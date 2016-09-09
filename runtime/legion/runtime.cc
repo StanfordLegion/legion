@@ -12765,9 +12765,6 @@ namespace Legion {
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
       ApBarrier result(Realm::Barrier::create_barrier(arrivals));
-#ifdef LEGION_SPY
-      LegionSpy::log_phase_barrier(result);
-#endif
       return PhaseBarrier(result);
     }
 
@@ -12830,9 +12827,6 @@ namespace Legion {
 #endif
       ApBarrier result(Realm::Barrier::create_barrier(arrivals, redop, 
                                                init_value, init_size));
-#ifdef LEGION_SPY
-      LegionSpy::log_phase_barrier(result);
-#endif
       return DynamicCollective(result, redop);
     }
 

@@ -3176,6 +3176,8 @@ namespace Legion {
         {
           ApEvent e = Runtime::get_previous_phase(*it); 
           preconditions.insert(e);
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
         for (std::vector<Grant>::const_iterator it = grants.begin();
               it != grants.end(); it++)
@@ -3331,6 +3333,9 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         completion_event);    
         }
@@ -6378,6 +6383,8 @@ namespace Legion {
         {
           ApEvent e = Runtime::get_previous_phase(*it);
           acquire_preconditions.insert(e);
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
       }
       if (!grants.empty())
@@ -6406,6 +6413,9 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         completion_event);
         }
@@ -6908,6 +6918,8 @@ namespace Legion {
         {
           ApEvent e = Runtime::get_previous_phase(*it);
           release_preconditions.insert(e);
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
       }
       if (!grants.empty())
@@ -6936,6 +6948,9 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         completion_event);
         }
@@ -10138,6 +10153,9 @@ namespace Legion {
           for (std::vector<PhaseBarrier>::const_iterator it = 
                 arrive_barriers.begin(); it != arrive_barriers.end(); it++)
           {
+            if (Runtime::legion_spy_enabled)
+              LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                   it->phase_barrier);
             Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                           completion_event);
           }
@@ -10217,6 +10235,9 @@ namespace Legion {
         for (std::vector<PhaseBarrier>::const_iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
                                         completion_event);
         }
@@ -10411,6 +10432,8 @@ namespace Legion {
         {
           ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
           sync_preconditions.insert(e);
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
       }
       if (!grants.empty())

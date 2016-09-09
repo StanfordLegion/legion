@@ -2027,6 +2027,8 @@ namespace Legion {
         // Note it is imperative we do this off the new barrier
         // generated after updating the arrival count.
         Runtime::phase_barrier_arrive(*it, 1/*count*/, arrive_pre);
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_phase_barrier_arrival(unique_op_id, it->phase_barrier);
       }
     }
 
@@ -2730,6 +2732,7 @@ namespace Legion {
       physical_instances.clear();
       physical_regions.clear();
       created_requirements.clear();
+      returnable_privileges.clear();
       inline_regions.clear();
       virtual_mapped.clear();
       no_access_regions.clear();
@@ -3211,15 +3214,17 @@ namespace Legion {
     void SingleTask::send_back_created_state(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      // We should be the outermost local context if we're doing this
-#ifdef DEBUG_LEGION
-      assert(parent_ctx->find_outermost_local_context(this) == this);
-#endif
       if (created_requirements.empty())
         return;
+#ifdef DEBUG_LEGION
+      assert(created_requirements.size() == returnable_privileges.size());
+#endif
       UniqueID target_context_uid = parent_ctx->get_context_uid();
       for (unsigned idx = 0; idx < created_requirements.size(); idx++)
       {
+        // Skip anything that doesn't have returnable privileges
+        if (!returnable_privileges[idx])
+          continue;
         const RegionRequirement &req = created_requirements[idx];
         // If it was deleted then we don't care
         if (was_created_requirement_deleted(req))
@@ -3576,20 +3581,36 @@ namespace Legion {
         runtime->forest->perform_fence_analysis(ctx, op, 
                                         regions[idx].region, true/*dominate*/);
       // Now see if we have any created regions
-      std::vector<LogicalRegion> created_regions;
+      // Track separately for the two possible contexts
+      std::set<LogicalRegion> local_regions;
+      std::set<LogicalRegion> outermost_regions;
       {
         AutoLock o_lock(op_lock,1,false/*exclusive*/);
         if (created_requirements.empty())
           return;
-        created_regions.resize(created_requirements.size());
         for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-          created_regions[idx] = created_requirements[idx].region;
+        {
+          const LogicalRegion &handle = created_requirements[idx].region;
+          if (returnable_privileges[idx])
+            outermost_regions.insert(handle);
+          else
+            local_regions.insert(handle);
+        }
       }
-      // Need outermost context for any created regions
-      ctx = find_outermost_local_context(this)->get_context(); 
-      for (unsigned idx = 0; idx < created_regions.size(); idx++)
-        runtime->forest->perform_fence_analysis(ctx, op, 
-                                    created_regions[idx], true/*dominate*/);
+      if (!local_regions.empty())
+      {
+        for (std::set<LogicalRegion>::const_iterator it = 
+              local_regions.begin(); it != local_regions.end(); it++)
+          runtime->forest->perform_fence_analysis(ctx,op,*it,true/*dominate*/);
+      }
+      if (!outermost_regions.empty())
+      {
+        // Need outermost context for these regions
+        ctx = parent_ctx->find_outermost_local_context(this)->get_context();
+        for (std::set<LogicalRegion>::const_iterator it = 
+              outermost_regions.begin(); it != outermost_regions.end(); it++)
+          runtime->forest->perform_fence_analysis(ctx,op,*it,true/*dominate*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4049,6 +4070,8 @@ namespace Legion {
                                       new_req.instance_fields.end());
       // Now make a new region requirement and physical region
       created_requirements.push_back(new_req);
+      // Created regions always return privileges that they make
+      returnable_privileges.push_back(true);
       // Make a new unmapped physical region
       physical_regions.push_back(PhysicalRegion(
             legion_new<PhysicalRegionImpl>(created_requirements.back(), 
@@ -4086,6 +4109,10 @@ namespace Legion {
         RegionRequirement new_req(*it, READ_WRITE, EXCLUSIVE, *it);
         new_req.privilege_fields.insert(fid);
         created_requirements.push_back(new_req);
+        // These privileges won't live past the end of this task 
+        // because they are locally created fields on regions that
+        // already existed before the task was run
+        returnable_privileges.push_back(false);
         physical_regions.push_back(PhysicalRegion(
               legion_new<PhysicalRegionImpl>(created_requirements.back(), 
                 ApEvent::NO_AP_EVENT, false/*mapped*/, this, map_id, tag, 
@@ -4117,14 +4144,25 @@ namespace Legion {
     SingleTask* SingleTask::find_parent_logical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
-      // If this one of our original requirements, we do the
-      // logical analysis in our context
+      // If this is one of our original region requirements then
+      // we can do the analysis in our original context
       if (index < regions.size())
         return this;
-      else // We created it, get the outermost enclosing context
+      // Otherwise we need to see if this going to be one of our
+      // region requirements that returns privileges or not. If
+      // it is then we do the analysis in the outermost context
+      // otherwise we do it locally in our own context. We need
+      // to hold the operation lock to look at this data structure.
+      index -= regions.size();
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(index < returnable_privileges.size());
+#endif
+      if (returnable_privileges[index])
         return parent_ctx->find_outermost_local_context(this);
+      return this;
     }
-    
+
     //--------------------------------------------------------------------------
     SingleTask* SingleTask::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
@@ -6593,30 +6631,25 @@ namespace Legion {
       }
       if (!created_requirements.empty())
       {
-        // Only invalidate the full logical context if we're
-        // the outermost context, otherwise, we just have to
-        // invaliate the users
-        SingleTask *outermost = 
-          parent_ctx->find_outermost_local_context(this);
-        if (outermost == this)
+        SingleTask *outermost = parent_ctx->find_outermost_local_context(this);
+        RegionTreeContext outermost_ctx = outermost->get_context();
+        const bool is_outermost = (outermost == this);
+        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
         {
-          for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-            runtime->forest->invalidate_current_context(context, false,
-                                            created_requirements[idx].region);
-        }
-        else
-        {
-          for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+          // See if we're a returnable privilege or not
+          if (returnable_privileges[idx])
           {
-            // Check to see if the region or the fields is still in the 
-            // set of created regions or fields, if not then do the full
-            // invaliation
-            const bool users_only = !was_created_requirement_deleted(
-                                           created_requirements[idx]);
-            runtime->forest->invalidate_current_context(
-                outermost->get_context(), users_only,
-                created_requirements[idx].region);
+            // If we're the outermost context or the requirement was
+            // deleted, then we can invalidate everything
+            // Otherwiswe we only invalidate the users
+            const bool users_only = !is_outermost && 
+              !was_created_requirement_deleted(created_requirements[idx]);
+            runtime->forest->invalidate_current_context(outermost_ctx,
+                        users_only, created_requirements[idx].region);
           }
+          else // Not returning so invalidate the full thing 
+            runtime->forest->invalidate_current_context(context,
+                false/*users only*/, created_requirements[idx].region);
         }
       }
     }
@@ -8038,9 +8071,18 @@ namespace Legion {
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements(); 
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
                                        unique_op_id,
                                        task_id, get_task_name());
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              launcher.wait_barriers.begin(); it !=
+              launcher.wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
       return result;
     }
 
@@ -9980,14 +10022,14 @@ namespace Legion {
       runtime->forest->check_context_state(context);
 #endif
     }
-    
+
     //--------------------------------------------------------------------------
     SingleTask* RemoteTask::find_outermost_local_context(SingleTask *previous)
     //--------------------------------------------------------------------------
     {
       return previous;
     }
-
+    
     //--------------------------------------------------------------------------
     SingleTask* RemoteTask::find_top_context(void)
     //--------------------------------------------------------------------------
@@ -10626,9 +10668,18 @@ namespace Legion {
       if (check_privileges)
         perform_privilege_checks();
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
                                   get_task_name());
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              launcher.wait_barriers.begin(); it !=
+              launcher.wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
       return future_map;
     }
 
@@ -10691,9 +10742,18 @@ namespace Legion {
       if (check_privileges)
         perform_privilege_checks();
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
                                   get_task_name());
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              launcher.wait_barriers.begin(); it !=
+              launcher.wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
       return reduction_future;
     }
 

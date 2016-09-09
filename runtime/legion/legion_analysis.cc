@@ -4191,8 +4191,6 @@ namespace Legion {
             unversioned -= local_overlap;
             version_info.add_current_version(it->first, overlap,
                                              false/*path only*/);
-            version_info.add_advance_version(it->first, overlap,
-                                             false/*path only*/);
             it->first->request_initial_version_state(context, overlap, 
                                                      ready_events);
           }
@@ -4221,8 +4219,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::record_advanced_versions(const FieldMask &version_mask,
-                                                  VersionInfo &version_info)
+    void VersionManager::record_advance_versions(const FieldMask &version_mask,
+                                                 VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
       // We're about to produce the first version of this instance

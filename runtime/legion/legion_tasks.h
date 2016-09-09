@@ -716,6 +716,10 @@ namespace Legion {
       // structures by creating regions and fields, make sure you are
       // holding the operation lock when you are accessing them
       std::deque<RegionRequirement>             created_requirements;
+      // Track whether the created region requirements have
+      // privileges to be returned or not
+      std::vector<bool>                         returnable_privileges;
+    protected:
       std::vector<PhysicalRegion>               physical_regions;
     protected: // Instance top view data structures
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;

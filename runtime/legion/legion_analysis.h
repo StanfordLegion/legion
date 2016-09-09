@@ -870,8 +870,8 @@ namespace Legion {
                                    const RegionUsage &usage,
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events);
-      void record_advanced_versions(const FieldMask &version_mask,
-                                    VersionInfo &version_info);
+      void record_advance_versions(const FieldMask &version_mask,
+                                   VersionInfo &version_info);
       void record_path_only_versions(const FieldMask &version_mask,
                                      const FieldMask &split_mask,
                                      FieldMask &unversioned_mask,

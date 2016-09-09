@@ -625,6 +625,20 @@ namespace Legion {
         free(buffer);
       }
 
+      static inline void log_phase_barrier_arrival(UniqueID unique_id,
+                                                   ApBarrier barrier)
+      {
+        log_spy.print("Phase Barrier Arrive %llu " IDFMT "",
+                      unique_id, barrier.id);
+      }
+
+      static inline void log_phase_barrier_wait(UniqueID unique_id,
+                                                ApEvent previous)
+      {
+        log_spy.print("Phase Barrier Wait %llu " IDFMT "",
+                      unique_id, previous.id);
+      }
+
       // The calls above this ifdef record the basic information about
       // the execution of an application. It is sufficient to show how
       // an application executed, but is insufficient to actually 
@@ -731,11 +745,6 @@ namespace Legion {
         log_spy.print("Fill Intersect " IDFMT " %d " IDFMT " %d %d",
 		      post.id,
 		      is_region, index, field, tree_id);
-      }
-
-      static inline void log_phase_barrier(ApBarrier barrier)
-      {
-        log_spy.print("Phase Barrier " IDFMT, barrier.id);
       } 
 #endif
     }; // namespace LegionSpy

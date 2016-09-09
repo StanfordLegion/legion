@@ -2473,8 +2473,6 @@ namespace Legion {
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
 #endif
       std::set<ApEvent> result_events;
-      std::set<ApEvent> copy_preconditions; 
-      copy_preconditions.insert(precondition);
       std::vector<unsigned> src_indexes(src_req.instance_fields.size());
       std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
       // Get the field indexes for all the fields
@@ -2681,7 +2679,8 @@ namespace Legion {
             ApEvent src_precondition = 
               src_targets[src_it->first].get_ready_event();
             ApEvent copy_pre = Runtime::merge_events(src_precondition,
-                                                     dst_precondition);
+                                                     dst_precondition,
+                                                     precondition);
             ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
                                                      dst_it->second, copy_pre);
             if (copy_post.exists())
@@ -15144,18 +15143,19 @@ namespace Legion {
       // virtual map the requirement or not. Note we are guaranteed
       // by the logical analysis that this is safe to do without any
       // kind of synchronization.
+      VersionManager &manager = get_current_version_manager(info.ctx);
       if (IS_WRITE(usage))
       {
-        VersionManager &manager = get_current_version_manager(info.ctx);
         // We update the parent state if we are not the top-level node
         const bool update_parent_state = 
           !info.version_info.is_upper_bound_node(this);
         const AddressSpaceID local_space = context->runtime->address_space;
         manager.advance_versions(info.traversal_mask, context,
             update_parent_state, local_space, info.map_applied_events);
-        // Now record just the advanced versions
-        manager.record_advanced_versions(info.traversal_mask,info.version_info);
       }
+      // Sine we're mapping we need to record the advance versions
+      // where we'll put the results when we're done
+      manager.record_advance_versions(info.traversal_mask,info.version_info);
       PhysicalState *state = get_physical_state(info.version_info);
       const AddressSpaceID local_space = context->runtime->address_space;
       // Get any restricted fields
@@ -15559,7 +15559,7 @@ namespace Legion {
       manager.advance_versions(fill_mask, context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
-      manager.record_advanced_versions(fill_mask, version_info);
+      manager.record_advance_versions(fill_mask, version_info);
       // Make the fill instance
       DistributedID did = context->runtime->get_available_distributed_id(false);
       FillView::FillViewValue *fill_value = 
@@ -15596,7 +15596,7 @@ namespace Legion {
       manager.advance_versions(fill_mask, context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
-      manager.record_advanced_versions(fill_mask, version_info);
+      manager.record_advance_versions(fill_mask, version_info);
       // Effectively a fill is a special kind of copy so we can analyze
       // it the same way to figure out how to issue the fill
       std::set<ApEvent> post_events;
