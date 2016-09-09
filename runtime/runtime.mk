@@ -125,6 +125,19 @@ ifeq ($(strip $(USE_HWLOC)),1)
   LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
 endif
 
+ifeq ($(strip $(USE_PAPI)),1)
+  ifndef PAPI_ROOT
+    ifdef PAPI
+      PAPI_ROOT = $(PAPI)
+    else
+      $(error USE_PAPI set, but neither PAPI nor PAPI_ROOT is defined, aborting build)
+    endif
+  endif
+  CC_FLAGS        += -DREALM_USE_PAPI
+  INC_FLAGS   += -I$(PAPI_ROOT)/include
+  LEGION_LD_FLAGS += -L$(PAPI_ROOT)/lib -lpapi
+endif
+
 USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
 ifneq ($(shell uname -s),Darwin)
@@ -355,7 +368,7 @@ MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/replay_mapper.cc \
 		   $(LG_RT_DIR)/mappers/debug_mapper.cc \
 		   $(LG_RT_DIR)/mappers/wrapper_mapper.cc
-		
+
 ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
 endif
