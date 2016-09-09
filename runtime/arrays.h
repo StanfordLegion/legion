@@ -220,6 +220,10 @@ namespace LegionRuntime {
       CUDAPREFIX Point(int32_t val) { x[0] = val; }
       CUDAPREFIX Point(uint32_t val) { x[0] = val; }
       CUDAPREFIX Point(uint64_t val) { x[0] = val; }
+#ifdef __MACH__
+      // on Darwin, size_t is neither uint32_t nor uint64_t...
+      CUDAPREFIX Point(size_t val) { x[0] = val; }
+#endif
       CUDAPREFIX Point(const coord_t *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
       CUDAPREFIX Point(const Point<1>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 

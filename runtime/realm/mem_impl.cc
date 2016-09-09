@@ -125,7 +125,7 @@ namespace Realm {
 	    // perfect match
 	    off_t retval = it->first;
 	    free_blocks.erase(it);
-	    log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%ld", me.id, size, retval);
+	    log_malloc.info("alloc full block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, (ssize_t)retval);
 	    usage += size;
 	    if(usage > peak_usage) peak_usage = usage;
 	    size_t footprint = this->size - retval;
@@ -138,7 +138,7 @@ namespace Realm {
 	    off_t leftover = it->second - size;
 	    off_t retval = it->first + leftover;
 	    it->second = leftover;
-	    log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%ld", me.id, size, retval);
+	    log_malloc.info("alloc partial block: mem=" IDFMT " size=%zd ofs=%zd", me.id, size, (ssize_t)retval);
 	    usage += size;
 	    if(usage > peak_usage) peak_usage = usage;
 	    size_t footprint = this->size - retval;
@@ -318,8 +318,8 @@ namespace Realm {
 
       i_impl->record_instance_usage();
 
-      log_inst.info("local instance " IDFMT " created in memory " IDFMT " at offset %ld+%zd (redop=%d list_size=%ld parent_inst=" IDFMT " block_size=%zd)",
-		    i.id, me.id, inst_offset, bytes_needed, redopid, list_size,
+      log_inst.info("local instance " IDFMT " created in memory " IDFMT " at offset %zd+%zd (redop=%d list_size=%zd parent_inst=" IDFMT " block_size=%zd)",
+		    i.id, me.id, (ssize_t)inst_offset, bytes_needed, redopid, (ssize_t)list_size,
                     parent_inst.id, block_size);
 
       return i;
@@ -349,7 +349,7 @@ namespace Realm {
 
       // Only do this if the response succeeds
       if (resp.i.exists()) {
-        log_inst.debug("created remote instance: inst=" IDFMT " offset=%ld", resp.i.id, resp.inst_offset);
+        log_inst.debug("created remote instance: inst=" IDFMT " offset=%zd", resp.i.id, (ssize_t)resp.inst_offset);
 
         DomainLinearization linear;
         linear.deserialize(linearization_bits);
@@ -1101,8 +1101,8 @@ namespace Realm {
 	  if(data == (cpumem->base + args.offset)) {
 	    // copy is in right spot - yay!
 	  } else {
-	    printf("%d: received remote write to registered memory in wrong spot: %p != %p+%ld = %p\n",
-		   gasnet_mynode(), data, cpumem->base, args.offset, cpumem->base + args.offset);
+	    printf("%d: received remote write to registered memory in wrong spot: %p != %p+%zd = %p\n",
+		   gasnet_mynode(), data, cpumem->base, (ssize_t)args.offset, cpumem->base + args.offset);
 	    impl->put_bytes(args.offset, data, datalen);
 	  }
 	} else {
@@ -1254,8 +1254,8 @@ namespace Realm {
       return;
     }
 
-    log_copy.debug("received remote reduce request: mem=" IDFMT ", offset=%ld+%d, size=%zd, redop=%d(%s), seq=%d/%d",
-		   args.mem.id, args.offset, args.stride, datalen,
+    log_copy.debug("received remote reduce request: mem=" IDFMT ", offset=%zd+%zd, size=%zd, redop=%d(%s), seq=%d/%d",
+		   args.mem.id, (ssize_t)args.offset, (ssize_t)args.stride, datalen,
 		   redop_id, (red_fold ? "fold" : "apply"),
 		   args.sender, args.sequence_id);
 
@@ -1327,8 +1327,8 @@ namespace Realm {
   {
     MemoryImpl *impl = get_runtime()->get_memory_impl(args.mem);
     
-    log_copy.debug("received remote reduction list request: mem=" IDFMT ", offset=%ld, size=%zd, redopid=%d",
-		   args.mem.id, args.offset, datalen, args.redopid);
+    log_copy.debug("received remote reduction list request: mem=" IDFMT ", offset=%zd, size=%zd, redopid=%d",
+		   args.mem.id, (ssize_t)args.offset, datalen, args.redopid);
 
     switch(impl->kind) {
     case MemoryImpl::MKIND_SYSMEM:
@@ -1492,8 +1492,8 @@ namespace Realm {
 			     unsigned sequence_id,
 			     bool make_copy /*= false*/)
     {
-      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%ld, size=%zd",
-		     mem.id, offset, datalen);
+      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zd",
+		     mem.id, (ssize_t)offset, datalen);
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(mem);
       char *dstptr;
@@ -1559,8 +1559,8 @@ namespace Realm {
 			     unsigned sequence_id,
 			     bool make_copy /*= false*/)
     {
-      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%ld, size=%zdx%zd",
-		     mem.id, offset, datalen, lines);
+      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zdx%zd",
+		     mem.id, (ssize_t)offset, datalen, lines);
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(mem);
       char *dstptr;
@@ -1629,8 +1629,8 @@ namespace Realm {
 			     unsigned sequence_id,
 			     bool make_copy /*= false*/)
     {
-      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%ld, size=%zd(%zd spans)",
-		     mem.id, offset, datalen, spans.size());
+      log_copy.debug("sending remote write request: mem=" IDFMT ", offset=%zd, size=%zd(%zd spans)",
+		     mem.id, (ssize_t)offset, datalen, spans.size());
 
       MemoryImpl *m_impl = get_runtime()->get_memory_impl(mem);
       char *dstptr;
@@ -1734,8 +1734,8 @@ namespace Realm {
     {
       const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[serdez_id];
       size_t field_size = serdez_op->sizeof_field_type;
-      log_copy.debug("sending remote serdez request: mem=" IDFMT ", offset=%ld, size=%zdx%zd, serdez_id=%d",
-                     mem.id, offset, field_size, count, serdez_id);
+      log_copy.debug("sending remote serdez request: mem=" IDFMT ", offset=%zd, size=%zdx%zd, serdez_id=%d",
+                     mem.id, (ssize_t)offset, field_size, count, serdez_id);
       size_t max_xfer_size = get_lmb_size(ID(mem).memory.owner_node);
       // create a intermediate buf with same size as max_xfer_size
       char* buffer_start = (char*) malloc(max_xfer_size);
@@ -1786,8 +1786,8 @@ namespace Realm {
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
       size_t rhs_size = redop->sizeof_rhs;
 
-      log_copy.debug("sending remote reduction request: mem=" IDFMT ", offset=%ld+%ld, size=%zdx%zd, redop=%d(%s)",
-		     mem.id, offset, dst_stride, rhs_size, count,
+      log_copy.debug("sending remote reduction request: mem=" IDFMT ", offset=%zd+%zd, size=%zdx%zd, redop=%d(%s)",
+		     mem.id, (ssize_t)offset, (ssize_t)dst_stride, rhs_size, count,
 		     redop_id, (red_fold ? "fold" : "apply"));
 
       // reductions always have to bounce off an intermediate buffer, so are subject to
