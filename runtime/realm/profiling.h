@@ -42,6 +42,13 @@ namespace Realm {
     PMID_OP_MEM_USAGE, // memories used by a copy
     PMID_INST_TIMELINE, // timeline for a physical instance
     PMID_INST_MEM_USAGE, // memory and size used by an instance
+    PMID_PCTRS_CACHE_L1I, // L1 I$ performance counters
+    PMID_PCTRS_CACHE_L1D, // L1 D$ performance counters
+    PMID_PCTRS_CACHE_L2, // L2 D$ performance counters
+    PMID_PCTRS_CACHE_L3, // L3 D$ performance counters
+    PMID_PCTRS_IPC,  // instructions/clocks performance counters
+    PMID_PCTRS_TLB,  // TLB miss counters
+    PMID_PCTRS_BP,   // branch predictor performance counters
   };
 
   namespace ProfilingMeasurements {
@@ -162,6 +169,43 @@ namespace Realm {
       RegionInstance instance;
       Memory memory;
       size_t bytes;
+    };
+
+    // Processor cache stats
+    template <ProfilingMeasurementID _ID>
+    struct CachePerfCounters {
+      static const ProfilingMeasurementID ID = _ID;
+      long long accesses;
+      long long misses;
+    };
+
+    typedef CachePerfCounters<PMID_PCTRS_CACHE_L1I> L1ICachePerfCounters;
+    typedef CachePerfCounters<PMID_PCTRS_CACHE_L1D> L1DCachePerfCounters;
+    typedef CachePerfCounters<PMID_PCTRS_CACHE_L2> L2CachePerfCounters;
+    typedef CachePerfCounters<PMID_PCTRS_CACHE_L3> L3CachePerfCounters;
+
+    // instructions/cycles
+    struct IPCPerfCounters {
+      static const ProfilingMeasurementID ID = PMID_PCTRS_IPC;
+      long long total_insts;
+      long long total_cycles;
+      long long fp_insts;
+      long long ld_insts;
+      long long st_insts;
+      long long br_insts;
+    };
+
+    struct TLBPerfCounters {
+      static const ProfilingMeasurementID ID = PMID_PCTRS_TLB;
+      long long inst_misses;
+      long long data_misses;
+    };
+
+    struct BranchPredictionPerfCounters {
+      static const ProfilingMeasurementID ID = PMID_PCTRS_BP;
+      long long total_branches;
+      long long taken_branches;
+      long long mispredictions;
     };
   };
 

@@ -28,6 +28,10 @@
 #include "atomics.h" // for __sync_fetch_and_add
 #endif
 
+#include <stdint.h>
+
+#include "lowlevel_config.h"
+
 #ifdef __CUDACC__
 #define CUDAPREFIX __host__ __device__
 #else
@@ -40,7 +44,7 @@ CUDAPREFIX static inline int imax(int a, int b) { return (a > b) ? a : b; }
 
 namespace LegionRuntime {
   namespace Arrays {
-    typedef long long int coord_t;
+    typedef ::legion_lowlevel_coord_t coord_t;
 
     template <unsigned DIM>
     class Point {
@@ -213,9 +217,13 @@ namespace LegionRuntime {
       enum { DIM = 1 };
       CUDAPREFIX Point(void) {}
       CUDAPREFIX Point(coord_t val) { x[0] = val; }
-      CUDAPREFIX Point(int val) { x[0] = val; }
+      CUDAPREFIX Point(int32_t val) { x[0] = val; }
+      CUDAPREFIX Point(uint32_t val) { x[0] = val; }
+      CUDAPREFIX Point(uint64_t val) { x[0] = val; }
+#ifdef __MACH__
+      // on Darwin, size_t is neither uint32_t nor uint64_t...
       CUDAPREFIX Point(size_t val) { x[0] = val; }
-      CUDAPREFIX Point(unsigned int val) { x[0] = val; }
+#endif
       CUDAPREFIX Point(const coord_t *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
       CUDAPREFIX Point(const Point<1>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 

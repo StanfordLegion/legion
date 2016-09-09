@@ -104,8 +104,6 @@ task main()
   c.legion_coloring_destroy(cq)
 
   var i = 0
-  -- Note: This test hits a bug in the vectorizer if vectorization is allowed.
-  __forbid(__vectorize)
   for x in r do
     x.a1 = 10000 + 10 * i
     x.a2 = 100 * i

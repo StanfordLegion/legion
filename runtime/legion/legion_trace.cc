@@ -153,7 +153,7 @@ namespace Legion {
           // Check for exceeding the trace size
           if (index >= dependences.size())
           {
-            log_run.error("Trace violation! Recorded %ld operations in trace "
+            log_run.error("Trace violation! Recorded %zd operations in trace "
                           "%d in task %s (UID %lld) but %d operations have "
                           "now been issued!", dependences.size(), tid,
                           ctx->get_task_name(), ctx->get_unique_id(), index+1);
@@ -183,7 +183,7 @@ namespace Legion {
           {
             log_run.error("Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having %d "
-                          "regions, but instead has %ld regions in replay.",
+                          "regions, but instead has %zd regions in replay.",
                           index, tid, ctx->get_task_name(),
                           ctx->get_unique_id(), info.count,
                           op->get_region_count());

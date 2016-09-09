@@ -171,7 +171,7 @@ namespace Legion {
       void register_multi_task(Operation *op, TaskID kind);
       void register_slice_owner(UniqueID pid, UniqueID id);
     public:
-      void process_task(size_t id, UniqueID op_id, 
+      void process_task(VariantID variant_id, UniqueID op_id, 
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
                   Realm::ProfilingMeasurements::OperationEventWaits *waits);

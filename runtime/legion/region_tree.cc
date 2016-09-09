@@ -4742,8 +4742,8 @@ namespace Legion {
               if (size != finder->second.size)
               {
                 log_run.error("ERROR: Inconsistent Semantic Tag value "
-                              "for tag %ld with different sizes of %ld"
-                              " and %ld for index tree node", 
+                              "for tag %ld with different sizes of %zd"
+                              " and %zd for index tree node", 
                               tag, size, finder->second.size);
 #ifdef DEBUG_LEGION
                 assert(false);
@@ -8324,8 +8324,8 @@ namespace Legion {
               if (size != finder->second.size)
               {
                 log_run.error("ERROR: Inconsistent Semantic Tag value "
-                              "for tag %ld with different sizes of %ld"
-                              " and %ld for index tree node", 
+                              "for tag %ld with different sizes of %zd"
+                              " and %zd for index tree node", 
                               tag, size, finder->second.size);
 #ifdef DEBUG_LEGION
                 assert(false);
@@ -8424,8 +8424,8 @@ namespace Legion {
               if (size != finder->second.size)
               {
                 log_run.error("ERROR: Inconsistent Semantic Tag value "
-                              "for tag %ld with different sizes of %ld"
-                              " and %ld for index tree node", 
+                              "for tag %ld with different sizes of %zd"
+                              " and %zd for index tree node", 
                               tag, size, finder->second.size);
 #ifdef DEBUG_LEGION
                 assert(false);
@@ -10070,8 +10070,8 @@ namespace Legion {
               if (size != finder->second.size)
               {
                 log_run.error("ERROR: Inconsistent Semantic Tag value "
-                              "for tag %ld with different sizes of %ld"
-                              " and %ld for region tree node", 
+                              "for tag %ld with different sizes of %zd"
+                              " and %zd for region tree node", 
                               tag, size, finder->second.size);
 #ifdef DEBUG_LEGION
                 assert(false);

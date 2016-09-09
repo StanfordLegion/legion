@@ -544,7 +544,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0UL);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL);
     }
 
     //--------------------------------------------------------------------------
@@ -552,7 +552,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1UL);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1ULL);
     }
 
     //--------------------------------------------------------------------------
@@ -560,7 +560,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2UL);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2ULL);
     }
 
     //--------------------------------------------------------------------------

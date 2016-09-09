@@ -1102,7 +1102,8 @@ namespace LegionRuntime {
 	  src_acc.read_untyped(ptr_t(src_index + i), buffer, bytes, src_offset);
           if(0 && i == 0) {
             printf("remote write: (%zd:%zd->%zd:%zd) %d bytes:",
-                   src_index + i, src_offset, dst_index + i, dst_offset, bytes);
+                   (ssize_t)(src_index + i), (ssize_t)src_offset,
+                   (ssize_t)(dst_index + i), (ssize_t)dst_offset, bytes);
             for(unsigned j = 0; j < bytes; j++)
               printf(" %02x", (unsigned char)(buffer[j]));
             printf("\n");

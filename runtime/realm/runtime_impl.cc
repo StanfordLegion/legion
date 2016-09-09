@@ -621,6 +621,9 @@ namespace Realm {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
 
+      // start up the threading subsystem - modules will likely want threads
+      if(!Threading::initialize()) exit(1);
+
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
@@ -1669,6 +1672,8 @@ namespace Realm {
 
 	module_registrar.unload_module_sofiles();
       }
+
+      if(!Threading::cleanup()) exit(1);
 
       // this terminates the process, so control never gets back to caller
       // would be nice to fix this...

@@ -37,6 +37,13 @@ endif()
 set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build" FORCE)
 set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
+#https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
+if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
+endif()
+
 #------------------------------------------------------------------------------#
 # Minimum log level
 #------------------------------------------------------------------------------#

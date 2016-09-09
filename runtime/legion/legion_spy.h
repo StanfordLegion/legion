@@ -56,7 +56,7 @@ namespace Legion {
       static inline void log_memory(IDType unique_id, size_t capacity,
           unsigned kind)
       {
-        log_spy.print("Memory " IDFMT " %lu %u", 
+        log_spy.print("Memory " IDFMT " %zu %u", 
 		      unique_id, capacity, kind);
       }
 
@@ -499,7 +499,7 @@ namespace Legion {
       static inline void log_instance_field_constraint(IDType inst_id,
                       bool contiguous, bool inorder, size_t num_fields)
       {
-        log_spy.print("Instance Field Constraint " IDFMT " %d %d %ld",
+        log_spy.print("Instance Field Constraint " IDFMT " %d %d %zd",
             inst_id, (contiguous ? 1 : 0), (inorder ? 1 : 0), num_fields);
       }
 
@@ -513,7 +513,7 @@ namespace Legion {
       static inline void log_instance_ordering_constraint(IDType inst_id,
                                   bool contiguous, size_t num_dimensions)
       {
-        log_spy.print("Instance Ordering Constraint " IDFMT " %d %ld",
+        log_spy.print("Instance Ordering Constraint " IDFMT " %d %zd",
                       inst_id, (contiguous ? 1 : 0), num_dimensions);
       }
 
@@ -527,21 +527,21 @@ namespace Legion {
       static inline void log_instance_splitting_constraint(IDType inst_id,
                               DimensionKind dim, size_t value, bool chunks)
       {
-        log_spy.print("Instance Splitting Constraint " IDFMT " %d %ld %d",
+        log_spy.print("Instance Splitting Constraint " IDFMT " %d %zd %d",
                       inst_id, dim, value, (chunks ? 1 : 0));
       }
 
       static inline void log_instance_dimension_constraint(IDType inst_id,
                         DimensionKind dim, EqualityKind eqk, size_t value)
       {
-        log_spy.print("Instance Dimension Constraint " IDFMT " %d %d %ld",
+        log_spy.print("Instance Dimension Constraint " IDFMT " %d %d %zd",
                       inst_id, dim, eqk, value);
       }
 
       static inline void log_instance_alignment_constraint(IDType inst_id,
                           FieldID fid, EqualityKind eqk, size_t alignment)
       {
-        log_spy.print("Instance Alignment Constraint " IDFMT " %d %d %ld",
+        log_spy.print("Instance Alignment Constraint " IDFMT " %d %d %zd",
                       inst_id, fid, eqk, alignment);
       }
 
@@ -620,7 +620,7 @@ namespace Legion {
           }
         }
         buffer[byte_index] = '\0';
-        log_spy.print("Task Tunable %llu %d %ld %s\n", 
+        log_spy.print("Task Tunable %llu %d %zd %s\n", 
                       unique_id, index, num_bytes, buffer);
         free(buffer);
       }

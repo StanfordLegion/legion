@@ -95,14 +95,10 @@ task main()
   var q = partition(aliased, r, cq, is_part)
   c.legion_domain_point_coloring_destroy(cq)
 
-  var i = 0
-  -- Note: This test hits a bug in the vectorizer if vectorization is allowed.
-  __forbid(__vectorize)
   for x in r do
-    x.a = 10000 + 10 * i
+    x.a = 10000 + 10 * (x.x * r.bounds:size().y * r.bounds:size().z + x.y * r.bounds:size().z + x.z)
     x.b = 0
     x.c = 0
-    i += 1
   end
 
   for x in r do

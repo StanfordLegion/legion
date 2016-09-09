@@ -6428,7 +6428,7 @@ function codegen.stat_for_list(cx, node)
             [block]
           end
         end
-        for i = ispace_type.dim, 1, -1 do
+        for i = 1, ispace_type.dim do
           local rect_i = i - 1 -- C is zero-based, Lua is one-based
           body = quote
             for [ index[i] ] = rect.lo.x[rect_i], rect.hi.x[rect_i] + 1 do

@@ -33,6 +33,8 @@
 typedef unsigned long long legion_lowlevel_id_t;
 #define IDFMT "%llx"
 
+typedef long long legion_lowlevel_coord_t;
+
 typedef unsigned int legion_lowlevel_address_space_t;
 typedef unsigned legion_lowlevel_task_func_id_t;
 typedef int legion_lowlevel_reduction_op_id_t;

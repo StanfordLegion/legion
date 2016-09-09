@@ -6403,8 +6403,8 @@ namespace Legion {
               if (size != finder->second.size)
               {
                 log_run.error("ERROR: Inconsistent Semantic Tag value "
-                              "for tag %ld with different sizes of %ld"
-                              " and %ld for task impl", 
+                              "for tag %ld with different sizes of %zd"
+                              " and %zd for task impl", 
                               tag, size, finder->second.size);
 #ifdef DEBUG_LEGION
                 assert(false);
@@ -8396,7 +8396,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       log_index.debug("Creating index space %x in task %s "
-                            "(ID %lld) with %ld maximum elements", handle.id, 
+                            "(ID %lld) with %zd maximum elements", handle.id, 
                             ctx->get_task_name(), ctx->get_unique_id(), 
                             max_num_elmts); 
       if (ctx->is_leaf())
@@ -19952,7 +19952,7 @@ namespace Legion {
         local_procs.local_address_space();
         if (local_procs.count() > MAX_NUM_PROCS)
         {
-          log_run.error("Maximum number of local processors %ld exceeds "
+          log_run.error("Maximum number of local processors %zd exceeds "
                         "compile time maximum of %d.  Change the value "
                         "in legion_config.h and recompile.",
                         local_procs.count(), MAX_NUM_PROCS);
