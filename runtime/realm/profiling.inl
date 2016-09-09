@@ -27,6 +27,11 @@ TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationProcessorUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceTimeline);
+template <Realm::ProfilingMeasurementID _ID>
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::CachePerfCounters<_ID>);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::IPCPerfCounters);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::TLBPerfCounters);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::BranchPredictionPerfCounters);
 
 #include "timers.h"
 
