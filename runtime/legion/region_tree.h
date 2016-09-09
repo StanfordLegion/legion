@@ -1752,9 +1752,6 @@ namespace Legion {
                            RestrictInfo &restrict_info, ApEvent term_event,
                            const RegionUsage &usage, bool defer_add_users,
                            InstanceSet &targets);
-      void register_virtual(ContextID ctx, const InstanceRef &ref,
-                            VersionInfo &version_info,
-                            const FieldMask &composite_mask);
       void seed_state(ContextID ctx, ApEvent term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,

@@ -5109,7 +5109,7 @@ namespace Legion {
               legion_new<PhysicalRegionImpl>(created_requirements.back(),
                 ApEvent::NO_AP_EVENT, false/*mapped*/, this, map_id, tag, 
                 is_leaf(), runtime)));
-      return int(created_requirements.size() - 1);
+      return int(regions.size() + created_requirements.size() - 1);
     }
 
     //--------------------------------------------------------------------------

@@ -2129,6 +2129,7 @@ namespace Legion {
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
       assert(!targets.empty());
+      assert(!targets[0].is_composite_ref());
 #endif
       RegionNode *child_node = get_node(req.region);
       FieldMask user_mask = 
@@ -2142,79 +2143,65 @@ namespace Legion {
                                      false/*closing*/, false/*logical*/,
                      FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
-      // Perform the registration, see if we have a virtual instance or not
-      if (targets[0].is_composite_ref())
+      // Perform the registration
+      // See if we need to acquire locks for read-only privileges
+      if (need_read_only_reservations && IS_READ_ONLY(req))
       {
-#ifdef DEBUG_LEGION
-        assert(targets.size() == 1); // better only be one
-#endif
+        // This is the price of allowing read-only requirements from
+        // different operations to be mapped in parallel, we have to 
+        // serialize access to the requirements mapping to the same
+        // instance otherwise we can get weird effects with partial
+        // applications of reductions in composite instances, etc.
+        //
+        // Note that by using a set we deduplicate and put the
+        // locks in the order to be taken to avoid deadlocks
+        std::set<Reservation> read_only_locks;
+        targets.find_read_only_reservations(read_only_locks);
+        RtEvent precondition;
+        for (std::set<Reservation>::const_iterator it = 
+              read_only_locks.begin(); it != read_only_locks.end(); it++)
+        {
+          RtEvent next = Runtime::acquire_rt_reservation(*it,
+                            true/*exclusive*/, precondition);
+          precondition = next;
+        }
+        // Have to wait for all the locks to be acquired
+        if (precondition.exists())
+          precondition.wait();
+        // Now do the mapping with our own applied event set
+        std::set<RtEvent> local_applied;
+        // Construct the traversal info
+        TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
+                           user_mask, local_applied);
+        child_node->register_region(info, context, restrict_info, term_event,
+                                    usage, defer_add_users, targets);
+        
+        if (!local_applied.empty())
+        {
+          // Release the read only locks once our map applied 
+          // conditions have been met
+          RtEvent done_event = Runtime::merge_events(local_applied);
+          for (std::set<Reservation>::const_iterator it = 
+                read_only_locks.begin(); it != read_only_locks.end(); it++)
+            it->release(done_event);
+          // Propagate the condition back to the map applied
+          map_applied.insert(done_event);
+        }
+        else
+        {
+          // Release the locks with no preconditions
+          for (std::set<Reservation>::const_iterator it = 
+                read_only_locks.begin(); it != read_only_locks.end(); it++)
+            it->release();
+        }
+      }
+      else // The common case
+      {
         // Construct the traversal info
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, map_applied);
-        child_node->register_virtual(ctx.get_id(), targets[0], 
-                                     version_info, user_mask);
-      }
-      else // this is the normal path
-      {
-        // See if we need to acquire locks for read-only privileges
-        if (need_read_only_reservations && IS_READ_ONLY(req))
-        {
-          // This is the price of allowing read-only requirements from
-          // different operations to be mapped in parallel, we have to 
-          // serialize access to the requirements mapping to the same
-          // instance otherwise we can get weird effects with partial
-          // applications of reductions in composite instances, etc.
-          //
-          // Note that by using a set we deduplicate and put the
-          // locks in the order to be taken to avoid deadlocks
-          std::set<Reservation> read_only_locks;
-          targets.find_read_only_reservations(read_only_locks);
-          RtEvent precondition;
-          for (std::set<Reservation>::const_iterator it = 
-                read_only_locks.begin(); it != read_only_locks.end(); it++)
-          {
-            RtEvent next = Runtime::acquire_rt_reservation(*it,
-                              true/*exclusive*/, precondition);
-            precondition = next;
-          }
-          // Have to wait for all the locks to be acquired
-          if (precondition.exists())
-            precondition.wait();
-          // Now do the mapping with our own applied event set
-          std::set<RtEvent> local_applied;
-          // Construct the traversal info
-          TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
-                             user_mask, local_applied);
-          child_node->register_region(info, context, restrict_info, term_event,
-                                      usage, defer_add_users, targets);
-          
-          if (!local_applied.empty())
-          {
-            // Release the read only locks once our map applied 
-            // conditions have been met
-            RtEvent done_event = Runtime::merge_events(local_applied);
-            for (std::set<Reservation>::const_iterator it = 
-                  read_only_locks.begin(); it != read_only_locks.end(); it++)
-              it->release(done_event);
-            // Propagate the condition back to the map applied
-            map_applied.insert(done_event);
-          }
-          else
-          {
-            // Release the locks with no preconditions
-            for (std::set<Reservation>::const_iterator it = 
-                  read_only_locks.begin(); it != read_only_locks.end(); it++)
-              it->release();
-          }
-        }
-        else // The common case
-        {
-          // Construct the traversal info
-          TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
-                             user_mask, map_applied);
-          child_node->register_region(info, context, restrict_info, term_event,
-                                      usage, defer_add_users, targets);
-        }
+        child_node->register_region(info, context, restrict_info, term_event,
+                                    usage, defer_add_users, targets);
       }
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -15436,20 +15423,6 @@ namespace Legion {
       if (!!restricted_fields && !IS_READ_ONLY(info.req))
         update_valid_views(state, restricted_fields, 
                            restricted_views, restricted_instances);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::register_virtual(ContextID ctx, const InstanceRef &ref,
-                     VersionInfo &version_info, const FieldMask &composite_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(ref.is_composite_ref());
-#endif
-      // Convert the view locally
-      CompositeView *view = convert_reference(ref);
-      PhysicalState *state = get_physical_state(version_info);
-      update_valid_views(state, composite_mask, true/*dirty*/, view);
     }
 
     //--------------------------------------------------------------------------
