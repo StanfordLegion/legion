@@ -781,9 +781,6 @@ namespace Legion {
     void VersionInfo::set_upper_bound_node(RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(upper_bound_node == NULL);
-#endif
       upper_bound_node = node;
     }
 
@@ -912,6 +909,35 @@ namespace Legion {
       // No need to copy over the physical states
       rhs.field_versions = field_versions;
       rhs.split_masks = split_masks;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::clone_to_depth(unsigned depth, const FieldMask &mask,
+                                     VersionInfo &target_info) const
+    //--------------------------------------------------------------------------
+    {
+      // If the upper bound nodes are the same, we are done
+      const unsigned upper_depth = upper_bound_node->get_depth();
+#ifdef DEBUG_LEGION
+      assert(upper_depth <= depth);
+#endif
+      if (upper_depth == depth)
+        return;
+      // Update the upper bound node
+      target_info.set_upper_bound_node(upper_bound_node);
+      // Copy data into the target info
+      for (unsigned idx = upper_depth; idx < depth; idx++)
+      {
+        const PhysicalState *state = physical_states[idx];
+#ifdef DEBUG_LEGION
+        assert(state != NULL);
+#endif
+        FieldMask split_overlap = split_masks[idx] & mask;
+        if (!!split_overlap)
+          target_info.record_split_fields(state->node, split_overlap);
+        // Also copy over the needed version states
+        state->clone_to(mask, target_info);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3839,6 +3865,39 @@ namespace Legion {
         result->reduction_views = reduction_views;
       }
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalState::clone_to(const FieldMask &mask, 
+                                 VersionInfo &target_info) const
+    //--------------------------------------------------------------------------
+    {
+      // Should only be calling this on path only nodes
+#ifdef DEBUG_LEGION
+      assert(path_only);
+#endif
+      if (!version_states.empty())
+      {
+        for (PhysicalVersions::iterator it = version_states.begin();
+              it != version_states.end(); it++)
+        {
+          FieldMask overlap = it->second & mask;
+          if (!overlap)
+            continue;
+          target_info.add_current_version(it->first, overlap, path_only);
+        }
+      }
+      if (!advance_states.empty())
+      {
+        for (PhysicalVersions::iterator it = advance_states.begin();
+              it != advance_states.end(); it++)
+        {
+          FieldMask overlap = it->second & mask;
+          if (!overlap)
+            continue;
+          target_info.add_advance_version(it->first, overlap, path_only);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

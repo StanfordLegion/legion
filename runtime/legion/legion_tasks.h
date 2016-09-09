@@ -510,6 +510,8 @@ namespace Legion {
     public:
       SingleTask* find_parent_logical_context(unsigned index);
       SingleTask* find_parent_physical_context(unsigned index);
+      void find_parent_version_info(unsigned index, unsigned depth, 
+                   const FieldMask &version_mask, VersionInfo &version_info);
       // Override by RemoteTask and TopLevelTask
       virtual SingleTask* find_outermost_local_context(SingleTask *previous);
       virtual SingleTask* find_top_context(void);

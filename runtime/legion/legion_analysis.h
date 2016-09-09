@@ -224,7 +224,6 @@ namespace Legion {
                                const FieldMask &state_mask, bool path_only);
       void add_advance_version(VersionState *state, 
                                const FieldMask &state_mask, bool path_only);
-      void add_field_versions(unsigned depth, FieldVersions* versions);
     public:
       inline bool is_upper_bound_set(void) const 
         { return (upper_bound_node != NULL); }
@@ -251,6 +250,8 @@ namespace Legion {
                          RegionTreeNode *to_node);
       void copy_to(VersionInfo &rhs);
       // Cloning information for virtual mappings
+      void clone_to_depth(unsigned depth, const FieldMask &mask,
+                          VersionInfo &target_info) const;
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       const FieldMask& get_split_mask(unsigned depth) const;
@@ -792,6 +793,7 @@ namespace Legion {
         const LegionMap<LogicalView*,FieldMask>::aligned &valid_above);
     public:
       PhysicalState* clone(void) const;
+      void clone_to(const FieldMask &mask, VersionInfo &target_info) const;
     public:
       void print_physical_state(const FieldMask &capture_mask,
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,

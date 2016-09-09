@@ -1630,6 +1630,17 @@ namespace Legion {
         parent_node = get_node(req.parent);
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
+      // If this is not the top of the tree, see if we have to get
+      // any version infromation from our parent context (e.g. because
+      // it virtually mapped above where we have privileges)
+      const unsigned depth = parent_node->get_depth();
+      if (depth > 0)
+      {
+        SingleTask *parent_ctx = op->get_parent();
+        unsigned parent_req_index = op->find_parent_index(idx);
+        parent_ctx->find_parent_version_info(parent_req_index, depth, 
+                                             user_mask, version_info);
+      }
       // Keep track of any unversioned fields
       FieldMask unversioned_mask = user_mask;
       // Do the traversal to compute the version numbers

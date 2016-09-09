@@ -3169,12 +3169,6 @@ namespace Legion {
       rez.serialize(depth);
       // See if we need to pack up base task information
       pack_base_external_task(rez, target);
-      // Pack up the version numbers only 
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        VersionInfo &info = get_version_info(idx);
-        info.pack_version_numbers(rez);
-      }
       // Pack up our virtual mapping information
       std::vector<unsigned> virtual_indexes;
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -3185,6 +3179,16 @@ namespace Legion {
       rez.serialize<size_t>(virtual_indexes.size());
       for (unsigned idx = 0; idx < virtual_indexes.size(); idx++)
         rez.serialize(virtual_indexes[idx]);
+      // Pack up the version numbers only 
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        VersionInfo &info = get_version_info(idx);
+        // If we're virtually mapped, we need all the information
+        if (virtual_mapped[idx])
+          info.pack_version_info(rez);
+        else
+          info.pack_version_numbers(rez);
+      }
       // Now pack up any local fields 
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked locals = 
                                                                   local_fields;
@@ -4167,7 +4171,7 @@ namespace Legion {
     SingleTask* SingleTask::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
- #ifdef DEBUG_LEGION
+#ifdef DEBUG_LEGION
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == parent_req_indexes.size());
 #endif     
@@ -4182,6 +4186,24 @@ namespace Legion {
       }
       else // We created it, put it in the top context
         return parent_ctx->find_top_context();
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::find_parent_version_info(unsigned index, unsigned depth,
+                       const FieldMask &version_mask, VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(regions.size() == virtual_mapped.size()); 
+#endif
+      // If this isn't one of our original region requirements then 
+      // we don't have any versions that the child won't discover itself
+      // Same if the region was not virtually mapped
+      if ((index >= virtual_mapped.size()) || !virtual_mapped[index])
+        return;
+      // We now need to clone any version info from the parent into the child
+      const VersionInfo &parent_info = get_version_info(index);  
+      parent_info.clone_to_depth(depth, version_mask, version_info);
     }
 
     //--------------------------------------------------------------------------
@@ -10299,17 +10321,22 @@ namespace Legion {
       derez.deserialize(depth);
       WrapperReferenceMutator mutator(preconditions);
       unpack_base_external_task(derez, &mutator);
-      version_infos.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        version_infos[idx].unpack_version_numbers(derez, runtime->forest);
-      virtual_mapped.resize(regions.size(), false);
       size_t num_virtual;
       derez.deserialize(num_virtual);
+      virtual_mapped.resize(regions.size(), false);
       for (unsigned idx = 0; idx < num_virtual; idx++)
       {
         unsigned index;
         derez.deserialize(index);
         virtual_mapped[index] = true;
+      }
+      version_infos.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (virtual_mapped[idx])
+          version_infos[idx].unpack_version_info(derez, runtime, preconditions);
+        else
+          version_infos[idx].unpack_version_numbers(derez, runtime->forest);
       }
       update_no_access_regions();
       size_t num_local;
