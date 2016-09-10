@@ -11963,7 +11963,8 @@ namespace Legion {
         ProjectionInfo &proj_info = projection_infos[idx];
         const bool partial_traversal = 
           (proj_info.projection_type == PART_PROJECTION) ||
-          (proj_info.projection->depth > 0);
+          ((proj_info.projection_type != SINGULAR) && 
+           (proj_info.projection->depth > 0));
         RegionTreePath privilege_path;
         initialize_privilege_path(privilege_path, regions[idx]);
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
