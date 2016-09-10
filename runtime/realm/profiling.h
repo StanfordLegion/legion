@@ -223,6 +223,9 @@ namespace Realm {
     template <typename T>
     ProfilingRequest &add_measurement(void);
 
+    ProfilingRequest &add_measurement(ProfilingMeasurementID measurement_id);
+    ProfilingRequest &add_measurements(const std::set<ProfilingMeasurementID>& measurement_ids);
+
     template <typename S> static ProfilingRequest *deserialize_new(S &s);
 
   protected:

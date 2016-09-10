@@ -165,6 +165,19 @@ namespace Realm {
     return *this;
   }
 
+  inline ProfilingRequest &ProfilingRequest::add_measurement(ProfilingMeasurementID measurement_id)
+  {
+    requested_measurements.insert(measurement_id);
+    return *this;
+  }
+
+  inline ProfilingRequest &ProfilingRequest::add_measurements(const std::set<ProfilingMeasurementID>& measurement_ids)
+  {
+    requested_measurements.insert(measurement_ids.begin(),
+				  measurement_ids.end());
+    return *this;
+  }
+
   template <typename S>
   bool serialize(S &s, const ProfilingRequest &pr)
   {
