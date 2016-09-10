@@ -989,7 +989,7 @@ namespace LegionRuntime {
       Rect<DIM> image_convex(const Rect<DIM> r) const
       {
 	return Rect<DIM>(image(r.lo),
-			 image(r.hi));
+			 image(r.hi + Point<DIM>::ONES()));
       }
 
       bool image_is_dense(const Rect<DIM> r) const
