@@ -2807,12 +2807,14 @@ namespace Legion {
     bool FieldState::projection_domain_dominates(const Domain &next_dom) const
     //--------------------------------------------------------------------------
     {
-      if (projection_domain == next_dom)
-        return true;
 #ifdef DEBUG_LEGION
-      assert(projection_domain.get_dim() == next_dom.get_dim());
       assert(projection_domain.get_dim() > 0);
 #endif
+      // If the domains do not have the same dimension, the answer must be no
+      if (projection_domain.get_dim() != next_dom.get_dim())
+        return false;
+      if (projection_domain == next_dom)
+        return true;
       switch (projection_domain.get_dim())
       {
         case 1:
