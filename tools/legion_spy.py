@@ -3464,7 +3464,7 @@ class LogicalState(object):
                 same_func_and_rect = True
                 current_rect = op.get_index_launch_rect()
                 for func,rect in self.projection_epoch:
-                    if shallow_disjoint and func.depth != 1:
+                    if shallow_disjoint and func.depth != 0:
                         shallow_disjoint = False
                         if not same_func_and_rect:
                             break
@@ -3473,8 +3473,13 @@ class LogicalState(object):
                             same_func_and_rect = False
                             if not shallow_disjoint:
                                 break
+                        elif rect.dim != current_rect.dim:
+                            # Different dimensions can't be compared
+                            same_func_and_rect = False
+                            if not shallow_disjoint:
+                                break
                         elif not rect.dominates(current_rect):
-                            same_func_and_rect= False
+                            same_func_and_rect = False
                             if not shallow_disjoint:
                                 break
                 # If we can't do either of these then we have to close
