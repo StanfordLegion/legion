@@ -32,10 +32,10 @@
 
 #include "lowlevel.h"
 
-#include "realm/operation.h"
-#include "realm/dynamic_table.h"
-#include "realm/id.h"
-#include "realm/metadata.h"
+#include "../realm/operation.h"
+#include "../realm/dynamic_table.h"
+#include "../realm/id.h"
+#include "../realm/metadata.h"
 
 #include <assert.h>
 
@@ -56,14 +56,14 @@ namespace Realm {
   class ProfilingRequestSet;
 };
 
-#include "realm/event_impl.h"
-#include "realm/rsrv_impl.h"
-#include "realm/machine_impl.h"
-#include "realm/proc_impl.h"
-#include "realm/mem_impl.h"
-#include "realm/inst_impl.h"
-#include "realm/idx_impl.h"
-#include "realm/runtime_impl.h"
+#include "../realm/event_impl.h"
+#include "../realm/rsrv_impl.h"
+#include "../realm/machine_impl.h"
+#include "../realm/proc_impl.h"
+#include "../realm/mem_impl.h"
+#include "../realm/inst_impl.h"
+#include "../realm/idx_impl.h"
+#include "../realm/runtime_impl.h"
 
 // namespace importing for backwards compatibility
 namespace LegionRuntime {

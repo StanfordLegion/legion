@@ -319,7 +319,7 @@ ASM_SRC		?=
 # Set the source files
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
-	           $(LG_RT_DIR)/lowlevel_dma.cc \
+	           $(LG_RT_DIR)/lowlevel/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
 	           $(LG_RT_DIR)/realm/faults.cc \
@@ -334,8 +334,8 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 		   $(LG_RT_DIR)/realm/idx_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc \
 		   $(LG_RT_DIR)/realm/sampling_impl.cc \
-                   $(LG_RT_DIR)/lowlevel.cc \
-                   $(LG_RT_DIR)/lowlevel_disk.cc
+                   $(LG_RT_DIR)/lowlevel/lowlevel.cc \
+                   $(LG_RT_DIR)/lowlevel/lowlevel_disk.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/numa/numa_module.cc \
 		   $(LG_RT_DIR)/realm/numa/numasysif.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/procset/procset_module.cc
@@ -348,7 +348,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/llvmjit/llvmjit_module.cc \
                    $(LG_RT_DIR)/realm/llvmjit/llvmjit_internal.cc
 endif
 ifeq ($(strip $(USE_GASNET)),1)
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/lowlevel/activemsg.cc
 endif
 GPU_RUNTIME_SRC +=
 else

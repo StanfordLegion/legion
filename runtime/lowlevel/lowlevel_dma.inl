@@ -18,7 +18,7 @@
 // nop, but helps IDEs
 #include "lowlevel_dma.h"
 
-#include "realm/logging.h"
+#include "../realm/logging.h"
 
 namespace LegionRuntime {
   namespace LowLevel {

@@ -16,12 +16,13 @@
 
 # Install headers
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
-  DESTINATION include
-  FILES_MATCHING PATTERN "*.h"
+  DESTINATION include/legion
+  FILES_MATCHING PATTERN "*/*.h" PATTERN "*/*.inl"
+  PATTERN "legion" EXCLUDE
 )
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/legion
   DESTINATION include
-  FILES_MATCHING PATTERN "*.inl"
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.inl"
 )
 
 # Lowlevel runtime
@@ -29,12 +30,12 @@ if(Legion_USE_SHARED_LOWLEVEL)
   list(APPEND LOW_RUNTIME_SRC shared_lowlevel.cc)
 else()
   list(APPEND LOW_RUNTIME_SRC
-    lowlevel_config.h
-    lowlevel_disk.cc
-    lowlevel_dma.h            lowlevel_dma.cc
-    lowlevel_dma.inl
-    lowlevel.h                lowlevel.cc
-    lowlevel_impl.h
+    lowlevel/lowlevel_config.h
+    lowlevel/lowlevel_disk.cc
+    lowlevel/lowlevel_dma.h   lowlevel/lowlevel_dma.cc
+    lowlevel/lowlevel_dma.inl
+    lowlevel/lowlevel.h       lowlevel/lowlevel.cc
+    lowlevel/lowlevel_impl.h
     realm/event_impl.h        realm/event_impl.cc
     realm/event_impl.inl
     realm/faults.h            realm/faults.cc
@@ -78,10 +79,10 @@ else()
   endif()
 endif()
 list(APPEND LOW_RUNTIME_SRC
-  accessor.h
-  arrays.h
-  atomics.h
-  common.h
+  lowlevel/accessor.h
+  lowlevel/arrays.h
+  lowlevel/atomics.h
+  lowlevel/common.h
   realm/bytearray.h
   realm/bytearray.inl
   realm/circ_queue.h
@@ -122,7 +123,7 @@ list(APPEND LOW_RUNTIME_SRC
   realm/timers.h           realm/timers.cc
   realm/timers.inl
   realm/utils.h
-  utilities.h
+  lowlevel/utilities.h
 )
 find_package(Threads REQUIRED)
 add_library(LowLevelRuntime ${LOW_RUNTIME_SRC})
@@ -166,12 +167,12 @@ endif()
 
 target_include_directories(LowLevelRuntime
   INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lowlevel>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/realm>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:include/legion/lowlevel>
     $<INSTALL_INTERFACE:include/legion>
-    $<INSTALL_INTERFACE:include/realm>
+    $<INSTALL_INTERFACE:include/legion/realm>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} legion realm
 )
 
@@ -238,8 +239,8 @@ target_include_directories(HighLevelRuntime
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/realm>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mappers>
     $<INSTALL_INTERFACE:include/legion>
-    $<INSTALL_INTERFACE:include/realm>
-    $<INSTALL_INTERFACE:include/mappers>
+    $<INSTALL_INTERFACE:include/legion/realm>
+    $<INSTALL_INTERFACE:include/legion/mappers>
   PRIVATE legion realm mappers
 )
 

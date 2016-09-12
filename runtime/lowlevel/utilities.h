@@ -37,8 +37,8 @@
 #include "atomics.h" // for __sync_fetch_and_add
 #endif
 
-#include "realm/logging.h"
-#include "realm/timers.h"
+#include "../realm/logging.h"
+#include "../realm/timers.h"
 
 //#define DETAILED_TIMING
 
