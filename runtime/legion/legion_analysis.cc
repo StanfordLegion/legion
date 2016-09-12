@@ -733,7 +733,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(depth < split_masks.size());
 #endif
-      split_masks[depth] = split_mask;
+      split_masks[depth] |= split_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -4302,6 +4302,54 @@ namespace Legion {
           version_info.add_advance_version(it->first, overlap,
                                            false/*path only*/);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::compute_advance_split_mask(VersionInfo &version_info,
+                                                    SingleTask *context,
+                                                const FieldMask &version_mask,
+                                                std::set<RtEvent> &ready_events,
+          const LegionMap<ProjectionEpochID,FieldMask>::aligned &advance_epochs)
+    //--------------------------------------------------------------------------
+    {
+      // See if we have been assigned
+      if (context != current_context)
+      {
+        const AddressSpaceID local_space = 
+          node->context->runtime->address_space;
+        owner_space = context->get_version_owner(node, local_space);
+        is_owner = (owner_space == local_space);
+        current_context = context;
+      }
+      // See if we are the owner
+      if (!is_owner)
+      {
+        FieldMask request_mask = version_mask - remote_valid_fields;
+        if (!!request_mask)
+        {
+          RtEvent wait_on = send_remote_version_request(request_mask,
+                                                        ready_events); 
+          wait_on.wait();
+#ifdef DEBUG_LEGION
+          // When we wake up everything should be good
+          assert(!(version_mask - remote_valid_fields));
+#endif
+        }
+      }
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+      // See if we've done any previous advances for this projection epoch
+      for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator it =
+            advance_epochs.begin(); it != advance_epochs.end(); it++)
+      {
+        LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
+          finder = previous_advancers.find(it->first);
+        if (finder == previous_advancers.end())
+          continue;
+        FieldMask overlap = finder->second & it->second;
+        if (!overlap)
+          continue;
+        version_info.record_split_fields(node, overlap);
       }
     }
 

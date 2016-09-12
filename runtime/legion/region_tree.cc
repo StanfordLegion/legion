@@ -1614,7 +1614,8 @@ namespace Legion {
                         const RegionTreePath &path, VersionInfo &version_info,
                         std::set<RtEvent> &ready_events, 
                         bool partial_traversal, bool close_traversal,
-                        RegionTreeNode *parent_node)
+                        RegionTreeNode *parent_node,
+          const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1648,7 +1649,7 @@ namespace Legion {
                                            user_mask, unversioned_mask,
                                            op, idx, context, version_info, 
                                            ready_events, partial_traversal,
-                                           close_traversal);
+                                           close_traversal, advance_epochs);
     }
 
     //--------------------------------------------------------------------------
@@ -4068,6 +4069,24 @@ namespace Legion {
       std::vector<ColorPoint> path;
       return compute_index_path(parent.get_index_space(),
                                 child.get_index_space(), path);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_subregion(LogicalRegion child,
+                                        LogicalPartition parent)
+    //--------------------------------------------------------------------------
+    {
+      if (child.get_tree_id() != parent.get_tree_id())
+        return false;
+      RegionNode *child_node = get_node(child);
+      PartitionNode *parent_node = get_node(parent);
+      while (child_node->parent != NULL)
+      {
+        if (child_node->parent == parent_node)
+          return true;
+        child_node = child_node->parent->parent;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -12589,7 +12608,8 @@ namespace Legion {
                                                VersionInfo &version_info,
                                                std::set<RtEvent> &ready_events,
                                                bool partial_traversal,
-                                               bool close_traversal)
+                                               bool close_traversal,
+          const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -12602,6 +12622,9 @@ namespace Legion {
       {
         if (partial_traversal)
         {
+#ifdef DEBUG_LEGION
+          assert(advance_epochs == NULL);
+#endif
           // If we are doing a partial traversal, then we just do the
           // normal path only traversal and don't recurse
           const FieldMask &split_mask = version_info.get_split_mask(depth);
@@ -12647,6 +12670,11 @@ namespace Legion {
       }
       else
       {
+        // See if we need to compute the split mask first, this happens
+        // only for projection epochs
+        if (advance_epochs != NULL)
+          manager.compute_advance_split_mask(version_info, parent_ctx,
+                          version_mask, ready_events, *advance_epochs);
         // Record the path only versions
         const FieldMask &split_mask = version_info.get_split_mask(depth);
         manager.record_path_only_versions(version_mask, split_mask,
@@ -12656,8 +12684,8 @@ namespace Legion {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         child->compute_version_numbers(ctx, path, usage, version_mask,
                                 unversioned_mask, op, idx, parent_ctx, 
-                                version_info, ready_events, 
-                                partial_traversal, close_traversal);
+                                version_info, ready_events, partial_traversal,
+                                close_traversal, advance_epochs);
       }
     }
 

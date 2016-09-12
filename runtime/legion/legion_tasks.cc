@@ -2050,7 +2050,7 @@ namespace Legion {
             ProjectionFunction *function = 
               runtime->find_projection_function(regions[idx].projection);
             regions[idx].region = 
-              function->project_point(this, idx, index_point);
+              function->project_point(this, idx, runtime, index_point);
           }
           // Update the region requirement kind 
           regions[idx].handle_type = SINGULAR;
@@ -9226,7 +9226,7 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
                                       path, version_infos[idx], ready_events,
                                       false/*partial*/, false/*close*/, 
-                                      parent_node);
+                                      parent_node, &proj_epochs);
       }
     }
 
@@ -12444,7 +12444,7 @@ namespace Legion {
         {
           ProjectionFunction *function = 
             runtime->find_projection_function(regions[idx].projection);
-          function->project_points(this, idx, minimal_points);
+          function->project_points(this, idx, runtime, minimal_points);
         }
       }
     }

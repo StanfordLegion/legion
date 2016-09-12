@@ -263,7 +263,10 @@ namespace Legion {
                                        std::set<RtEvent> &ready_events,
                                        bool partial_traversal = false,
                                        bool close_traversal = false,
-                                       RegionTreeNode *parent_node = NULL);
+                                       RegionTreeNode *parent_node = NULL,
+              // For computing split masks for projection epochs only
+              const LegionMap<ProjectionEpochID,
+                              FieldMask>::aligned *advance_epochs = NULL);
       void advance_version_numbers(Operation *op, unsigned idx,
                                    bool update_parent_state,
                                    bool parent_is_upper_bound,
@@ -469,6 +472,7 @@ namespace Legion {
       bool is_top_level_region(LogicalRegion handle);
     public:
       bool is_subregion(LogicalRegion child, LogicalRegion parent);
+      bool is_subregion(LogicalRegion child, LogicalPartition parent);
       bool is_disjoint(IndexPartition handle);
       bool is_disjoint(LogicalPartition handle);
     public:
@@ -1388,7 +1392,8 @@ namespace Legion {
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events,
                                    bool partial_traversal,
-                                   bool close_traversal);
+                                   bool close_traversal,
+        const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs);
       void advance_version_numbers(ContextID ctx,
                                    AddressSpaceID local_space,
                                    const RegionTreePath &path,

@@ -874,6 +874,11 @@ namespace Legion {
                                    std::set<RtEvent> &ready_events);
       void record_advance_versions(const FieldMask &version_mask,
                                    VersionInfo &version_info);
+      void compute_advance_split_mask(VersionInfo &version_info,
+                                      SingleTask *context,
+                                      const FieldMask &version_mask,
+                                      std::set<RtEvent> &ready_events,
+         const LegionMap<ProjectionEpochID,FieldMask>::aligned &advance_epochs);
       void record_path_only_versions(const FieldMask &version_mask,
                                      const FieldMask &split_mask,
                                      FieldMask &unversioned_mask,

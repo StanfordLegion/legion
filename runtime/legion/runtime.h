@@ -1281,10 +1281,17 @@ namespace Legion {
     public:
       ProjectionFunction& operator=(const ProjectionFunction &rhs);
     public:
-      LogicalRegion project_point(Task *task, unsigned idx,
+      LogicalRegion project_point(Task *task, unsigned idx, Runtime *runtime,
                                   const DomainPoint &point);
-      void project_points(Task *task, unsigned idx,
+      void project_points(Task *task, unsigned idx, Runtime *runtime,
                           std::vector<MinimalPoint> &minimal_points);
+    protected:
+      void check_projection_region_result(const RegionRequirement &req,
+                                          const Task *task, unsigned idx,
+                                          LogicalRegion result, Runtime *rt);
+      void check_projection_partition_result(const RegionRequirement &req,
+                                             const Task *task, unsigned idx,
+                                             LogicalRegion result, Runtime *rt);
     public:
       const int depth; 
       const bool is_exclusive;

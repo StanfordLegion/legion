@@ -7429,7 +7429,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunction::project_point(Task *task, unsigned idx, 
-                                                    const DomainPoint &point)
+                                     Runtime *runtime, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       const RegionRequirement &req = task->regions[idx];
@@ -7441,33 +7441,41 @@ namespace Legion {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
         {
-            return functor->project(DUMMY_CONTEXT, task, idx, 
-                                    req.partition, point); 
+          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx, 
+                                                  req.partition, point); 
+          check_projection_partition_result(req, task, idx, result, runtime);
+          return result;
         }
         else
         {
-          return functor->project(DUMMY_CONTEXT, task, idx,
-                                  req.region, point);
+          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
+                                                  req.region, point);
+          check_projection_region_result(req, task, idx, result, runtime);
+          return result;
         }
       }
       else
       {
         if (req.handle_type == PART_PROJECTION)
         {
-          return functor->project(DUMMY_CONTEXT, task, idx, 
-                                  req.partition, point);
+          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx, 
+                                                  req.partition, point);
+          check_projection_partition_result(req, task, idx, result, runtime);
+          return result;
         }
         else
         {
-          return functor->project(DUMMY_CONTEXT, task, idx,
-                                  req.region, point);
+          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
+                                                  req.region, point);
+          check_projection_region_result(req, task, idx, result, runtime);
+          return result;
         }
       }
     }
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::project_points(Task *task, unsigned idx, 
-                                      std::vector<MinimalPoint> &minimal_points)
+                    Runtime *runtime, std::vector<MinimalPoint> &minimal_points)
     //--------------------------------------------------------------------------
     {
       const RegionRequirement &req = task->regions[idx];
@@ -7482,9 +7490,10 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            it->add_projection_region(idx,
-                functor->project(DUMMY_CONTEXT, task, idx,
-                                 req.partition, it->get_domain_point()));
+            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
+                                      req.partition, it->get_domain_point());
+            check_projection_partition_result(req, task, idx, result, runtime);
+            it->add_projection_region(idx, result);
           }
         }
         else
@@ -7492,9 +7501,10 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            it->add_projection_region(idx,
-                functor->project(DUMMY_CONTEXT, task, idx,
-                                 req.region, it->get_domain_point()));
+            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
+                                         req.region, it->get_domain_point());
+            check_projection_region_result(req, task, idx, result, runtime);
+            it->add_projection_region(idx, result);
           }
         }
       }
@@ -7505,9 +7515,10 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            it->add_projection_region(idx, 
-              functor->project(DUMMY_CONTEXT, task, idx, 
-                               req.partition, it->get_domain_point()));
+            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
+                                      req.partition, it->get_domain_point());
+            check_projection_partition_result(req, task, idx, result, runtime);
+            it->add_projection_region(idx, result);
           }
         }
         else
@@ -7515,12 +7526,77 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            it->add_projection_region(idx,
-              functor->project(DUMMY_CONTEXT, task, idx,
-                               req.region, it->get_domain_point()));
+            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
+                                         req.region, it->get_domain_point());
+            check_projection_region_result(req, task, idx, result, runtime);
+            it->add_projection_region(idx, result);
           }
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_projection_region_result(
+        const RegionRequirement &req, const Task *task, unsigned idx,
+        LogicalRegion result, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      if (result.get_tree_id() != req.region.get_tree_id())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion of tree ID %d for region requirement %d "
+            "of task %s (UID %lld) which is different from the upper "
+            "bound node of tree ID %d", projection_id, 
+            result.get_tree_id(), idx, task->get_task_name(), 
+            task->get_unique_id(), req.region.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PROJECTION_RESULT);
+      }
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->is_subregion(result, req.region))
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which is not a subregion of the "
+            "upper bound region for region requirement %d of "
+            "task %s (UID %lld)", projection_id, idx,
+            task->get_task_name(), task->get_unique_id());
+        assert(false);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_projection_partition_result(
+        const RegionRequirement &req, const Task *task, unsigned idx,
+        LogicalRegion result, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      if (result.get_tree_id() != req.partition.get_tree_id())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion of tree ID %d for region requirement %d "
+            "of task %s (UID %lld) which is different from the upper "
+            "bound node of tree ID %d", projection_id, 
+            result.get_tree_id(), idx, task->get_task_name(), 
+            task->get_unique_id(), req.partition.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PROJECTION_RESULT);
+      }
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->is_subregion(result, req.partition))
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which is not a subregion of the "
+            "upper bound region for region requirement %d of "
+            "task %s (UID %lld)", projection_id, idx,
+            task->get_task_name(), task->get_unique_id());
+        assert(false);
+      }
+#endif
     }
 
     /////////////////////////////////////////////////////////////
