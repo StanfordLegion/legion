@@ -196,6 +196,7 @@ if(Legion_BUILD_EXAMPLES OR Legion_BUILD_EXAMPLE_APPS)
 
   if(Legion_BUILD_EXAMPLES)
     add_subdirectory(examples)
+    add_subdirectory(tutorial)
   endif()
   if(Legion_BUILD_EXAMPLE_APPS)
     add_subdirectory(apps)
