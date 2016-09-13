@@ -3460,10 +3460,16 @@ class LogicalState(object):
                 pass
             elif self.projection_mode == OPEN_READ_WRITE:
                 # Figure out if we are in shallow disjoint mode or not
-                shallow_disjoint = req.projection_function.depth == 0 
+                # We can still be in shallow disjoint if we are reading
+                # no matter what the projection depth
+                shallow_disjoint = req.projection_function.depth == 0 or req.is_read_only()
+                # Quick pass if we are disjoint shallow and have a
+                # read-only user, then there is nothing we need to do
                 same_func_and_rect = True
                 current_rect = op.get_index_launch_rect()
                 for func,rect in self.projection_epoch:
+                    # We can stay in shallow disjoint mode if the
+                    # next user is going to be reading only
                     if shallow_disjoint and func.depth != 0:
                         shallow_disjoint = False
                         if not same_func_and_rect:
@@ -3483,11 +3489,12 @@ class LogicalState(object):
                             if not shallow_disjoint:
                                 break
                 # If we can't do either of these then we have to close
-                # Also have to close if this is a reduction
-                if not shallow_disjoint and not same_func_and_rect or req.is_reduce():
+                # Also have to close if this is a reduction and not shallow disjoint
+                if not shallow_disjoint and (not same_func_and_rect or req.is_reduce()):
                     if not self.perform_close_operation(empty_children_to_close,
                                   False, op, req, previous_deps, perform_checks):
                         return False
+                    self.projection_mode = OPEN_NONE
             else:
                 assert self.projection_mode == OPEN_MULTI_REDUCE
                 assert self.current_redop != 0
@@ -3495,6 +3502,7 @@ class LogicalState(object):
                     if not self.perform_close_operation(empty_children_to_close,
                               False, op, req, previous_deps, perform_checks):
                         return False
+                    self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = dict()
             permit_leave_open = False # Never allowed to leave anything open here
@@ -5236,12 +5244,15 @@ class Operation(object):
                     assert ancestor
                     dep_type = compute_dependence_type(req, other_req)
                     if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
-                        print(("Region requirements %d and %d of operation %s "+
-                               "are interfering in %s") % 
-                               (index,idx,str(self),str(self.context)))
-                        if self.state.assert_on_error:
-                            assert False
-                        return False
+                        # Only report this at least one is not a projection requirement
+                        if req.projection_function is None or \
+                            other_req.projection_function is None:
+                            print(("Region requirements %d and %d of operation %s "+
+                                   "are interfering in %s") % 
+                                   (index,idx,str(self),str(self.context)))
+                            if self.state.assert_on_error:
+                                assert False
+                            return False
                     aliased_children.add(ancestor.depth) 
             # Keep track of the previous dependences so we can 
             # use them for adding/checking dependences on close operations
@@ -7489,7 +7500,7 @@ class CompositeNode(object):
     def are_domination_tests_sound(self):
         if isinstance(self.node, LogicalRegion):
             return True
-        # Partition nodes are only sound if they have all the fields
+        # Partition nodes are only sound if they have all the children 
         if len(self.children) != self.node.get_num_children():
             return False
         return True
