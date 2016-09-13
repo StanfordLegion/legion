@@ -2391,7 +2391,11 @@ namespace Legion {
             // Get the interference kind and report it if it is bad
             RegionUsage usage2(regions[indexes[j]]);
             DependenceType dtype = check_dependence_type(usage1, usage2);
-            if ((dtype == TRUE_DEPENDENCE) || (dtype == ANTI_DEPENDENCE))
+            // We can only reporting interfering requirements precisely
+            // if at least one of these is not a projection requireemnts
+            if (((dtype == TRUE_DEPENDENCE) || (dtype == ANTI_DEPENDENCE)) &&
+                ((regions[indexes[i]].handle_type == SINGULAR) ||
+                 (regions[indexes[j]].handle_type == SINGULAR)))
               report_interfering_requirements(indexes[j], indexes[i]);
             // Special case, if the parents are not the same,
             // then we don't have to do anything cause their

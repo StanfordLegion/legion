@@ -2726,7 +2726,7 @@ namespace Legion {
         open_state = OPEN_REDUCE_PROJ;
         redop = user.usage.redop;
       }
-      else if (disjoint && (projection->depth == 1))
+      else if (disjoint && (projection->depth == 0))
         open_state = OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW;
       else
         open_state = OPEN_READ_WRITE_PROJ;

@@ -11368,6 +11368,15 @@ namespace Legion {
                 else
                   it++;
               }
+              else if (IS_READ_ONLY(closer.user.usage))
+              {
+                // Read-only projections of any depth allow
+                // us to stay in disjoint shallow mode because
+                // they are not going to mutate the state at
+                // all and we can catch dependences on any
+                // index spaces without needing a close operation
+                it++;
+              }
               else if (proj_info.projection->depth == 0)
               {
                 // If we are also disjoint shallow we can stay in this mode
