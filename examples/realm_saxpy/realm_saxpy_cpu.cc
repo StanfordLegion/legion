@@ -250,7 +250,7 @@ void top_level_task(const void *args, size_t arglen,
   // Run our checker task
   Event done = first_cpu.spawn(CHECK_RESULT_TASK, &saxpy_args, 
                                 sizeof(saxpy_args), z_ready); 
-  printf("Done Event is (" IDFMT ",%d)\n\n", done.id, done.gen);
+  printf("Done Event is (" IDFMT ")\n\n", done.id);
   done.wait();
 }
 
@@ -303,7 +303,7 @@ void check_result_task(const void *args, size_t arglen,
     if (relative < 1e-6) {
       // ok
     } else {
-      printf("Index: %d Expected: %.8g Actual: %.8g\n", pir.p.x[0], expected, actual);
+      printf("Index: %lld Expected: %.8g Actual: %.8g\n", pir.p.x[0], expected, actual);
       success = false;
       break;
     }
