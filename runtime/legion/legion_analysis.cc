@@ -2387,18 +2387,18 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // CurrentState 
+    // LogicalState 
     ///////////////////////////////////////////////////////////// 
 
     //--------------------------------------------------------------------------
-    CurrentState::CurrentState(RegionTreeNode *node, ContextID ctx)
+    LogicalState::LogicalState(RegionTreeNode *node, ContextID ctx)
       : owner(node)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    CurrentState::CurrentState(const CurrentState &rhs)
+    LogicalState::LogicalState(const LogicalState &rhs)
       : owner(NULL)
     //--------------------------------------------------------------------------
     {
@@ -2407,13 +2407,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CurrentState::~CurrentState(void)
+    LogicalState::~LogicalState(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    CurrentState& CurrentState::operator=(const CurrentState&rhs)
+    LogicalState& LogicalState::operator=(const LogicalState&rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2422,35 +2422,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* CurrentState::operator new(size_t count)
+    void* LogicalState::operator new(size_t count)
     //--------------------------------------------------------------------------
     {
-      return legion_alloc_aligned<CurrentState,true/*bytes*/>(count);
+      return legion_alloc_aligned<LogicalState,true/*bytes*/>(count);
     }
 
     //--------------------------------------------------------------------------
-    void* CurrentState::operator new[](size_t count)
+    void* LogicalState::operator new[](size_t count)
     //--------------------------------------------------------------------------
     {
-      return legion_alloc_aligned<CurrentState,true/*bytes*/>(count);
+      return legion_alloc_aligned<LogicalState,true/*bytes*/>(count);
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    void CurrentState::operator delete[](void *ptr)
+    void LogicalState::operator delete(void *ptr)
     //--------------------------------------------------------------------------
     {
       free(ptr);
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::check_init(void)
+    void LogicalState::operator delete[](void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::check_init(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2465,7 +2465,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::clear_logical_users(void)
+    void LogicalState::clear_logical_users(void)
     //--------------------------------------------------------------------------
     {
       if (!curr_epoch_users.empty())
@@ -2491,7 +2491,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::reset(void)
+    void LogicalState::reset(void)
     //--------------------------------------------------------------------------
     {
       field_states.clear();
@@ -2507,7 +2507,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void CurrentState::clear_deleted_state(const FieldMask &deleted_mask)
+    void LogicalState::clear_deleted_state(const FieldMask &deleted_mask)
     //--------------------------------------------------------------------------
     {
       for (LegionList<FieldState>::aligned::iterator it = field_states.begin();
@@ -2562,7 +2562,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::advance_projection_epochs(const FieldMask &advance_mask)
+    void LogicalState::advance_projection_epochs(const FieldMask &advance_mask)
     //--------------------------------------------------------------------------
     {
       // See if we can get some coalescing going on here
@@ -2607,7 +2607,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::capture_projection_epochs(FieldMask capture_mask,
+    void LogicalState::capture_projection_epochs(FieldMask capture_mask,
                                                  ProjectionInfo &info)
     //--------------------------------------------------------------------------
     {
@@ -2635,7 +2635,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::capture_close_epochs(FieldMask capture_mask,
+    void LogicalState::capture_close_epochs(FieldMask capture_mask,
                                             ClosedNode *closed_node) const
     //--------------------------------------------------------------------------
     {
@@ -2653,7 +2653,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CurrentState::update_projection_epochs(FieldMask update_mask,
+    void LogicalState::update_projection_epochs(FieldMask update_mask,
                                                 const ProjectionInfo &info)
     //--------------------------------------------------------------------------
     {
@@ -3580,7 +3580,7 @@ namespace Legion {
     // be found in region_tree.cc to make sure that templates are instantiated
 
     //--------------------------------------------------------------------------
-    void LogicalCloser::update_state(CurrentState &state)
+    void LogicalCloser::update_state(LogicalState &state)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

@@ -10241,7 +10241,7 @@ namespace Legion {
                                                   const FieldMask &init_dirty)
     //--------------------------------------------------------------------------
     {
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
       state.dirty_fields |= init_dirty;
     }
 
@@ -10258,7 +10258,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, 
                         REGION_NODE_REGISTER_LOGICAL_USER_CALL);
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
@@ -10584,7 +10584,7 @@ namespace Legion {
                                              const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
       OpenOp *open = context->runtime->get_available_open_op(false); 
       open->initialize(open_mask, this, path, trace_info,
                        creator.op, creator.idx);
@@ -10607,7 +10607,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::create_logical_advance(CurrentState &state,
+    void RegionTreeNode::create_logical_advance(LogicalState &state,
                                                 const FieldMask &advance_mask,
                                                 const LogicalUser &creator,
                                                 const TraceInfo &trace_info,
@@ -10644,7 +10644,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::register_local_user(CurrentState &state,
+    void RegionTreeNode::register_local_user(LogicalState &state,
                                              const LogicalUser &user,
                                              const TraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -10662,7 +10662,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::add_open_field_state(CurrentState &state, bool arrived,
+    void RegionTreeNode::add_open_field_state(LogicalState &state, bool arrived,
                                               const ProjectionInfo &proj_info,
                                               const LogicalUser &user,
                                               const FieldMask &open_mask,
@@ -10689,7 +10689,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::perform_advance_analysis(CurrentState &state,
+    void RegionTreeNode::perform_advance_analysis(LogicalState &state,
                                                   AdvanceOp *advance_op,
                                                 const LogicalUser &advance_user,
                                                 const LogicalUser &create_user)
@@ -10728,7 +10728,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_LOGICAL_NODE_CALL);
-      CurrentState &state = get_current_state(closer.ctx);
+      LogicalState &state = get_logical_state(closer.ctx);
       // Perform closing checks on both the current epoch users
       // as well as the previous epoch users
       perform_closing_checks<CURR_LOGICAL_ALLOC>(closer, read_only_close,
@@ -10814,7 +10814,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::siphon_logical_children(LogicalCloser &closer,
-                                              CurrentState &state,
+                                              LogicalState &state,
                                               const FieldMask &current_mask,
                                               const FieldMask *aliased_children,
                                               bool record_close_operations,
@@ -11215,7 +11215,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::siphon_logical_projection(LogicalCloser &closer,
-                                                CurrentState &state,
+                                                LogicalState &state,
                                                 const FieldMask &current_mask,
                                                 const ProjectionInfo &proj_info,
                                                 bool record_close_operations,
@@ -11458,7 +11458,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::flush_logical_reductions(LogicalCloser &closer,
-                                                  CurrentState &state,
+                                                  LogicalState &state,
                                               FieldMask &reduction_flush_fields,
                                                   bool record_close_operations,
                                                   const ColorPoint &next_child,
@@ -11833,7 +11833,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::merge_new_field_state(CurrentState &state,
+    void RegionTreeNode::merge_new_field_state(LogicalState &state,
                                                const FieldState &new_state)
     //--------------------------------------------------------------------------
     {
@@ -11854,7 +11854,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::merge_new_field_states(CurrentState &state,
+    void RegionTreeNode::merge_new_field_states(LogicalState &state,
                              const LegionDeque<FieldState>::aligned &new_states)
     //--------------------------------------------------------------------------
     {
@@ -11869,7 +11869,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::filter_prev_epoch_users(CurrentState &state,
+    void RegionTreeNode::filter_prev_epoch_users(LogicalState &state,
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
@@ -11890,7 +11890,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::filter_curr_epoch_users(CurrentState &state,
+    void RegionTreeNode::filter_curr_epoch_users(LogicalState &state,
                                                  const FieldMask &field_mask)
     //--------------------------------------------------------------------------
     {
@@ -11947,7 +11947,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::record_logical_reduction(CurrentState &state,
+    void RegionTreeNode::record_logical_reduction(LogicalState &state,
                                                   ReductionOpID redop,
                                                   const FieldMask &user_mask)
     //--------------------------------------------------------------------------
@@ -11962,7 +11962,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::clear_logical_reduction_fields(CurrentState &state,
+    void RegionTreeNode::clear_logical_reduction_fields(LogicalState &state,
                                                   const FieldMask &cleared_mask)
     //--------------------------------------------------------------------------
     {
@@ -11984,7 +11984,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::sanity_check_logical_state(CurrentState &state)
+    void RegionTreeNode::sanity_check_logical_state(LogicalState &state)
     //--------------------------------------------------------------------------
     {
       // For every child and every field, it should only be open in one mode
@@ -12059,7 +12059,7 @@ namespace Legion {
                       Operation *op, const FieldMask &field_mask, bool dominate)
     //--------------------------------------------------------------------------
     {
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
       for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned::iterator 
             it = state.curr_epoch_users.begin(); it != 
             state.curr_epoch_users.end(); /*nothing*/)
@@ -12140,7 +12140,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, 
                         REGION_NODE_REGISTER_LOGICAL_USER_CALL);
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);
 #endif
@@ -12224,7 +12224,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::siphon_logical_deletion(LogicalCloser &closer,
-                                                 CurrentState &state,
+                                                 LogicalState &state,
                                                  const FieldMask &current_mask,
                                                  const ColorPoint &next_child,
                                                  FieldMask &open_below,
@@ -12419,7 +12419,7 @@ namespace Legion {
                                                  AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
       std::set<RegionTreeNode*> to_traverse;
       Serializer rez;
       {
@@ -12509,7 +12509,7 @@ namespace Legion {
                                                       Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
       derez.deserialize(state.dirty_below);
       derez.deserialize(state.dirty_fields);
       derez.deserialize(state.reduction_fields);
@@ -13967,9 +13967,9 @@ namespace Legion {
     void RegionTreeNode::initialize_current_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
-      if (!current_states.has_entry(ctx))
+      if (!logical_states.has_entry(ctx))
         return;
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
       state.check_init();
     }
 
@@ -13977,9 +13977,9 @@ namespace Legion {
     void RegionTreeNode::invalidate_current_state(ContextID ctx,bool users_only)
     //--------------------------------------------------------------------------
     {
-      if (!current_states.has_entry(ctx))
+      if (!logical_states.has_entry(ctx))
         return;
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
       if (users_only)
         state.clear_logical_users();
       else
@@ -13991,9 +13991,9 @@ namespace Legion {
                                                   const FieldMask &deleted_mask)
     //--------------------------------------------------------------------------
     {
-      if (!current_states.has_entry(ctx))
+      if (!logical_states.has_entry(ctx))
         return;
-      CurrentState &state = get_current_state(ctx);
+      LogicalState &state = get_logical_state(ctx);
       state.clear_deleted_state(deleted_mask);
     }
 
@@ -16008,9 +16008,9 @@ namespace Legion {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (current_states.has_entry(ctx))
+      if (logical_states.has_entry(ctx))
       {
-        CurrentState &state = get_current_state(ctx);
+        LogicalState &state = get_logical_state(ctx);
         print_logical_state(state, capture_mask, to_traverse, logger);  
       }
       else
@@ -16077,7 +16077,7 @@ namespace Legion {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (current_states.has_entry(ctx))
+      if (logical_states.has_entry(ctx))
       {
         VersionManager &manager= get_current_version_manager(ctx);
         manager.print_physical_state(this, capture_mask, to_traverse, logger);
@@ -16102,7 +16102,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::print_logical_state(CurrentState &state,
+    void RegionNode::print_logical_state(LogicalState &state,
                                          const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                          TreeStateLogger *logger)
@@ -16184,8 +16184,8 @@ namespace Legion {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (current_states.has_entry(ctx))
-        print_logical_state(get_current_state(ctx), capture_mask,
+      if (logical_states.has_entry(ctx))
+        print_logical_state(get_logical_state(ctx), capture_mask,
                             to_traverse, logger);
       else
         logger->log("No state");
@@ -16251,7 +16251,7 @@ namespace Legion {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (current_states.has_entry(ctx))
+      if (logical_states.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
         manager.print_physical_state(this, capture_mask, to_traverse, logger);
@@ -16999,9 +16999,9 @@ namespace Legion {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (current_states.has_entry(ctx))
+      if (logical_states.has_entry(ctx))
       {
-        CurrentState &state = get_current_state(ctx);
+        LogicalState &state = get_logical_state(ctx);
         print_logical_state(state, capture_mask, to_traverse, logger);    
       }
       else
@@ -17075,7 +17075,7 @@ namespace Legion {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (current_states.has_entry(ctx))
+      if (logical_states.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
         manager.print_physical_state(this, capture_mask, to_traverse, logger);
@@ -17100,7 +17100,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::print_logical_state(CurrentState &state,
+    void PartitionNode::print_logical_state(LogicalState &state,
                                         const FieldMask &capture_mask,
                    LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                         TreeStateLogger *logger)
@@ -17186,9 +17186,9 @@ namespace Legion {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (current_states.has_entry(ctx))
+      if (logical_states.has_entry(ctx))
       {
-        CurrentState &state = get_current_state(ctx);
+        LogicalState &state = get_logical_state(ctx);
         print_logical_state(state, capture_mask, to_traverse, logger);
       }
       else
@@ -17261,7 +17261,7 @@ namespace Legion {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (current_states.has_entry(ctx))
+      if (logical_states.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
         manager.print_physical_state(this, capture_mask, to_traverse, logger);

@@ -1037,8 +1037,8 @@ namespace Legion {
       "Region Node Premap Region",                                    \
       "Region Node Register Region",                                  \
       "Region Node Close State",                                      \
-      "Current State Record Verison Numbers",                         \
-      "Current State Advance Version Numbers",                        \
+      "Logical State Record Verison Numbers",                         \
+      "Logical State Advance Version Numbers",                        \
       "Physical State Capture State",                                 \
       "Physical State Apply Path Only",                               \
       "Physical State Apply State",                                   \
@@ -1172,7 +1172,7 @@ namespace Legion {
     class NodeTraverser;
 
     class ProjectionEpoch;
-    class CurrentState;
+    class LogicalState;
     class PhysicalState;
     class VersionState;
     class VersionInfo;

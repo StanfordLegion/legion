@@ -562,21 +562,21 @@ namespace Legion {
     };
 
     /**
-     * \class CurrentState 
+     * \class LogicalState
      * Track all the information about the current state
      * of a logical region from a given context. This
      * is effectively all the information at the analysis
      * wavefront for this particular logical region.
      */
-    class CurrentState {
+    class LogicalState {
     public:
       static const AllocationType alloc_type = CURRENT_STATE_ALLOC;
     public:
-      CurrentState(RegionTreeNode *owner, ContextID ctx);
-      CurrentState(const CurrentState &state);
-      ~CurrentState(void);
+      LogicalState(RegionTreeNode *owner, ContextID ctx);
+      LogicalState(const LogicalState &state);
+      ~LogicalState(void);
     public:
-      CurrentState& operator=(const CurrentState &rhs);
+      LogicalState& operator=(const LogicalState &rhs);
       void* operator new(size_t count);
       void* operator new[](size_t count);
       void operator delete(void *ptr);
@@ -616,7 +616,7 @@ namespace Legion {
       std::list<ProjectionEpoch*> projection_epochs;
     };
 
-    typedef DynamicTableAllocator<CurrentState,10,8> CurrentStateAllocator;
+    typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
 
     /**
      * \class ClosedNode
@@ -703,7 +703,7 @@ namespace Legion {
                                        const FieldMask &open_below,
              LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &cusers,
              LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers);
-      void update_state(CurrentState &state);
+      void update_state(LogicalState &state);
       void register_close_operations(
               LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::track_aligned &users);
     protected:

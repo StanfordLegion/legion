@@ -1249,13 +1249,13 @@ namespace Legion {
 #endif
         return result;
       }
-      inline CurrentState& get_current_state(ContextID ctx)
+      inline LogicalState& get_logical_state(ContextID ctx)
       {
-        return *(current_states.lookup_entry(ctx, this, ctx));
+        return *(logical_states.lookup_entry(ctx, this, ctx));
       }
-      inline CurrentState* get_current_state_ptr(ContextID ctx)
+      inline LogicalState* get_logical_state_ptr(ContextID ctx)
       {
-        return current_states.lookup_entry(ctx, this, ctx);
+        return logical_states.lookup_entry(ctx, this, ctx);
       }
       inline VersionManager& get_current_version_manager(ContextID ctx)
       {
@@ -1291,21 +1291,21 @@ namespace Legion {
                                const LogicalUser &creator,
                                const RegionTreePath &path,
                                const TraceInfo &trace_info);
-      void create_logical_advance(CurrentState &state,
+      void create_logical_advance(LogicalState &state,
                                   const FieldMask &advance_mask,
                                   const LogicalUser &creator,
                                   const TraceInfo &trace_info,
                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
                                   bool parent_is_upper_bound);
-      void register_local_user(CurrentState &state,
+      void register_local_user(LogicalState &state,
                                const LogicalUser &user,
                                const TraceInfo &trace_info);
-      void add_open_field_state(CurrentState &state, bool arrived,
+      void add_open_field_state(LogicalState &state, bool arrived,
                                 const ProjectionInfo &projection_info,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
                                 const ColorPoint &next_child);
-      void perform_advance_analysis(CurrentState &state, AdvanceOp *advance,
+      void perform_advance_analysis(LogicalState &state, AdvanceOp *advance,
                                     const LogicalUser &advance_user,
                                     const LogicalUser &create_user);
       void close_logical_node(LogicalCloser &closer,
@@ -1313,20 +1313,20 @@ namespace Legion {
                               bool permit_leave_open,
                               bool read_only_close);
       void siphon_logical_children(LogicalCloser &closer,
-                                   CurrentState &state,
+                                   LogicalState &state,
                                    const FieldMask &closing_mask,
                                    const FieldMask *aliased_children,
                                    bool record_close_operations,
                                    const ColorPoint &next_child,
                                    FieldMask &open_below);
       void siphon_logical_projection(LogicalCloser &closer,
-                                     CurrentState &state,
+                                     LogicalState &state,
                                      const FieldMask &closing_mask,
                                      const ProjectionInfo &proj_info,
                                      bool record_close_operations,
                                      FieldMask &open_below);
       void flush_logical_reductions(LogicalCloser &closer,
-                                    CurrentState &state,
+                                    LogicalState &state,
                                     FieldMask &reduction_flush_fields,
                                     bool record_close_operations,
                                     const ColorPoint &next_child,
@@ -1346,19 +1346,19 @@ namespace Legion {
                                     bool record_closed_fields,
                                    LegionDeque<FieldState>::aligned &new_states,
                                     FieldMask &output_mask); 
-      void merge_new_field_state(CurrentState &state, 
+      void merge_new_field_state(LogicalState &state, 
                                  const FieldState &new_state);
-      void merge_new_field_states(CurrentState &state, 
+      void merge_new_field_states(LogicalState &state, 
                             const LegionDeque<FieldState>::aligned &new_states);
-      void filter_prev_epoch_users(CurrentState &state, const FieldMask &mask);
-      void filter_curr_epoch_users(CurrentState &state, const FieldMask &mask);
+      void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
+      void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const FieldMask &uninitialized);
-      void record_logical_reduction(CurrentState &state, ReductionOpID redop,
+      void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
-      void clear_logical_reduction_fields(CurrentState &state,
+      void clear_logical_reduction_fields(LogicalState &state,
                                           const FieldMask &cleared_mask);
-      void sanity_check_logical_state(CurrentState &state);
+      void sanity_check_logical_state(LogicalState &state);
       void register_logical_dependences(ContextID ctx, Operation *op,
                                         const FieldMask &field_mask,
                                         bool dominate);
@@ -1370,7 +1370,7 @@ namespace Legion {
                                      VersionInfo &version_info,
                                      const TraceInfo &trace_info);
       void siphon_logical_deletion(LogicalCloser &closer,
-                                   CurrentState &state,
+                                   LogicalState &state,
                                    const FieldMask &current_mask,
                                    const ColorPoint &next_child,
                                    FieldMask &open_below,
@@ -1611,7 +1611,7 @@ namespace Legion {
       NodeSet creation_set;
       bool destroyed;
     protected:
-      DynamicTable<CurrentStateAllocator> current_states;
+      DynamicTable<LogicalStateAllocator> logical_states;
       DynamicTable<VersionManagerAllocator> current_versions;
     protected:
       Reservation node_lock;
@@ -1733,7 +1733,7 @@ namespace Legion {
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask);
-      void print_logical_state(CurrentState &state,
+      void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
@@ -1921,7 +1921,7 @@ namespace Legion {
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
                                           const FieldMask &mask);
-      void print_logical_state(CurrentState &state,
+      void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
