@@ -13,10 +13,10 @@
  * limitations under the License.
  */
 
-#include "realm/realm_config.h"
+#include "../realm/realm_config.h"
 #include "lowlevel_dma.h"
 #include "accessor.h"
-#include "realm/threads.h"
+#include "../realm/threads.h"
 #include <errno.h>
 // included for file memory data transfer
 #include <unistd.h>
@@ -42,8 +42,8 @@ using namespace LegionRuntime::Accessor;
 
 #include "atomics.h"
 
-#include "realm/timers.h"
-#include "realm/serialize.h"
+#include "../realm/timers.h"
+#include "../realm/serialize.h"
 
 using namespace Realm::Serialization;
 

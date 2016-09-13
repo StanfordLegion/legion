@@ -53,7 +53,7 @@ using namespace LegionRuntime::Accessor;
 #include <emmintrin.h>
 #endif
 
-#include "realm/timers.h"
+#include "../realm/timers.h"
 
 // Implementation of Detailed Timer
 namespace LegionRuntime {

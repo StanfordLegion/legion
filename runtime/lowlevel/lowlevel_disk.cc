@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-#include "realm/realm_config.h"
+#include "../realm/realm_config.h"
 #include "lowlevel_impl.h"
 #include "lowlevel.h"
 #include <sys/types.h>

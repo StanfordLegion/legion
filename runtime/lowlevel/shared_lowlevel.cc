@@ -16,9 +16,9 @@
 
 #include "lowlevel.h"
 #include "accessor.h"
-#include "realm/profiling.h"
-#include "realm/timers.h"
-#include "realm/custom_serdez.h"
+#include "../realm/profiling.h"
+#include "../realm/timers.h"
+#include "../realm/custom_serdez.h"
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add

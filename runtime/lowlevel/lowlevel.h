@@ -20,7 +20,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 //
 //  WARNING: Do not add any new code to this file - its days are numbered.
-//   New code should include realm/realm.h or some of its individual pieces.
+//   New code should include ../realm/realm.h or some of its individual pieces.
 //
 ///////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////
@@ -34,7 +34,7 @@
 // just include the new Realm header and import a bunch of stuff into the
 //  old C++ namespace
 
-#include "realm/realm.h"
+#include "../realm/realm.h"
 
 namespace LegionRuntime {
   namespace LowLevel {
