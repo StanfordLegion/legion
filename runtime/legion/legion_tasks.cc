@@ -9165,21 +9165,26 @@ namespace Legion {
         // If they are the same node, we are already done
         if (child_node == parent_node)
           continue;
-        // Compute our privilege path
-        RegionTreePath path;
+        // Compute our privilege full projection path 
+        RegionTreePath projection_path;
         runtime->forest->initialize_path(child_node->get_row_source(),
-                                         parent_node->get_row_source(), path);
+                       parent_node->get_row_source(), projection_path);
+        // Any opens/advances have already been generated to the
+        // upper bound node, so we don't have to handle that node, 
+        // therefore all our paths must start at one node below the
+        // upper bound node
+        RegionTreeNode *one_below = parent_node->get_tree_child(
+                projection_path.get_child(parent_node->get_depth()));
+        RegionTreePath one_below_path;
+        one_below_path.initialize(projection_path.get_min_depth()+1, 
+                                  projection_path.get_max_depth());
+        for (unsigned idx2 = projection_path.get_min_depth()+1; 
+              idx2 < projection_path.get_max_depth(); idx2++)
+          one_below_path.register_child(idx2, projection_path.get_child(idx2));
         const LegionMap<ProjectionEpochID,FieldMask>::aligned &proj_epochs = 
           proj_info.get_projection_epochs();
         // Do the analysis to see if we've opened all the nodes to the child
         {
-          RegionTreeNode *one_below = parent_node->get_tree_child(
-                                  path.get_child(parent_node->get_depth()));
-          RegionTreePath open_path;
-          open_path.initialize(path.get_min_depth()+1, path.get_max_depth());
-          for (unsigned idx2 = path.get_min_depth()+1; 
-                idx2 < path.get_max_depth(); idx2++)
-            open_path.register_child(idx2, path.get_child(idx2));
           for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
                 it = proj_epochs.begin(); it != proj_epochs.end(); it++)
           {
@@ -9188,13 +9193,18 @@ namespace Legion {
             runtime->forest->advance_version_numbers(this, idx, 
                 false/*update parent state*/, false/*doesn't matter*/,
                 true/*dedup opens*/, false/*dedup advance*/, it->first, 
-                0/*id*/, one_below, open_path, it->second, 
+                0/*id*/, one_below, one_below_path, it->second, 
                 empty_dirty_previous, ready_events);
           }
         }
         // If we're doing something other than reading, we need
-        // to also do the advance for anything open below
-        if (!IS_READ_ONLY(regions[idx]))
+        // to also do the advance for anything open below, we do
+        // this from the one below node to the node above the child node
+        // The exception is if we are reducing in which case we go from
+        // the all the way to the bottom so that the first reduction
+        // point bumps the version number appropriately
+        if (!IS_READ_ONLY(regions[idx]) && 
+            ((one_below != child_node) || IS_REDUCE(regions[idx])))
         {
           RegionTreePath advance_path;
           // If we're a reduction we go all the way to the bottom
@@ -9203,14 +9213,23 @@ namespace Legion {
           // at the destination node
           if (!IS_REDUCE(regions[idx]))
           {
-            advance_path.initialize(path.get_min_depth(), 
-                                    path.get_max_depth()-1);
-            for (unsigned idx2 = path.get_min_depth(); 
-                  idx2 < (path.get_max_depth()-1); idx2++)
-              advance_path.register_child(idx2, path.get_child(idx2));
+#ifdef DEBUG_LEGION
+            assert(one_below->get_depth() < child_node->get_depth()); 
+#endif
+            advance_path.initialize(one_below_path.get_min_depth(), 
+                                    one_below_path.get_max_depth()-1);
+            for (unsigned idx2 = one_below_path.get_min_depth(); 
+                  idx2 < (one_below_path.get_max_depth()-1); idx2++)
+              advance_path.register_child(idx2, one_below_path.get_child(idx2));
           }
           else
-            advance_path = path;
+          {
+#ifdef DEBUG_LEGION
+            assert((one_below->get_depth() < child_node->get_depth()) ||
+                   (one_below == child_node)); 
+#endif
+            advance_path = one_below_path;
+          }
           const bool parent_is_upper_bound = 
             (slice_req.handle_type != PART_PROJECTION) && 
             (slice_req.region == slice_req.parent);
@@ -9222,15 +9241,15 @@ namespace Legion {
             runtime->forest->advance_version_numbers(this, idx, 
                 true/*update parent state*/, parent_is_upper_bound,
                 false/*dedup opens*/, true/*dedup advances*/, 0/*id*/, 
-                it->first, parent_node, advance_path, it->second, 
+                it->first, one_below, advance_path, it->second, 
                 empty_dirty_previous, ready_events);
           }
         }
         // Now we can record our version numbers just like everyone else
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                      path, version_infos[idx], ready_events,
-                                      false/*partial*/, false/*close*/, 
-                                      parent_node, &proj_epochs);
+                                      one_below_path, version_infos[idx], 
+                                      ready_events, false/*partial*/, 
+                                      false/*close*/, one_below, &proj_epochs);
       }
     }
 
