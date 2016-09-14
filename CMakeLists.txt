@@ -39,33 +39,18 @@ set(EXTRA_LDFLAGS)
 # GASNet configuration
 #------------------------------------------------------------------------------#
 
-# set the default GASNet model to par, others are not supported
-set(GASNET_MODEL par CACHE STRING "Default GASNet model" FORCE)
-
-include(FindGASNet)
-
-option(ENABLE_GASNET "Enable GASNet support" OFF)
-
-if(ENABLE_GASNET)
-
-  if(GASNET_MODEL)
-    if(NOT ${GASNET_MODEL} STREQUAL "par")
-      message(FATAL_ERROR
-        "${GASNET_MODEL} model is not supported, use 'par'(default)")
-    endif(NOT ${GASNET_MODEL} STREQUAL "par")
-  endif(GASNET_MODEL)
-
-  find_package(GASNet)
-
-  if(NOT GASNET_FOUND)
-    message(FATAL_ERROR "GASNet is required for this build configuration")
-  endif(NOT GASNET_FOUND)
-
-  include_directories(${GASNET_INCLUDE_DIR})
-  list(APPEND EXTRA_LIBS ${GASNET_LIBRARY_FOUND})
-
-endif(ENABLE_GASNET)
-
+option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
+if(Legion_USE_GASNet)
+  set(GASNet_THREADING "par" CACHE STRING "GASNet Threading model to use")
+  set_property(CACHE GASNet_THREADING PROPERTY STRINGS seq par parsync)
+  mark_as_advanced(GASNet_THREADING)
+  if(NOT GASNet_THREADING STREQUAL "par")
+    message(FATAL_ERROR "GASNet threading mode \"${GASNet_THREADING}\" is not currently supported by Legion")
+  endif()
+  set(GASNet_CONDUIT "" CACHE STRING "GASNet communication conduit to use")
+  mark_as_advanced(GASNet_CONDUIT)
+  find_package(GASNet REQUIRED)
+endif()
 
 #------------------------------------------------------------------------------#
 # LIBRARIES configuration

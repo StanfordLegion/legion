@@ -35,6 +35,10 @@ install(TARGETS legion_mappers EXPORT legion_mappersTargets
   LIBRARY DESTINATION ${PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${PACKAGE_BIN_DESTINATION}
 )
+if(Legion_USE_GASNet)
+   target_compile_definitions(legion_mappers PUBLIC USE_GASNET)
+   target_link_libraries(legion_mappers PUBLIC GASNet::GASNet)
+endif(Legion_USE_GASNet)
 
 
 foreach (file ${mappers_HEADERS})

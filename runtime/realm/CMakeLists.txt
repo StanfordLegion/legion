@@ -124,6 +124,10 @@ target_include_directories(realm
     ${CMAKE_SOURCE_DIR}/runtime
     ${CMAKE_SOURCE_DIR}/runtime/legion
     ${CMAKE_SOURCE_DIR}/runtime/realm)
+if(Legion_USE_GASNet)
+   target_compile_definitions(realm PUBLIC USE_GASNET)
+   target_link_libraries(realm PUBLIC GASNet::GASNet)
+endif(Legion_USE_GASNet)
 
 set ( PACKAGE_LIB_DESTINATION "${CMAKE_INSTALL_PREFIX}/lib")
 set ( PACKAGE_BIN_DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")

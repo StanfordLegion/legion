@@ -52,6 +52,11 @@ set(legion_SOURCES
 SET_SOURCE_FILES_PROPERTIES(legion.inl PROPERTIES HEADER_FILE_ONLY 1)
 
 add_library(legion ${legion_SOURCES})
+if(Legion_USE_GASNet)
+   target_compile_definitions(legion PUBLIC USE_GASNET)
+   target_link_libraries(legion PUBLIC GASNet::GASNet)
+endif(Legion_USE_GASNet)
+
 target_include_directories(legion
   PRIVATE
     ${CMAKE_SOURCE_DIR}/runtime
