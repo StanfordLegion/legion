@@ -5625,10 +5625,11 @@ class Operation(object):
                     # Capture a temporary composite instance, but don't register it
                     comp_inst = src_req.logical_node.capture_composite_instance(depth, 
                                                                   src_field, self, src_req)
-                    return comp_inst.issue_copies_across(dst=dst_inst, dst_depth=depth, 
+                    if not comp_inst.issue_copies_across(dst=dst_inst, dst_depth=depth, 
                             dst_field=dst_field, region=dst_req.logical_node, 
                             op=self, index=dst_index, perform_checks=perform_checks, 
-                            error_str=error_str)
+                            error_str=error_str):
+                        return False
                 else:
                     # Normal copy
                     src_preconditions = src_inst.find_use_dependences(depth=depth, 
