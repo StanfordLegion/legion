@@ -426,8 +426,8 @@ namespace LegionRuntime {
 
       CUDAPREFIX Rect<DIM>& operator-=(const Point<DIM> &translate)
       {
-        lo += translate;
-        hi += translate;
+        lo -= translate;
+        hi -= translate;
         return *this;
       }
 
