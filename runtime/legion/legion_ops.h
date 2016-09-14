@@ -409,8 +409,10 @@ namespace Legion {
       // Some extra support for tracking dependences that we've 
       // registered as part of our logical traversal
       void record_logical_dependence(const LogicalUser &user);
-      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned& 
-                                    get_logical_records(void);
+      inline LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned&
+          get_logical_records(void) { return logical_records; }
+      inline LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned&
+          get_logical_advances(void) { return logical_advances; }
       void clear_logical_records(void);
     public:
       // Notify when a region from a dependent task has 
@@ -501,6 +503,8 @@ namespace Legion {
       MustEpochOp *must_epoch;
       // A set list or recorded dependences during logical traversal
       LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_records;
+      // A set of advance operations recorded during logical traversal
+      LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned logical_advances;
       // A dependence tracker for this operation
       union {
         MappingDependenceTracker *mapping;

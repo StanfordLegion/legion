@@ -1055,19 +1055,13 @@ namespace Legion {
     void Operation::record_logical_dependence(const LogicalUser &user)
     //--------------------------------------------------------------------------
     {
-      // Never record advance operations, they are always last
-      // before a generating operation so nothing else below in 
-      // the tree should depend on them
-      if (user.op->get_operation_kind() != ADVANCE_OP_KIND)
+      // Record the advance operations separately, in many cases we don't
+      // need to include them in our analysis of above users, but in the case
+      // of creating new advance operations below in the tree we do
+      if (user.op->get_operation_kind() == ADVANCE_OP_KIND)
+        logical_advances.push_back(user);
+      else
         logical_records.push_back(user);
-    }
-
-    //--------------------------------------------------------------------------
-    LegionList<LogicalUser,LOGICAL_REC_ALLOC>::track_aligned&
-                                            Operation::get_logical_records(void)
-    //--------------------------------------------------------------------------
-    {
-      return logical_records;
     }
 
     //--------------------------------------------------------------------------
@@ -1075,6 +1069,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       logical_records.clear();
+      logical_advances.clear();
     }
 
     //--------------------------------------------------------------------------
