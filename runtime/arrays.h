@@ -334,6 +334,35 @@ namespace LegionRuntime {
 	return res;
       }
 
+      CUDAPREFIX Point<DIM>& operator+=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] += other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator-=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] -= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator*=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] *= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator/=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] /= other.x[i];
+        return *this;
+      }
+
+
       CUDAPREFIX coord_t dot(const Point<DIM> other) const { return dot(*this, other); }
   
     public:
