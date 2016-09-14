@@ -3201,6 +3201,8 @@ class LogicalState(object):
         # No need to do anything for the advance, just perform the epoch analysis
         assert 0 in advance.reqs
         advance_req = advance.reqs[0]
+        # TODO: Need to catch dependences on advances above in the tree
+        # from aliased but non-interfering region requirements
         # Check for dependences on things above us in the tree
         for prev_op,prev_req in previous_deps:
             # Check for replays
