@@ -5288,9 +5288,7 @@ namespace Legion {
                                                    requirement,
                                                    privilege_path,
                                                    version_info,
-                                                   preconditions,
-                                                   false/*partial*/,
-                                                   true/*close*/);
+                                                   preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else

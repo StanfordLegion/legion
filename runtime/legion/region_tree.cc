@@ -1613,8 +1613,7 @@ namespace Legion {
                         unsigned idx, const RegionRequirement &req,
                         const RegionTreePath &path, VersionInfo &version_info,
                         std::set<RtEvent> &ready_events, 
-                        bool partial_traversal, bool close_traversal,
-                        RegionTreeNode *parent_node,
+                        bool partial_traversal, RegionTreeNode *parent_node,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
     //--------------------------------------------------------------------------
     {
@@ -1649,7 +1648,7 @@ namespace Legion {
                                            user_mask, unversioned_mask,
                                            op, idx, context, version_info, 
                                            ready_events, partial_traversal,
-                                           close_traversal, advance_epochs);
+                                           advance_epochs);
     }
 
     //--------------------------------------------------------------------------
@@ -2361,7 +2360,7 @@ namespace Legion {
       // Always build the composite instance, and then optionally issue
       // update copies to the target instances from the composite instance
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
-          closing_mask, version_info, context, closed_tree);
+          closing_mask, version_info, context, closed_tree, map_applied);
       if (targets.empty())
         return;
       PhysicalState *physical_state = NULL;
@@ -12630,13 +12629,9 @@ namespace Legion {
                                                VersionInfo &version_info,
                                                std::set<RtEvent> &ready_events,
                                                bool partial_traversal,
-                                               bool close_traversal,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!partial_traversal || !close_traversal); // can't be both
-#endif
       VersionManager &manager = get_current_version_manager(ctx);
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
@@ -12653,29 +12648,6 @@ namespace Legion {
           manager.record_path_only_versions(version_mask, split_mask,
                                unversioned_mask, parent_ctx, op, idx, 
                                usage, version_info, ready_events);
-        }
-        else if (close_traversal)
-        {
-          // A close always advances the version numbers even if we 
-          // already did an advance for dirty below. Closes of trees
-          // below then effectively are double bumps of the version
-          // numbers while reduction flushes are just a single 
-          // increment. The double bump for closing sub-trees
-          // is necessary to maintain the monotonicity of the 
-          // version state objects.
-          const bool update_parent_state = 
-            !version_info.is_upper_bound_node(this);
-          const AddressSpaceID local_space = context->runtime->address_space;
-          manager.advance_versions(version_mask, parent_ctx,
-              update_parent_state, local_space, ready_events);
-          // We need the final version of our previous version infos
-          // and the names of the current version infos, we could
-          // probably use the normal 'record_versions' call here now
-          // but we'll keep it separate for the moment in case we
-          // need to do something special for close operations in 
-          // the future (as we used to do in the past)
-          manager.record_close_only_versions(version_mask, parent_ctx, 
-                           op, idx, usage, version_info, ready_events);
         }
         else
         {
@@ -12706,8 +12678,8 @@ namespace Legion {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         child->compute_version_numbers(ctx, path, usage, version_mask,
                                 unversioned_mask, op, idx, parent_ctx, 
-                                version_info, ready_events, partial_traversal,
-                                close_traversal, advance_epochs);
+                                version_info, ready_events, 
+                                partial_traversal, advance_epochs);
       }
     }
 
@@ -12775,17 +12747,32 @@ namespace Legion {
                                                 const FieldMask &closing_mask,
                                                 VersionInfo &version_info, 
                                                 SingleTask *owner_ctx,
-                                                ClosedNode *closed_tree)
+                                                ClosedNode *closed_tree,
+                                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(version_info.is_upper_bound_set());
 #endif
+      const AddressSpace local_space = context->runtime->address_space;
+      // First we need to record the rest of our closed versions
+      VersionManager &manager = get_current_version_manager(ctx_id);
+      // A close always advances the version numbers even if we 
+      // already did an advance for dirty below. Closes of trees
+      // below then effectively are double bumps of the version
+      // numbers while reduction flushes are just a single 
+      // increment. The double bump for closing sub-trees
+      // is necessary to maintain the monotonicity of the 
+      // version state objects.
+      const bool update_parent_state = !version_info.is_upper_bound_node(this);
+      manager.advance_versions(closing_mask, owner_ctx, update_parent_state, 
+                               local_space, ready_events);
+      // Now we can record our advance versions
+      manager.record_advance_versions(closing_mask, version_info);
       // Fix the closed tree
       closed_tree->fix_closed_tree();
       // Prepare to make the new view
       DistributedID did = context->runtime->get_available_distributed_id(false);
-      const AddressSpace local_space = context->runtime->address_space;
       // Copy the version info that we need
       CompositeVersionInfo *view_info = new CompositeVersionInfo();
       version_info.copy_to(*view_info);

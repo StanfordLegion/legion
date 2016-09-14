@@ -887,12 +887,6 @@ namespace Legion {
                                      const RegionUsage &usage,
                                      VersionInfo &version_info,
                                      std::set<RtEvent> &ready_events);
-      void record_close_only_versions(const FieldMask &version_mask,
-                                      SingleTask *context,
-                                      Operation *op, unsigned index,
-                                      const RegionUsage &usage,
-                                      VersionInfo &version_info,
-                                      std::set<RtEvent> &ready_events);
       void advance_versions(FieldMask version_mask, SingleTask *context,
                             bool update_parent_state,
                             AddressSpaceID source_space,

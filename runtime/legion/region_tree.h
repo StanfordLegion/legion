@@ -262,7 +262,6 @@ namespace Legion {
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
                                        bool partial_traversal = false,
-                                       bool close_traversal = false,
                                        RegionTreeNode *parent_node = NULL,
               // For computing split masks for projection epochs only
               const LegionMap<ProjectionEpochID,
@@ -1392,7 +1391,6 @@ namespace Legion {
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events,
                                    bool partial_traversal,
-                                   bool close_traversal,
         const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs);
       void advance_version_numbers(ContextID ctx,
                                    AddressSpaceID local_space,
@@ -1419,7 +1417,8 @@ namespace Legion {
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info,
                                      SingleTask *owner_context,
-                                     ClosedNode *closed_tree);
+                                     ClosedNode *closed_tree,
+                                     std::set<RtEvent> &ready_events);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
