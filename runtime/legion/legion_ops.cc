@@ -5375,11 +5375,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> preconditions;
-      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   privilege_path,
-                                                   version_info,
-                                                   preconditions);
+      if (!!disjoint_close_mask)
+      {
+        // We know for sure that the parent node is split if we're 
+        // supposed to be closing it cause it has dirty data below
+        version_info.record_split_fields(closed_tree->node,
+                                         disjoint_close_mask);
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     privilege_path,
+                                                     version_info,
+                                                     preconditions,
+                                                     true/*partial*/);
+        FieldMask non_disjoint = close_mask - disjoint_close_mask;
+        if (!!non_disjoint) // handle any remaining fields
+          runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                       requirement,
+                                                       privilege_path,
+                                                       version_info,
+                                                       preconditions);
+      }
+      else // the normal path
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     privilege_path,
+                                                     version_info,
+                                                     preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
