@@ -7629,6 +7629,7 @@ namespace Legion {
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
+      assert(!(capture_mask - (dirty_mask | reduction_mask)));
       assert((this->version_number + 1) == target->version_number);
 #endif
       FieldMask dirty_overlap = dirty_mask & capture_mask;
