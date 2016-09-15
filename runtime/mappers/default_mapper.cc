@@ -2879,19 +2879,30 @@ namespace Legion {
               tasks.begin(); it != tasks.end(); ++it) {
 	  if(it->size() != group_size) continue;
 
-	  // skip address spaces that are too small
+	  // first choice is the space after the one we used last time
 	  std::map<AddressSpaceID, std::deque<Processor> >::iterator 
             curr_as = prev_as;
-	  while(true) {
-	    // step to next address space and wrap if needed
-	    if(curr_as != as2proc.end())
-	      ++curr_as;
-	    if(curr_as == as2proc.end())
-	      curr_as = as2proc.begin();
-	    // are there enough processors in this space?
-	    if(curr_as->second.size() >= group_size)
-	      break;
-	    assert(curr_as != prev_as);  // should never go through all spaces
+	  if(curr_as != as2proc.end())
+	    ++curr_as;
+	  if(curr_as == as2proc.end())
+	    curr_as = as2proc.begin();
+	  
+	  // skip address spaces that are too small
+	  if(curr_as->second.size() < group_size) {
+	    std::map<AddressSpaceID, std::deque<Processor> >::iterator 
+	      next_as = curr_as;
+	    do {
+	      if(next_as != as2proc.end())
+		++next_as;
+	      if(next_as == as2proc.end())
+		next_as = as2proc.begin();
+	      // if we wrap around, nothing is large enough and we're toast
+	      if(next_as == curr_as) {
+	      }
+	      log_mapper.fatal() << "must_epoch: no address space has enough processors to fit a group of " << group_size << " tasks!";
+	      assert(false);
+	    } while(next_as->second.size() < group_size);
+	    curr_as = next_as;
 	  }
 	  prev_as = curr_as;
 	  
