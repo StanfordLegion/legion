@@ -540,6 +540,7 @@ namespace Legion {
     public:
       void add_predicate_reference(void);
       void remove_predicate_reference(void);
+      virtual void trigger_commit(void);
     public:
       bool register_waiter(PredicateWaiter *waiter, 
                            GenerationID gen, bool &value);
@@ -550,6 +551,7 @@ namespace Legion {
       bool predicate_value;
       std::map<PredicateWaiter*,GenerationID> waiters;
     protected:
+      RtUserEvent collect_predicate;
       unsigned predicate_references;
     };
 

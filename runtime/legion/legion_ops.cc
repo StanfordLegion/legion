@@ -1268,6 +1268,7 @@ namespace Legion {
     {
       activate_operation();
       predicate_resolved = false;
+      collect_predicate = RtUserEvent::NO_RT_USER_EVENT;
       predicate_references = 0;
     }
 
@@ -1300,9 +1301,9 @@ namespace Legion {
     void PredicateImpl::remove_predicate_reference(void)
     //--------------------------------------------------------------------------
     {
-      bool need_trigger;
       bool remove_reference;
       GenerationID task_gen = 0;  // initialization to make gcc happy
+      RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
@@ -1314,15 +1315,30 @@ namespace Legion {
         {
           // Get the task generation before things can be cleaned up
           task_gen = get_generation();
-          need_trigger = predicate_resolved;
+          to_trigger = collect_predicate;
         }
-        else
-          need_trigger = false;
       }
-      if (need_trigger)
-        complete_execution();
       if (remove_reference)
         remove_mapping_reference(task_gen);
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void PredicateImpl::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent precondition;
+      {
+        AutoLock o_lock(op_lock);
+        // See if we have any outstanding references, if so make a precondition
+        if (predicate_references > 0)
+        {
+          collect_predicate = Runtime::create_rt_user_event();
+          precondition = collect_predicate;
+        }
+      }
+      commit_operation(true/*deactivate*/, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -1352,7 +1368,7 @@ namespace Legion {
     void PredicateImpl::set_resolved_value(GenerationID pred_gen, bool value)
     //--------------------------------------------------------------------------
     {
-      bool need_trigger;
+      bool need_trigger = true;
       // Make a copy of the waiters since we could get cleaned up in parallel
       std::map<PredicateWaiter*,GenerationID> copy_waiters;
       {
@@ -1362,7 +1378,6 @@ namespace Legion {
           predicate_resolved = true;
           predicate_value = value;
           copy_waiters = waiters;
-          need_trigger = (predicate_references == 0);
         }
         else
           need_trigger= false;
