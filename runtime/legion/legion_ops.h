@@ -1085,6 +1085,21 @@ namespace Legion {
      */
     class InterCloseOp : public CloseOp {
     public:
+      struct DisjointCloseInfo {
+      public:
+        FieldMask close_mask;
+        VersionInfo version_info;
+        ClosedNode *close_node;
+        std::set<RtEvent> ready_events;
+      };
+      struct DisjointCloseArgs : public LgTaskArgs<DisjointCloseArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DISJOINT_CLOSE_TASK_ID;
+      public:
+        InterCloseOp *proxy_this;
+        RegionTreeNode *child_node;
+      };
+    public:
       InterCloseOp(Runtime *runtime);
       InterCloseOp(const InterCloseOp &rhs);
       virtual ~InterCloseOp(void);
@@ -1097,6 +1112,13 @@ namespace Legion {
                       ClosedNode *closed_tree, const TraceInfo &trace_info,
                       int close_idx, const VersionInfo &version_info,
                       const FieldMask &close_mask, Operation *create_op);
+      ProjectionInfo& initialize_disjoint_close(const FieldMask &disjoint_mask,
+                                                const Domain &launch_domain);
+      DisjointCloseInfo* find_disjoint_close_child(unsigned index,
+                                                   RegionTreeNode *child);
+      void perform_disjoint_close(RegionTreeNode *child_to_close, 
+                                  DisjointCloseInfo &close_info,
+                                  std::set<RtEvent> &ready_events);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1117,12 +1139,19 @@ namespace Legion {
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
     protected:
-      int invoke_mapper(const InstanceSet &valid_instances,
-                              InstanceSet &chosen_instances);
+      void invoke_mapper(const InstanceSet &valid_instances);
       void report_profiling_results(void);
+    public:
+      static void handle_disjoint_close(const void *args);
     protected:
       FieldMask close_mask;
       ClosedNode *closed_tree;
+      InstanceSet chosen_instances;
+    protected:
+      // For disjoint partition closes with projections
+      FieldMask disjoint_close_mask;
+      ProjectionInfo projection_info;
+      LegionMap<RegionTreeNode*,DisjointCloseInfo>::aligned children_to_close;
     protected:
       unsigned parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;

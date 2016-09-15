@@ -409,6 +409,7 @@ namespace Legion {
         get_projection_epochs(void) const { return projection_epochs; }
       void record_projection_epoch(ProjectionEpochID epoch,
                                    const FieldMask &epoch_mask);
+      void clear(void);
     public:
       void pack_info(Serializer &rez) const;
       void unpack_info(Deserializer &derez, Runtime *runtime,
@@ -513,7 +514,7 @@ namespace Legion {
       FieldState(void);
       FieldState(const GenericUser &u, const FieldMask &m, 
                  const ColorPoint &child);
-      FieldState(const GenericUser &u, const FieldMask &m,
+      FieldState(const RegionUsage &u, const FieldMask &m,
                  ProjectionFunction *proj, const Domain &proj_domain, bool dis);
     public:
       inline bool is_projection_state(void) const 
@@ -641,10 +642,16 @@ namespace Legion {
       inline const FieldMask& get_covered_fields(void) const
         { return covered_fields; }
     public:
+      // For performing disjoint close operations
+      ClosedNode* clone_disjoint_projection(RegionTreeNode *child_node,
+                                            const FieldMask &close_mask) const;
+    public:
       void add_child_node(ClosedNode *child);
       void record_closed_fields(const FieldMask &closed_fields);
       void record_projections(const ProjectionEpoch *epoch,
                               const FieldMask &closed_fields);
+      void record_projection(ProjectionFunction *function,
+              const Domain &domain, const FieldMask &mask);
     public:
       void fix_closed_tree(void);
       void filter_dominated_fields(const ClosedNode *old_tree,
@@ -689,13 +696,14 @@ namespace Legion {
         { return (!!normal_close_mask) || (!!read_only_close_mask) ||
                   (!!flush_only_close_mask); }
       // Record normal closes like this
-      void record_close_operation(const FieldMask &mask, bool projection);
+      void record_close_operation(const FieldMask &mask, bool projection,
+                                  bool disjoint_close = false);
       void record_read_only_close(const FieldMask &mask, bool projection);
       void record_flush_only_close(const FieldMask &mask);
       ClosedNode* find_closed_node(RegionTreeNode *node);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
-      void initialize_close_operations(RegionTreeNode *target, 
+      void initialize_close_operations(LogicalState &state, 
                                        Operation *creator,
                                        const VersionInfo &version_info,
                                        const TraceInfo &trace_info);
@@ -731,6 +739,7 @@ namespace Legion {
       FieldMask flush_only_close_mask;
       std::map<RegionTreeNode*,ClosedNode*> closed_nodes;
       FieldMask closed_projections;
+      FieldMask disjoint_close_mask;
     protected:
       // At most we will ever generate three close operations at a node
       InterCloseOp *normal_close_op;
@@ -791,6 +800,8 @@ namespace Legion {
       void capture_composite_root(CompositeView *composite_view,
                                   const FieldMask &closed_mask,
         const LegionMap<LogicalView*,FieldMask>::aligned &valid_above);
+      void perform_disjoint_close(InterCloseOp *op, unsigned index,
+                   SingleTask *context, const FieldMask &closing_mask);
     public:
       PhysicalState* clone(void) const;
       void clone_to(const FieldMask &mask, VersionInfo &target_info) const;
@@ -1085,6 +1096,8 @@ namespace Legion {
                                   const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
+      void perform_disjoint_close(InterCloseOp *op, unsigned index,
+            SingleTask *context, const FieldMask &close_mask) const;
     public: // methods for applying state information
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,

@@ -5229,6 +5229,78 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    ProjectionInfo& InterCloseOp::initialize_disjoint_close(
+                    const FieldMask &disjoint_mask, const Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(requirement.handle_type == PART_PROJECTION);
+      assert(!(disjoint_mask - close_mask)); // better dominate
+#endif
+      // Always the default projection function
+      requirement.projection = 0;
+      projection_info = ProjectionInfo(runtime, requirement, launch_domain);
+      disjoint_close_mask = disjoint_mask;
+      return projection_info;
+    }
+
+    //--------------------------------------------------------------------------
+    InterCloseOp::DisjointCloseInfo* InterCloseOp::find_disjoint_close_child(
+                                          unsigned index, RegionTreeNode *child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index == 0); // should always be zero for now
+#endif
+      // See if it exists already, if not we need to clone the version info
+      LegionMap<RegionTreeNode*,DisjointCloseInfo>::aligned::iterator finder = 
+        children_to_close.find(child);
+      if (finder == children_to_close.end())
+      {
+        DisjointCloseInfo &info = children_to_close[child];
+        // Set the depth for the version info now for when we record info
+        const unsigned child_depth = child->get_depth();
+        info.version_info.resize(child_depth);
+        return &info;
+      }
+      else
+        return &(finder->second);
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::perform_disjoint_close(RegionTreeNode *child_to_close,
+                                              DisjointCloseInfo &close_info,
+                                              std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      // Clone any version info that we need from the original version info
+      const unsigned child_depth = child_to_close->get_depth();
+#ifdef DEBUG_LEGION
+      assert(child_depth > 0);
+#endif
+      version_info.clone_to_depth(child_depth-1, close_info.close_mask,
+                                  close_info.version_info);
+      const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs =
+        &(projection_info.get_projection_epochs());
+      runtime->forest->physical_perform_close(requirement,
+                                              close_info.version_info,
+                                              this, 0/*idx*/, 
+                                              close_info.close_node,
+                                              child_to_close, 
+                                              close_info.close_mask,
+                                              ready_events,
+                                              chosen_instances, 
+                                              projection_epochs
+#ifdef DEBUG_LEGION
+                                              , get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
+      // It is important that we apply our version info when we are done
+      close_info.version_info.apply_mapping(ready_events); 
+    }
+
+    //--------------------------------------------------------------------------
     void InterCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -5254,6 +5326,10 @@ namespace Legion {
         delete closed_tree;
         closed_tree = NULL;
       }
+      chosen_instances.clear();
+      disjoint_close_mask.clear();
+      projection_info.clear();
+      children_to_close.clear();
       profiling_results = Mapper::CloseProfilingInfo();
       runtime->free_inter_close_op(this);
     }
@@ -5301,37 +5377,89 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(completion_event.exists());
+      assert(chosen_instances.empty());
 #endif
       // See if we are restricted or not and if not find our valid instances 
-      InstanceSet chosen_instances;
-      int composite_idx = -1;
       if (!restrict_info.has_restrictions())
       {
         InstanceSet valid_instances;
         runtime->forest->physical_premap_only(this, 0/*idx*/, requirement,
                                               version_info, valid_instances);
         // now invoke the mapper to find the instances to use
-        composite_idx = invoke_mapper(valid_instances, chosen_instances);
+        invoke_mapper(valid_instances);
       }
       else
         chosen_instances = restrict_info.get_instances();
 #ifdef DEBUG_LEGION
       assert(closed_tree != NULL);
 #endif
-      // Now we can perform our close operation
-      runtime->forest->physical_perform_close(requirement,
-                                              version_info, this, 0/*idx*/, 
-                                              composite_idx, closed_tree,
-                                              completion_event,
-                                              map_applied_conditions,
-                                              chosen_instances
+      RegionTreeNode *close_node = (
+          requirement.handle_type == PART_PROJECTION) ?
+              static_cast<RegionTreeNode*>(
+                  runtime->forest->get_node(requirement.partition)) :
+              static_cast<RegionTreeNode*>(
+                  runtime->forest->get_node(requirement.region));
+      // First see if we have any disjoint close fields
+      if (!!disjoint_close_mask)
+      {
+        // Perform the disjoint close, any disjoint children that come
+        // back to us will be recorded
+        runtime->forest->physical_disjoint_close(this, 0/*idx*/, close_node,
+                                         disjoint_close_mask, version_info);
+        // These fields have been closed by a disjoint close
+        close_mask -= disjoint_close_mask;
+        // See if we have any chlidren to close, either handle them now
+        // or issue tasks to perform the close operations
+        if (!children_to_close.empty())
+        {
+          for (LegionMap<RegionTreeNode*,DisjointCloseInfo>::aligned::iterator 
+                it = children_to_close.begin(); it != 
+                children_to_close.end(); it++)
+          {
+            // Make our copies of the closed tree now
+            it->second.close_node = closed_tree->clone_disjoint_projection(
+                                          it->first, it->second.close_mask);
+            // See if we need to defer it
+            if (!it->second.ready_events.empty())
+            {
+              RtEvent ready_event = 
+                Runtime::merge_events(it->second.ready_events);
+              if (ready_event.exists() && !ready_event.has_triggered())
+              {
+                // Now we have to defer it
+                DisjointCloseArgs args;
+                args.proxy_this = this;
+                args.child_node = it->first;
+                RtEvent done_event = runtime->issue_runtime_meta_task(args,
+                    LG_LATENCY_PRIORITY, this, ready_event);
+                // Add the done event to the map applied events
+                map_applied_conditions.insert(done_event);
+                continue;
+              }
+            }
+            // If we make it here, we can do the close of the child immediately
+            perform_disjoint_close(it->first,it->second,map_applied_conditions);
+          }
+        }
+      }
+      // See if we have any remaining fields for which to do a normal close
+      if (!!close_mask)
+      {
+        // Now we can perform our close operation
+        runtime->forest->physical_perform_close(requirement,
+                                                version_info, this, 0/*idx*/,
+                                                closed_tree, 
+                                                close_node, close_mask,
+                                                map_applied_conditions,
+                                                chosen_instances, NULL
 #ifdef DEBUG_LEGION
-                                              , get_logging_name()
-                                              , unique_op_id
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-                                              );
-      // The physical perform close call took ownership
-      closed_tree = NULL;
+                                                );
+        // The physical perform close call took ownership
+        closed_tree = NULL;
+      }
       if (Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -5440,8 +5568,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    int InterCloseOp::invoke_mapper(const InstanceSet &valid_instances,
-                                          InstanceSet &chosen_instances)
+    void InterCloseOp::invoke_mapper(const InstanceSet &valid_instances)
     //--------------------------------------------------------------------------
     {
       Mapper::MapCloseInput input;
@@ -5476,7 +5603,7 @@ namespace Legion {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
-      int composite_index = runtime->forest->physical_convert_mapping(this,
+      runtime->forest->physical_convert_mapping(this,
                                   requirement, output.chosen_instances, 
                                   chosen_instances, bad_tree, missing_fields,
                                   &acquired_instances, unacquired, 
@@ -5552,13 +5679,14 @@ namespace Legion {
                         parent_ctx->get_unique_id());
       } 
       if (Runtime::unsafe_mapper)
-        return composite_index;
+        return;
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
-        if (int(idx) == composite_index)
-          continue;
         const InstanceRef &ref = chosen_instances[idx];
+        if (!ref.has_ref() || ref.is_composite_ref() || 
+            ref.get_manager()->is_virtual_manager())
+          continue;
         if (!ref.get_manager()->meets_regions(regions_to_check))
         {
           log_run.error("Invalid mapper output from invocation of 'map_close' "
@@ -5573,7 +5701,6 @@ namespace Legion {
           exit(ERROR_INVALID_MAPPER_OUTPUT);
         }
       }
-      return composite_index;
     }
 
     //--------------------------------------------------------------------------
@@ -5590,6 +5717,26 @@ namespace Legion {
       assert(profiling_reported.exists());
 #endif
       Runtime::trigger_event(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InterCloseOp::handle_disjoint_close(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DisjointCloseArgs *close_args = (const DisjointCloseArgs*)args;
+      DisjointCloseInfo *close_info = 
+        close_args->proxy_this->find_disjoint_close_child(0/*index*/, 
+                                                   close_args->child_node);
+      std::set<RtEvent> done_events;
+      close_args->proxy_this->perform_disjoint_close(close_args->child_node,
+                                                     *close_info, done_events);
+      // We actually have to wait for these events to be done
+      // since our completion event was put in the map_applied conditions
+      if (!done_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(done_events);
+        wait_on.wait();
+      }
     }
 
     /////////////////////////////////////////////////////////////

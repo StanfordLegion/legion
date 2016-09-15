@@ -296,6 +296,7 @@ namespace Legion {
       LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
       LG_ADD_VERSIONING_SET_REF_TASK_ID,
       LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
+      LG_DISJOINT_CLOSE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -388,6 +389,7 @@ namespace Legion {
         "Defer Task Map and Launch",                              \
         "Defer Versioning Set Reference",                         \
         "Version State Capture Dirty",                            \
+        "Disjoint Close",                                         \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };

@@ -337,16 +337,22 @@ namespace Legion {
       void physical_perform_close(const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, unsigned index,
-                                  int composite_index,
                                   ClosedNode *closed_tree,
-                                  ApEvent term_event, 
+                                  RegionTreeNode *close_node,
+                                  const FieldMask &closing_mask,
                                   std::set<RtEvent> &map_applied,
-                                  const InstanceSet &targets
+                                  const InstanceSet &targets,
+                                  // projection_epochs can be NULL
+        const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs
 #ifdef DEBUG_LEGION
                                   , const char *log_name
                                   , UniqueID uid
 #endif
                                   );
+      void physical_disjoint_close(InterCloseOp *op, unsigned index, 
+                                   RegionTreeNode *close_node,
+                                   const FieldMask &closing_mask,
+                                   VersionInfo &version_info);
       ApEvent physical_close_context(RegionTreeContext ctx,
                                      const RegionRequirement &req,
                                      VersionInfo &version_info,
@@ -1418,7 +1424,8 @@ namespace Legion {
                                      VersionInfo &version_info,
                                      SingleTask *owner_context,
                                      ClosedNode *closed_tree,
-                                     std::set<RtEvent> &ready_events);
+                                     std::set<RtEvent> &ready_events,
+        const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs); 
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
@@ -1901,6 +1908,10 @@ namespace Legion {
                                   std::vector<bool> &up_mask, 
                                   SingleTask *context,
                                   std::vector<InstanceView*> &results);
+    public:
+      void perform_disjoint_close(InterCloseOp *op, unsigned idx,
+              SingleTask *context, const FieldMask &closing_mask, 
+              VersionInfo &version_info);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
