@@ -103,7 +103,8 @@ typedef legion_lowlevel_coord_t coord_t;
   NEW_RECT_TYPE(legion_rect_3d_t, legion_point_3d_t);
 #undef NEW_RECT_TYPE
 
-#define NEW_BLOCKIFY_TYPE(T, PT) typedef struct T { PT block_size; } T
+#define NEW_BLOCKIFY_TYPE(T, PT) \
+  typedef struct T { PT block_size; PT offset; } T
   NEW_BLOCKIFY_TYPE(legion_blockify_1d_t, legion_point_1d_t);
   NEW_BLOCKIFY_TYPE(legion_blockify_2d_t, legion_point_2d_t);
   NEW_BLOCKIFY_TYPE(legion_blockify_3d_t, legion_point_3d_t);
