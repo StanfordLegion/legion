@@ -3398,6 +3398,9 @@ class LogicalState(object):
                 # Figure out the children to close
                 # Full closes have to close everybody 
                 children_to_close = dict() 
+                # If we're going to do a write discard then
+                # this can be a read only close
+                overwrite = req.priv == WRITE_ONLY
                 for child,open_mode in self.open_children.iteritems():
                     if open_mode == OPEN_READ_ONLY:                
                         children_to_close[child] = False
@@ -3411,7 +3414,7 @@ class LogicalState(object):
                     else:
                         assert False
                 if not self.perform_close_operation(children_to_close,
-                        False, op, req, previous_deps, perform_checks):
+                        overwrite, op, req, previous_deps, perform_checks):
                     return False
                 # No upgrades if we closed it
                 upgrade_child = False
