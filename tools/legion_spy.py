@@ -3288,7 +3288,7 @@ class LogicalState(object):
                 else:
                     assert self.projection_mode == OPEN_READ_WRITE or \
                            self.projection_mode == OPEN_READ_ONLY
-            elif req.is_reduce():
+            elif req.is_reduce() and self.projection_mode == OPEN_NONE:
                 self.projection_mode = OPEN_MULTI_REDUCE
                 self.current_redop = req.redop
             else:
@@ -3456,6 +3456,11 @@ class LogicalState(object):
         if self.projection_mode != OPEN_NONE:
             assert not self.open_children # Should not have any open children
             empty_children_to_close = dict()
+            # Only get to do a disjoint close if we're either going to be
+            # in read-write shallow mode
+            disjoint_close = isinstance(self.node, LogicalPartition) and \
+                self.node.are_all_children_disjoint() and \
+                (req.is_read_only() or req.projection_function.depth == 0)
             if self.projection_mode == OPEN_READ_ONLY:
                 # No need to do anything here, we're just 
                 # going to change projection modes
@@ -3494,17 +3499,23 @@ class LogicalState(object):
                 # Also have to close if this is a reduction and not shallow disjoint
                 if not shallow_disjoint and (not same_func_and_rect or req.is_reduce()):
                     if not self.perform_close_operation(empty_children_to_close,
-                                  False, op, req, previous_deps, perform_checks):
+                          False, op, req, previous_deps, perform_checks, disjoint_close):
                         return False
-                    self.projection_mode = OPEN_NONE
+                    if disjoint_close:
+                        self.projection_mode = OPEN_READ_WRITE
+                    else:
+                        self.projection_mode = OPEN_NONE
             else:
                 assert self.projection_mode == OPEN_MULTI_REDUCE
                 assert self.current_redop != 0
                 if self.current_redop != req.redop:
                     if not self.perform_close_operation(empty_children_to_close,
-                              False, op, req, previous_deps, perform_checks):
+                          False, op, req, previous_deps, perform_checks, disjoint_close):
                         return False
-                    self.projection_mode = OPEN_NONE
+                    if disjoint_close:
+                        self.projection_mode = OPEN_READ_WRITE
+                    else:
+                        self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = dict()
             permit_leave_open = False # Never allowed to leave anything open here
@@ -3692,7 +3703,7 @@ class LogicalState(object):
                 close.add_incoming(dep)
 
     def perform_close_operation(self, children_to_close, read_only_close, op, req,
-                                previous_deps, perform_checks):
+                                previous_deps, perform_checks, disjoint_close = False):
         error_str = ' for read-only close operation' if read_only_close \
             else ' for normal close operation'
         # Find the close operation first
@@ -3731,12 +3742,15 @@ class LogicalState(object):
         # See if we still have any dirty children below
         # Read only close operations don't update the dirty fields
         if not read_only_close and self.dirty_below:
-            still_dirty = False
-            for privilege in self.open_children.itervalues():
-                if privilege == READ_WRITE or privilege == REDUCE or \
-                    privilege == WRITE_ONLY:
-                      still_dirty = True
-                      break
+            # If we're doing a disjoint close then we get to
+            # leave the dirty fields in place
+            still_dirty = disjoint_close 
+            if not still_dirty:
+                for privilege in self.open_children.itervalues():
+                    if privilege == READ_WRITE or privilege == REDUCE or \
+                        privilege == WRITE_ONLY:
+                          still_dirty = True
+                          break
             if not still_dirty:
                 self.dirty_below = False
         return True
