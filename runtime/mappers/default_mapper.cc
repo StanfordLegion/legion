@@ -2040,10 +2040,10 @@ namespace Legion {
       // as long as possible, delete reduction instances
       // as soon as possible, otherwise we are ambivalent
       // Only have higher priority for things we cache
-      if (meets_fill_constraints && (kind == TASK_MAPPING))
-        return GC_NEVER_PRIORITY;
       if (reduction)
         return GC_FIRST_PRIORITY;
+      if (meets_fill_constraints && (kind == TASK_MAPPING))
+        return GC_NEVER_PRIORITY;
       return GC_DEFAULT_PRIORITY;
     }
 
