@@ -127,10 +127,10 @@ namespace Legion {
       }
 
       static inline void log_field_creation(unsigned unique_id, 
-                                            unsigned field_id)
+                                unsigned field_id, size_t size)
       {
-        log_spy.print("Field Creation %u %u", 
-		      unique_id, field_id);
+        log_spy.print("Field Creation %u %u %ld", 
+		      unique_id, field_id, size);
       }
 
       static inline void log_field_name(unsigned unique_id,

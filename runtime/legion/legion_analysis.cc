@@ -5817,7 +5817,7 @@ namespace Legion {
       if (!is_owner())
         add_base_valid_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
-      log_garbage.info("GC Version State %ld %d", 
+      log_garbage.info("GC Version State %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -5846,7 +5846,7 @@ namespace Legion {
         assert(!currently_valid);
 #endif 
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }

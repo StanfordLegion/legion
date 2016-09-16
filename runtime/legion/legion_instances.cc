@@ -997,7 +997,7 @@ namespace Legion {
       // Add a reference to the layout
       layout->add_reference();
 #ifdef LEGION_GC
-      log_garbage.info("GC Instance Manager %ld %d " IDFMT " " IDFMT " ",
+      log_garbage.info("GC Instance Manager %lld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
       if (Runtime::legion_spy_enabled)
@@ -1024,7 +1024,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
       if (layout->remove_reference())
@@ -1519,7 +1519,7 @@ namespace Legion {
         memory_manager->register_remote_instance(this);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC List Reduction Manager %ld %d " IDFMT " " IDFMT " ",
+      log_garbage.info("GC List Reduction Manager %lld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
     }
@@ -1543,7 +1543,7 @@ namespace Legion {
       // Free up our pointer space
       ptr_space.get_index_space().destroy();
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -1680,7 +1680,7 @@ namespace Legion {
         memory_manager->register_remote_instance(this);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Fold Reduction Manager %ld %d " IDFMT " " IDFMT " ",
+      log_garbage.info("GC Fold Reduction Manager %lld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
     }
@@ -1702,7 +1702,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }

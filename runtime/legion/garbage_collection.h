@@ -441,10 +441,10 @@ namespace Legion {
     {
       did = LEGION_DISTRIBUTED_ID_FILTER(did);
       if (ADD)
-        log_garbage.info("GC Add Base Ref %d %ld %d %d %d",
+        log_garbage.info("GC Add Base Ref %d %lld %d %d %d",
                           kind, did, local_space, src, cnt);
       else
-        log_garbage.info("GC Remove Base Ref %d %ld %d %d %d",
+        log_garbage.info("GC Remove Base Ref %d %lld %d %d %d",
                           kind, did, local_space, src, cnt);
     }
 
@@ -457,10 +457,10 @@ namespace Legion {
       did = LEGION_DISTRIBUTED_ID_FILTER(did);
       src = LEGION_DISTRIBUTED_ID_FILTER(src);
       if (ADD)
-        log_garbage.info("GC Add Nested Ref %d %ld %d %ld %d",
+        log_garbage.info("GC Add Nested Ref %d %lld %d %lld %d",
                           kind, did, local_space, src, cnt);
       else
-        log_garbage.info("GC Remove Nested Ref %d %ld %d %ld %d",
+        log_garbage.info("GC Remove Nested Ref %d %lld %d %lld %d",
                           kind, did, local_space, src, cnt);
     }
 
