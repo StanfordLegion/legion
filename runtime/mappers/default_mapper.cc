@@ -2900,7 +2900,8 @@ namespace Legion {
 	      // if we wrap around, nothing is large enough and we're toast
 	      if(next_as == curr_as) {
 	      }
-	      log_mapper.fatal() << "must_epoch: no address space has enough processors to fit a group of " << group_size << " tasks!";
+	      log_mapper.fatal() << "must_epoch: no address space has enough "
+                  << "processors to fit a group of " << group_size << " tasks!";
 	      assert(false);
 	    } while(next_as->second.size() < group_size);
 	    curr_as = next_as;
