@@ -44,6 +44,10 @@ variables:
   TEST_SPY: "1"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
+.cxx98_32bit_normal: &cxx98_32bit_normal
+  CC_FLAGS: "-std=c++98 -m32"
+  LD_FLAGS: "-m32"
+  MARCH: "i686"
 
 ###
 ### Setup
@@ -180,6 +184,10 @@ linux_gcc49_terra35_cxx11_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *release, *cxx11_normal]
+linux_gcc49_terra35_cxx98_32bit_debug:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra35, *debug, *cxx98_32bit_normal]
 
 # Linux with Clang 3.5
 linux_clang35_terra35_cxx98_release:
@@ -198,6 +206,10 @@ linux_clang35_terra35_cxx11_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *release, *cxx11_normal]
+linux_clang35_terra35_cxx98_32bit_debug:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_32bit_normal]
 
 # # macOS with Clang 3.5
 # macos_clang35_cxx98_debug_checks:
