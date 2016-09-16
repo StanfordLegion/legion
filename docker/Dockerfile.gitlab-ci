@@ -12,7 +12,7 @@ RUN apt-get update -qq && \
     add-apt-repository ppa:pypy/ppa -y && \
     apt-get update -qq && \
     apt-get install -qq \
-      build-essential git pypy time wget \
+      build-essential gcc-multilib git pypy time wget \
       g++-4.8 g++-4.9 g++-5 g++-6 \
       clang-3.5 libclang-3.5-dev llvm-3.5-dev \
       clang-3.8 libclang-3.8-dev llvm-3.8-dev \
