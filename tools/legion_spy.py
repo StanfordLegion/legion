@@ -2413,11 +2413,11 @@ class IndexPartition(object):
             child.print_tree()
 
 class Field(object):
-    __slots__ = ['space', 'fid', 'name']
+    __slots__ = ['space', 'fid', 'size', 'name']
     def __init__(self, space, fid):
         self.space = space
         self.fid = fid
-        sef.size = None
+        self.size = None
         self.name = None
 
     def set_name(self, name):
@@ -8455,7 +8455,13 @@ class RealmCopy(RealmBase):
                 ',fontcolor=black,shape=record,penwidth=0];')
 
     def compute_copy_size(self):
-        return 0
+        field_size = 0
+        for field in self.src_fields:
+            field_size += field.size
+        shape = self.region.index_space.shape
+        if self.intersect:
+            shape = shape & self.intersect.index_space.shape
+        return (field_size * shape.volume())
 
 
 class RealmFill(RealmBase):
@@ -10161,12 +10167,12 @@ class State(object):
         print('Total events: '+str(len(self.events)))
         print('Total copies: '+str(len(self.copies)))
         total_copy_bytes = 0
-        for copy in self.copies:
+        for copy in self.copies.itervalues():
             total_copy_bytes += copy.compute_copy_size()
         print('  Total bytes moved: '+str(total_copy_bytes))
         print('Total fills:  '+str(len(self.fills)))
         total_fill_bytes = 0
-        for fill in self.fills:
+        for fill in self.fills.itervalues():
             total_fill_bytes += fill.compute_fill_size()
         print('  Total bytes filled: '+str(total_fill_bytes))
 
