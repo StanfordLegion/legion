@@ -342,6 +342,12 @@ class Shape(object):
                 return True
         return False
 
+    def volume(self):
+        result = len(self.points)
+        for rect in self.rects:
+            result += rect.volume()
+        return result
+
     def copy(self):
         result = Shape()
         for point in self.points:
@@ -2411,6 +2417,7 @@ class Field(object):
     def __init__(self, space, fid):
         self.space = space
         self.fid = fid
+        sef.size = None
         self.name = None
 
     def set_name(self, name):
@@ -8447,6 +8454,9 @@ class RealmCopy(RealmBase):
         printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
                 ',fontcolor=black,shape=record,penwidth=0];')
 
+    def compute_copy_size(self):
+        return 0
+
 
 class RealmFill(RealmBase):
     __slots__ = ['fields', 'dsts', 'node_name']
@@ -8511,6 +8521,14 @@ class RealmFill(RealmBase):
         printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
                 ',fontcolor=black,shape=record,penwidth=0];')
 
+    def compute_fill_size(self):
+        field_size = 0
+        for field in self.fields:
+            field_size += field.size
+        shape = self.region.index_space.shape
+        if self.intersect:
+            shape = shape & self.intersect.index_space.shape
+        return (field_size * shape.volume())
 
 class EventGraphTraverser(object):
     def __init__(self, forwards, use_gen, generation,
@@ -8808,7 +8826,7 @@ field_space_pat          = re.compile(
 field_space_name_pat     = re.compile(
     prefix+"Field Space Name (?P<uid>[0-9]+) (?P<name>[-$()\w. ]+)")
 field_create_pat         = re.compile(
-    prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
+    prefix+"Field Creation (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<size>[0-9]+)")
 field_name_pat           = re.compile(
     prefix+"Field Name (?P<uid>[0-9]+) (?P<fid>[0-9]+) (?P<name>[-$()\w. ]+)")
 region_pat               = re.compile(
@@ -9608,7 +9626,8 @@ def parse_legion_spy_line(line, state):
     m = field_create_pat.match(line)
     if m is not None:
         space = state.get_field_space(int(m.group('uid'),16))
-        space.get_field(int(m.group('fid')))
+        field = space.get_field(int(m.group('fid')))
+        field.size = int(m.group('size'))
         return True
     m = field_name_pat.match(line)
     if m is not None:
@@ -10138,6 +10157,19 @@ class State(object):
             node.print_incoming_event_edges(printer) 
         printer.print_pdf_after_close(False)
 
+    def print_realm_statistics(self):
+        print('Total events: '+str(len(self.events)))
+        print('Total copies: '+str(len(self.copies)))
+        total_copy_bytes = 0
+        for copy in self.copies:
+            total_copy_bytes += copy.compute_copy_size()
+        print('  Total bytes moved: '+str(total_copy_bytes))
+        print('Total fills:  '+str(len(self.fills)))
+        total_fill_bytes = 0
+        for fill in self.fills:
+            total_fill_bytes += fill.compute_fill_size()
+        print('  Total bytes filled: '+str(total_fill_bytes))
+
     def make_replay_file(self):
         file_name = 'legion.rp'
         print('Emitting replay file '+file_name)
@@ -10544,6 +10576,9 @@ def main(temp_dir):
         '-t', '--trees', dest='print_trees', action='store_true',
         help='print index and region trees')
     parser.add_argument(
+        '--realm-stats', dest='realm_stats', action='store_true',
+        help='print Realm statistics')
+    parser.add_argument(
         '-y', '--replay', dest='replay_file', action='store_true',
         help='generate mapper replay file')
     parser.add_argument(
@@ -10575,6 +10610,7 @@ def main(temp_dir):
     instance_descriptions = args.instance_descriptions
     mapping_decisions = args.mapping_decisions
     print_trees = args.print_trees
+    realm_stats = args.realm_stats
     replay_file = args.replay_file
     detailed_graphs = args.detailed_graphs
     sanity_checks = args.sanity_checks
@@ -10689,6 +10725,9 @@ def main(temp_dir):
     if event_graphs:
         print("Making event graphs...")
         state.make_event_graph(temp_dir)
+    if realm_stats:
+        print("Printing Realm statistics...")
+        state.print_realm_statistics()
     if replay_file:
         print("Generating mapper replay file...")
         state.make_replay_file()
