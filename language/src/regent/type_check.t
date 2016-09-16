@@ -1710,6 +1710,65 @@ function type_check.expr_image(cx, node)
   }
 end
 
+function type_check.expr_image_by_task(cx, node)
+  local parent = type_check.expr(cx, node.parent)
+  local parent_type = std.check_read(cx, parent)
+  local index_type = parent_type:ispace().index_type
+  local partition = type_check.expr(cx, node.partition)
+  local partition_type = std.check_read(cx, partition)
+  local task = type_check.expr_function(cx, node.region.region)
+  local task_type = task.value:gettype()
+
+  if parent_type:is_opaque() then
+    report.error(node, "type mismatch in argument 1: expected region with structured indexspace " ..
+                 "but got one with unstructured indexspace")
+  end
+
+  if index_type ~= partition_type:parent_region():ispace().index_type then
+    report.error(node, "index type mismatch between " .. tostring(index_type) ..
+                 " (argument 1) and " .. tostring(partition_type:parent_region():ispace().index_type) ..
+                 " (argument 2)")
+  end
+
+  if not std.is_region(parent_type) then
+    report.error(node, "type mismatch in argument 1: expected region but got " ..
+                tostring(parent_type))
+  end
+
+  if not std.is_partition(partition_type) then
+    report.error(node, "type mismatch in argument 2: expected partition but got " ..
+                tostring(partition_type))
+  end
+
+  if not std.is_task(task.value) then
+    report.error(node, "type mismatch in argument 3: expected task but got a non-task value")
+  end
+
+  local rect_type = std.rect_type(index_type)
+  local expected = terralib.types.functype(terralib.newlist({rect_type}), rect_type, false)
+  if task_type ~= expected then
+    report.error(node, "type mismatch in argument 3: expected " .. tostring(expected) ..
+                 " but got " .. tostring(task_type))
+  end
+
+  local parent_symbol
+  if parent:is(ast.typed.expr.ID) then
+    parent_symbol = parent.value
+  else
+    parent_symbol = terralib.newsymbol()
+  end
+  local expr_type = std.partition(std.aliased, parent_symbol, partition_type.colors_symbol)
+
+  return ast.typed.expr.ImageByTask {
+    parent = parent,
+    partition = partition,
+    task = task,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_preimage(cx, node)
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
@@ -2831,7 +2890,12 @@ function type_check.expr(cx, node)
     return type_check.expr_partition_by_field(cx, node)
 
   elseif node:is(ast.specialized.expr.Image) then
-    return type_check.expr_image(cx, node)
+    if not node.region.fields and
+       node.region.region:is(ast.specialized.expr.Function) then
+      return type_check.expr_image_by_task(cx, node)
+    else
+      return type_check.expr_image(cx, node)
+    end
 
   elseif node:is(ast.specialized.expr.Preimage) then
     return type_check.expr_preimage(cx, node)

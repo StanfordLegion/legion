@@ -403,6 +403,7 @@ ast.typed.expr:leaf("Partition", {"disjointness", "region", "coloring",
 ast.typed.expr:leaf("PartitionEqual", {"region", "colors"})
 ast.typed.expr:leaf("PartitionByField", {"region", "colors"})
 ast.typed.expr:leaf("Image", {"parent", "partition", "region"})
+ast.typed.expr:leaf("ImageByTask", {"parent", "partition", "task"})
 ast.typed.expr:leaf("Preimage", {"parent", "partition", "region"})
 ast.typed.expr:leaf("CrossProduct", {"args"})
 ast.typed.expr:leaf("CrossProductArray", {"lhs", "disjointness", "colorings"})

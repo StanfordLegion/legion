@@ -749,9 +749,7 @@ function value:__get_field(cx, node, value_type, field_name)
   end
 end
 
-function value:get_field(cx, node, field_name, field_type)
-  local value_type = self.value_type
-
+function value:get_field(cx, node, field_name, field_type, value_type)
   local result = self:unpack(cx, value_type, field_name, field_type)
   return result:__get_field(cx, node, value_type, field_name)
 end
@@ -3537,6 +3535,7 @@ function codegen.expr_partition_equal(cx, node)
            local colors = `(color_rect.hi.x[ [i] ] - color_rect.lo.x[ [i] ] + 1)
            return quote
              [blockify].block_size.x[ [i] ] = ([block] + [colors] - 1) / [colors]
+             [blockify].offset.x[ [i] ] = region_rect.lo.x[ [i] ]
            end
          end)]
       var [ip] = [create_index_partition](

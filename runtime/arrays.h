@@ -334,6 +334,35 @@ namespace LegionRuntime {
 	return res;
       }
 
+      CUDAPREFIX Point<DIM>& operator+=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] += other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator-=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] -= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator*=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] *= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator/=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] /= other.x[i];
+        return *this;
+      }
+
+
       CUDAPREFIX coord_t dot(const Point<DIM> other) const { return dot(*this, other); }
   
     public:
@@ -426,8 +455,8 @@ namespace LegionRuntime {
 
       CUDAPREFIX Rect<DIM>& operator-=(const Point<DIM> &translate)
       {
-        lo += translate;
-        hi += translate;
+        lo -= translate;
+        hi -= translate;
         return *this;
       }
 
@@ -976,13 +1005,23 @@ namespace LegionRuntime {
       typedef GenericPointInRectIterator<DIM> PointInOutputRectIterator;
 
       Blockify(void) {}
-      Blockify(Point<DIM> _block_size) : block_size(_block_size) {}
+      Blockify(Point<DIM> _block_size) :
+        block_size(_block_size),
+        offset(Point<DIM>::ZEROES())
+      {
+      }
+
+      Blockify(Point<DIM> _block_size, Point<DIM> _offset) :
+        block_size(_block_size),
+        offset(_offset)
+      {
+      }
 
       Point<DIM> image(const Point<DIM> p) const
       {
 	Point<DIM> q;
 	for(unsigned i = 0; i < DIM; i++)
-	  q.x[i] = p.x[i] / block_size.x[i];
+	  q.x[i] = (p.x[i] - offset.x[i]) / block_size.x[i];
 	return q;
       }
   
@@ -1013,7 +1052,7 @@ namespace LegionRuntime {
       {
 	Rect<DIM> q;
 	for(unsigned i = 0; i < DIM; i++) {
-	  q.lo.x[i] = p.x[i] * block_size.x[i];
+	  q.lo.x[i] = p.x[i] * block_size.x[i] + offset[i];
 	  q.hi.x[i] = q.lo.x[i] + (block_size.x[i] - 1);
 	}
 	return q;
@@ -1026,6 +1065,7 @@ namespace LegionRuntime {
 
     protected:
       Point<DIM> block_size;
+      Point<DIM> offset;
     };
   }; // namespace Arrays
 }; // namespace LegionRuntime

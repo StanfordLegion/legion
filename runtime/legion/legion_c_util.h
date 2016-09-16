@@ -221,7 +221,7 @@ namespace Legion {
 
 #define NEW_BLOCKIFY_WRAPPER(T_, T)                     \
       static T unwrap(T_ t_) {                          \
-        T t(unwrap(t_.block_size));                     \
+        T t(unwrap(t_.block_size), unwrap(t_.offset));  \
         return t;                                       \
       }
 
