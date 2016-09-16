@@ -15900,15 +15900,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(view != NULL);
 #endif
-      ApUserEvent ready_event = Runtime::create_ap_user_event();
-      Runtime::trigger_event(ready_event);
       // Update the physical state with the new instance
       PhysicalState *state = get_physical_state(version_info);
       // We need to invalidate all other instances for these fields since
       // we are now making this the only valid copy of the data
       update_valid_views(state, attach_mask, true/*dirty*/, view);
       // Return the resulting instance
-      return InstanceRef(manager, attach_mask, ready_event);
+      return InstanceRef(manager, attach_mask, ApUserEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
