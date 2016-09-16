@@ -29,6 +29,10 @@
 #include "event_impl.h"
 #include "rsrv_impl.h"
 
+#ifdef USE_HDF
+#include <hdf5.h>
+#endif
+
 namespace Realm {
 
   class RegionInstanceImpl;
