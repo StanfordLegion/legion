@@ -693,6 +693,9 @@ namespace Legion {
                                     GCPriority priority);
       RtEvent acquire_instances(const std::set<PhysicalManager*> &managers,
                                     std::vector<bool> &results);
+      void record_created_instance( PhysicalManager *manager, bool acquire,
+                                    MapperID mapper_id, Processor proc,
+                                    GCPriority priority, bool remote);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -746,9 +749,6 @@ namespace Legion {
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
                                     bool tight_region_bounds, bool remote);
-      void record_created_instance( PhysicalManager *manager, bool acquire,
-                                    MapperID mapper_id, Processor proc,
-                                    GCPriority priority, bool remote);
       void record_deleted_instance(PhysicalManager *manager); 
       void find_instances_by_state(size_t needed_size, InstanceState state, 
                      std::set<CollectableInfo<true> > &smaller_instances,

@@ -10446,6 +10446,9 @@ namespace Legion {
       }
       // Tell the parent that we added the restriction
       file_instance = runtime->forest->create_file_instance(this, requirement);
+      file_instance->memory_manager->record_created_instance(
+          file_instance, false, 0, parent_ctx->get_executing_processor(),
+          GC_NEVER_PRIORITY, false);
       parent_ctx->add_restriction(this, file_instance, requirement);
       end_dependence_analysis();
     }
@@ -10892,6 +10895,8 @@ namespace Legion {
 #endif
         exit(ERROR_ILLEGAL_DETACH_OPERATION);
       }
+      manager->memory_manager->set_garbage_collection_priority(manager,
+        0, parent_ctx->get_executing_processor(), GC_MAX_PRIORITY);
 
       RegionTreeContext physical_ctx = 
         parent_ctx->find_enclosing_context(parent_req_index);

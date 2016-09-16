@@ -15901,6 +15901,7 @@ namespace Legion {
       assert(view != NULL);
 #endif
       ApUserEvent ready_event = Runtime::create_ap_user_event();
+      Runtime::trigger_event(ready_event);
       // Update the physical state with the new instance
       PhysicalState *state = get_physical_state(version_info);
       // We need to invalidate all other instances for these fields since
