@@ -171,7 +171,6 @@ namespace Realm {
         measurements.import_requests(requests);
         if (measurements.wants_measurement<
                           ProfilingMeasurements::InstanceTimeline>()) {
-          timeline.instance = me;
           timeline.record_create_time();
         }
       }
@@ -284,6 +283,8 @@ namespace Realm {
       if (!requests.empty()) {
         if (measurements.wants_measurement<
                           ProfilingMeasurements::InstanceTimeline>()) {
+	  // set the instance ID correctly now - it wasn't available at construction time
+          timeline.instance = me;
           timeline.record_delete_time();
           measurements.add_measurement(timeline);
         }
