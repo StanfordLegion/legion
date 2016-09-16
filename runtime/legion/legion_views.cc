@@ -255,7 +255,7 @@ namespace Legion {
       else 
         manager->add_nested_resource_ref(did);
 #ifdef LEGION_GC
-      log_garbage.info("GC Materialized View %ld %d %ld", 
+      log_garbage.info("GC Materialized View %lld %d %lld", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
           LEGION_DISTRIBUTED_ID_FILTER(manager->did)); 
 #endif
@@ -314,7 +314,7 @@ namespace Legion {
       assert(outstanding_gc_events.empty());
 #endif
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -4587,7 +4587,7 @@ namespace Legion {
       assert(closed_tree->node == node);
 #endif
 #ifdef LEGION_GC
-      log_garbage.info("GC Composite View %ld %d", 
+      log_garbage.info("GC Composite View %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -4647,7 +4647,7 @@ namespace Legion {
       if (closed_tree->remove_reference())
         delete closed_tree;
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -6262,7 +6262,7 @@ namespace Legion {
 #endif
       value->add_reference();
 #ifdef LEGION_GC
-      log_garbage.info("GC Fill View %ld %d", 
+      log_garbage.info("GC Fill View %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -6283,7 +6283,7 @@ namespace Legion {
       if (value->remove_reference())
         delete value;
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -6480,7 +6480,7 @@ namespace Legion {
       logical_node->register_instance_view(manager, owner_context, this);
       manager->add_nested_resource_ref(did);
 #ifdef LEGION_GC
-      log_garbage.info("GC Reduction View %ld %d %ld", 
+      log_garbage.info("GC Reduction View %lld %d %lld", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space,
           LEGION_DISTRIBUTED_ID_FILTER(manager->did));
 #endif
@@ -6522,7 +6522,7 @@ namespace Legion {
       assert(outstanding_gc_events.empty());
 #endif
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }

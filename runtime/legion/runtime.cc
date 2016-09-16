@@ -407,7 +407,7 @@ namespace Legion {
       if (producer_op != NULL)
         producer_op->add_mapping_reference(op_gen);
 #ifdef LEGION_GC
-      log_garbage.info("GC Future %ld %d", 
+      log_garbage.info("GC Future %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -442,7 +442,7 @@ namespace Legion {
       if (producer_op != NULL)
         producer_op->remove_mapping_reference(op_gen);
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -2605,9 +2605,11 @@ namespace Legion {
         if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
           PhysicalManager::delete_physical_manager(manager);
       }
-      else if (is_owner && manager->is_reduction_manager() && 
-                manager->try_active_deletion())
-        record_deleted_instance(manager);
+      else if (is_owner && manager->is_reduction_manager())
+      { 
+        if (manager->try_active_deletion())
+          record_deleted_instance(manager);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13966,7 +13968,7 @@ namespace Legion {
         fid = get_unique_field_id();
 
       if (legion_spy_enabled)
-        LegionSpy::log_field_creation(space.id, fid);
+        LegionSpy::log_field_creation(space.id, fid, field_size);
 
       if (local)
         ctx->add_local_field(space, fid, field_size, serdez_id);
@@ -14035,7 +14037,8 @@ namespace Legion {
           resulting_fields[idx] = get_unique_field_id();
 
         if (legion_spy_enabled)
-          LegionSpy::log_field_creation(space.id, resulting_fields[idx]);
+          LegionSpy::log_field_creation(space.id, 
+                                        resulting_fields[idx], sizes[idx]);
       }
       if (local)
         ctx->add_local_fields(space, resulting_fields, sizes, serdez_id);
