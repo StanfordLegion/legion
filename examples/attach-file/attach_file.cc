@@ -292,8 +292,10 @@ void top_level_task(const Task *task,
   runtime->execute_index_space(ctx, stencil_launcher);
 
   // Launcher a copy operation that performs checkpoint
-  struct timespec ts_start, ts_mid, ts_end;
-  clock_gettime(CLOCK_MONOTONIC, &ts_start);
+  //struct timespec ts_start, ts_mid, ts_end;
+  //clock_gettime(CLOCK_MONOTONIC, &ts_start);
+  double ts_start, ts_mid, ts_end;
+  ts_start = Realm::Clock::current_time_in_microseconds();
   PhysicalRegion cp_pr;
 #ifdef USE_HDF
   if(*hdf5_file_name) {
@@ -328,7 +330,8 @@ void top_level_task(const Task *task,
   copy_launcher.add_dst_field(0, FID_CP);
   runtime->issue_copy_operation(ctx, copy_launcher);
   
-  clock_gettime(CLOCK_MONOTONIC, &ts_mid);
+  //clock_gettime(CLOCK_MONOTONIC, &ts_mid);
+  ts_mid = Realm::Clock::current_time_in_microseconds();
 #ifdef USE_HDF
   if(*hdf5_file_name) {
     runtime->detach_hdf5(ctx, cp_pr);
@@ -337,13 +340,16 @@ void top_level_task(const Task *task,
   {
     runtime->detach_file(ctx, cp_pr);
   }
-  clock_gettime(CLOCK_MONOTONIC, &ts_end);
-  double attach_time = ((1.0 * (ts_mid.tv_sec - ts_start.tv_sec)) +
-                     (1e-9 * (ts_mid.tv_nsec - ts_start.tv_nsec)));
-  double detach_time = ((1.0 * (ts_end.tv_sec - ts_mid.tv_sec)) +
-                     (1e-9 * (ts_end.tv_nsec - ts_mid.tv_nsec)));
-  printf("ELAPSED TIME = %7.3f s\n", attach_time);
-  printf("ELAPSED TIME = %7.3f s\n", detach_time);
+  //clock_gettime(CLOCK_MONOTONIC, &ts_end);
+  ts_end = Realm::Clock::current_time_in_microseconds();
+  //double attach_time = ((1.0 * (ts_mid.tv_sec - ts_start.tv_sec)) +
+  //                   (1e-9 * (ts_mid.tv_nsec - ts_start.tv_nsec)));
+  //double detach_time = ((1.0 * (ts_end.tv_sec - ts_mid.tv_sec)) +
+  //                   (1e-9 * (ts_end.tv_nsec - ts_mid.tv_nsec)));
+  double attach_time = 1e-6 * (ts_mid - ts_start);
+  double detach_time = 1e-6 * (ts_end - ts_mid);
+  printf("ELAPSED TIME (ATTACH) = %7.3f s\n", attach_time);
+  printf("ELAPSED TIME (DETACH) = %7.3f s\n", detach_time);
 
   // Finally, we launch a single task to check the results.
   TaskLauncher check_launcher(CHECK_TASK_ID, 
