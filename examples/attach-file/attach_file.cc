@@ -17,6 +17,11 @@
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
+#include <unistd.h>
+#include <sys/types.h>
+#ifdef USE_HDF
+#include <hdf5.h>
+#endif
 #include "legion.h"
 using namespace Legion;
 using namespace LegionRuntime::Accessor;
@@ -46,21 +51,63 @@ enum FieldIDs {
   FID_CP
 };
 
-void generate_hdf_file(const char* file_name, int num_elemnts)
+bool generate_disk_file(const char *file_name, int num_elements)
 {
-  double *arr;
-  arr = (double*) calloc(num_elemnts, sizeof(double));
+  // create the file if needed
+  int fd = open(file_name, O_CREAT | O_WRONLY, 0666);
+  if(fd < 0) {
+    perror("open");
+    return false;
+  }
+
+  // make it large enough to hold 'num_elements' doubles
+  int res = ftruncate(fd, num_elements * sizeof(double));
+  if(res < 0) {
+    perror("ftruncate");
+    close(fd);
+    return false;
+  }
+
+  // now close the file - the Legion runtime will reopen it on the attach
+  close(fd);
+  return true;
+}
+
+#ifdef USE_HDF
+bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_elements)
+{
   hid_t file_id = H5Fcreate(file_name, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+  if(file_id < 0) {
+    printf("H5Fcreate failed: %d\n", file_id);
+    return false;
+  }
+
   hsize_t dims[1];
-  dims[0] = num_elemnts;
+  dims[0] = num_elements;
   hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
-  hid_t dataset = H5Dcreate2(file_id, "FID_CP", H5T_IEEE_F64BE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-  H5Dwrite(dataset, H5T_IEEE_F64BE, H5S_ALL, H5S_ALL, H5P_DEFAULT, arr);
+  if(dataspace_id < 0) {
+    printf("H5Screate_simple failed: %d\n", dataspace_id);
+    H5Fclose(file_id);
+    return false;
+  }
+
+  hid_t dataset = H5Dcreate2(file_id, dataset_name,
+			     H5T_IEEE_F64BE, dataspace_id,
+			     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+  if(dataset < 0) {
+    printf("H5Dcreate2 failed: %d\n", dataset);
+    H5Sclose(dataspace_id);
+    H5Fclose(file_id);
+    return false;
+  }
+
+  // close things up - attach will reopen later
   H5Dclose(dataset);
   H5Sclose(dataspace_id);
   H5Fclose(file_id);
-  free(arr);
+  return true;
 }
+#endif
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
@@ -68,6 +115,14 @@ void top_level_task(const Task *task,
 {
   int num_elements = 1024;
   int num_subregions = 4;
+  char disk_file_name[256];
+  strcpy(disk_file_name, "checkpoint.dat");
+#ifdef USE_HDF
+  char hdf5_file_name[256];
+  char hdf5_dataset_name[256];
+  hdf5_file_name[0] = 0;
+  strcpy(hdf5_dataset_name, "FID_CP");
+#endif
   // Check for any command line arguments
   {
       const InputArgs &command_args = Runtime::get_input_args();
@@ -77,6 +132,14 @@ void top_level_task(const Task *task,
         num_elements = atoi(command_args.argv[++i]);
       if (!strcmp(command_args.argv[i],"-b"))
         num_subregions = atoi(command_args.argv[++i]);
+      if (!strcmp(command_args.argv[i],"-f"))
+	strcpy(disk_file_name, command_args.argv[++i]);
+#ifdef USE_HDF
+      if (!strcmp(command_args.argv[i],"-h"))
+	strcpy(hdf5_file_name, command_args.argv[++i]);
+      if (!strcmp(command_args.argv[i],"-d"))
+	strcpy(hdf5_dataset_name, command_args.argv[++i]);
+#endif
     }
   }
   printf("Running stencil computation for %d elements...\n", num_elements);
@@ -229,11 +292,33 @@ void top_level_task(const Task *task,
   runtime->execute_index_space(ctx, stencil_launcher);
 
   // Launcher a copy operation that performs checkpoint
-  std::vector<FieldID> field_vec;
-  field_vec.push_back(FID_CP);
   struct timespec ts_start, ts_mid, ts_end;
   clock_gettime(CLOCK_MONOTONIC, &ts_start);
-  PhysicalRegion cp_pr = runtime->attach_file(ctx, "checkpoint.dat", cp_lr, cp_lr, field_vec, LEGION_FILE_CREATE);
+  PhysicalRegion cp_pr;
+#ifdef USE_HDF
+  if(*hdf5_file_name) {
+    // create the HDF5 file first - attach wants it to already exist
+    bool ok = generate_hdf_file(hdf5_file_name, hdf5_dataset_name, num_elements);
+    assert(ok);
+    std::map<FieldID,const char*> field_map;
+    field_map[FID_CP] = hdf5_dataset_name;
+    printf("Checkpointing data to HDF5 file '%s' (dataset='%s')\n",
+	   hdf5_file_name, hdf5_dataset_name);
+    cp_pr = runtime->attach_hdf5(ctx, hdf5_file_name, cp_lr, cp_lr, field_map,
+				 LEGION_FILE_READ_WRITE);
+  } else
+#endif
+  {
+    // create the disk file first - attach wants it to already exist
+    bool ok = generate_disk_file(disk_file_name, num_elements);
+    assert(ok);
+    std::vector<FieldID> field_vec;
+    field_vec.push_back(FID_CP);
+    printf("Checkpointing data to disk file '%s'\n",
+	   disk_file_name);
+    cp_pr = runtime->attach_file(ctx, disk_file_name, cp_lr, cp_lr, field_vec,
+				 LEGION_FILE_READ_WRITE);
+  }
   //cp_pr.wait_until_valid();
   CopyLauncher copy_launcher;
   copy_launcher.add_copy_requirements(
@@ -244,7 +329,14 @@ void top_level_task(const Task *task,
   runtime->issue_copy_operation(ctx, copy_launcher);
   
   clock_gettime(CLOCK_MONOTONIC, &ts_mid);
-  runtime->detach_file(ctx, cp_pr);
+#ifdef USE_HDF
+  if(*hdf5_file_name) {
+    runtime->detach_hdf5(ctx, cp_pr);
+  } else
+#endif
+  {
+    runtime->detach_file(ctx, cp_pr);
+  }
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
   double attach_time = ((1.0 * (ts_mid.tv_sec - ts_start.tv_sec)) +
                      (1e-9 * (ts_mid.tv_nsec - ts_start.tv_nsec)));
@@ -252,6 +344,7 @@ void top_level_task(const Task *task,
                      (1e-9 * (ts_end.tv_nsec - ts_mid.tv_nsec)));
   printf("ELAPSED TIME = %7.3f s\n", attach_time);
   printf("ELAPSED TIME = %7.3f s\n", detach_time);
+
   // Finally, we launch a single task to check the results.
   TaskLauncher check_launcher(CHECK_TASK_ID, 
       TaskArgument(&num_elements, sizeof(num_elements)));
