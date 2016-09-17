@@ -430,12 +430,13 @@ namespace Realm {
 	  // that our memory buffer is a subset of - i.e. use our strides as
 	  // the extents of the effectively-contiguous supserset
 	  hsize_t ms_dims[DIM];
+	  assert(lsi.strides[0][0] == 1);
 	  if(DIM > 1) {
 	    ms_dims[0] = lsi.strides[1][0];
 	    for(unsigned i = 1; i < DIM - 1; i++) {
 	      // this has to divide evenly
-	      assert((lsi.strides[i][0] % ms_dims[i - 1]) == 0);
-	      ms_dims[i] = lsi.strides[i][0] / ms_dims[i - 1];
+	      assert((lsi.strides[i][0] % lsi.strides[i - 1][0]) == 0);
+	      ms_dims[i] = lsi.strides[i][0] / lsi.strides[i - 1][0];
 	    }
 	  }
 	  // last dim just needs to be at least what we want to copy
@@ -492,7 +493,7 @@ namespace Realm {
     template <typename T>
     bool HDF5InstPairCopier<T>::copy_all_fields(Domain d)
     {
-      log_hdf5.print() << "copy all fields";
+      //log_hdf5.print() << "copy all fields";
       switch(d.get_dim()) {
       case 0:
 	{
@@ -537,7 +538,7 @@ namespace Realm {
     template <typename T>
     void HDF5InstPairCopier<T>::flush(void)
     {
-      log_hdf5.print() << "flush";
+      //log_hdf5.print() << "flush";
     }
 
 
