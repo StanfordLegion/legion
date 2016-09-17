@@ -27,6 +27,7 @@ hdf5.H5F_ACC_TRUNC = 2
 hdf5.H5T_STD_I32LE = hdf5.H5T_STD_I32LE_g
 hdf5.H5T_STD_I64LE = hdf5.H5T_STD_I64LE_g
 hdf5.H5T_IEEE_F64LE = hdf5.H5T_IEEE_F64LE_g
+hdf5.H5P_DEFAULT = 0
 
 fspace t {
   a : int32,
