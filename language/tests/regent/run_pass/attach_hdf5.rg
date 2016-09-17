@@ -35,7 +35,6 @@ fspace t {
 }
 
 local filename = os.tmpname() .. ".hdf"
---local filename = "a.hdf5" -- os.tmpname() .. ".hdf"
 
 terra generate_hdf5_file(filename : rawstring)
   var fid = hdf5.H5Fcreate(filename, hdf5.H5F_ACC_TRUNC, hdf5.H5P_DEFAULT, hdf5.H5P_DEFAULT)
@@ -96,36 +95,51 @@ task main()
 
   generate_hdf5_file(filename)
   
-  fill_region(r1, 1)
-
   -- test 1: attach and directly read/write the file (i.e. no acquire/release)
-  attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
-  --acquire(r2)
-  --fill_region(r2, 1)
-  --compare_regions(is, r1, r2)
-  --release(r2)
-  detach(hdf5, r2.{a, b, c})
+  -- TODO: disabled until we can get regent to use generic accessor
+  if false then
+    fill_region(r1, 1)
+    attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
+    fill_region(r2, 1)
+    compare_regions(is, r1, r2)
+    detach(hdf5, r2.{a, b, c})
+  end
 
-  -- test 2: write different data and then re-attach - should see old data
-  --  use acquire/release this time to allow an implicit copy
-  fill_region(r2, 2)
-  regentlib.c.printf("AAA\n");
-  --compare_regions(is, r1, r2)
-  attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
-  acquire(r2)
---  compare_regions(is, r1, r2)
-  release(r2)
-  detach(hdf5, r2.{a, b, c})
+  -- test 2: attach and directly read/write the file but use acquire/release
+  --  (should make a local copy)
+  if true then
+    fill_region(r1, 2)
+    attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
+    acquire(r2)
+    fill_region(r2, 2)
+    compare_regions(is, r1, r2)
+    release(r2)
+    detach(hdf5, r2.{a, b, c})
+  end
 
-  -- test 3: use explicit copies (no acquire/release needed)
-  fill_region(r1, 3)
-  attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
-regentlib.c.printf("CCC\n");
-  copy(r1.{a,b,c}, r2.{a,b,c})
-  copy(r2.a, r3.a)
-  copy(r2.b, r3.b)
-  copy(r2.c, r3.c)
-  detach(hdf5, r2.{a,b,c})
-  compare_regions(is, r1, r3)
+  -- test 3: write different data and then re-attach - should see old data
+  --  (from test 2) use acquire/release this time to allow an implicit copy
+  if true then
+    fill_region(r1, 2)
+    fill_region(r2, 3)
+    attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
+    acquire(r2)
+    compare_regions(is, r1, r2)
+    release(r2)
+    detach(hdf5, r2.{a, b, c})
+  end
+
+  -- test 4: use explicit copies (no acquire/release needed)
+  if true then
+    fill_region(r1, 4)
+    attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
+    copy(r1.{a,b,c}, r2.{a,b,c})
+    copy(r2.a, r3.a)
+    copy(r2.b, r3.b)
+    copy(r2.c, r3.c)
+    detach(hdf5, r2.{a,b,c})
+    compare_regions(is, r1, r3)
+  end
 end
+
 regentlib.start(main)
