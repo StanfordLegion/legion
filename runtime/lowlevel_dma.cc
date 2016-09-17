@@ -2766,6 +2766,10 @@ namespace LegionRuntime {
 
 	InstPairCopier *ipc = mpc->inst_pair(src_inst, dst_inst, oasvec);
 
+	// does the copier want to iterate the domain itself?
+	if(ipc->copy_all_fields(domain))
+	  continue;
+
 	// index space instances use 1D linearizations for translation
 	Arrays::Mapping<1, 1> *src_linearization = get_runtime()->get_instance_impl(src_inst)->metadata.linearization.get_mapping<1>();
 	Arrays::Mapping<1, 1> *dst_linearization = get_runtime()->get_instance_impl(dst_inst)->metadata.linearization.get_mapping<1>();
@@ -2831,6 +2835,10 @@ namespace LegionRuntime {
 	OASVec& oasvec = it->second;
 
 	InstPairCopier *ipc = mpc->inst_pair(src_inst, dst_inst, oasvec);
+
+	// does the copier want to iterate the domain itself?
+	if(ipc->copy_all_fields(domain))
+	  continue;
 
 	RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(src_inst);
 	RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst_inst);

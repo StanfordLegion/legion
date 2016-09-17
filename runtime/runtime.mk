@@ -347,6 +347,10 @@ ifeq ($(strip $(USE_LLVM)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/llvmjit/llvmjit_module.cc \
                    $(LG_RT_DIR)/realm/llvmjit/llvmjit_internal.cc
 endif
+ifeq ($(strip $(USE_HDF)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
+		   $(LG_RT_DIR)/realm/hdf5/hdf5_internal.cc
+endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif

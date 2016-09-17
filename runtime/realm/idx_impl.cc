@@ -23,6 +23,10 @@
 #include "mem_impl.h"
 #include "runtime_impl.h"
 
+#ifdef USE_HDF
+#include "realm/hdf5/hdf5_module.h"
+#endif
+
 namespace Realm {
 
   Logger log_meta("meta");
@@ -469,8 +473,12 @@ namespace Realm {
       return RegionInstance::NO_INST;
 #else
       ProfilingRequestSet requests;
-
       assert(field_sizes.size() == field_files.size());
+      return Realm::HDF5::create_hdf5_instance(*this, requests,
+					       file_name, field_sizes, field_files,
+					       read_only);
+
+#if 0
       Memory memory = Memory::NO_MEMORY;
       Machine machine = Machine::get_machine();
       std::set<Memory> mem;
@@ -539,6 +547,7 @@ namespace Realm {
       log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
 	       this->is_id, memory.id, i.id, inst_bytes);
       return i;
+#endif
 #endif
     }
 

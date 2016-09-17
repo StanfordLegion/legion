@@ -41,6 +41,9 @@
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit_module.h"
 #endif
+#ifdef USE_HDF
+#include "realm/hdf5/hdf5_module.h"
+#endif
 
 namespace Realm {
 
