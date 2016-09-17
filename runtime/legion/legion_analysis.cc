@@ -3924,7 +3924,7 @@ namespace Legion {
                              SingleTask *context, const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
     {
-      // Iterate over the version states
+      // Iterate over the current states
       for (PhysicalVersions::iterator it = version_states.begin();
             it != version_states.end(); it++)
       {
@@ -4667,6 +4667,70 @@ namespace Legion {
             unversioned_mask &= unversioned;
           else
             unversioned_mask.clear();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::record_disjoint_close_versions(
+                                                const FieldMask &version_mask,
+                                                SingleTask *context,
+                                                Operation *op, unsigned index,
+                                                VersionInfo &version_info,
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      // See if we have been assigned
+      if (context != current_context)
+      {
+        const AddressSpaceID local_space = 
+          node->context->runtime->address_space;
+        owner_space = context->get_version_owner(node, local_space);
+        is_owner = (owner_space == local_space);
+        current_context = context;
+      }
+      // See if we are the owner
+      if (!is_owner)
+      {
+        FieldMask request_mask = version_mask - remote_valid_fields;
+        if (!!request_mask)
+        {
+          RtEvent wait_on = send_remote_version_request(request_mask,
+                                                        ready_events); 
+          wait_on.wait();
+#ifdef DEBUG_LEGION
+          // When we wake up everything should be good
+          assert(!(version_mask - remote_valid_fields));
+#endif
+        }
+      }
+      // We aren't mutating our data structures, so we just need 
+      // the manager lock in read only mode
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      sanity_check();
+#endif
+      // We need all the current versions at this level with 
+      // their open children information up to date because
+      // it is the current version state objects that are 
+      // tracking which children are dirty below 
+      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit =
+            current_version_infos.begin(); vit != 
+            current_version_infos.end(); vit++)
+      {
+        FieldMask local_overlap = vit->second.get_valid_mask() & version_mask;
+        if (!local_overlap)
+          continue;
+        for (ManagerVersions::iterator it = vit->second.begin();
+              it != vit->second.end(); it++)
+        {
+          FieldMask overlap = it->second & local_overlap;
+          if (!overlap)
+            continue;
+          version_info.add_current_version(it->first, overlap,
+                                           true/*path only*/); 
+          it->first->request_children_version_state(context, overlap,
+                                                    ready_events);
         }
       }
     }

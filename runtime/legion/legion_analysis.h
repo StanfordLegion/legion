@@ -898,6 +898,11 @@ namespace Legion {
                                      const RegionUsage &usage,
                                      VersionInfo &version_info,
                                      std::set<RtEvent> &ready_events);
+      void record_disjoint_close_versions(const FieldMask &version_mask,
+                                          SingleTask *context,
+                                          Operation *op, unsigned index,
+                                          VersionInfo &version_info,
+                                          std::set<RtEvent> &ready_events);
       void advance_versions(FieldMask version_mask, SingleTask *context,
                             bool update_parent_state,
                             AddressSpaceID source_space,

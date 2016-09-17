@@ -1612,8 +1612,8 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op, 
                         unsigned idx, const RegionRequirement &req,
                         const RegionTreePath &path, VersionInfo &version_info,
-                        std::set<RtEvent> &ready_events, 
-                        bool partial_traversal, RegionTreeNode *parent_node,
+                        std::set<RtEvent> &ready_events, bool partial_traversal,
+                        bool disjoint_close, RegionTreeNode *parent_node,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
     //--------------------------------------------------------------------------
     {
@@ -1648,7 +1648,7 @@ namespace Legion {
                                            user_mask, unversioned_mask,
                                            op, idx, context, version_info, 
                                            ready_events, partial_traversal,
-                                           advance_epochs);
+                                           disjoint_close, advance_epochs);
     }
 
     //--------------------------------------------------------------------------
@@ -12684,6 +12684,7 @@ namespace Legion {
                                                VersionInfo &version_info,
                                                std::set<RtEvent> &ready_events,
                                                bool partial_traversal,
+                                               bool disjoint_close,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
     //--------------------------------------------------------------------------
     {
@@ -12703,6 +12704,12 @@ namespace Legion {
           manager.record_path_only_versions(version_mask, split_mask,
                                unversioned_mask, parent_ctx, op, idx, 
                                usage, version_info, ready_events);
+        }
+        else if (disjoint_close)
+        {
+          manager.record_disjoint_close_versions(version_mask, 
+                    parent_ctx, op, idx, version_info, ready_events);
+                        
         }
         else
         {
@@ -12733,8 +12740,8 @@ namespace Legion {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         child->compute_version_numbers(ctx, path, usage, version_mask,
                                 unversioned_mask, op, idx, parent_ctx, 
-                                version_info, ready_events, 
-                                partial_traversal, advance_epochs);
+                                version_info, ready_events, partial_traversal,
+                                disjoint_close, advance_epochs);
       }
     }
 
@@ -16890,8 +16897,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::perform_disjoint_close(InterCloseOp *op, unsigned index, 
-                             SingleTask *context, const FieldMask &closing_mask, 
+    void PartitionNode::perform_disjoint_close(InterCloseOp *op, unsigned index,
+                             SingleTask *context, const FieldMask &closing_mask,
                              VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {

@@ -6323,7 +6323,7 @@ namespace Legion {
       // map in parallel: we have to get the reservations for doing
       // read-only mappings to each physical instance prior to performing
       // the mapping. The call to physical_register_only can do this for
-      // us if we only have on requirement, but with multiple requirements
+      // us if we only have one requirement, but with multiple requirements
       // we need to deduplicate physical instances across requirements
       // so we have to do it here in the caller's context
       if (multiple_requirements)
@@ -9249,6 +9249,7 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
                                       one_below_path, version_infos[idx], 
                                       ready_events, false/*partial*/, 
+                                      false/*disjoint close*/,
                                       one_below, &proj_epochs);
       }
     }

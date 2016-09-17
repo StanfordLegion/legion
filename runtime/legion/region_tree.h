@@ -262,6 +262,7 @@ namespace Legion {
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
                                        bool partial_traversal = false,
+                                       bool disjoint_close = false,
                                        RegionTreeNode *parent_node = NULL,
               // For computing split masks for projection epochs only
               const LegionMap<ProjectionEpochID,
@@ -1397,6 +1398,7 @@ namespace Legion {
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events,
                                    bool partial_traversal,
+                                   bool disjoint_close,
         const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs);
       void advance_version_numbers(ContextID ctx,
                                    AddressSpaceID local_space,
