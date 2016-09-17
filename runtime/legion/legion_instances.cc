@@ -558,8 +558,9 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(constraints->memory_constraint.has_kind);
 #endif
-      LegionSpy::log_instance_memory_constraint(instance.id,
-          constraints->memory_constraint.kind);
+      if (constraints->memory_constraint.is_valid())
+        LegionSpy::log_instance_memory_constraint(instance.id,
+            constraints->memory_constraint.kind);
       LegionSpy::log_instance_field_constraint(instance.id,
           constraints->field_constraint.contiguous, 
           constraints->field_constraint.inorder,
