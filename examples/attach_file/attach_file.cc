@@ -92,7 +92,7 @@ bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_
   }
 
   hid_t dataset = H5Dcreate2(file_id, dataset_name,
-			     H5T_IEEE_F64BE, dataspace_id,
+			     H5T_IEEE_F64LE, dataspace_id,
 			     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
   if(dataset < 0) {
     printf("H5Dcreate2 failed: %d\n", dataset);
