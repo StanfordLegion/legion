@@ -1857,6 +1857,7 @@ namespace Realm {
 
       if(module->zcmem) {
 	Machine::ProcessorMemoryAffinity pma;
+	pma.p = p;
 	pma.m = module->zcmem->me;
 	pma.bandwidth = 20; // "medium"
 	pma.latency = 200;  // "bad"
