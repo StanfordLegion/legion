@@ -1213,7 +1213,7 @@ namespace LegionRuntime {
 #ifdef BOUNDS_CHECKS
       check_bounds(region, dp);
 #endif
-#ifdef USE_HDF
+#ifdef OLD_USE_HDF
       // we can directly access HDF memory by domain point
       if (impl->memory.kind() == Memory::HDF_MEM) {
         HDFMemory* hdf = (HDFMemory*)get_runtime()->get_memory_impl(impl->memory);
@@ -1280,7 +1280,7 @@ namespace LegionRuntime {
 #ifdef BOUNDS_CHECKS
       check_bounds(region, dp);
 #endif
-#ifdef USE_HDF
+#ifdef OLD_USE_HDF
       if (impl->memory.kind() == Memory::HDF_MEM) {
         HDFMemory* hdf = (HDFMemory*) get_runtime()->get_memory_impl(impl->memory);
         int fid = 0;

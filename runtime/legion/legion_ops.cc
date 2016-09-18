@@ -10843,6 +10843,9 @@ namespace Legion {
       }
       // Tell the parent that we added the restriction
       file_instance = runtime->forest->create_file_instance(this, requirement);
+      file_instance->memory_manager->record_created_instance(
+          file_instance, false, 0, parent_ctx->get_executing_processor(),
+          GC_NEVER_PRIORITY, false);
       parent_ctx->add_restriction(this, file_instance, requirement);
     }
 
@@ -11284,6 +11287,7 @@ namespace Legion {
 #endif
         exit(ERROR_ILLEGAL_DETACH_OPERATION);
       }
+      
       ApEvent detach_event = 
         runtime->forest->detach_file(requirement, this, 0/*idx*/, 
                                      version_info, reference);
@@ -11293,6 +11297,11 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(applied_conditions));
       else
         complete_mapping();
+
+      // Now remove the valid reference added by the attach operation
+      manager->memory_manager->set_garbage_collection_priority(manager,
+        0, parent_ctx->get_executing_processor(), GC_MAX_PRIORITY);
+
       Runtime::trigger_event(completion_event, detach_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(detach_event));

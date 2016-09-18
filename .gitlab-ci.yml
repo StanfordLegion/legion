@@ -7,9 +7,10 @@ variables:
   WARN_AS_ERROR: "1"
   REALM_BACKTRACE: "1"
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
+  TEST_REGENT: "1"
 
 # Local variables (included on a case-by-case basis in each job):
-.gcc49: &gcc48
+.gcc48: &gcc48
   CXX: "g++-4.8"
 .gcc49: &gcc49
   CXX: "g++-4.9"
@@ -44,6 +45,13 @@ variables:
   TEST_SPY: "1"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
+.cxx98_32bit_normal: &cxx98_32bit_normal
+  CC_FLAGS: "-std=c++98 -m32"
+  LD_FLAGS: "-m32"
+  MARCH: "i686"
+
+.skip_regent: &skip_regent
+  TEST_REGENT: "0"
 
 ###
 ### Setup
@@ -105,7 +113,10 @@ before_script:
 .tests: &tests
   script:
     - export LG_RT_DIR=$PWD/runtime
-    - ./language/travis.py
+    - |
+      if [[ "$TEST_REGENT" -eq 1 ]]; then
+        ./language/travis.py
+      fi
     - |
       make -s -C tutorial/00_hello_world -j$THREADS
       tutorial/00_hello_world/hello_world -logfile out_%.log
@@ -180,6 +191,10 @@ linux_gcc49_terra35_cxx11_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *release, *cxx11_normal]
+linux_gcc49_terra35_cxx98_32bit_debug_noregent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra35, *debug, *cxx98_32bit_normal, *skip_regent]
 
 # Linux with Clang 3.5
 linux_clang35_terra35_cxx98_release:
@@ -198,6 +213,10 @@ linux_clang35_terra35_cxx11_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *release, *cxx11_normal]
+linux_clang35_terra35_cxx98_32bit_debug_noregent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_32bit_normal, *skip_regent]
 
 # # macOS with Clang 3.5
 # macos_clang35_cxx98_debug_checks:

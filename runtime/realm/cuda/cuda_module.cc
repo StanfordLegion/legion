@@ -645,7 +645,7 @@ namespace Realm {
       if(gpu->pinned_sysmems.count(src_mem) == 0)
 	return false;
 
-      if(dst_mem != gpu->fbmem->me)
+      if(!(gpu->fbmem) || (dst_mem != gpu->fbmem->me))
 	return false;
 
       return true;
@@ -675,7 +675,7 @@ namespace Realm {
       if(redop_id != 0)
 	return false;
 
-      if(src_mem != gpu->fbmem->me)
+      if(!(gpu->fbmem) || (src_mem != gpu->fbmem->me))
 	return false;
 
       if(gpu->pinned_sysmems.count(dst_mem) == 0)
@@ -706,6 +706,9 @@ namespace Realm {
       // copies entirely within our fb, no reduction support
 
       if(redop_id != 0)
+	return false;
+
+      if(!gpu->fbmem)
 	return false;
 
       Memory our_fb = gpu->fbmem->me;
@@ -740,7 +743,7 @@ namespace Realm {
       if(redop_id != 0)
 	return false;
 
-      if(src_mem != gpu->fbmem->me)
+      if(!(gpu->fbmem) || (src_mem != gpu->fbmem->me))
 	return false;
 
       if(gpu->peer_fbs.count(dst_mem) == 0)
@@ -771,27 +774,33 @@ namespace Realm {
 
       r->add_dma_channel(new GPUDMAChannel_D2D(this));
 
-      // only create a p2p channel if we have peers
-      for(std::vector<GPU *>::iterator it = module->gpus.begin();
-	  it != module->gpus.end();
-	  it++) {
-	// ignore ourselves
-	if(*it == this) continue;
+      // only create a p2p channel if we have peers (and an fb)
+      if(fbmem) {
+	for(std::vector<GPU *>::iterator it = module->gpus.begin();
+	    it != module->gpus.end();
+	    it++) {
+	  // ignore ourselves
+	  if(*it == this) continue;
 
-	// ignore gpus that we don't expect to be able to peer with
-	if(info->peers.count((*it)->info->device) == 0)
-	  continue;
+	  // ignore gpus that we don't expect to be able to peer with
+	  if(info->peers.count((*it)->info->device) == 0)
+	    continue;
 
-	// enable peer access
-	{
-	  AutoGPUContext agc(this);
-	  CHECK_CU( cuCtxEnablePeerAccess((*it)->context, 0) );
+	  // ignore gpus with no fb
+	  if(!((*it)->fbmem))
+	    continue;
+
+	  // enable peer access
+	  {
+	    AutoGPUContext agc(this);
+	    CHECK_CU( cuCtxEnablePeerAccess((*it)->context, 0) );
+	  }
+	  peer_fbs.insert((*it)->fbmem->me);
+	  log_gpu.print() << "peer access enabled from FB " << fbmem->me << " to FB " << (*it)->fbmem->me;
 	}
-	peer_fbs.insert((*it)->fbmem->me);
-	log_gpu.print() << "peer access enabled from FB " << fbmem->me << " to FB " << (*it)->fbmem->me;
+	if(!peer_fbs.empty())
+	  r->add_dma_channel(new GPUDMAChannel_P2P(this));
       }
-      if(!peer_fbs.empty())
-	r->add_dma_channel(new GPUDMAChannel_P2P(this));
     }
 
 
@@ -1837,14 +1846,17 @@ namespace Realm {
       runtime->add_processor(proc);
 
       // this processor is able to access its own FB and the ZC mem (if any)
-      Machine::ProcessorMemoryAffinity pma;
-      pma.p = p;
-      pma.m = fbmem->me;
-      pma.bandwidth = 200;  // "big"
-      pma.latency = 5;      // "ok"
-      runtime->add_proc_mem_affinity(pma);
+      if(fbmem) {
+	Machine::ProcessorMemoryAffinity pma;
+	pma.p = p;
+	pma.m = fbmem->me;
+	pma.bandwidth = 200;  // "big"
+	pma.latency = 5;      // "ok"
+	runtime->add_proc_mem_affinity(pma);
+      }
 
       if(module->zcmem) {
+	Machine::ProcessorMemoryAffinity pma;
 	pma.m = module->zcmem->me;
 	pma.bandwidth = 20; // "medium"
 	pma.latency = 200;  // "bad"
@@ -2183,10 +2195,11 @@ namespace Realm {
       Module::create_memories(runtime);
 
       // each GPU needs its FB memory
-      for(std::vector<GPU *>::iterator it = gpus.begin();
-	  it != gpus.end();
-	  it++)
-	(*it)->create_fb_memory(runtime, cfg_fb_mem_size_in_mb << 20);
+      if(cfg_fb_mem_size_in_mb > 0)
+	for(std::vector<GPU *>::iterator it = gpus.begin();
+	    it != gpus.end();
+	    it++)
+	  (*it)->create_fb_memory(runtime, cfg_fb_mem_size_in_mb << 20);
 
       // a single ZC memory for everybody
       if((cfg_zc_mem_size_in_mb > 0) && !gpus.empty()) {

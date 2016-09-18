@@ -946,14 +946,6 @@ namespace Realm {
 					       n->memories.size()).convert<Memory>());
       n->memories.push_back(filemem);
 
-#ifdef USE_HDF
-      // create HDF memory
-      HDFMemory *hdfmem;
-      hdfmem = new HDFMemory(ID::make_memory(gasnet_mynode(),
-					     n->memories.size()).convert<Memory>());
-      n->memories.push_back(hdfmem);
-#endif
-
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
 	  it++)
