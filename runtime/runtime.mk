@@ -274,6 +274,10 @@ USE_HDF ?= 0
 ifeq ($(strip $(USE_HDF)), 1)
   CC_FLAGS      += -DUSE_HDF
   LEGION_LD_FLAGS      += -lhdf5
+  ifdef HDF_ROOT
+		CC_FLAGS += -I$(HDF_ROOT)/include
+		LD_FLAGS += -L$(HDF_ROOT)/lib
+  endif
 endif
 
 SKIP_MACHINES= titan% daint%
