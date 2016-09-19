@@ -151,7 +151,7 @@ def symlink(from_path, to_path):
         os.symlink(from_path, to_path)
 
 def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
-                     cuda, gasnet, gasnet_dir, clean_first, thread_count, extra_flags):
+                     cuda, hdf, gasnet, gasnet_dir, clean_first, thread_count, extra_flags):
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
         ('TERRA_DIR', terra_dir),                           # for bindings
@@ -162,6 +162,7 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
          'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1),
          'USE_CUDA=%s' % (1 if cuda else 0),
          'USE_GASNET=%s' % (1 if gasnet else 0),
+         'USE_HDF=%s' % (1 if hdf else 0),
          ] +
         extra_flags +
         (['GASNET=%s' % gasnet_dir] if gasnet_dir is not None else []) +
@@ -201,7 +202,7 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
              '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
              os.path.join(bindings_dir, 'liblegion_terra.so')])
 
-def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
+def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False, hdf=False,
             rdir=None, external_terra_dir=None, gasnet_dir=None, debug=False,
             clean_first=True, thread_count=None, extra_flags=[]):
     if shared_llr:
@@ -235,7 +236,7 @@ def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
-                     general, cuda, gasnet, gasnet_dir, clean_first,
+                     general, cuda, hdf, gasnet, gasnet_dir, clean_first,
                      thread_count, extra_flags)
 
 def driver():
@@ -261,6 +262,10 @@ def driver():
         '--cuda', dest = 'cuda', action = 'store_true', required = False,
         default = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1',
         help = 'Build Legion with CUDA.')
+    parser.add_argument(
+        '--hdf', dest = 'hdf', action = 'store_true', required = False,
+        default = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1',
+        help = 'Build Legion with HDF.')
     parser.add_argument(
         '--rdir', dest = 'rdir', required = False,
         choices = ['prompt', 'auto', 'manual', 'never'], default = None,
