@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops10.rg:33: vectorization failed: loop body has an array access with a non-scalar index
+-- vectorize_loops10.rg:33: vectorization failed: loop body has an array access with non-contiguous values
 --     a[e.v] = 1
 --         ^
 

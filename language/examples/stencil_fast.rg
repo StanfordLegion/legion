@@ -23,7 +23,7 @@ local common = require("stencil_common")
 
 local DTYPE = double
 local RADIUS = 2
-local USE_FOREIGN = true
+local USE_FOREIGN = false
 
 local c = regentlib.c
 
@@ -214,17 +214,13 @@ function make_ghost_y_partition(is_complete)
   return ghost_y_partition
 end
 
-local function off(i, x, y)
-  return rexpr int2d { x = i.x + x, y = i.y + y } end
-end
-
 local function make_stencil_pattern(points, index, off_x, off_y, radius)
   local value
   for i = 1, radius do
     local neg = off_x < 0 or off_y < 0
     local coeff = ((neg and -1) or 1)/(2*i*radius)
     local x, y = off_x*i, off_y*i
-    local component = rexpr coeff*points[ [off(index, x, y)] ].input end
+    local component = rexpr coeff*points[ index + {x, y} ].input end
     if value then
       value = rexpr value + component end
     else
@@ -259,8 +255,9 @@ end
 local function make_stencil_interior(private, interior, radius)
   if not USE_FOREIGN then
     return rquote
+      __demand(__vectorize)
       for i in interior do
-        private[i].output = private[i].output +
+        private[i].output +=
           [make_stencil_pattern(private, i,  0, -1, radius)] +
           [make_stencil_pattern(private, i, -1,  0, radius)] +
           [make_stencil_pattern(private, i,  1,  0, radius)] +
@@ -354,8 +351,9 @@ local stencil = make_stencil(RADIUS)
 local function make_increment_interior(private, exterior)
   if not USE_FOREIGN then
     return rquote
+      __demand(__vectorize)
       for i in exterior do
-        private[i].input = private[i].input + 1
+        private[i].input += 1
       end
     end
   else

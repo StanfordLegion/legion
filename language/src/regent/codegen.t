@@ -6697,27 +6697,65 @@ function codegen.stat_for_list_vectorized(cx, node)
   else
     local fields = ispace_type.index_type.fields
     if fields then
-      -- XXX: multi-dimensional index spaces are not supported yet
+      local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
       local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-      local rect = terralib.newsymbol("rect")
-      local index = fields:map(function(field) return terralib.newsymbol(tostring(field)) end)
+      local rect = terralib.newsymbol(rect_type, "rect")
+      local index = fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end)
+      local base = terralib.newsymbol(c.coord_t, "base")
+      local count = terralib.newsymbol(c.coord_t, "base")
+      local start = terralib.newsymbol(c.coord_t, "base")
+      local stop = terralib.newsymbol(c.coord_t, "base")
+      local final = terralib.newsymbol(c.coord_t, "base")
+
       local body = quote
         var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
         do
-          [block]
+          [orig_block]
         end
       end
-      for i = ispace_type.dim, 1, -1 do
+      body = quote
+        var [ index[1] ] = base
+        if count >= [vector_width] then
+          while [ index[1] ] < [start] do
+            var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
+            do
+              [orig_block]
+            end
+            [ index[1] ] = [ index[1] ] + 1
+          end
+          while [ index[1] ] < [stop] do
+            var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
+            do
+              [block]
+            end
+            [ index[1] ] = [ index[1] ] + [vector_width]
+          end
+        end
+        while [ index[1] ] < [final] do
+          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
+          do
+            [orig_block]
+          end
+          [ index[1] ] = [ index[1] ] + 1
+        end
+      end
+      for i = 2, ispace_type.dim do
         local rect_i = i - 1 -- C is zero-based, Lua is one-based
         body = quote
-          for [ index[i] ] = rect.lo.x[rect_i], rect.hi.x[rect_i] + 1 do
-            [orig_block]
+          for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+            [body]
           end
         end
       end
       return quote
         [actions]
         var [rect] = [domain_get_rect]([domain])
+        var alignment = [vector_width]
+        var [base] = [rect].lo.x[0]
+        var [count] = [rect].hi.x[0] - [rect].lo.x[0] + 1
+        var [start] = ([base] + alignment - 1) and not (alignment - 1)
+        var [stop] = ([base] + [count]) and not (alignment - 1)
+        var [final] = [base] + [count]
         [body]
         [cleanup_actions]
       end
