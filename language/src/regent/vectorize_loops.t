@@ -157,7 +157,7 @@ function flip_types.stat(cx, simd_width, symbol, node)
     for i = 1, #node.symbols do
       local symbol = node.symbols[i]
       if node.values[i] == nil or
-         cx:lookup_expr_type(node.values[i]) == V then
+         cx:lookup_expr_type(node.values[i]) ~= C then
         types:insert(flip_types.type(simd_width, node.types[i]))
         symbols:insert(std.newsymbol(types[i],
           symbol:hasname() and symbol:getname() .. "_vectorized"))
