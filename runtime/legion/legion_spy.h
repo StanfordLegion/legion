@@ -656,6 +656,13 @@ namespace Legion {
 		      next_id, next_idx, dep_type);
       }
 
+      // Logger call for disjoint close operations
+      static inline void log_disjoint_close_field(UniqueID close_id,
+                                                  FieldID fid)
+      {
+        log_spy.print("Disjoint Close Field %llu %d", close_id, fid);
+      }
+
       // Logger calls for realm events
       static inline void log_event_dependence(LgEvent one, LgEvent two)
       {

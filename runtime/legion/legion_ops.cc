@@ -5256,6 +5256,21 @@ namespace Legion {
       requirement.projection = 0;
       projection_info = ProjectionInfo(runtime, requirement, launch_domain);
       disjoint_close_mask = disjoint_mask;
+#ifdef LEGION_SPY
+      if (Runtime::legion_spy_enabled)
+      {
+        std::set<FieldID> disjoint_close_fields;
+#ifdef DEBUG_LEGION
+        assert(closed_tree != NULL);
+#endif
+        closed_tree->node->column_source->get_field_set(disjoint_close_mask,
+            requirement.privilege_fields, disjoint_close_fields);
+        for (std::set<FieldID>::const_iterator it = 
+              disjoint_close_fields.begin(); it != 
+              disjoint_close_fields.end(); it++)
+          LegionSpy::log_disjoint_close_field(unique_op_id, *it);
+      }
+#endif
       return projection_info;
     }
 
