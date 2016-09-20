@@ -2789,8 +2789,8 @@ class LogicalRegion(object):
                     perform_checks, self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
-            return self.parent.parent.perform_verification_registration(field, op, req,
-                    inst, perform_checks, point_set)
+            return self.parent.parent.perform_verification_registration(depth, field, 
+                    op, req, inst, perform_checks, point_set)
         else:
             # Do the actual work
             for point in point_set.iterator():
@@ -4678,7 +4678,7 @@ class VerificationState(object):
             # If we have a pending fill, that needs to be done first
             pass
         elif inst not in self.previous_instances:
-            # Otherwise no pending fill see if we have to issue a copy
+            # Otherwise no pending fill, see if we have to issue a copy
             # to bring the instance up to date from the previous write
             pass
         # If there are any pending reductions, we must issue those now too
@@ -4694,6 +4694,23 @@ class VerificationState(object):
         return True
 
     def perform_verification_registration(self, op, req, inst, perform_checks):
+        preconditions = inst.find_verification_use_dependences(self.depth, 
+                                          self.field, self.point, op, req)
+        if perform_checks:
+            bad = check_preconditions(preconditions, op)
+            if bad is not None:
+                print("ERROR: Missing use precondition for field "+str(self.field)+
+                      " of region requirement "+str(req.index)+" of "+str(op)+
+                      " (UID "+str(op.uid)+") on previous "+str(bad))
+                if self.tree.state.assert_on_error:
+                    assert False
+                return False
+        else:
+            for other in preconditions:
+              op.physical_incoming.add(other)
+              other.physical_outgoing.add(op)
+        # Record ourselves as a user for this instance
+        inst.add_verification_user(self.depth, self.field, self.point, op, req)
         return True
 
 class Requirement(object):
@@ -6100,6 +6117,11 @@ class Operation(object):
         mappings = self.mappings[index]
         assert self.context
         depth = self.context.find_enclosing_context_depth(req, mappings)
+        # Don't do registrations for single tasks or post close ops
+        # Single tasks are registered after all copies are issued
+        # Post tasks never register users since they aren't necessary
+        perform_registration = (self.kind != SINGLE_TASK_KIND) and \
+            (self.kind != POST_CLOSE_OP_KIND)
         for field in req.fields:
             # Find the instance that we chose to map this field to
             if field.fid not in mappings:
@@ -6113,7 +6135,7 @@ class Operation(object):
                 # do any analysis here since we're just passing in the state
                 continue
             if not req.logical_node.perform_physical_verification(depth, field,
-                    self, req, inst, perform_checks, self.kind != SINGLE_TASK_KIND):
+                    self, req, inst, perform_checks, perform_registration):
                 return False
         return True
 
@@ -6152,6 +6174,11 @@ class Operation(object):
                 prefix += '  '
         print((prefix+"Performing physical verification analysis "+
                      "for %s (UID %d)...") % (str(self),self.uid))
+        # As a small performance optimization get all our reachable operations
+        # now if we are going to be doing checks so we don't have to repeate BFS
+        assert self.reachable_cache is None
+        self.reachable_cache = set()
+        self.get_physical_reachable(self.reachable_cache, False)
         # Handle special cases
         if self.kind == COPY_OP_KIND:
             num_reqs = len(self.reqs)
@@ -7226,6 +7253,60 @@ class Task(object):
         else:
             replay_file.write(struct.pack('I',0))
 
+class PointUser(object):
+    __slots__ = ['op', 'index', 'logical_op', 'priv', 'coher', 'redop']
+    def __init__(self, op, index, priv, coher, redop):
+        self.op = op
+        self.index = index
+        # The application level operation that generated this user
+        if op is not None:
+            self.logical_op = op.get_logical_op()
+            assert isinstance(self.logical_op, Operation)
+        else:
+            self.logical_op = None
+        self.priv = priv
+        self.coher = coher
+        self.redop = redop
+
+    def is_realm_op(self):
+        assert self.op is not None
+        return self.op.is_realm_operation()
+
+    def is_no_access(self):
+        return self.priv == NO_ACCESS
+
+    def is_read_only(self):
+        return self.priv == READ_ONLY
+
+    def has_write(self):
+        return (self.priv == READ_WRITE) or (self.priv == REDUCE) or \
+                (self.priv == WRITE_ONLY)
+
+    def is_write(self):
+        return (self.priv == READ_WRITE) or (self.priv == WRITE_ONLY)
+
+    def is_read_write(self):
+        return self.priv == READ_WRITE
+
+    def is_write_only(self):
+        return self.priv == WRITE_ONLY
+
+    def is_reduce(self):
+        return self.priv == REDUCE
+
+    def is_exclusive(self):
+        return self.coher == EXCLUSIVE
+
+    def is_atomic(self):
+        return self.coher == ATOMIC
+
+    def is_simult(self):
+        return self.coher == SIMULTANEOUS
+
+    def is_relaxed(self):
+        return self.coher == RELAXED
+
+
 class InstanceUser(object):
     __slots__ = ['op', 'index', 'logical_op', 'region', 'priv', 'coher', 
                  'redop', 'shape', 'intersect']
@@ -7644,7 +7725,86 @@ class Instance(object):
 
     def reset_verification_users(self, depth):
         if depth in self.verification_users:
-            del self.verification_users
+            del self.verification_users[depth]
+
+    def get_verification_users(self, depth, field, point):
+        if depth not in self.verification_users:
+            self.verification_users[depth] = dict()
+        key = (field,point)
+        if key not in self.verification_users[depth]:
+            result = list()
+            self.verification_users[depth][key] = result
+            return result
+        return self.verification_users[depth][key]
+
+    def find_verification_use_dependences(self, depth, field, point, op, req):
+        assert not self.is_virtual()
+        users = self.get_verification_users(depth, field, point)
+        result = set()
+        logical_op = op.get_logical_op()
+        for user in reversed(users):
+            # If this is another user generated by the same operation
+            # but from a different region requirement then we can 
+            # skip the dependence because we'll catch it implicitly
+            # as part of the dependences through other region requirements
+            if logical_op is user.logical_op and req.index != user.index:
+                continue
+            dep = compute_dependence_type(user, req)
+            if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
+                result.add(user.op)
+                # If the previous was an exclusive user there is no
+                # need to keep going back
+                if user.is_write() and user.is_exclusive():
+                    break
+        return result
+
+    def find_verification_copy_dependences(self, depth, field, point, 
+                                           op, index, reading, redop):
+        assert not self.is_virtual()
+        users = self.get_verification_users(depth, field, point)
+        result = set()
+        if reading:
+            assert redop == 0
+            inst = PointUser(None, index, READ_ONLY, EXCLUSIVE, 0)
+        elif redop != 0:
+            inst = PointUser(None, index, REDUCE, EXCLUSIVE, redop)
+        else:
+            inst = PointUser(None, index, READ_WRITE, EXCLUSIVE, 0)
+        logical_op = op.get_logical_op()
+        for user in reversed(users):
+            # If this user was generated by the same operation check to 
+            # see if is another user or a copy operation, users from a
+            # different region requirement can be skipped, otherwise
+            # we can avoid WAR and WAW dependences, but not true RAW dependences
+            if logical_op is user.logical_op and index != user.index:
+                if not user.is_realm_op() or not reading or user.is_read_only():
+                    continue
+            dep = compute_dependence_type(user, inst)
+            if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
+                result.add(user.op)
+                # If the previous was an exclusive writer than we 
+                # have transitive dependences on everything before
+                if user.is_write() and user.is_exclusive():
+                    break
+        return result
+
+    def add_verification_user(self, depth, field, point, op, req):
+        assert not self.is_virtual()
+        assert not op.is_realm_operation()
+        users = self.get_verification_users(depth, field, point)
+        users.append(PointUser(op, req.index, req.priv, req.coher, req.redop))
+
+    def add_copy_user(self, depth, field, point, op, index, reading, redop):
+        assert not self.is_virtual()
+        assert op.is_realm_operation()
+        users = self.get_verification_users(depth, field, point)
+        if reading:
+            assert redop == 0
+            users.append(PointUser(op, index, READ_ONLY, EXCLUSIVE, 0))
+        elif redop != 0:
+            users.append(PointUser(op, index, REDUCE, EXCLUSIVE, redop))
+        else:
+            users.append(PointUser(op, index, READ_WRITE, EXCLUSIVE, 0))
 
     def pack_inst_replay_info(self, replay_file):
         replay_file.write(struct.pack('Q', self.handle))
