@@ -1906,6 +1906,10 @@ class PointSet(object):
                 self.points.remove(point)
         return self
 
+    def iterator(self):
+        for p in self.points:
+            yield p
+
 class Processor(object):
     __slots__ = ['state', 'uid', 'kind_num', 'kind', 'mem_latency', 
                  'mem_bandwidth', 'node_name']
@@ -2481,8 +2485,8 @@ class FieldSpace(object):
 
 class LogicalRegion(object):
     __slots__ = ['state', 'index_space', 'field_space', 'tree_id', 'children',
-                 'name', 'parent', 'logical_state', 'physical_state', 'node_name',
-                 'has_named_children']
+                 'name', 'parent', 'logical_state', 'physical_state', 
+                 'verification_state', 'node_name', 'has_named_children']
     def __init__(self, state, iid, fid, tid):
         self.state = state
         self.index_space = iid
@@ -2493,6 +2497,7 @@ class LogicalRegion(object):
         self.parent = None
         self.logical_state = dict()
         self.physical_state = dict()
+        self.verification_state = dict() # only for top-level regions
         self.index_space.add_instance(self.tree_id, self)
         self.node_name = 'region_node_'+str(self.index_space.uid)+\
             '_'+str(self.field_space.uid)+'_'+str(self.tree_id)
@@ -2573,6 +2578,12 @@ class LogicalRegion(object):
     def reset_physical_state(self, depth):
         if self.physical_state and depth in self.physical_state:
             self.physical_state[depth] = dict()
+
+    def reset_verification_state(self, depth):
+        # Should be top-level region
+        assert not self.parent
+        if self.verification_state and depth in self.verification_state:
+            self.verification_state[depth] = dict()
 
     def compute_path(self, path, target):
         if self is not target:
@@ -2707,6 +2718,86 @@ class LogicalRegion(object):
         physical_state = self.get_physical_state(depth, field)
         return physical_state.close_physical_tree(target, op, req, perform_checks, 
                                                   clear_state)
+
+    def get_verification_state(self, depth, field, point):
+        # Should always be at the root
+        assert not self.parent
+        if depth not in self.verification_state:
+            self.verification_state[depth] = dict()
+        field_point_dict = self.verification_state[depth]
+        key = (field,point)
+        if key not in field_point_dict:
+            result = VerificationState(self, depth, field, point)
+            field_point_dict[key] = result
+            return result
+        return field_point_dict[key]
+
+    def initialize_verification_state(self, depth, field, inst, point_set=None):
+        if not point_set:
+            # First get the point set
+            self.initialize_verification_state(depth, field, inst, self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            self.parent.parent.initialize_verification_state(depth, field, inst, point_set)
+        else:
+            # Then do the actual work 
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                state.initialize_verification_state(inst)
+
+    def perform_fill_verification(self, depth, field, op, req, point_set=None):
+        if not point_set:
+            # First get the point set
+            return self.perform_fill_verification(depth, field, op, req,
+                                                  self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            return self.parent.parent.perform_fill_verification(depth, field, op, 
+                                                                req, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                if not state.perform_fill_verification(op, req):
+                    return False
+            return True
+
+    def perform_physical_verification(self, depth, field, op, req, inst, perform_checks, 
+                                      perform_registration, point_set=None):
+        if not point_set:
+            # First get the point set
+            return self.perform_physical_verification(depth, field, op, req, inst,
+                    perform_checks, perform_registration, self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            return self.parent.parent.perform_physical_verification(depth, field, op, req,
+                    inst, perform_checks, perform_registration, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                if not state.perform_physical_verification(op, req, inst, 
+                        perform_checks, perform_registration):
+                    return False
+            return True
+
+    def perform_verification_registration(self, depth, field, op, req, inst, 
+                                          perform_checks, point_set=None): 
+        if not point_set:
+            # First get the point set
+            return self.perform_verification_registration(depth, field, op, req, inst,
+                    perform_checks, self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            return self.parent.parent.perform_verification_registration(field, op, req,
+                    inst, perform_checks, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                if not state.perform_verification_registration(op, req, inst, perform_checks):
+                    return False
+            return True
 
     def mark_named_children(self):
         if self.name is not None:
@@ -4488,6 +4579,123 @@ class PhysicalState(object):
                                   op=reduction, index=index, reading=False, redop=src.redop)
         return True
 
+class VerificationState(object):
+    __slots__ = ['tree', 'depth', 'field', 'point', 'valid_instances', 
+                 'previous_instances', 'pending_reductions', 'pending_fill']
+    def __init__(self, tree, depth, field, point):
+        self.tree = tree
+        self.depth = depth
+        self.field = field
+        self.point = point
+        # State machine is write -> reduce -> read
+        self.valid_instances = set()
+        self.previous_instances = set()
+        self.pending_reductions = set()
+        self.pending_fill = False 
+
+    def reset(self):
+        self.pending_fill = False
+        self.previous_instances = set()
+        self.valid_instances = set()
+        self.pending_reductions = set()
+
+    def initialize_verification_state(self, inst):
+        self.valid_instances.add(inst)
+
+    def perform_fill_verification(self, op, req):
+        # Fills clear everything out so we are just done
+        self.pending_fill = True
+        self.previous_instances = set()
+        self.valid_instances = set()
+        self.pending_reductions = set()
+
+    def perform_physical_verification(self, op, req, inst, perform_checks, 
+                                      perform_registration):
+        assert not inst.is_virtual()
+        if req.is_reduce():
+            assert inst.redop != 0
+            # Move valid instances back to previous instances
+            # and add ourselves to the reduction instances
+            # See if we are the first reduction
+            if not self.pending_reductions:
+                self.previous_instances = self.valid_instances
+                self.valid_instances = set()
+            self.pending_reductions.add(inst)
+        elif req.is_write_only():
+            assert self.redop == 0
+            # We overwrite everything else
+            self.reset()
+            self.valid_instances.add(inst)
+        else:
+            # See if we need to do anything to bring this up to date
+            if inst not in self.valid_instances:
+                # Find or make copies to bring this up to date
+                error_str = "region requirement "+str(req.index)+" of "+str(op)
+                if not self.issue_update_copies(inst, op, req, perform_checks, error_str):
+                    return False
+            # Now that it is up to date, we can update the instance sets
+            if req.is_write():
+                # We overwrite everything else
+                self.reset()
+                self.valid_instances.add(inst)
+            else:
+                assert req.is_read_only()
+                # Just have to add ourselves to the list of valid instances
+                self.valid_instances.add(inst)
+        # Finally perform our registrations
+        if perform_registration and not self.perform_verification_registration(op, 
+                                                        req, inst, perform_checks):
+            return False
+        restricted = True if req.restricted_fields and \
+            self.field in req.restricted_fields else False
+        # If we are restricted and we're not read-only we have to issue
+        # copies back to the restricted instance
+        if restricted and req.priv != READ_ONLY:
+            restricted_inst = req.restricted_fields[self.field]
+            if inst is not restricted_inst:
+                error_str = "restricted region requirement "+str(req.index)+" of "+str(op)
+                # We need to issue a copy or a reduction back to the 
+                # restricted instance in order to have the proper semantics
+                if inst.redop != 0:
+                    # Have to perform a reduction back
+                    if not self.issue_update_reductions(restricted_inst, op, req,
+                                                        perform_checks, error_str):
+                        return False
+                else:
+                    # Perform a normal copy back
+                    if not self.issue_update_copies(restricted_inst, op, req, 
+                                                    perform_checks, error_str):
+                        return False
+                # Restrictions always overwrite everything when they are done
+                self.reset()
+                self.valid_instances.add(inst)
+        return True
+
+    def issue_update_copies(self, inst, op, req, perform_checks, error_str):
+        assert inst not in self.valid_instances
+        # Check to see if it was valid from before
+        if self.pending_fill:
+            # If we have a pending fill, that needs to be done first
+            pass
+        elif inst not in self.previous_instances:
+            # Otherwise no pending fill see if we have to issue a copy
+            # to bring the instance up to date from the previous write
+            pass
+        # If there are any pending reductions, we must issue those now too
+        if self.pending_reductions:
+            return self.issue_update_reductions(inst, op, req, perform_checks, error_str)
+        return True
+
+    def issue_update_reductions(self, inst, op, req, perform_checks, error_str):
+        assert self.pending_reductions
+        # Make sure a reduction was issued from each reduction instance
+        for reduction_inst in self.pending_reductions:
+            pass
+        return True
+
+    def perform_verification_registration(self, op, req, inst, perform_checks):
+        return True
+
 class Requirement(object):
     __slots__ = ['state', 'index', 'is_reg', 'index_node', 'field_space', 'tid',
                  'logical_node', 'priv', 'coher', 'redop', 'fields', 'parent',
@@ -4652,10 +4860,10 @@ class Operation(object):
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
                  'advance_ops', 'task', 'task_id', 'index_owner', 'points', 
                  'launch_rect', 'creator', 'realm_copies', 'realm_fills', 
-                 'internal_idx', 'partition_kind', 'partition_node', 'node_name', 
-                 'cluster_name', 'generation', 'need_logical_replay', 
-                 'reachable_cache', 'transitive_warning_issued', 
-                 'arrival_barriers', 'wait_barriers']
+                 'internal_idx', 'disjoint_close_fields', 'partition_kind', 
+                 'partition_node', 'node_name', 'cluster_name', 'generation', 
+                 'need_logical_replay', 'reachable_cache', 
+                 'transitive_warning_issued', 'arrival_barriers', 'wait_barriers']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -4689,6 +4897,8 @@ class Operation(object):
         # Only valid for internal operations (e.g. open, close, advance)
         self.creator = None
         self.internal_idx = -1
+        # Only valid for close operations
+        self.disjoint_close_fields = None
         # Only valid for pending partition operations
         self.partition_kind = None
         self.partition_node = None
@@ -4967,6 +5177,11 @@ class Operation(object):
         if not self.wait_barriers:
             self.wait_barriers = list()
         self.wait_barriers.append(bar)
+
+    def add_disjoint_close_field(self, fid):
+        if not self.disjoint_close_fields:
+            self.disjoint_close_fields = list()
+        self.disjoint_close_fields.append(fid)
 
     def find_temporary_instance(self, index, fid):
         if not self.temporaries:
@@ -5757,18 +5972,6 @@ class Operation(object):
         # If this is a close operation itself do the close analysis
         if self.is_close():
             return self.perform_physical_close_analysis(depth, perform_checks)
-        # Do traversals for all of our region requirements and map our instances
-        if not self.reqs:
-            # Go down the task tree if we are a task
-            if self.kind == SINGLE_TASK_KIND:
-                assert self.reachable_cache is None
-                self.reachable_cache = set()
-                self.get_physical_reachable(self.reachable_cache, False)
-                task = self.state.get_task(self)
-                if not task.perform_task_physical_analysis(perform_checks):
-                    return False
-                self.reachable_cache = None
-            return True
         # As a small performance optimization get all our reachable operations
         # now if we are going to be doing checks so we don't have to repeate BFS
         assert self.reachable_cache is None
@@ -5870,6 +6073,124 @@ class Operation(object):
                 for fill in self.realm_fills:
                     if not fill.analyzed:
                         print('    '+str(fill)+' was unnecessary')
+
+    def verify_copy_requirements(self, src_idx, src_req, dst_idx, dst_req, perform_checks):
+        # TODO Verification
+        return True
+
+    def verify_fill_requirement(self, index, req, perform_checks):
+        assert self.context
+        depth = self.context.find_enclosing_context_depth(req, req.restricted_fields)
+        for field in req.fields:
+            if not req.logical_node.perform_fill_verification(depth, field, self,
+                                                            req, perform_checks):
+                return False
+            # If this field is restricted, we effectively have to fill it
+            # now to get the proper semantics of seeing updates right away
+            if req.restricted_fields and field in req.restricted_fields:
+                if not req.logical_node.perform_physical_verification(depth, field,
+                        self, req, req.restricted_fields[field], perform_checks, False):
+                    return False
+        return True
+
+    def verify_physical_requirement(self, index, req, perform_checks):
+        if req.is_no_access():
+            return True
+        assert index in self.mappings
+        mappings = self.mappings[index]
+        assert self.context
+        depth = self.context.find_enclosing_context_depth(req, mappings)
+        for field in req.fields:
+            # Find the instance that we chose to map this field to
+            if field.fid not in mappings:
+                print("Missing mapping decision for field "+str(field)+" of "+
+                      "requirement requirement "+str(index)+" of "+str(self))
+                print("This is a runtime logging bug, please report it.")
+            assert field.fid in mappings
+            inst = mappings[field.fid]
+            if inst.is_virtual():
+                # In the case of virtual mappings we don't have to
+                # do any analysis here since we're just passing in the state
+                continue
+            if not req.logical_node.perform_physical_verification(depth, field,
+                    self, req, inst, perform_checks, self.kind != SINGLE_TASK_KIND):
+                return False
+        return True
+
+    def perform_verification_registration(self, index, req, perform_checks):
+        assert self.kind == SINGLE_TASK_KIND
+        if req.is_no_access():
+            return True
+        assert index in self.mappings
+        mappings = self.mappings[index]
+        assert self.context
+        depth = self.context.find_enclosing_context_depth(req, mappings)
+        for field in req.fields:
+            assert field.fid in mappings
+            inst = mappings[field.fid]
+            # skip any virtual mappings
+            if inst.is_virtual():
+                continue
+            if not req.logical_node.perform_verification_registration(depth, field,
+                                                    self, req, inst, perform_checks):
+                return False
+        return True
+
+    def perform_op_physical_verification(self, perform_checks):
+        # We can skip any internal operations, no need to do anything
+        # If we are an index space task, only do our points
+        if self.kind == INDEX_TASK_KIND:
+            assert self.points is not None
+            for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
+                if not point.op.perform_op_physical_analysis(perform_checks):
+                    return False
+            return True
+        prefix = ''
+        if self.context:
+            depth = self.context.get_depth()
+            for idx in range(depth):
+                prefix += '  '
+        print((prefix+"Performing physical verification analysis "+
+                     "for %s (UID %d)...") % (str(self),self.uid))
+        # Handle special cases
+        if self.kind == COPY_OP_KIND:
+            num_reqs = len(self.reqs)
+            assert num_reqs % 2 == 0
+            num_copies = num_reqs / 2
+            for idx in range(num_copies):
+                if not self.verify_copy_requirements(idx, self.reqs[idx],
+                        idx+num_copies, self.reqs[idx+num_copies], perform_checks):
+                    return False
+        elif self.kind == FILL_OP_KIND:
+            for index,req in self.reqs.iteritems():
+                if not self.verify_fill_requirement(index, req, perform_checks):
+                    return False
+        elif self.kind == DELETION_OP_KIND:
+            # Skip deletions, they only impact logical analysis
+            pass
+        else:
+            # Only post close ops here
+            if self.is_close():
+                assert self.kind == POST_CLOSE_OP_KIND
+            for index,req, in self.reqs.iteritems():
+                if not self.verify_physical_requirement(index, req, perform_checks):
+                    return False
+            if self.kind == SINGLE_TASK_KIND:
+                # We now need to do the registration for our region
+                # requirements since we didn't do it as part of the 
+                # normal physical analysis
+                for index,req, in self.reqs.iteritems():
+                    if not self.perform_verification_registration(index, req, 
+                                                                  perform_checks):
+                        return False
+                # If we are not a leaf task, go down the task tree
+                if self.task is not None:
+                    if not self.task.perform_task_physical_verification(perform_checks):
+                        return False
+        self.check_for_unanalyzed_realm_ops(perform_checks)
+        # Clean up our reachable cache
+        self.reachable_cache = None
+        return True
 
     def print_op_mapping_decisions(self, depth):
         if self.inter_close_ops:
@@ -6591,6 +6912,41 @@ class Task(object):
         # Record that we handled this field for this instance
         self.used_instances.add((inst,fid))
 
+    def find_enclosing_context_depth(self, child_req, mappings):
+        # Special case for the top-level task
+        depth = self.get_depth()
+        if depth == 0:
+            return depth
+        # Find which region requirement privileges were derived from
+        for idx,our_req in self.op.reqs.iteritems():
+            if child_req.parent is not our_req.logical_node:
+                continue
+            fields_good = True
+            for field in child_req.fields:
+                if field not in our_req.fields:
+                    fields_good = False
+                    break
+            if not fields_good:
+                continue
+            # We'll assume the privileges are good for now
+            # See if we are virtual mapped or not
+            any_virtual = False
+            for field in child_req.fields:
+                assert idx in self.op.mappings
+                assert field.fid in self.op.mappings[idx]
+                if self.op.mappings[idx][field.fid].is_virtual():
+                    any_virtual = True
+                    break
+            if any_virtual:
+                assert self.op.context
+                return self.op.context.find_enclosing_context_depth(our_req, mappings)
+            else:
+                if mappings:
+                    for fid,inst in mappings.iteritems():
+                        self.used_instances.add((inst,fid))
+                return depth
+        assert False # Should never get here 
+
     def perform_task_physical_analysis(self, perform_checks):
         if not self.operations:
             return True
@@ -6654,6 +7010,38 @@ class Task(object):
         # Reset any physical states that we 
         # Always need to clear out the physical state on the way out
         self.op.state.reset_physical_state(depth)
+        return success
+
+    def perform_task_physical_verification(self, perform_checks):
+        if not self.operations:
+            return True
+        # Depth is a proxy for context 
+        depth = self.get_depth()
+        assert self.used_instances is None
+        self.used_instances = set()
+        # Initialize any regions that we mapped
+        if self.op.reqs:
+            for idx,req in self.op.reqs.iteritems():
+                # Skip any no access requirements
+                if req.is_no_access():
+                    continue
+                assert idx in self.op.mappings
+                mappings = self.op.mappings[idx]
+                for field in req.fields:
+                    assert field.fid in mappings
+                    inst = mappings[field.fid]
+                    if inst.is_virtual():
+                        continue
+                    req.logical_node.initialize_verification_state(depth, field, inst)
+        success = True
+        for op in self.operations:
+            if not op.perform_op_physical_verification(perform_checks):
+                success = False
+                break
+        # Reset any physical user lists at our depth
+        for inst,fid in self.used_instances:
+            inst.reset_verification_users(depth)
+        self.op.state.reset_verification_state(depth)
         return success
 
     def print_task_mapping_decisions(self):
@@ -6997,8 +7385,8 @@ class OffsetConstraint(object):
 
 class Instance(object):
     __slots__ = ['state', 'handle', 'memory', 'region', 'fields', 
-                 'redop', 'depth_users', 'processor', 'creator', 
-                 'uses', 'creator_regions', 'specialized_constraint',
+                 'redop', 'depth_users', 'verification_users', 'processor', 
+                 'creator', 'uses', 'creator_regions', 'specialized_constraint',
                  'memory_constraint', 'field_constraint', 'ordering_constraint',
                  'splitting_constraints', 'dimension_constraints',
                  'alignment_constraints', 'offset_constraints']
@@ -7011,6 +7399,7 @@ class Instance(object):
         self.fields = None
         self.redop = 0
         self.depth_users = dict() # map to dict for each depth
+        self.verification_users = dict()
         self.creator = None # Initially a uid, later an op after post-parsing
         self.processor = None
         self.uses = 0
@@ -7252,6 +7641,10 @@ class Instance(object):
         else:
             users[field].append(InstanceUser(op, index, region,
                                  READ_WRITE, EXCLUSIVE, 0, shape, intersect))
+
+    def reset_verification_users(self, depth):
+        if depth in self.verification_users:
+            del self.verification_users
 
     def pack_inst_replay_info(self, replay_file):
         replay_file.write(struct.pack('Q', self.handle))
@@ -8927,6 +9320,8 @@ op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 close_index_pat          = re.compile(
     prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
+disjoint_close_pat       = re.compile(
+    prefix+"Disjoint Close Field (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
 # Patterns for logical analysis and region requirements
 requirement_pat         = re.compile(
     prefix+"Logical Requirement (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<is_reg>[0-1]) "+
@@ -9592,6 +9987,11 @@ def parse_legion_spy_line(line, state):
         task.add_close_index(int(m.group('index')),
                              int(m.group('child')))
         return True
+    m = disjoint_close_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.add_disjoint_close_field(int(m.group('fid')))     
+        return True
     # Region tree shape patterns (near the bottom since they are infrequent)
     m = top_index_pat.match(line)
     if m is not None:
@@ -10098,6 +10498,7 @@ class State(object):
         assert self.top_level_uid is not None
         top_task = self.get_task(self.top_level_uid)
         # Perform the physical analysis on all the operations in program order
+        #if not top_task.perform_task_physical_verification(perform_checks):
         if not top_task.perform_task_physical_analysis(perform_checks):
             print("FAIL")
             return
@@ -10460,6 +10861,12 @@ class State(object):
             region.reset_physical_state(depth)
         for partition in self.partitions.itervalues():
             partition.reset_physical_state(depth)
+        # Definitely run the garbage collector here
+        gc.collect()
+
+    def reset_verification_state(self, depth):
+        for region in self.trees.itervalues():
+            region.reset_verification_state(depth)
         # Definitely run the garbage collector here
         gc.collect()
 
