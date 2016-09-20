@@ -47,7 +47,7 @@ namespace LegionRuntime {
 
     inline long long __sync_fetch_and_add(long long *ptr, long long value)
     {
-      long result;
+      long long result;
       asm volatile("lock; xaddq %0, %1"
           : "=r"(result), "=m"(*ptr)
           : "0"(value), "m"(*ptr)
