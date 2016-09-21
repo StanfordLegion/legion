@@ -2897,6 +2897,8 @@ std.sov = terralib.memoize(function(struct_type, width)
     local entry_type = entry[2] or entry.type
     if entry_type:isprimitive() then
       st.entries:insert{entry_field, vector(entry_type, width)}
+    elseif entry_type:isarray() then
+      st.entries:insert{entry_field, vector(entry_type.type, width)[entry_type.N]}
     else
       st.entries:insert{entry_field, std.sov(entry_type, width)}
     end
