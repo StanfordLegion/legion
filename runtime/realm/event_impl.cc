@@ -1491,7 +1491,7 @@ namespace Realm {
 	  get_runtime()->local_event_free_list->free_entry(this);
       } else {
 	// we're triggering somebody else's event, so the first thing to do is tell them
-	assert(trigger_node == gasnet_mynode());
+	assert(trigger_node == (int)gasnet_mynode());
 	// once we send this message, it's possible we get an update from the owner before
 	//  we take the lock a few lines below here (assuming somebody on this node had 
 	//  already subscribed), so check here that we're triggering a new generation
@@ -1855,7 +1855,7 @@ static void *bytedup(const void *data, size_t datalen)
         if(owner != gasnet_mynode()) {
 	  ID wait_id(wait_on);
 	  int wait_node = (wait_id.is_event() ? wait_id.event.creator_node : wait_id.barrier.creator_node);
-	  if(wait_node != gasnet_mynode()) {
+	  if(wait_node != (int)gasnet_mynode()) {
 	    // let deferral happen on owner node (saves latency if wait_on event
 	    //   gets triggered there)
 	    //printf("sending deferred arrival to %d for " IDFMT "/%d (" IDFMT "/%d)\n",

@@ -1239,7 +1239,7 @@ namespace Realm {
       // root node will be whoever owns the target proc
       int root = ID(target_proc).proc.owner_node;
 
-      if(gasnet_mynode() == root) {
+      if((int)gasnet_mynode() == root) {
 	// ROOT NODE
 
 	// step 1: receive wait_on from every node
@@ -1249,7 +1249,7 @@ namespace Realm {
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(int i = 0; i < gasnet_nodes(); i++) {
+	for(int i = 0; i < (int)gasnet_nodes(); i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
@@ -1323,7 +1323,7 @@ namespace Realm {
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(int i = 0; i < gasnet_nodes(); i++) {
+	for(int i = 0; i < (int)gasnet_nodes(); i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
@@ -1383,7 +1383,7 @@ namespace Realm {
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(int i = 0; i < gasnet_nodes(); i++) {
+	for(int i = 0; i < (int)gasnet_nodes(); i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
