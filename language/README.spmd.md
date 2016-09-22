@@ -11,11 +11,12 @@ This optimization requires [RDIR](https://github.com/StanfordLegion/rdir), a
 suite of dataflow-style optimizations for Regent. When installing Regent, make
 sure RDIR is enabled.
 
-SPMD-style execution can be applied to any control flow construct,
-with the following limitations.
+SPMD-style execution can be applied to any arbitrary nested control
+flow, with the following limitations.
 
-  * The leaves are `for` loops (numeric or over ispaces)
-  * All leaves have the same loop bounds
+  * The *leaves* (the innermost control flow constructs that
+    themselves contain no nested control flow) must be `for` loops
+  * All leaves must have the same loop bounds
   * The bodies of leaves each contain a single (?) task launch
       * There must be no loop-carried dependencies between iterations
       * Region arguments must be of the form `p[i]` where i is the loop index
