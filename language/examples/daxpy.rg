@@ -50,11 +50,11 @@ task main()
   fill(points.y, 2.0)
 
   for i = 0, chunks do
-    daxpy(points, 3.0)
+    daxpy(part[i], 3.0)
   end
 
   for i = 0, chunks do
-    check(points)
+    check(part[i])
   end
 
   c.printf("Done!\n")
