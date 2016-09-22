@@ -19,7 +19,7 @@ with the following limitations.
   * All leaves must have the same loop bounds
   * The bodies of leaves each contain a single (?) task launch
       * There must be no loop-carried dependencies between iterations
-      * Region arguments must be of the form `p[i]` where i is the loop index
+      * Region arguments must be of the form `p[i]` where `i` is the loop index
           * Note: You can simulate `p[f(i)]` by baking the function `f` into
             an aliased partition `q`
       * Partition arguments must be of the form `p[i]`
