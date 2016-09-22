@@ -2445,8 +2445,10 @@ namespace Legion {
         const FieldMask overlap = user_mask & event_users.user_mask;
         if (!overlap)
           continue;
+        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+          preconditions.find(pit->first);
 #ifndef LEGION_SPY
-        if (preconditions.find(pit->first) != preconditions.end())
+        if ((finder != preconditions.end()) && (!(overlap - finder->second)))
           continue;
 #endif
         if (event_users.single)
@@ -2454,8 +2456,6 @@ namespace Legion {
           if (has_local_precondition(event_users.users.single_user, usage,
                                      child_color, op_id, index))
           {
-            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-              preconditions.find(pit->first);
             if (finder == preconditions.end())
               preconditions[pit->first] = overlap;
             else
@@ -2474,10 +2474,11 @@ namespace Legion {
             if (has_local_precondition(it->first, usage,
                                        child_color, op_id, index))
             {
-              LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-                preconditions.find(pit->first);
               if (finder == preconditions.end())
+              {
                 preconditions[pit->first] = user_overlap;
+                finder = preconditions.find(pit->first);
+              }
               else
                 finder->second |= user_overlap;
             }
