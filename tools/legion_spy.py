@@ -4690,7 +4690,11 @@ class VerificationState(object):
         assert self.pending_reductions
         # Make sure a reduction was issued from each reduction instance
         for reduction_inst in self.pending_reductions:
-            pass
+            if perform_checks:
+                pass  
+            else:
+                  
+
         return True
 
     def perform_verification_registration(self, op, req, inst, perform_checks):
@@ -9235,6 +9239,7 @@ class PhysicalTraverser(object):
             if node.generation == self.generation:
                 return
             else:
+                assert node.generation < self.generation
                 node.generation = self.generation
         do_next = True
         if self.node_fn is not None:
@@ -9251,6 +9256,59 @@ class PhysicalTraverser(object):
                     self.visit_node(next_node)
         if self.post_node_fn is not None:
             self.post_node_fn(node, self)
+
+class VerificationTraverser(object):
+    def __init__(self, forwards, use_gen, generation,
+                 op_fn = None, post_op_fn = None,
+                 copy_fn = None, post_copy_fn = None,
+                 fill_fn = None, post_fill_fn = None):
+        self.forwards = forwards
+        self.use_gen = use_gen
+        self.generation = generation
+        self.op_fn = op_fn
+        self.post_op_fn = post_op_fn
+        self.copy_fn = copy_fn
+        self.post_copy_fn = post_copy_fn
+        self.fill_fn = fill_fn
+        self.post_fill_fn = post_fill_fn
+
+    def visit_node(self, node):
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                assert node.generation < self.generation
+                node.generation = self.generation
+        if isinstance(node, Operation):
+            if self.op_fn and not self.op_fn(node, self):
+                return
+            self.traverse_next(node)
+            if self.post_op_fn:
+                self.post_op_fn(node, self)
+        elif isinstance(node, RealmCopy):
+            if self.copy_fn and not self.copy_fn(node, self):
+                return
+            self.traverse_next(node)
+            if self.post_copy_fn:
+                self.post_copy_fn(node, self)
+        elif isinstance(node, RealmFill):
+            if self.fill_fn and not self.fill_fn(node, self):
+                return
+            self.traverse_next(node)
+            if self.post_fill_fn:
+                self.post_fill_fn(node, self)
+        else:
+            assert False # should never get here
+
+    def traverse_next(self, node):
+        if self.forwards:
+            if node.physical_outgoing:
+                for next_node in node.physical_outgoing:
+                    self.visit_node(next_node)
+        else:
+            if node.physical_incoming:
+                for next_next in node.physical_incoming:
+                    self.visit_node(next_node)
 
 class GraphPrinter(object):
     __slots__ = ['name', 'filename', 'out', 'depth', 'next_cluster_id']
