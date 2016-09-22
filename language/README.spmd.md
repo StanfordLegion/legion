@@ -5,14 +5,14 @@ under active research. As a result, the optimization has a number of
 limitations which it currently imposes on the source program.
 
 The hope is to lift these limitations over time, but please understand that
-this is research and thus some uncertainty is expected.
+this is research and thus some uncertainty as to the final outcomeis expected.
 
 This optimization requires [RDIR](https://github.com/StanfordLegion/rdir), a
 suite of dataflow-style optimizations for Regent. When installing Regent, make
 sure RDIR is enabled.
 
-SPMD-style execution can be applied to any arbitrary nested control
-flow, with the following limitations.
+Automatic SPMD execution can be applied to any arbitrary nested control flow,
+with the following limitations.
 
   * The *leaves* (the innermost control flow constructs that
     themselves contain no nested control flow) must be `for` loops
