@@ -37,7 +37,7 @@ where
 do
   __demand(__vectorize)
   for e in r do
-    var t = 0
+    var t : float
     for idx = 0, 10 do
       e.p1.v += t
       t = e.p2.v

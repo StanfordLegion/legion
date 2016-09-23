@@ -141,6 +141,7 @@ static inline float get_node_voltage(const RegionAccessor<AT,float> &priv,
   return 0.f;
 }
 
+#ifdef __SSE__
 template<typename AT_VAL, typename AT_PTR>
 static inline __m128 get_vec_node_voltage(ptr_t current_wire,
                                           const RegionAccessor<AT_VAL,float> &priv,
@@ -171,6 +172,7 @@ static inline __m128 get_vec_node_voltage(ptr_t current_wire,
   }
   return _mm_set_ps(voltages[3],voltages[2],voltages[1],voltages[0]);
 }
+#endif
 
 /*static*/
 bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
@@ -238,6 +240,8 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
 
   const int steps = piece.steps;
   unsigned index = 0;
+#ifdef __SSE__
+  // using SSE intrinsics, we can work on wires 4-at-a-time
   {
     __m128 temp_v[WIRE_SEGMENTS+1];
     __m128 temp_i[WIRE_SEGMENTS];
@@ -294,7 +298,8 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
       index += 4;
     }
   }
-  // Handle any leftover elements
+#endif
+  // Handle any leftover elements (or all of them, in the non-SSE case)
   while (index < piece.num_wires)
   {
     float temp_v[WIRE_SEGMENTS+1];
@@ -318,16 +323,16 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
     ptr_t in_ptr = soa_in_ptr.read(wire_ptr);
     PointerLocation in_loc = soa_in_loc.read(wire_ptr);
     temp_v[0] = 
-      get_node_voltage(fa_pvt_voltage, fa_shr_voltage, fa_ghost_voltage, in_loc, in_ptr);
+      get_node_voltage(soa_pvt_voltage, soa_shr_voltage, soa_ghost_voltage, in_loc, in_ptr);
     ptr_t out_ptr = soa_out_ptr.read(wire_ptr);
     PointerLocation out_loc = soa_out_loc.read(wire_ptr);
     temp_v[WIRE_SEGMENTS] = 
-      get_node_voltage(fa_pvt_voltage, fa_shr_voltage, fa_ghost_voltage, out_loc, out_ptr);
+      get_node_voltage(soa_pvt_voltage, soa_shr_voltage, soa_ghost_voltage, out_loc, out_ptr);
 
     // Solve the RLC model iteratively
-    float inductance = fa_inductance.read(wire_ptr);
-    float recip_resistance = 1.f/fa_resistance.read(wire_ptr);
-    float recip_capacitance = 1.f/fa_wire_cap.read(wire_ptr);
+    float inductance = soa_inductance.read(wire_ptr);
+    float recip_resistance = 1.f/soa_resistance.read(wire_ptr);
+    float recip_capacitance = 1.f/soa_wire_cap.read(wire_ptr);
     float dt = piece.dt;
     float recip_dt = 1.0/dt;
     for (int j = 0; j < steps; j++)

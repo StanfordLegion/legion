@@ -122,7 +122,7 @@ local terra init_cuda() : int32
     r = DriverAPI.cuCtxGetDevice(&d)
     assert(r == 0, "CUDA error in cuCtxGetDevice")
   else
-    var stderr = C.fdopen(2, "w")
+    r = DriverAPI.cuDeviceGet(&d, 0)
     assert(r == 0, "CUDA error in cuDeviceGet")
     r = DriverAPI.cuCtxCreate_v2(&cx, 0, d)
     assert(r == 0, "CUDA error in cuCtxCreate_v2")

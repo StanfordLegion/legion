@@ -218,7 +218,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
   {
     // Print out how many processors there are and each
     // of their kinds.
-    printf("There are %ld processors:\n", all_procs.size());
+    printf("There are %zd processors:\n", all_procs.size());
     for (std::set<Processor>::const_iterator it = all_procs.begin();
           it != all_procs.end(); it++)
     {
@@ -260,7 +260,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
     // on the target architecture and print out their info.
     std::set<Memory> all_mems;
     machine.get_all_memories(all_mems);
-    printf("There are %ld memories:\n", all_mems.size());
+    printf("There are %zd memories:\n", all_mems.size());
     for (std::set<Memory>::const_iterator it = all_mems.begin();
           it != all_mems.end(); it++)
     {
@@ -271,28 +271,28 @@ AdversarialMapper::AdversarialMapper(Machine m,
         // RDMA addressable memory when running with GASNet
         case Memory::GLOBAL_MEM:
           {
-            printf("  GASNet Global Memory ID " IDFMT " has %ld KB\n", 
+            printf("  GASNet Global Memory ID " IDFMT " has %zd KB\n", 
                     it->id, memory_size_in_kb);
             break;
           }
         // DRAM on a single node
         case Memory::SYSTEM_MEM:
           {
-            printf("  System Memory ID " IDFMT " has %ld KB\n",
+            printf("  System Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Pinned memory on a single node
         case Memory::REGDMA_MEM:
           {
-            printf("  Pinned Memory ID " IDFMT " has %ld KB\n",
+            printf("  Pinned Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // A memory associated with a single socket
         case Memory::SOCKET_MEM:
           {
-            printf("  Socket Memory ID " IDFMT " has %ld KB\n",
+            printf("  Socket Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
@@ -300,56 +300,56 @@ AdversarialMapper::AdversarialMapper(Machine m,
         // all GPUs on a single node
         case Memory::Z_COPY_MEM:
           {
-            printf("  Zero-Copy Memory ID " IDFMT " has %ld KB\n",
+            printf("  Zero-Copy Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // GPU framebuffer memory for a single GPU
         case Memory::GPU_FB_MEM:
           {
-            printf("  GPU Frame Buffer Memory ID " IDFMT " has %ld KB\n",
+            printf("  GPU Frame Buffer Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Disk memory on a single node
         case Memory::DISK_MEM:
           {
-            printf("  Disk Memory ID " IDFMT " has %ld KB\n",
+            printf("  Disk Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // HDF framebuffer memory for a single GPU
         case Memory::HDF_MEM:
           {
-            printf("  HDF Memory ID " IDFMT " has %ld KB\n",
+            printf("  HDF Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // File memory on a single node
         case Memory::FILE_MEM:
           {
-            printf("  File Memory ID " IDFMT " has %ld KB\n",
+            printf("  File Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L3 cache
         case Memory::LEVEL3_CACHE:
           {
-            printf("  Level 3 Cache ID " IDFMT " has %ld KB\n",
+            printf("  Level 3 Cache ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L2 cache
         case Memory::LEVEL2_CACHE:
           {
-            printf("  Level 2 Cache ID " IDFMT " has %ld KB\n",
+            printf("  Level 2 Cache ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L1 cache
         case Memory::LEVEL1_CACHE:
           {
-            printf("  Level 1 Cache ID " IDFMT " has %ld KB\n",
+            printf("  Level 1 Cache ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
@@ -372,7 +372,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
     // using the 'get_visible_memories' method on the machine.
     std::set<Memory> vis_mems;
     machine.get_visible_memories(local_proc, vis_mems);
-    printf("There are %ld memories visible from processor " IDFMT "\n",
+    printf("There are %zd memories visible from processor " IDFMT "\n",
             vis_mems.size(), local_proc.id);
     for (std::set<Memory>::const_iterator it = vis_mems.begin();
           it != vis_mems.end(); it++)

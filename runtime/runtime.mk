@@ -271,9 +271,10 @@ endif
 
 # general low-level doesn't use HDF by default
 USE_HDF ?= 0
+HDF_LIBNAME ?= hdf5
 ifeq ($(strip $(USE_HDF)), 1)
-  CC_FLAGS      += -DUSE_HDF
-  LEGION_LD_FLAGS      += -lhdf5
+  CC_FLAGS      += -DUSE_HDF -I/usr/include/hdf5/serial
+  LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
 endif
 
 SKIP_MACHINES= titan% daint%
@@ -307,6 +308,9 @@ CC_FLAGS        += -Wall -Wno-strict-overflow
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 endif
+
+# fix for some systems that need this for printf formatting macros
+CC_FLAGS	+= -D__STDC_FORMAT_MACROS
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 

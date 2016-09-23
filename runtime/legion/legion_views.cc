@@ -2681,20 +2681,24 @@ namespace Legion {
         }
 #endif
         const EventUsers &event_users = pit->second;
-        const FieldMask overlap = user_mask & event_users.user_mask;
+        FieldMask overlap = user_mask & event_users.user_mask;
         if (!overlap)
           continue;
+        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+          preconditions.find(pit->first);
 #ifndef LEGION_SPY
-        if (preconditions.find(pit->first) != preconditions.end())
-          continue;
+        if (finder != preconditions.end())
+        {
+          overlap -= finder->second;
+          if (!overlap)
+            continue;
+        }
 #endif
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
                                      child_color, op_id, index, origin_node))
           {
-            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-              preconditions.find(pit->first);
             if (finder == preconditions.end())
               preconditions[pit->first] = overlap;
             else
@@ -2707,16 +2711,18 @@ namespace Legion {
                 it = event_users.users.multi_users->begin(); it !=
                 event_users.users.multi_users->end(); it++)
           {
-            const FieldMask user_overlap = user_mask & it->second;
+            const FieldMask user_overlap = overlap & it->second;
             if (!user_overlap)
               continue;
             if (has_local_precondition(it->first, usage, child_color, 
                                        op_id, index, origin_node))
             {
-              LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-                preconditions.find(pit->first);
               if (finder == preconditions.end())
+              {
                 preconditions[pit->first] = user_overlap;
+                // Needed for when we go around the loop again
+                finder = preconditions.find(pit->first);
+              }
               else
                 finder->second |= user_overlap;
             }

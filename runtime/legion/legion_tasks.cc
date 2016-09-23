@@ -5699,7 +5699,7 @@ namespace Legion {
       {
         if (output.target_procs.size() > 1)
         {
-          log_run.warning("Ignoring suprious additional target processors "
+          log_run.warning("Ignoring spurious additional target processors "
                           "requested in 'map_task' for task %s (ID %lld) "
                           "by mapper %s because task is part of a must "
                           "epoch launch.", get_task_name(), get_unique_id(),

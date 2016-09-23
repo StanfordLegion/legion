@@ -6456,35 +6456,7 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
-    std.assert(ispace_type.dim == 0 or not ispace_type.index_type.fields,
-      "multi-dimensional index spaces are not supported yet")
-
-    local cuda_opts = cx.task_meta:getcuda()
-    -- wrap for-loop body as a terra function
-    local N = 1 --cuda_opts.unrolling_factor
-    local T = 32
-    local threadIdX = cudalib.nvvm_read_ptx_sreg_tid_x
-    local blockIdX = cudalib.nvvm_read_ptx_sreg_ctaid_x
-    local blockDimX = cudalib.nvvm_read_ptx_sreg_ntid_x
-    local base = terralib.newsymbol(uint32, "base")
-    local count = terralib.newsymbol(c.size_t, "count")
-    local tid = terralib.newsymbol(c.size_t, "tid")
-    local ptr_init
-    if ispace_type.dim == 0 then
-      ptr_init = quote
-        if [tid] >= [count] + [base] then return end
-        var [symbol] = [symbol.type] {
-          __ptr = c.legion_ptr_t {
-            value = [tid]
-          }
-        }
-      end
-    else
-      ptr_init = quote
-        if [tid] >= [count] + [base] then return end
-        var [symbol] = [symbol.type] { __ptr = [tid] }
-      end
-    end
+    -- Find variables defined from the outer scope
     local undefined = {}
     local defined = { [node.symbol] = true }
     local accesses = {}
@@ -6524,7 +6496,10 @@ function codegen.stat_for_list(cx, node)
     ast.traverse_node_prepostorder(collect_symbol_pre,
                                    collect_symbol_post,
                                    node.block)
+
+    -- Base pointers need a special treatment to find them
     local base_pointers = {}
+    local strides = {}
     for node, _ in pairs(accesses) do
       local value_type = std.as_read(node.expr_type)
       node.expr_type:bounds():map(function(region)
@@ -6534,57 +6509,150 @@ function codegen.stat_for_list(cx, node)
           function(field_path) return prefix .. field_path end)
         absolute_field_paths:map(function(field_path)
           base_pointers[cx:region(region):base_pointer(field_path)] = true
+          local stride = cx:region(region):stride(field_path)
+          for idx = 2, #stride do strides[stride[idx]] = true end
         end)
       end)
     end
+
+    -- Now wrap the body as a terra function
+
+    -- FIXME: These parameters should be customizable
+    local N = 1
+    local T = 64
+
+    local indices = terralib.newlist()
+    local lower_bounds = terralib.newlist()
+    local upper_bounds = terralib.newlist()
+    local body
+    if ispace_type:is_opaque() then
+      indices:insert(terralib.newsymbol(c.coord_t, "ptr"))
+      lower_bounds:insert(terralib.newsymbol(c.coord_t, "lo1"))
+      upper_bounds:insert(terralib.newsymbol(c.coord_t, "hi1"))
+      body = quote
+        var [symbol] = [symbol.type]{
+          __ptr = c.legion_ptr_t { value = [ indices[1] ] }
+        }
+        do
+          [block]
+        end
+      end
+    else
+      for i = 1, ispace_type.dim do
+        lower_bounds:insert(terralib.newsymbol(c.coord_t, "lo" .. tostring(i)))
+        upper_bounds:insert(terralib.newsymbol(c.coord_t, "hi" .. tostring(i)))
+      end
+      local fields = ispace_type.index_type.fields
+      if fields then
+        indices:insertall(
+          fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end))
+        body = quote
+          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ [indices] } }
+          do
+            [block]
+          end
+        end
+        for i = 2, ispace_type.dim do
+          body = quote
+            for [ indices[i] ] = [ lower_bounds[i] ], [ upper_bounds[i] ] + 1 do
+              [body]
+            end
+          end
+        end
+      else
+        indices:insert(terralib.newsymbol(c.coord_t, "idx"))
+        body = quote
+          var [symbol] = [symbol.type]{ __ptr = [ indices[1] ] }
+          do
+            [block]
+          end
+        end
+      end
+    end
+
+    local tid = terralib.newsymbol(c.size_t, "tid")
+    body = quote
+      do
+        var [ indices[1] ] = [tid] + [ lower_bounds[1] ]
+        if [ indices[1] ] > [ upper_bounds[1] ] then return end
+        [body]
+      end
+    end
+    for i = 2, N do
+      body = quote
+        [body]
+        [tid] = [tid] + T
+        [body]
+      end
+    end
+
+    local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
+    local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
+    local bid_x   = cudalib.nvvm_read_ptx_sreg_ctaid_x
+    local n_bid_x = cudalib.nvvm_read_ptx_sreg_ctaid_x
+
+    local tid_y   = cudalib.nvvm_read_ptx_sreg_tid_y
+    local n_tid_y = cudalib.nvvm_read_ptx_sreg_ntid_y
+    local bid_y   = cudalib.nvvm_read_ptx_sreg_ctaid_y
+    local n_bid_y = cudalib.nvvm_read_ptx_sreg_ctaid_y
+
+    local tid_z   = cudalib.nvvm_read_ptx_sreg_tid_z
+    local n_tid_z = cudalib.nvvm_read_ptx_sreg_ntid_z
+    local bid_z   = cudalib.nvvm_read_ptx_sreg_ctaid_z
+    local n_bid_z = cudalib.nvvm_read_ptx_sreg_ctaid_z
+
+    body = quote
+      var local_tid = tid_x() + tid_y() * n_tid_x() + tid_z() * n_tid_y() * n_tid_x()
+      var global_offset = bid_x() + bid_y() * n_bid_x() + bid_z() * n_bid_y() * n_bid_x()
+      var [tid] = local_tid + global_offset
+      [body]
+    end
+
     local args = terralib.newlist()
     for base_pointer, _ in pairs(base_pointers) do args:insert(base_pointer) end
+    for stride, _ in pairs(strides) do args:insert(stride) end
     for symbol, _ in pairs(undefined) do args:insert(symbol:getsymbol()) end
-    args:insert(base)
-    args:insert(count)
+    args:insertall(lower_bounds)
+    args:insertall(upper_bounds)
     args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
 
-    local kernel_body = terralib.newlist()
-    kernel_body:insert(quote
-      var [tid] = [base] + (threadIdX() + [N] * blockIdX() * blockDimX())
-    end)
-    for i = 1, N do
-      kernel_body:insert(quote
-        [ptr_init];
-        [block];
-        [tid] = [tid] + [T]
-      end)
-    end
+    local terra kernel([args]) [body] end
 
-    local terra kernel([args])
-      [kernel_body]
-    end
-
-    local task = cx.task_meta
-
-    -- register the function for JIT compiling PTX
-    local kernel_id = task:addcudakernel(kernel)
+    -- Register the kernel function to JIT
+    local kernel_id = cx.task_meta:addcudakernel(kernel)
 
     -- kernel launch
+    local count = terralib.newsymbol(c.size_t, "count")
     local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args, N, T)
 
-    if ispace_type.dim == 0 then
+    if ispace_type:is_opaque() then
       return quote
         [actions]
         while iterator_has_next([it]) do
           var [count] = 0
-          var [base] = iterator_next_span([it], &count, -1).value
+          var [ lower_bounds[1] ] = iterator_next_span([it], &[count], -1).value
+          var [ upper_bounds[1] ] = [ lower_bounds[1] ] + [count] - 1
           [kernel_call]
         end
         [cleanup_actions]
       end
     else
+      local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
+      local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
+      local rect = terralib.newsymbol(rect_type, "rect")
+      local bounds_setup = terralib.newlist()
+      for idx = 1, ispace_type.dim do
+        bounds_setup:insert(quote
+          var [ lower_bounds[idx] ], [ upper_bounds[idx] ] =
+            [rect].lo.x[ [idx - 1] ], [rect].hi.x[ [idx - 1] ]
+        end)
+      end
       return quote
         [actions]
-        var rect = c.legion_domain_get_rect_1d([domain])
-        var [count] = rect.hi.x[0] - rect.lo.x[0] + 1
-        var [base] = rect.lo.x[0]
-        [kernel_call]
+        var [rect] = [domain_get_rect]([domain])
+        [bounds_setup]
+        var [count] = [rect].hi.x[0] - [rect].lo.x[0] + 1
+        if [count] > 0 then [kernel_call] end
         [cleanup_actions]
       end
     end
@@ -6697,27 +6765,65 @@ function codegen.stat_for_list_vectorized(cx, node)
   else
     local fields = ispace_type.index_type.fields
     if fields then
-      -- XXX: multi-dimensional index spaces are not supported yet
+      local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
       local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-      local rect = terralib.newsymbol("rect")
-      local index = fields:map(function(field) return terralib.newsymbol(tostring(field)) end)
+      local rect = terralib.newsymbol(rect_type, "rect")
+      local index = fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end)
+      local base = terralib.newsymbol(c.coord_t, "base")
+      local count = terralib.newsymbol(c.coord_t, "base")
+      local start = terralib.newsymbol(c.coord_t, "base")
+      local stop = terralib.newsymbol(c.coord_t, "base")
+      local final = terralib.newsymbol(c.coord_t, "base")
+
       local body = quote
         var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
         do
-          [block]
+          [orig_block]
         end
       end
-      for i = ispace_type.dim, 1, -1 do
+      body = quote
+        var [ index[1] ] = base
+        if count >= [vector_width] then
+          while [ index[1] ] < [start] do
+            var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
+            do
+              [orig_block]
+            end
+            [ index[1] ] = [ index[1] ] + 1
+          end
+          while [ index[1] ] < [stop] do
+            var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
+            do
+              [block]
+            end
+            [ index[1] ] = [ index[1] ] + [vector_width]
+          end
+        end
+        while [ index[1] ] < [final] do
+          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
+          do
+            [orig_block]
+          end
+          [ index[1] ] = [ index[1] ] + 1
+        end
+      end
+      for i = 2, ispace_type.dim do
         local rect_i = i - 1 -- C is zero-based, Lua is one-based
         body = quote
-          for [ index[i] ] = rect.lo.x[rect_i], rect.hi.x[rect_i] + 1 do
-            [orig_block]
+          for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+            [body]
           end
         end
       end
       return quote
         [actions]
         var [rect] = [domain_get_rect]([domain])
+        var alignment = [vector_width]
+        var [base] = [rect].lo.x[0]
+        var [count] = [rect].hi.x[0] - [rect].lo.x[0] + 1
+        var [start] = ([base] + alignment - 1) and not (alignment - 1)
+        var [stop] = ([base] + [count]) and not (alignment - 1)
+        var [final] = [base] + [count]
         [body]
         [cleanup_actions]
       end
