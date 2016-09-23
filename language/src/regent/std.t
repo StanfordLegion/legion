@@ -1978,7 +1978,7 @@ function std.generate_conditional_metamethod(ty, method)
   return macro(function(a, b)
     if a:gettype() == b:gettype() then
       return generate_conditional_metamethod_body(ty, method, a, b)
-    else
+    elseif method == "__le" or method == "__lt" then
       local combinators = conditional_combinators[method]
       local lhs = generate_conditional_metamethod_body(ty, method, `([b].lo), a)
       local rhs = generate_conditional_metamethod_body(ty, method, a, `([b].hi))
