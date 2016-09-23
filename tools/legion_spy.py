@@ -4608,6 +4608,7 @@ class VerificationState(object):
         self.previous_instances = set()
         self.valid_instances = set()
         self.pending_reductions = set()
+        return True
 
     def perform_physical_verification(self, op, req, inst, perform_checks, 
                                       perform_registration):
@@ -4671,16 +4672,49 @@ class VerificationState(object):
                 self.valid_instances.add(inst)
         return True
 
+    def perform_copy(self, src, dst, op, req):
+        copy = op.find_or_create_copy(req, self.field, src, dst)
+        # Update the source instance
+        src_preconditions = src.find_verification_copy_dependences(
+            self.depth, self.field, self.point, op, req.index, True, 0)
+        for pre in src_preconditions:
+            pre.physical_outgoing.add(copy)
+            copy.physical_incoming.add(pre)
+        src.add_verification_copy_user(self.depth, self.field, self.point,
+                                       copy, req.index, True, 0)
+        # Then do the destination instance
+        dst_preconditions = dst.find_verification_copy_dependences(
+            self.depth, self.field, self.point, op, req.index, False, src.redop)
+        for pre in dst_preconditions:
+            pre.physical_outgoing.add(copy)
+            copy.physical_incoming.add(pre)
+        dst.add_verification_copy_user(self.depth, self.field, self.point,
+                                       copy, req.index, False, src.redop)
+
     def issue_update_copies(self, inst, op, req, perform_checks, error_str):
         assert inst not in self.valid_instances
-        # Check to see if it was valid from before
-        if self.pending_fill:
-            # If we have a pending fill, that needs to be done first
+        if perform_checks:
             pass
-        elif inst not in self.previous_instances:
-            # Otherwise no pending fill, see if we have to issue a copy
-            # to bring the instance up to date from the previous write
-            pass
+        else:
+            # First see if we have a valid instance we can copy from  
+            if self.valid_instances:
+                src = next(iter(self.valid_instances))
+                self.perform_copy(src, inst, op, req)
+            # If we have a fill operation, we can just do that
+            elif self.pending_fill:
+                fill = op.find_or_create_fill(req, self.field, inst)
+                preconditions = inst.find_verification_copy_dependences(
+                    self.depth, self.field, self.point, op, req.index, False, 0)
+                for pre in preconditions:
+                    pre.physical_outgoing.add(fill)
+                    fill.physical_incoming.add(pre)
+                inst.add_verification_copy_user(self.depth, self.field, 
+                    self.point, fill, req.index, False, 0)
+            # Otherwise we'll only have previous instances if there are reductions
+            elif self.previous_instances and inst not in self.previous_instances:
+                assert self.pending_reductions
+                src = next(iter(self.previous_instances)) 
+                self.perform_copy(src, inst, op, req)
         # If there are any pending reductions, we must issue those now too
         if self.pending_reductions:
             return self.issue_update_reductions(inst, op, req, perform_checks, error_str)
@@ -4693,8 +4727,7 @@ class VerificationState(object):
             if perform_checks:
                 pass  
             else:
-                  
-
+                self.perform_copy(reduction_inst, inst, op, req)
         return True
 
     def perform_verification_registration(self, op, req, inst, perform_checks):
@@ -4711,8 +4744,8 @@ class VerificationState(object):
                 return False
         else:
             for other in preconditions:
-              op.physical_incoming.add(other)
-              other.physical_outgoing.add(op)
+                op.physical_incoming.add(other)
+                other.physical_outgoing.add(op)
         # Record ourselves as a user for this instance
         inst.add_verification_user(self.depth, self.field, self.point, op, req)
         return True
@@ -5433,6 +5466,52 @@ class Operation(object):
             return self.index_owner.find_generated_fill(field, region, dst, intersect)
         return None
 
+    def find_or_create_fill(self, req, field, dst):
+        # Run through our copies and see if we can find one that matches
+        if self.realm_fills:
+            for fill in self.realm_fills:
+                if req.logical_node is not fill.region:
+                    continue
+                if field.fid not in fill.fields:
+                    continue
+                idx = fill.fields.index(field.fid)
+                if dst is not fill.dsts[idx]:
+                    continue
+                return fill
+        else:
+            self.realm_fills = list()
+        fill = self.state.create_fill(self)
+        fill.set_region(req.logical_node)
+        fill.add_field(field.fid, dst)
+        self.realm_fills.append(fill)
+        return fill
+
+    def find_or_create_copy(self, req, field, src, dst):
+        # Run through our copies and see if we can find one that matches
+        if self.realm_copies:
+            for copy in self.realm_copies:
+                # See if the regions are the same
+                if req.logical_node is not copy.region:
+                    continue
+                if field.fid not in copy.src_fields:
+                    continue
+                idx = copy.src_fields.index(field.fid)
+                if field.fid != copy.dst_fields[idx]:
+                    continue
+                if src is not copy.srcs[idx]:
+                    continue
+                if dst is not copy.dsts[idx]:
+                    continue
+                return copy
+        else:
+            self.realm_copies = list()
+        # If we get here we have to make our copy
+        copy = self.state.create_copy(self)
+        copy.set_region(req.logical_node)
+        copy.add_field(field.fid, src, field.fid, dst, src.redop)
+        self.realm_copies.append(copy)
+        return copy
+
     def perform_cycle_check(self):
         def traverse_node(node, traverser):
             if node is traverser.origin:
@@ -6096,7 +6175,23 @@ class Operation(object):
                         print('    '+str(fill)+' was unnecessary')
 
     def verify_copy_requirements(self, src_idx, src_req, dst_idx, dst_req, perform_checks):
-        # TODO Verification
+        src_mappings = self.find_mapping(src_index, src_req.parent)
+        dst_mappings = self.find_mapping(dst_index, dst_req.parent)
+        assert self.context
+        src_depth = self.context.find_enclosing_context_depth(src_req, 
+                                            src_req.restricted_fields)
+        dst_depth = self.context.find_enclosing_context_depth(dst_req,
+                                            dst_req.restricted_fields)
+        assert len(src_req.fields) == len(dst_req.fields)
+        for fidx in range(len(src_req.fields)):
+            src_field = src_req.fields[fidx]
+            dst_field = dst_req.fields[fidx]
+            assert src_field.fid in src_mappings
+            assert dst_field.fid in dst_mappings
+            src_inst = src_mappings[src_field.fid]
+            dst_inst = dst_mappings[dst_field.fid]
+            assert not dst_inst.is_virtual()
+            is_reduce = dst_req.is_reduce()
         return True
 
     def verify_fill_requirement(self, index, req, perform_checks):
@@ -6168,7 +6263,7 @@ class Operation(object):
         if self.kind == INDEX_TASK_KIND:
             assert self.points is not None
             for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
-                if not point.op.perform_op_physical_analysis(perform_checks):
+                if not point.op.perform_op_physical_verification(perform_checks):
                     return False
             return True
         prefix = ''
@@ -6203,17 +6298,19 @@ class Operation(object):
             # Only post close ops here
             if self.is_close():
                 assert self.kind == POST_CLOSE_OP_KIND
-            for index,req, in self.reqs.iteritems():
-                if not self.verify_physical_requirement(index, req, perform_checks):
-                    return False
+            if self.reqs:
+                for index,req, in self.reqs.iteritems():
+                    if not self.verify_physical_requirement(index, req, perform_checks):
+                        return False
             if self.kind == SINGLE_TASK_KIND:
                 # We now need to do the registration for our region
                 # requirements since we didn't do it as part of the 
                 # normal physical analysis
-                for index,req, in self.reqs.iteritems():
-                    if not self.perform_verification_registration(index, req, 
-                                                                  perform_checks):
-                        return False
+                if self.reqs:
+                    for index,req, in self.reqs.iteritems():
+                        if not self.perform_verification_registration(index, req, 
+                                                                      perform_checks):
+                            return False
                 # If we are not a leaf task, go down the task tree
                 if self.task is not None:
                     if not self.task.perform_task_physical_verification(perform_checks):
@@ -7798,7 +7895,7 @@ class Instance(object):
         users = self.get_verification_users(depth, field, point)
         users.append(PointUser(op, req.index, req.priv, req.coher, req.redop))
 
-    def add_copy_user(self, depth, field, point, op, index, reading, redop):
+    def add_verification_copy_user(self, depth, field, point, op, index, reading, redop):
         assert not self.is_virtual()
         assert op.is_realm_operation()
         users = self.get_verification_users(depth, field, point)
@@ -10716,8 +10813,8 @@ class State(object):
         assert self.top_level_uid is not None
         top_task = self.get_task(self.top_level_uid)
         # Perform the physical analysis on all the operations in program order
-        #if not top_task.perform_task_physical_verification(perform_checks):
-        if not top_task.perform_task_physical_analysis(perform_checks):
+        if not top_task.perform_task_physical_verification(perform_checks):
+            #if not top_task.perform_task_physical_analysis(perform_checks):
             print("FAIL")
             return
         print("Pass")
