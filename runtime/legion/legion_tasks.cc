@@ -8579,21 +8579,7 @@ namespace Legion {
     bool IndividualTask::early_map_task(void)
     //--------------------------------------------------------------------------
     {
-      // For individual tasks we always early map restricted regions
-      std::vector<unsigned> early_map_indexes;
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (regions[idx].is_restricted())
-          early_map_indexes.push_back(idx);
-      }
-      if (!early_map_indexes.empty())
-      {
-        bool result = early_map_regions(map_applied_conditions, 
-                                        early_map_indexes);
-        if (!acquired_instances.empty())
-          release_acquired_instances(acquired_instances);
-        return result;
-      }
+      // Nothing to do for now
       return true;
     }
 
@@ -11344,7 +11330,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         const RegionRequirement &req = regions[idx];
-        if (req.is_restricted() || req.must_premap())
+        if (req.must_premap())
           early_map_indexes.push_back(idx);
       }
       if (!early_map_indexes.empty())
