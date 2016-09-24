@@ -4579,9 +4579,253 @@ class PhysicalState(object):
                                   op=reduction, index=index, reading=False, redop=src.redop)
         return True
 
+class VerificationTraverser(object):
+    def __init__(self, state, inst, op, req, error_str):
+        self.state = state
+        self.target = inst
+        self.op = op
+        self.req = req
+        self.error_str = error_str
+        if state.pending_reductions:
+            self.found_dataflow_path = inst in state.previous_instances
+        else:
+            assert inst not in state.valid_instances
+            self.found_dataflow_path = False
+        if not self.found_dataflow_path:
+            self.dataflow_stack = list()
+            # If there are reductions we can't add the instance to 
+            # the stack until we've gone through a reduction
+            if not state.pending_reductions:
+                self.dataflow_stack.append(inst)    
+        self.observed_reductions = set()
+        self.failed_analysis = False
+        self.tree = state.tree
+        self.field = state.field
+        self.depth = state.depth
+        self.point = state.point
+        self.generation = op.state.get_next_traversal_generation()
+
+    def visit_node(self, node):
+        if node.generation == self.generation:
+            return
+        else:
+            assert node.generation < self.generation
+            node.generation = self.generation
+        if isinstance(node, Operation):
+            if not self.visit_operation(node):
+                return
+            self.traverse_node(node)
+        elif isinstance(node, RealmCopy):
+            if not self.visit_copy(node):
+                return
+            self.traverse_node(node)
+            self.post_visit_copy(node)
+        elif isinstance(node, RealmFill):
+            if not self.visit_fill(node):
+                return
+            self.traverse_node(node)
+        else:
+            assert False # should never get here
+
+    def traverse_node(self, node):
+        if node.physical_incoming:
+            for next_node in node.physical_incoming:
+                self.visit_node(next_node)
+                if self.verified() or self.failed_analysis:
+                    break
+
+    def visit_operation(self, op):
+        # For now we don't traverse through other operations
+        # We may need to change this for read only cases
+        return False
+
+    def visit_copy(self, copy):
+        # Quick checks to see if we can skip it
+        # If it's not the same tree, we can't go through it
+        if copy.region.tree_id != self.tree.tree_id:
+            return False
+        # Same tree, but doesn't have our point, we can still go through
+        # if we have seen all our reductions (e.g. we have a dataflow stack)
+        # and the copy contains our field and target
+        if not copy.region.get_point_set().has_point(self.point) or \
+            (copy.intersect and
+                not copy.intersect.get_point_set().has_point(self.point)):
+            if not self.found_dataflow_path and self.dataflow_stack and \
+                self.field in copy.dst_fields and \
+                copy.dsts[copy.dst_fields.index(self.field)] is self.dataflow_stack[-1]:
+                return True
+            return False
+        # Check to see if this is a reduction copy or not
+        if 0 in copy.redops:
+            # Normal copy
+            # See if we need to do the dataflow check
+            if not self.found_dataflow_path and self.dataflow_stack:
+                if self.field in copy.dst_fields and \
+                    copy.dsts[copy.dst_fields.index(self.field)] is \
+                       self.dataflow_stack[-1]:
+                    # Traverse the dataflow path
+                    src = copy.srcs[copy.dst_fields.index(self.field)]
+                    # See if the source is a valid instance or a
+                    # previous instance in the presence of pending reductions
+                    if not self.state.pending_reductions:
+                        if src in self.state.valid_instances:
+                            self.found_dataflow_path = True
+                            self.perform_copy_analysis(copy, src, 
+                                          self.dataflow_stack[-1])
+                        else:
+                            # Push it on the stack and continue traversal
+                            self.dataflow_stack.append(src)
+                            return True
+                    else:
+                        if src in self.state.previous_instances:
+                            self.found_dataflow_path = True             
+                            self.perform_copy_analysis(copy, src,
+                                          self.dataflow_stack[-1])
+                        else:
+                            # Push it on the stack and continue traversal
+                            self.dataflow_stack.append(src)
+                            return True
+        else:
+            # Reduction copy
+            if self.field in copy.dst_fields and \
+                copy.dsts[copy.dst_fields.index(self.field)] is self.target:
+                src = copy.srcs[copy.dst_fields.index(self.field)]
+                assert src.redop != 0
+                assert src in self.state.pending_reductions
+                self.observed_reductions.add(src)
+                # See if we still need the dataflow path
+                if self.found_dataflow_path:
+                    # Already have the dataflow path, so just aanalysis the copy
+                    self.perform_copy_analysis(copy, src, self.target)
+                else:
+                    # Otherwise we can now push the target on the stack
+                    self.dataflow_stack.append(self.target)
+                    return True
+        return False
+
+    def post_visit_copy(self, copy):
+        # If this was just something we traversed through then 
+        # there is nothing to do on the way back
+        if not copy.region.get_point_set.has_point(self.point) or \
+            not copy.intersect or \
+            not copy.intersect.get_point_set().has_point(self.point):
+            return
+        if self.failed_analysis:
+            self.dataflow_stack.pop()
+            return
+        if 0 in copy.redops:
+            # Normal copy, definitely do the analysis if this is part
+            # of the analysis
+            if copy.region.get_point_set().has_point(self.point) and \
+                self.found_datflow_path and (not copy.intersect or 
+                    copy.intersect.get_point_set().has_point(self.point)): 
+                assert len(self.dataflow_stack) > 1
+                # Perform the copy analysis
+                self.perform_copy_analysis(copy, self.dataflow_stack[-1], 
+                                           self.dataflow_stack[-2])
+        else:
+            # Perform the reduction analysis if we found a path
+            if self.found_dataflow_path:
+                src = copy.srcs[copy.dst_fields.index(self.field)]
+                self.perform_copy_analysis(copy, src, self.target)
+        # Always pop our instance off the stack
+        self.dataflow_stack.pop()
+
+    def perform_copy_analysis(self, copy, src, dst):
+        copy.analyzed = True
+        if copy.reachable_cache is None:
+            copy.reachable_cache = set()
+            copy.get_physical_reachable(copy.reachable_cache, False)
+        src_preconditions = src.find_verification_copy_dependences(self.depth,
+            self.field, self.point, self.op, self.req.index, True, 0)
+        for pre in src_preconditions:
+            if pre not in copy.reachable_cache:
+                print("ERROR: Missing source precondition for "+str(copy)+
+                    " on field "+str(self.field)+" for op "+self.error_str+
+                    " on "+str(pre))
+                self.failed_analysis = True
+                if self.op.state.assert_on_error:
+                    assert False
+                return
+        dst_preconditions = dst.find_verification_copy_dependences(self.depth,
+            self.field, self.point, self.op, self.req.index, False, src.redop)
+        for pre in dst_preconditions:
+            if pre not in copy.reachable_cache:
+                print("ERROR: Missing destination precondition for "+str(copy)+
+                    " on field "+str(self.field)+" for op "+self.error_str+
+                    " on "+str(pre))
+                self.failed_analysis = True
+                if self.op.state.assert_on_error:
+                    assert False
+                return
+        src.add_verification_copy_user(self.depth, self.field, self.point, 
+                                       copy, self.req.index, True, 0)
+        dst.add_verification_copy_user(self.depth, self.field, self.point,
+                                       copy, self.req.index, False, src.redop)
+
+    def visit_fill(self, fill):
+        # Quick checks to see if we can skip it
+        if fill.region.tree_id != self.tree.tree_id:
+            return False
+        # See if this fill is for the current target
+        if not self.found_dataflow_path and self.dataflow_stack and \
+              self.field in fill.fields and \
+              fill.dsts[fill.fields.index(self.field)] is self.dataflow_stack[-1]:
+            # If we don't have the point we can continue through
+            if not fill.region.get_point_set().has_point(self.point) and \
+                (not fill.intersect or \
+                  not fill.intersect.get_point_set().has_point(self.point)):
+                return True
+            assert self.state.pending_fill
+            self.found_dataflow_path = True
+            fill.analyzed = True
+            # Perform the fill analysis
+            if fill.reachable_cache is None:
+                fill.reachable_cache = set()
+                fill.get_physical_reachable(fill.reachable_cache, False)
+            dst = fill.dsts[fill.fields.index(self.field)]
+            preconditions = dst.find_verification_copy_dependences(self.depth,
+                self.field, self.point, self.op, self.req.index, False, 0)
+            for pre in preconditions:
+                if pre not in fill.reachable_cache:
+                    print("ERROR: Missing destination precondition for "+
+                        str(fill)+" on field "+str(self.field)+" for op "+
+                        self.error_str+" on "+str(pre))
+                    self.failed_analysis = True
+                    if self.op.state.assert_on_error:
+                        assert False
+                    break
+            dst.add_verification_copy_user(self.depth, self.field, self.point,
+                                           fill, self.req.index, False, 0)
+        return False
+
+    def verified(self, last = False):
+        if self.failed_analysis:
+            if last and self.op.state.assert_on_error:
+                assert False
+            return False
+        # If we didn't have a dataflow path then we're done
+        if not self.found_dataflow_path:
+            if last and self.op.state.assert_on_error:
+                assert False
+            return False
+        # See if we saw all the needed reductions
+        if self.state.pending_reductions and \
+            len(self.state.pending_reductions) != len(self.observed_reductions):
+            if last and self.op.state.assert_on_error:
+                assert False
+            return False
+        return True
+
+    def verify(self, node):
+        # Traverse the node and then see if we satisfied everything
+        self.traverse_node(node)
+        return self.verified(True)
+
 class VerificationState(object):
     __slots__ = ['tree', 'depth', 'field', 'point', 'valid_instances', 
-                 'previous_instances', 'pending_reductions', 'pending_fill']
+                 'previous_instances', 'pending_reductions', 
+                 'pending_fill', 'initialized']
     def __init__(self, tree, depth, field, point):
         self.tree = tree
         self.depth = depth
@@ -4592,6 +4836,7 @@ class VerificationState(object):
         self.previous_instances = set()
         self.pending_reductions = set()
         self.pending_fill = False 
+        self.initialized = False
 
     def reset(self):
         self.pending_fill = False
@@ -4693,41 +4938,46 @@ class VerificationState(object):
 
     def issue_update_copies(self, inst, op, req, perform_checks, error_str):
         assert inst not in self.valid_instances
+        # If we're performing checks, we just need to check everything
         if perform_checks:
-            pass
-        else:
-            # First see if we have a valid instance we can copy from  
-            if self.valid_instances:
-                src = next(iter(self.valid_instances))
-                self.perform_copy(src, inst, op, req)
-            # If we have a fill operation, we can just do that
-            elif self.pending_fill:
-                fill = op.find_or_create_fill(req, self.field, inst)
-                preconditions = inst.find_verification_copy_dependences(
-                    self.depth, self.field, self.point, op, req.index, False, 0)
-                for pre in preconditions:
-                    pre.physical_outgoing.add(fill)
-                    fill.physical_incoming.add(pre)
-                inst.add_verification_copy_user(self.depth, self.field, 
-                    self.point, fill, req.index, False, 0)
-            # Otherwise we'll only have previous instances if there are reductions
-            elif self.previous_instances and inst not in self.previous_instances:
-                assert self.pending_reductions
-                src = next(iter(self.previous_instances)) 
-                self.perform_copy(src, inst, op, req)
+            # Special case for the first access
+            if not self.initialized:
+                self.initialized = True
+                return True
+            traverser = VerificationTraverser(self, inst, op, req, error_str)
+            return traverser.verify(op)
+        # First see if we have a valid instance we can copy from  
+        if self.valid_instances:
+            src = next(iter(self.valid_instances))
+            self.perform_copy(src, inst, op, req)
+        # If we have a fill operation, we can just do that
+        elif self.pending_fill:
+            fill = op.find_or_create_fill(req, self.field, inst)
+            preconditions = inst.find_verification_copy_dependences(
+                self.depth, self.field, self.point, op, req.index, False, 0)
+            for pre in preconditions:
+                pre.physical_outgoing.add(fill)
+                fill.physical_incoming.add(pre)
+            inst.add_verification_copy_user(self.depth, self.field, 
+                self.point, fill, req.index, False, 0)
+        # Otherwise we'll only have previous instances if there are reductions
+        elif self.previous_instances and inst not in self.previous_instances:
+            assert self.pending_reductions
+            src = next(iter(self.previous_instances)) 
+            self.perform_copy(src, inst, op, req)
         # If there are any pending reductions, we must issue those now too
         if self.pending_reductions:
-            return self.issue_update_reductions(inst, op, req, perform_checks, error_str)
+            return self.issue_update_reductions(inst, op, req, False, error_str)
         return True
 
     def issue_update_reductions(self, inst, op, req, perform_checks, error_str):
         assert self.pending_reductions
+        if perform_checks:
+            traverser = VerificationTraverser(self, inst, op, req, error_str)
+            return traverser.verify(op)
         # Make sure a reduction was issued from each reduction instance
         for reduction_inst in self.pending_reductions:
-            if perform_checks:
-                pass  
-            else:
-                self.perform_copy(reduction_inst, inst, op, req)
+            self.perform_copy(reduction_inst, inst, op, req)
         return True
 
     def perform_verification_registration(self, op, req, inst, perform_checks):
@@ -6198,8 +6448,7 @@ class Operation(object):
         assert self.context
         depth = self.context.find_enclosing_context_depth(req, req.restricted_fields)
         for field in req.fields:
-            if not req.logical_node.perform_fill_verification(depth, field, self,
-                                                            req, perform_checks):
+            if not req.logical_node.perform_fill_verification(depth, field, self, req):
                 return False
             # If this field is restricted, we effectively have to fill it
             # now to get the proper semantics of seeing updates right away
@@ -7045,35 +7294,39 @@ class Task(object):
         depth = self.get_depth()
         if depth == 0:
             return depth
-        # Find which region requirement privileges were derived from
-        for idx,our_req in self.op.reqs.iteritems():
-            if child_req.parent is not our_req.logical_node:
-                continue
-            fields_good = True
-            for field in child_req.fields:
-                if field not in our_req.fields:
-                    fields_good = False
-                    break
-            if not fields_good:
-                continue
-            # We'll assume the privileges are good for now
-            # See if we are virtual mapped or not
-            any_virtual = False
-            for field in child_req.fields:
-                assert idx in self.op.mappings
-                assert field.fid in self.op.mappings[idx]
-                if self.op.mappings[idx][field.fid].is_virtual():
-                    any_virtual = True
-                    break
-            if any_virtual:
-                assert self.op.context
-                return self.op.context.find_enclosing_context_depth(our_req, mappings)
-            else:
-                if mappings:
-                    for fid,inst in mappings.iteritems():
-                        self.used_instances.add((inst,fid))
-                return depth
-        assert False # Should never get here 
+        if self.op.reqs:
+            # Find which region requirement privileges were derived from
+            for idx,our_req in self.op.reqs.iteritems():
+                if child_req.parent is not our_req.logical_node:
+                    continue
+                fields_good = True
+                for field in child_req.fields:
+                    if field not in our_req.fields:
+                        fields_good = False
+                        break
+                if not fields_good:
+                    continue
+                # We'll assume the privileges are good for now
+                # See if we are virtual mapped or not
+                any_virtual = False
+                for field in child_req.fields:
+                    assert idx in self.op.mappings
+                    assert field.fid in self.op.mappings[idx]
+                    if self.op.mappings[idx][field.fid].is_virtual():
+                        any_virtual = True
+                        break
+                if any_virtual:
+                    assert self.op.context
+                    return self.op.context.find_enclosing_context_depth(our_req, mappings)
+                else:
+                    if mappings:
+                        for fid,inst in mappings.iteritems():
+                            self.used_instances.add((inst,fid))
+                    return depth
+        # Trust the runtime privilege checking here
+        # If we get here this is a created privilege flowing back
+        # up the task tree so just give it depth zero
+        return 0
 
     def perform_task_physical_analysis(self, perform_checks):
         if not self.operations:
@@ -9354,58 +9607,6 @@ class PhysicalTraverser(object):
         if self.post_node_fn is not None:
             self.post_node_fn(node, self)
 
-class VerificationTraverser(object):
-    def __init__(self, forwards, use_gen, generation,
-                 op_fn = None, post_op_fn = None,
-                 copy_fn = None, post_copy_fn = None,
-                 fill_fn = None, post_fill_fn = None):
-        self.forwards = forwards
-        self.use_gen = use_gen
-        self.generation = generation
-        self.op_fn = op_fn
-        self.post_op_fn = post_op_fn
-        self.copy_fn = copy_fn
-        self.post_copy_fn = post_copy_fn
-        self.fill_fn = fill_fn
-        self.post_fill_fn = post_fill_fn
-
-    def visit_node(self, node):
-        if self.use_gen:
-            if node.generation == self.generation:
-                return
-            else:
-                assert node.generation < self.generation
-                node.generation = self.generation
-        if isinstance(node, Operation):
-            if self.op_fn and not self.op_fn(node, self):
-                return
-            self.traverse_next(node)
-            if self.post_op_fn:
-                self.post_op_fn(node, self)
-        elif isinstance(node, RealmCopy):
-            if self.copy_fn and not self.copy_fn(node, self):
-                return
-            self.traverse_next(node)
-            if self.post_copy_fn:
-                self.post_copy_fn(node, self)
-        elif isinstance(node, RealmFill):
-            if self.fill_fn and not self.fill_fn(node, self):
-                return
-            self.traverse_next(node)
-            if self.post_fill_fn:
-                self.post_fill_fn(node, self)
-        else:
-            assert False # should never get here
-
-    def traverse_next(self, node):
-        if self.forwards:
-            if node.physical_outgoing:
-                for next_node in node.physical_outgoing:
-                    self.visit_node(next_node)
-        else:
-            if node.physical_incoming:
-                for next_next in node.physical_incoming:
-                    self.visit_node(next_node)
 
 class GraphPrinter(object):
     __slots__ = ['name', 'filename', 'out', 'depth', 'next_cluster_id']
@@ -10813,8 +11014,8 @@ class State(object):
         assert self.top_level_uid is not None
         top_task = self.get_task(self.top_level_uid)
         # Perform the physical analysis on all the operations in program order
-        if not top_task.perform_task_physical_verification(perform_checks):
-            #if not top_task.perform_task_physical_analysis(perform_checks):
+        #if not top_task.perform_task_physical_verification(perform_checks):
+        if not top_task.perform_task_physical_analysis(perform_checks):
             print("FAIL")
             return
         print("Pass")
