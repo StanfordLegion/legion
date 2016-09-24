@@ -2283,6 +2283,7 @@ namespace Legion {
         LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
         if (restrict_infos[idx1].has_restrictions())
           restrict_infos[idx1].populate_restrict_fields(restricted_fields);
+        const bool restricted_out = !!restricted_fields && !IS_READ_ONLY(req);
         for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
         {
           InstanceRef &ref = targets[idx2];
@@ -2290,7 +2291,7 @@ namespace Legion {
                                        ref.get_valid_fields(), 
                                        op, idx1, runtime->address_space,
                                        info, map_applied_events);
-          if (!!restricted_fields)
+          if (restricted_out)
           {
             FieldMask restricted = ref.get_valid_fields() & restricted_fields;
             if (!!restricted)
@@ -15602,7 +15603,7 @@ namespace Legion {
                 usage, term_event, ref.get_valid_fields(), info.op, info.index,
                 info.version_info, local_space, info.map_applied_events);
             ref.set_ready_event(ready);
-            if (!!restricted_fields)
+            if (!!restricted_fields && !IS_READ_ONLY(info.req))
             {
               FieldMask restricted = ref.get_valid_fields() & restricted_fields;
               if (!!restricted)
@@ -15625,13 +15626,15 @@ namespace Legion {
                     info.index, info.version_info, info.map_applied_events);
               ref.set_ready_event(ready);
             }
+            const bool restricted_out = 
+              !!restricted_fields && !IS_READ_ONLY(info.req);
             for (unsigned idx = 0; idx < targets.size(); idx++)
             {
               InstanceRef &ref = targets[idx];
               new_views[idx]->as_instance_view()->add_user(usage, term_event,
                        ref.get_valid_fields(), info.op, info.index, 
                        local_space, info.version_info, info.map_applied_events);
-              if (!!restricted_fields)
+              if (restricted_out)
               {
                 FieldMask restricted = 
                   ref.get_valid_fields() & restricted_fields;
