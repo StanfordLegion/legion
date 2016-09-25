@@ -640,6 +640,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent TaskOp::get_restrict_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      return merge_restrict_preconditions(grants, wait_barriers);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalManager* TaskOp::select_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
     //--------------------------------------------------------------------------
@@ -1936,10 +1943,7 @@ namespace Legion {
       for (std::vector<PhaseBarrier>::const_iterator it = 
             phase_barriers.begin(); it != phase_barriers.end(); it++)
       {
-        // Update the arrival count
         arrive_barriers.push_back(*it);
-        // Note it is imperative we do this off the new barrier
-        // generated after updating the arrival count.
         Runtime::phase_barrier_arrive(*it, 1/*count*/, arrive_pre);
       }
     }
@@ -8134,6 +8138,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances); 
       acquired_instances.clear();
+      restrict_postconditions.clear();
       // Read this before freeing the task
       // Should be safe, but we'll be careful
       const bool is_top_level_task = top_level_task;
@@ -8156,10 +8161,10 @@ namespace Legion {
       indexes = launcher.index_requirements;
       regions = launcher.region_requirements;
       futures = launcher.futures;
+      // Can't update these here in case we get restricted postconditions
       grants = launcher.grants;
-      update_grants(launcher.grants);
       wait_barriers = launcher.wait_barriers;
-      update_arrival_barriers(launcher.arrive_barriers);
+      arrive_barriers = launcher.arrive_barriers;
       arglen = launcher.argument.get_size();
       if (arglen > 0)
       {
@@ -8505,6 +8510,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::record_restrict_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      restrict_postconditions.insert(postcondition);
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::report_interfering_close_requirement(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -8625,6 +8637,21 @@ namespace Legion {
               version_infos[idx].apply_mapping(get_parent_context(idx).get_id(),
                                 runtime->address_space, map_applied_conditions);
         }
+        // We can now apply any arrives or releases
+        if (!arrive_barriers.empty() || !grants.empty())
+        {
+          ApEvent done_event = get_task_completion();
+          if (!restrict_postconditions.empty())
+          {
+            restrict_postconditions.insert(done_event);
+            done_event = Runtime::merge_events(restrict_postconditions);
+          }
+          for (unsigned idx = 0; idx < grants.size(); idx++)
+            grants[idx].impl->register_operation(done_event);
+          for (std::vector<PhaseBarrier>::const_iterator it = 
+                arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+            Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
+        }
         // If we succeeded in mapping and everything was mapped
         // then we get to mark that we are done mapping
         if (is_leaf())
@@ -8676,6 +8703,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_remote())
+        return false;
+      if (!restrict_postconditions.empty())
         return false;
       // Otherwise we're going to do it mark that we
       // don't need to trigger the underlying completion event.
@@ -9396,6 +9425,7 @@ namespace Legion {
             this->slice_owner->get_unique_op_id(),
             this->get_unique_op_id());
       deactivate_single();
+      restrict_postconditions.clear();
       if (!remote_instances.empty())
       {
         UniqueID local_uid = get_unique_id();
@@ -9462,13 +9492,29 @@ namespace Legion {
         if (!map_applied_conditions.empty())
         {
           RtEvent done = Runtime::merge_events(map_applied_conditions);
-          slice_owner->record_child_mapped(done);
+          if (!restrict_postconditions.empty())
+          {
+            ApEvent restrict_post = 
+              Runtime::merge_events(restrict_postconditions);
+            slice_owner->record_child_mapped(done, restrict_post);
+          }
+          else
+            slice_owner->record_child_mapped(done, ApEvent::NO_AP_EVENT);
           complete_mapping(done);
         }
         else
         {
           // Tell our owner that we mapped
-          slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT);
+          if (!restrict_postconditions.empty())
+          {
+            ApEvent restrict_post = 
+              Runtime::merge_events(restrict_postconditions);
+            slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, 
+                                             restrict_post);
+          }
+          else
+            slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
+                                             ApEvent::NO_AP_EVENT);
           // Mark that we ourselves have mapped
           complete_mapping();
         }
@@ -9581,6 +9627,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->get_acquired_instances_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::record_restrict_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      restrict_postconditions.insert(postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -9739,7 +9792,8 @@ namespace Legion {
       // task as being mapped
       if (is_locally_mapped() && is_leaf())
       {
-        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT);
+        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
+                                         ApEvent::NO_AP_EVENT);
         complete_mapping();
       }
 #ifdef LEGION_SPY
@@ -9790,12 +9844,28 @@ namespace Legion {
       if (!map_applied_conditions.empty())
       {
         RtEvent done = Runtime::merge_events(map_applied_conditions);
-        slice_owner->record_child_mapped(done);
+        if (!restrict_postconditions.empty())
+        {
+          ApEvent restrict_post = 
+            Runtime::merge_events(restrict_postconditions);
+          slice_owner->record_child_mapped(done, restrict_post);
+        }
+        else
+          slice_owner->record_child_mapped(done, ApEvent::NO_AP_EVENT);
         complete_mapping(done);
       }
       else
       {
-        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT);
+        if (!restrict_postconditions.empty())
+        {
+          ApEvent restrict_post = 
+            Runtime::merge_events(restrict_postconditions);
+          slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,  
+                                           restrict_post);
+        }
+        else
+          slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
+                                           ApEvent::NO_AP_EVENT);
         // Now we can complete this point task
         complete_mapping();
       }
@@ -10624,6 +10694,7 @@ namespace Legion {
       reduction_future = Future();
       rerun_analysis_requirements.clear();
       map_applied_conditions.clear();
+      restrict_postconditions.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -11491,6 +11562,12 @@ namespace Legion {
         future_map.impl->complete_all_futures();
       if (must_epoch != NULL)
         must_epoch->notify_subop_complete(this);
+      if (!restrict_postconditions.empty())
+      {
+        ApEvent restrict_done = Runtime::merge_events(restrict_postconditions);
+        need_completion_trigger = false;
+        Runtime::trigger_event(completion_event, restrict_done);
+      }
       complete_operation();
       if (speculation_state == RESOLVE_FALSE_STATE)
         trigger_children_committed();
@@ -11833,7 +11910,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::return_slice_mapped(unsigned points, long long denom,
-                                        RtEvent applied_condition)
+                               RtEvent applied_condition, ApEvent restrict_post)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_RETURN_SLICE_MAPPED_CALL);
@@ -11847,6 +11924,8 @@ namespace Legion {
         slice_fraction.add(Fraction<long long>(1,denom));
         if (applied_condition.exists())
           map_applied_conditions.insert(applied_condition);
+        if (restrict_post.exists())
+          restrict_postconditions.insert(restrict_post);
         // Already know that mapped points is the same as total points
         if (slice_fraction.is_whole())
         {
@@ -11963,6 +12042,8 @@ namespace Legion {
       derez.deserialize(denom);
       RtEvent applied_condition;
       derez.deserialize(applied_condition);
+      ApEvent restrict_postcondition;
+      derez.deserialize(restrict_postcondition);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (!IS_WRITE(regions[idx]))
@@ -11975,7 +12056,8 @@ namespace Legion {
         }
         // otherwise it was locally mapped so we are already done
       }
-      return_slice_mapped(points, denom, applied_condition);
+      return_slice_mapped(points, denom, applied_condition, 
+                          restrict_postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -12144,6 +12226,7 @@ namespace Legion {
         release_acquired_instances(acquired_instances);
       acquired_instances.clear();
       map_applied_conditions.clear();
+      restrict_postconditions.clear();
       runtime->free_slice_task(this);
     }
 
@@ -12757,7 +12840,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_child_mapped(RtEvent child_complete)
+    void SliceTask::record_child_mapped(RtEvent child_complete,
+                                        ApEvent restrict_postcondition)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
@@ -12765,6 +12849,8 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         if (child_complete.exists())
           map_applied_conditions.insert(child_complete);
+        if (restrict_postcondition.exists())
+          restrict_postconditions.insert(restrict_postcondition);
 #ifdef DEBUG_LEGION
         assert(num_unmapped_points > 0);
 #endif
@@ -12875,8 +12961,16 @@ namespace Legion {
           }
           // otherwise it was locally mapped so we are already done
         }
-        index_owner->return_slice_mapped(points.size(), denominator, 
-                                         applied_condition);
+        if (!restrict_postconditions.empty())
+        {
+          ApEvent restrict_post = 
+            Runtime::merge_events(restrict_postconditions);
+          index_owner->return_slice_mapped(points.size(), denominator,
+                                     applied_condition, restrict_post);
+        }
+        else
+          index_owner->return_slice_mapped(points.size(), denominator, 
+                             applied_condition, ApEvent::NO_AP_EVENT);
       }
       complete_mapping(applied_condition);
       if (!acquired_instances.empty())
@@ -12948,6 +13042,13 @@ namespace Legion {
       rez.serialize(points.size());
       rez.serialize(denominator);
       rez.serialize(applied_condition);
+      if (!restrict_postconditions.empty())
+      {
+        ApEvent restrict_post = Runtime::merge_events(restrict_postconditions);
+        rez.serialize(restrict_post);
+      }
+      else
+        rez.serialize(ApEvent::NO_AP_EVENT);
       // Also pack up any regions names we need for doing invalidations
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {

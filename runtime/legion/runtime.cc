@@ -1208,6 +1208,12 @@ namespace Legion {
       }
       valid = false;
       mapped = false;
+      // If we have a wait for unmapped event, then we need to wait
+      // before we return, this usually occurs because we had restricted
+      // coherence on the region and we have to issue copies back to 
+      // the restricted instances before we are officially unmapped
+      if (wait_for_unmap.exists() && !wait_for_unmap.has_triggered())
+        wait_for_unmap.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -1241,7 +1247,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::reset_references(const InstanceSet &refs,
-                                              ApUserEvent term_event)
+                                       ApUserEvent term_event, ApEvent wait_for)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1254,6 +1260,7 @@ namespace Legion {
         references.add_valid_references(PHYSICAL_REGION_REF);
       termination_event = term_event;
       trigger_on_unmap = true;
+      wait_for_unmap = wait_for;
     }
 
     //--------------------------------------------------------------------------

@@ -644,7 +644,8 @@ namespace Legion {
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
                              const VersionInfo &version_info, 
                              Operation *op, unsigned index,
-                             std::set<RtEvent> &map_applied_events);
+                             std::set<RtEvent> &map_applied_events,
+                             bool restrict_out = false);
       ApEvent perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         const VersionInfo &version_info,
@@ -816,7 +817,9 @@ namespace Legion {
     public:
       void issue_deferred_copies(const TraversalInfo &info,
                                  MaterializedView *dst,
-                                 const FieldMask &copy_mask);
+                                 const FieldMask &copy_mask,
+                                 const RestrictInfo &restrict_info,
+                                 bool restrict_out);
       void issue_deferred_copies_across(const TraversalInfo &info,
                                         MaterializedView *dst,
                                   const std::vector<unsigned> &src_indexes,

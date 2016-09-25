@@ -292,6 +292,13 @@ namespace Legion {
                                        get_acquired_instances_ref(void);
       // Update the set of atomic locks for this operation
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      // Get the restrict precondition for this operation
+      virtual ApEvent get_restrict_precondition(void) const;
+      static ApEvent merge_restrict_preconditions(
+          const std::vector<Grant> &grants,
+          const std::vector<PhaseBarrier> &wait_barriers);
+      // Record the restrict postcondition
+      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       // Help for creating temporary instances
       MaterializedView* create_temporary_instance(PhysicalManager *dst,
@@ -638,6 +645,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -659,6 +667,7 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
+      std::set<ApEvent> restrict_postconditions;
     protected:
       MapperManager *mapper;
     protected:
@@ -713,6 +722,8 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+      virtual ApEvent get_restrict_precondition(void) const;
+      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -745,6 +756,7 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
+      std::set<ApEvent> restrict_postconditions;
     protected:
       Mapper::CopyProfilingInfo   profiling_results;
       RtUserEvent                 profiling_reported;
@@ -1181,6 +1193,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual ApEvent get_restrict_precondition(void) const;
     public: 
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -1249,6 +1262,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+      virtual ApEvent get_restrict_precondition(void) const;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -1969,6 +1983,7 @@ namespace Legion {
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
+      virtual ApEvent get_restrict_precondition(void) const;
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);

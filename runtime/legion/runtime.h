@@ -302,8 +302,8 @@ namespace Legion {
       void remap_region(ApEvent new_ready_event);
       const RegionRequirement& get_requirement(void) const;
       void set_reference(const InstanceRef &references);
-      void reset_references(const InstanceSet &instances,
-                            ApUserEvent term_event);
+      void reset_references(const InstanceSet &instances,ApUserEvent term_event,
+                            ApEvent wait_for = ApEvent::NO_AP_EVENT);
       ApEvent get_ready_event(void) const;
       bool has_references(void) const;
       void get_references(InstanceSet &instances) const;
@@ -336,6 +336,7 @@ namespace Legion {
       // upon unmap
       bool trigger_on_unmap;
       ApUserEvent termination_event;
+      ApEvent wait_for_unmap;
 #ifdef BOUNDS_CHECKS
     private:
       Domain bounds;
