@@ -7549,11 +7549,11 @@ class Event(object):
         # This is an untriggered user event, report it
         if self.ap_user_event:
             print("WARNING: "+str(self)+" is an untriggered application user event")
-            if self.node.state.assert_on_warning:
+            if self.state.assert_on_warning:
                 assert False
         else:
             print("WARNING: "+str(self)+" is an untriggered runtime user event")
-            if self.node.state.assert_on_warning:
+            if self.state.assert_on_warning:
                 assert False
         print("  Incoming:")
         if self.incoming:
