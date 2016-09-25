@@ -89,7 +89,7 @@ your mind at any time by re-running this script with the "--rdir"
 parameter.
 '''
 
-def install_rdir(rdir, regent_dir):
+def install_rdir(rdir, legion_dir, regent_dir):
     config_filename = os.path.join(regent_dir, '.rdir.json')
     if rdir is None:
         rdir = load_json_config(config_filename)
@@ -102,7 +102,7 @@ def install_rdir(rdir, regent_dir):
     assert rdir in ['auto', 'manual', 'never']
 
     if rdir == 'auto':
-        git_submodule_update(regent_dir)
+        git_submodule_update(legion_dir)
 
     dump_json_config(config_filename, rdir)
 
@@ -228,7 +228,7 @@ def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
     if 'LG_RT_DIR' in os.environ:
         runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
 
-    install_rdir(rdir, regent_dir)
+    install_rdir(rdir, legion_dir, regent_dir)
 
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, external_terra_dir, thread_count)
