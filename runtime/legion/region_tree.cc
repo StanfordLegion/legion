@@ -2282,6 +2282,7 @@ namespace Legion {
         LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
         if (restrict_infos[idx1].has_restrictions())
           restrict_infos[idx1].populate_restrict_fields(restricted_fields);
+        const bool restricted_out = !!restricted_fields && !IS_READ_ONLY(req);
         for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
         {
           InstanceRef &ref = targets[idx2];
@@ -2289,7 +2290,7 @@ namespace Legion {
                                        ref.get_valid_fields(), 
                                        op, idx1, runtime->address_space,
                                        &info, map_applied_events);
-          if (!!restricted_fields)
+          if (restricted_out)
           {
             FieldMask restricted = ref.get_valid_fields() & restricted_fields;
             if (!!restricted)
@@ -2322,11 +2323,12 @@ namespace Legion {
           node->convert_target_views(restricted_instances,
               enclosing_contexts[idx1], restricted_views);
           if (!copy_out_views.empty())
-            node->issue_restricted_copies(traversal_info, restricted_instances,
-                                          restricted_views, copy_out_views);
+            node->issue_restricted_copies(traversal_info, restrict_infos[idx1],
+                restricted_instances, restricted_views, copy_out_views);
           if (!reduce_out_views.empty())
             node->issue_restricted_reductions(traversal_info, 
-                restricted_instances, restricted_views, reduce_out_views);
+                restrict_infos[idx1], restricted_instances, 
+                restricted_views, reduce_out_views);
         }
       }
     }
@@ -2336,7 +2338,7 @@ namespace Legion {
                 VersionInfo &version_info, Operation *op, unsigned index, 
                 ClosedNode *closed_tree, RegionTreeNode *close_node,
                 const FieldMask &closing_mask, std::set<RtEvent> &map_applied, 
-                const InstanceSet &targets,
+                const RestrictInfo &restrict_info, const InstanceSet &targets,
       const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs
 #ifdef DEBUG_LEGION
                 , const char *log_name
@@ -2386,7 +2388,8 @@ namespace Legion {
         assert(target_view->is_materialized_view());
 #endif
         close_node->issue_update_copies(info, 
-            target_view->as_materialized_view(), target_mask, valid_instances);
+            target_view->as_materialized_view(), target_mask, 
+            valid_instances, restrict_info);
         // Update the valid views for the node
 #ifdef DEBUG_LEGION
         assert(physical_state != NULL);
@@ -13058,7 +13061,9 @@ namespace Legion {
     void RegionTreeNode::issue_update_copies(const TraversalInfo &info,
                                              MaterializedView *dst,
                                              FieldMask copy_mask,
-             const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances)
+             const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances,
+                                             const RestrictInfo &restrict_info,
+                                             bool restrict_out /*=false*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_ISSUE_UPDATE_COPIES_CALL);
@@ -13124,7 +13129,18 @@ namespace Legion {
                                      info.op->get_unique_op_id(),
                                      info.index, local_space, preconditions,
                                      info.map_applied_events);
-
+        // If we're restricted, get our restrict precondition
+        if (restrict_info.has_restrictions())
+        {
+          FieldMask restrict_mask;
+          restrict_info.populate_restrict_fields(restrict_mask);
+          restrict_mask &= update_mask;
+          if (!!restrict_mask)
+          {
+            ApEvent restrict_pre = info.op->get_restrict_precondition();
+            preconditions[restrict_pre] = restrict_mask;
+          }
+        }
         LegionMap<ApEvent,FieldMask>::aligned postconditions;
         issue_grouped_copies(info, dst, preconditions, update_mask,
                  src_instances, &info.version_info, postconditions);
@@ -13137,6 +13153,18 @@ namespace Legion {
                              it->second, false/*reading*/, local_space, 
                              info.map_applied_events);
         }
+        if (restrict_out && restrict_info.has_restrictions())
+        {
+          FieldMask restrict_mask;
+          restrict_info.populate_restrict_fields(restrict_mask);
+          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+                postconditions.begin(); it != postconditions.end(); it++)
+          {
+            if (it->second * restrict_mask)
+              continue;
+            info.op->record_restrict_postcondition(it->first);
+          }
+        }
       }
       // If we still have fields that need to be updated and there
       // are composite instances then we need to issue updates copies
@@ -13146,7 +13174,8 @@ namespace Legion {
         for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it =
               deferred_instances.begin(); it != deferred_instances.end(); it++)
         {
-          it->first->issue_deferred_copies(info, dst, it->second);
+          it->first->issue_deferred_copies(info, dst, it->second, 
+                                           restrict_info, restrict_out);
         }
       }
     }
@@ -13523,7 +13552,8 @@ namespace Legion {
                                                  VersionInfo &version_info,
            const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                                  Operation *op, unsigned index,
-                                                 std::set<RtEvent> &map_applied)
+                                                 std::set<RtEvent> &map_applied,
+                                                 bool restrict_out/*= false*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -13551,8 +13581,8 @@ namespace Legion {
           assert(!(it->second - copy_mask));
 #endif
           // Then we have a reduction to perform
-          it->first->perform_reduction(inst_target, copy_mask, 
-                                       &version_info, op, index, map_applied);
+          it->first->perform_reduction(inst_target, copy_mask, &version_info, 
+                                       op, index, map_applied, restrict_out);
         }
       }
     }
@@ -13617,9 +13647,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::issue_restricted_copies(const TraversalInfo &info,
-        const InstanceSet &restricted_instances,
-        const std::vector<MaterializedView*> &restricted_views,
-        const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views)
+      const RestrictInfo &restrict_info,const InstanceSet &restricted_instances,
+      const std::vector<MaterializedView*> &restricted_views,
+      const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views)
     //--------------------------------------------------------------------------
     {
       FieldMask src_fields;
@@ -13649,7 +13679,8 @@ namespace Legion {
         }
         // Issue the update copy
         issue_update_copies(info, restricted_views[idx], 
-                            overlap, copy_out_views);
+                            overlap, copy_out_views, 
+                            restrict_info, true/*restrict out*/);
         if (!src_fields)
           break;
       }
@@ -13657,9 +13688,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::issue_restricted_reductions(const TraversalInfo &info,
-        const InstanceSet &restricted_instances,
-        const std::vector<MaterializedView*> &restricted_views,
-        const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views)
+      const RestrictInfo &restrict_info,const InstanceSet &restricted_instances,
+      const std::vector<MaterializedView*> &restricted_views,
+      const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views)
     //--------------------------------------------------------------------------
     {
       FieldMask reduction_fields;
@@ -13675,7 +13706,8 @@ namespace Legion {
           continue;
         issue_update_reductions(restricted_views[idx], overlap, 
                                 info.version_info, reduce_out_views,
-                                info.op, info.index, info.map_applied_events);
+                                info.op, info.index, 
+                                info.map_applied_events, true/*restrict out*/);
         reduction_fields -= overlap;
         if (!reduction_fields)
           break;
@@ -15367,7 +15399,7 @@ namespace Legion {
           }
         }
         if (!reduce_out_views.empty())
-          issue_restricted_reductions(info, restricted_instances, 
+          issue_restricted_reductions(info, restrict_info, restricted_instances,
                                       restricted_views, reduce_out_views);
       }
       else
@@ -15414,7 +15446,8 @@ namespace Legion {
                       info.version_info, false/*needs space*/, valid_views);
                   has_valid_views = true;
                 }
-                issue_update_copies(info, view, needed_fields, valid_views);
+                issue_update_copies(info, view, needed_fields, 
+                                    valid_views, restrict_info);
               }
             }
             else
@@ -15427,7 +15460,8 @@ namespace Legion {
                     info.version_info, false/*needs space*/, valid_views);
                 has_valid_views = true;
               }
-              issue_update_copies(info, view, valid_fields, valid_views);
+              issue_update_copies(info, view, valid_fields, 
+                                  valid_views, restrict_info);
             }
             // Finally add this to the set of valid views for the state
             if (!!restricted_fields)
@@ -15491,7 +15525,7 @@ namespace Legion {
                 usage, term_event, ref.get_valid_fields(), info.op, info.index,
                 &info.version_info, local_space, info.map_applied_events);
             ref.set_ready_event(ready);
-            if (!!restricted_fields)
+            if (!!restricted_fields && !IS_READ_ONLY(info.req))
             {
               FieldMask restricted = ref.get_valid_fields() & restricted_fields;
               if (!!restricted)
@@ -15514,13 +15548,15 @@ namespace Legion {
                     info.index, &info.version_info, info.map_applied_events);
               ref.set_ready_event(ready);
             }
+            const bool restricted_out = 
+              !!restricted_fields && !IS_READ_ONLY(info.req);
             for (unsigned idx = 0; idx < targets.size(); idx++)
             {
               InstanceRef &ref = targets[idx];
               new_views[idx]->as_instance_view()->add_user(usage, term_event,
                        ref.get_valid_fields(), info.op, info.index, 
                        local_space, &info.version_info,info.map_applied_events);
-              if (!!restricted_fields)
+              if (restricted_out)
               {
                 FieldMask restricted = 
                   ref.get_valid_fields() & restricted_fields;
@@ -15531,7 +15567,7 @@ namespace Legion {
           }
           // If we have to do any copy out operations, then we do that now
           if (!copy_out_views.empty())
-            issue_restricted_copies(info, restricted_instances, 
+            issue_restricted_copies(info, restrict_info, restricted_instances, 
                                     restricted_views, copy_out_views);
         }
       }

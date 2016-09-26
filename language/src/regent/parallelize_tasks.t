@@ -195,23 +195,57 @@ local function shallow_copy(tbl)
   return new_tbl
 end
 
-local function factorize(number, ways)
-  local factors = terralib.newlist()
-  for k = ways, 2, -1 do
-    local limit = math.ceil(math.pow(number, 1 / k))
-    local factor
-    for idx = 1, limit do
-      if number % idx == 0 then
-        factor = idx
-      end
+local compute_extent = {
+  [std.int1d] = terra(dop : int, rect : std.rect1d) : std.int1d
+    return [std.int1d](dop)
+  end,
+  [std.int2d] = terra(dop : int, rect : std.rect2d) : std.int2d
+    var sz = rect:size()
+    var py = -1
+    var f : int = dop / 2
+    if f > sz.__ptr.y then f = sz.__ptr.y end
+    while f >= 1 do
+      if dop % f == 0 then py = f break end
+      f = f - 1
     end
-    number = number / factor
-    factors:insert(factor)
-  end
-  factors:insert(number)
-  factors:sort(function(a, b) return a > b end)
-  return factors
-end
+    var px = dop / py
+    if px > sz.__ptr.x or py > sz.__ptr.y then
+      c.printf(
+        "Impossible to partition the rectangle (%d, %d) - (%d, %d) in %d pieces\n",
+        rect.lo.__ptr.x, rect.lo.__ptr.y, rect.hi.__ptr.x, rect.hi.__ptr.y, dop)
+      std.assert(false, "parallelization failed")
+    end
+    return std.int2d { [std.int2d.impl_type] { px, py } }
+  end,
+  [std.int3d] = terra(dop : int, rect : std.rect3d) : std.int3d
+    var sz = rect:size()
+    var pz = -1
+    var f = dop / 2
+    if f > sz.__ptr.z then f = sz.__ptr.z end
+    while f >= 1 do
+      if dop % f == 0 then pz = f break end
+      f = f - 1
+    end
+    dop = dop / pz
+    var py = -1
+    f = dop
+    if f > sz.__ptr.y then f = sz.__ptr.y end
+    while f >= 1 do
+      if dop % f == 0 then py = f break end
+      f = f - 1
+    end
+    var px = dop / py
+    if px > sz.__ptr.x or py > sz.__ptr.y or pz > sz.__ptr.z then
+      c.printf(
+        ["Impossible to partition the rectangle " ..
+         "(%d, %d, %d) - (%d, %d, %d) in %d pieces\n"],
+        rect.lo.__ptr.x, rect.lo.__ptr.y, rect.lo.__ptr.z,
+        rect.hi.__ptr.x, rect.hi.__ptr.y, rect.hi.__ptr.z, dop)
+      std.assert(false, "parallelization failed")
+    end
+    return std.int3d { [std.int3d.impl_type] { px, py, pz } }
+  end,
+}
 
 -- #####################################
 -- ## Utilities for AST node manipulation
@@ -865,15 +899,11 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
   local region_type = region_symbol:gettype()
   local index_type = region_type:ispace().index_type
   local dim = index_type.dim
-  local factors = factorize(pparam:dop(), dim)
-  local extent_expr
-  if dim > 1 then
-    extent_expr = mk_expr_ctor(factors:map(function(f)
-      return mk_expr_constant(f, int)
-    end))
-  else
-    extent_expr = mk_expr_constant(factors[1], int)
-  end
+  local extent_expr = mk_expr_call(
+    compute_extent[index_type], terralib.newlist {
+      mk_expr_constant(pparam:dop(), int),
+      mk_expr_bounds_access(mk_expr_id(region_symbol))
+    })
 
   local color_space_expr = mk_expr_ispace(index_type, extent_expr)
   local partition_type =

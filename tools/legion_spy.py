@@ -6345,18 +6345,20 @@ class Operation(object):
             # Skip deletions, they only impact logical analysis
             pass
         else:
-            for index,req in self.reqs.iteritems():
-                if not self.analyze_physical_requirement(depth, index, req, 
-                                                         perform_checks):
-                    return False
+            if self.reqs:
+                for index,req in self.reqs.iteritems():
+                    if not self.analyze_physical_requirement(depth, index, req, 
+                                                             perform_checks):
+                        return False
             if self.kind == SINGLE_TASK_KIND:
                 # We now need to do the registration for our region
                 # requirements since we didn't do it as part of the 
                 # normal physical analysis
-                for index,req in self.reqs.iteritems():
-                    if not self.perform_physical_registration(depth, index, req, 
-                                                              perform_checks):
-                        return False
+                if self.reqs:
+                    for index,req in self.reqs.iteritems():
+                        if not self.perform_physical_registration(depth, index, req,
+                                                                  perform_checks):
+                            return False
                 # If we are not a leaf task, go down the task tree
                 if self.task is not None:
                     if not self.task.perform_task_physical_analysis(perform_checks):
@@ -9022,11 +9024,11 @@ class Event(object):
         # This is an untriggered user event, report it
         if self.ap_user_event:
             print("WARNING: "+str(self)+" is an untriggered application user event")
-            if self.node.state.assert_on_warning:
+            if self.state.assert_on_warning:
                 assert False
         else:
             print("WARNING: "+str(self)+" is an untriggered runtime user event")
-            if self.node.state.assert_on_warning:
+            if self.state.assert_on_warning:
                 assert False
         print("  Incoming:")
         if self.incoming:

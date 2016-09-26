@@ -697,7 +697,8 @@ namespace Legion {
       void perform_reduction(InstanceView *target, const FieldMask &copy_mask, 
                              VersionTracker *version_tracker, 
                              Operation *op, unsigned index,
-                             std::set<RtEvent> &map_applied_events);
+                             std::set<RtEvent> &map_applied_events,
+                             bool restrict_out = false);
       ApEvent perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         VersionTracker *version_tracker,
@@ -884,7 +885,9 @@ namespace Legion {
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask) = 0;
+                                         const FieldMask &copy_mask,
+                                         const RestrictInfo &restrict_info,
+                                         bool restrict_out) = 0;
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
@@ -1060,7 +1063,9 @@ namespace Legion {
                  LegionMap<CompositeView*,FieldMask>::aligned &replacements);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask);
+                                         const FieldMask &copy_mask,
+                                         const RestrictInfo &restrict_info,
+                                         bool restrict_out);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,
@@ -1277,7 +1282,9 @@ namespace Legion {
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask);
+                                         const FieldMask &copy_mask,
+                                         const RestrictInfo &restrict_info,
+                                         bool restrict_out);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          const FieldMask &copy_mask,

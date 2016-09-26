@@ -4945,7 +4945,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CompositeView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
-                                              const FieldMask &copy_mask)
+                                              const FieldMask &copy_mask,
+                                              const RestrictInfo &restrict_info,
+                                              bool restrict_out)
     //--------------------------------------------------------------------------
     {
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
@@ -4959,6 +4961,17 @@ namespace Legion {
                                    local_space, preconditions, 
                                    info.map_applied_events,
                                    false/*can filter*/);
+      if (restrict_info.has_restrictions())
+      {
+        FieldMask restrict_mask;
+        restrict_info.populate_restrict_fields(restrict_mask);
+        restrict_mask &= copy_mask;
+        if (!!restrict_mask)
+        {
+          ApEvent restrict_pre = info.op->get_restrict_precondition();
+          preconditions[restrict_pre] = restrict_mask;
+        }
+      }
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
       FieldMask written_mask;
       issue_deferred_copies(info, dst, copy_mask, written_mask,
@@ -5007,6 +5020,18 @@ namespace Legion {
                            info.op->get_unique_op_id(), info.index,
                            it->set_mask, false/*reading*/, local_space,
                            info.map_applied_events);
+      }
+      if (restrict_out && restrict_info.has_restrictions())
+      {
+        FieldMask restrict_mask;
+        restrict_info.populate_restrict_fields(restrict_mask);
+        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+              postconditions.begin(); it != postconditions.end(); it++)
+        {
+          if (it->second * restrict_mask)
+            continue;
+          info.op->record_restrict_postcondition(it->first);
+        }
       }
     }
 
@@ -6366,7 +6391,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FillView::issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask)
+                                         const FieldMask &copy_mask,
+                                         const RestrictInfo &restrict_info,
+                                         bool restrict_out)
     //--------------------------------------------------------------------------
     {
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
@@ -6377,6 +6404,17 @@ namespace Legion {
                                    info.op->get_unique_op_id(),
                                    info.index, local_space, 
                                    preconditions, info.map_applied_events);
+      if (restrict_info.has_restrictions())
+      {
+        FieldMask restrict_mask;
+        restrict_info.populate_restrict_fields(restrict_mask);
+        restrict_mask &= copy_mask;
+        if (!!restrict_mask)
+        {
+          ApEvent restrict_pre = info.op->get_restrict_precondition();
+          preconditions[restrict_pre] = restrict_mask;
+        }
+      }
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
       FieldMask written_mask;
       issue_deferred_copies(info, dst, copy_mask, written_mask,
@@ -6391,6 +6429,18 @@ namespace Legion {
                            info.op->get_unique_op_id(), info.index,
                            it->second, false/*reading*/, local_space, 
                            info.map_applied_events);
+      }
+      if (restrict_out && restrict_info.has_restrictions())
+      {
+        FieldMask restrict_mask;
+        restrict_info.populate_restrict_fields(restrict_mask);
+        for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+              postconditions.begin(); it != postconditions.end(); it++)
+        {
+          if (it->second * restrict_mask)
+            continue;
+          info.op->record_restrict_postcondition(it->first);
+        }
       }
     }
 
@@ -6547,7 +6597,8 @@ namespace Legion {
                                           const FieldMask &reduce_mask,
                                           VersionTracker *versions,
                                           Operation *op, unsigned index,
-                                          std::set<RtEvent> &map_applied_events)
+                                          std::set<RtEvent> &map_applied_events,
+                                          bool restrict_out)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,REDUCTION_VIEW_PERFORM_REDUCTION_CALL);
@@ -6584,7 +6635,9 @@ namespace Legion {
       this->add_copy_user(manager->redop, reduce_post, versions,
                          op->get_unique_op_id(), index, reduce_mask, 
                          true/*reading*/, local_space, map_applied_events);
-    }
+      if (restrict_out)
+        op->record_restrict_postcondition(reduce_post);
+    } 
 
     //--------------------------------------------------------------------------
     ApEvent ReductionView::perform_deferred_reduction(MaterializedView *target,

@@ -438,6 +438,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent Operation::get_restrict_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent Operation::merge_restrict_preconditions(
+                                const std::vector<Grant> &grants, 
+                                const std::vector<PhaseBarrier> &wait_barriers)
+    //--------------------------------------------------------------------------
+    {
+      if (!grants.empty())
+        assert(false); // Figure out how to deduplicate grant acquires
+      if (wait_barriers.empty())
+        return ApEvent::NO_AP_EVENT;
+      if (wait_barriers.size() == 1)
+        return Runtime::get_previous_phase(wait_barriers[0].phase_barrier);
+      std::set<ApEvent> wait_events;
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        wait_events.insert(
+            Runtime::get_previous_phase(wait_barriers[idx].phase_barrier));
+      return Runtime::merge_events(wait_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::record_restrict_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called for inherited types
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     MaterializedView* Operation::create_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
     //--------------------------------------------------------------------------
@@ -1865,6 +1899,7 @@ namespace Legion {
       acquired_instances.clear();
       atomic_locks.clear();
       map_applied_conditions.clear();
+      restrict_postconditions.clear();
       profiling_results = Mapper::InlineProfilingInfo();
       // Now return this operation to the queue
       runtime->free_map_op(this);
@@ -2006,7 +2041,16 @@ namespace Legion {
       version_info.apply_mapping(map_applied_conditions);
       // Update our physical instance with the newly mapped instances
       // Have to do this before triggering the mapped event
-      region.impl->reset_references(mapped_instances, termination_event);
+      if (!restrict_postconditions.empty())
+      {
+        // If we have restricted postconditions, tell the physical instance
+        // that it has an event to wait for before it is unmapped
+        ApEvent wait_for = Runtime::merge_events(restrict_postconditions);
+        region.impl->reset_references(mapped_instances, 
+                                      termination_event, wait_for);
+      }
+      else // The normal path here
+        region.impl->reset_references(mapped_instances, termination_event);
       ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
       if (mapped_instances.size() > 1)
       {
@@ -2189,6 +2233,13 @@ namespace Legion {
         log_temporary_instance(output.temporary_instance.impl, 
                                index, needed_fields);
       return output.temporary_instance.impl;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::record_restrict_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      restrict_postconditions.insert(postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -2926,6 +2977,7 @@ namespace Legion {
       acquired_instances.clear();
       atomic_locks.clear();
       map_applied_conditions.clear();
+      restrict_postconditions.clear();
       profiling_results = Mapper::CopyProfilingInfo();
       // Return this operation to the runtime
       runtime->free_copy_op(this);
@@ -3340,6 +3392,12 @@ namespace Legion {
       // copy complete event
       if (!arrive_barriers.empty())
       {
+        ApEvent done_event = copy_complete_event;
+        if (!restrict_postconditions.empty())
+        {
+          restrict_postconditions.insert(done_event);
+          done_event = Runtime::merge_events(restrict_postconditions);
+        }
         for (std::vector<PhaseBarrier>::iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
@@ -3515,6 +3573,20 @@ namespace Legion {
         log_temporary_instance(output.temporary_instance.impl, 
                                index, needed_fields);
       return output.temporary_instance.impl;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CopyOp::get_restrict_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      return merge_restrict_preconditions(grants, wait_barriers);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::record_restrict_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      restrict_postconditions.insert(postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5319,6 +5391,7 @@ namespace Legion {
                                               child_to_close, 
                                               close_info.close_mask,
                                               ready_events,
+                                              restrict_info,
                                               chosen_instances, 
                                               projection_epochs
 #ifdef DEBUG_LEGION
@@ -5499,6 +5572,7 @@ namespace Legion {
                                                 closed_tree, 
                                                 close_node, close_mask,
                                                 map_applied_conditions,
+                                                restrict_info,
                                                 chosen_instances, NULL
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
@@ -6655,6 +6729,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent AcquireOp::get_restrict_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      return merge_restrict_preconditions(grants, wait_barriers);
+    }
+
+    //--------------------------------------------------------------------------
     UniqueID AcquireOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -7243,6 +7324,13 @@ namespace Legion {
         log_temporary_instance(output.temporary_instance.impl, 
                                index, needed_fields);
       return output.temporary_instance.impl;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReleaseOp::get_restrict_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      return merge_restrict_preconditions(grants, wait_barriers);
     }
 
     //--------------------------------------------------------------------------
@@ -10449,6 +10537,13 @@ namespace Legion {
     {
       version_info.clear();
       commit_operation(true/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FillOp::get_restrict_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      return merge_restrict_preconditions(grants, wait_barriers);
     }
 
     //--------------------------------------------------------------------------

@@ -342,6 +342,7 @@ namespace Legion {
                                   RegionTreeNode *close_node,
                                   const FieldMask &closing_mask,
                                   std::set<RtEvent> &map_applied,
+                                  const RestrictInfo &restrict_info,
                                   const InstanceSet &targets,
                                   // projection_epochs can be NULL
         const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs
@@ -1456,7 +1457,9 @@ namespace Legion {
       void issue_update_copies(const TraversalInfo &info,
                                MaterializedView *target, 
                                FieldMask copy_mask,
-            const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances);
+            const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances,
+                               const RestrictInfo &restrict_info,
+                               bool restrict_out = false);
       void sort_copy_instances(const TraversalInfo &info,
                                MaterializedView *target,
                                FieldMask &copy_mask,
@@ -1481,17 +1484,20 @@ namespace Legion {
                                    VersionInfo &version_info,
           const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
                                    Operation *op, unsigned index,
-                                   std::set<RtEvent> &map_applied_events);
+                                   std::set<RtEvent> &map_applied_events,
+                                   bool restrict_out = false);
       void invalidate_instance_views(PhysicalState *state,
                                      const FieldMask &invalid_mask); 
       void invalidate_reduction_views(PhysicalState *state,
                                       const FieldMask &invalid_mask);
       // Helper methods for doing copy/reduce-out for restricted coherence
       void issue_restricted_copies(const TraversalInfo &info,
+         const RestrictInfo &restrict_info, 
          const InstanceSet &restricted_instances,
          const std::vector<MaterializedView*> &restricted_views,
          const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views);
       void issue_restricted_reductions(const TraversalInfo &info,
+         const RestrictInfo &restrict_info,
          const InstanceSet &restricted_instances,
          const std::vector<MaterializedView*> &restricted_views,
          const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views);
