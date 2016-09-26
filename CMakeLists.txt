@@ -20,6 +20,10 @@ project(Legion)
 #------------------------------------------------------------------------------#
 # Some boilerplate to setup nice output directories
 #------------------------------------------------------------------------------#
+
+#for multilib distros
+include(GNUInstallDirs)
+
 list(INSERT CMAKE_MODULE_PATH 0 "${Legion_SOURCE_DIR}/cmake")
 if(NOT CMAKE_ARCHIVE_OUTPUT_DIRECTORY)
   set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${Legion_BINARY_DIR}/lib)
@@ -60,7 +64,7 @@ option(Legion_USE_HWLOC "Use hwloc for topology awareness" OFF)
 if(Legion_USE_HWLOC)
   find_package(HWLOC REQUIRED)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindHWLOC.cmake
-    DESTINATION lib/cmake/Legion
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 endif()
 
@@ -79,7 +83,7 @@ if(Legion_USE_GASNet)
   mark_as_advanced(GASNet_CONDUIT)
   find_package(GASNet REQUIRED)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindGASNet.cmake
-    DESTINATION lib/cmake/Legion
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 endif()
 
@@ -91,7 +95,7 @@ if(Legion_USE_LLVM)
   set(Legion_LLVM_COMPONENTS irreader jit mcjit x86)
   find_package(LLVM REQUIRED COMPONENTS ${Legion_LLVM_COMPONENTS})
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindLLVM.cmake
-    DESTINATION lib/cmake/Legion
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 endif()
 
@@ -107,10 +111,10 @@ if(Legion_USE_CUDA)
   endif()
   find_package(CUDA REQUIRED)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
-    DESTINATION lib/cmake/Legion
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
   install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
-    DESTINATION lib/cmake/Legion/newcmake
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
 endif()
 
@@ -138,7 +142,7 @@ export(EXPORT LegionTargets
 install(EXPORT LegionTargets
   NAMESPACE Legion::
   FILE LegionTargets.cmake
-  DESTINATION lib/cmake/Legion
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
 )
 
 configure_file(
@@ -147,7 +151,7 @@ configure_file(
   @ONLY
 )
 install(FILES ${Legion_BINARY_DIR}/LegionConfigCommon.cmake
-  DESTINATION lib/cmake/Legion
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
 )
 
 configure_file(
@@ -157,7 +161,7 @@ configure_file(
 )
 
 install(FILES cmake/LegionConfig-install.cmake
-  DESTINATION lib/cmake/Legion
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   RENAME LegionConfig.cmake
 )
 
