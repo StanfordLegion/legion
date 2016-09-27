@@ -8900,7 +8900,8 @@ namespace Legion {
         for (Domain::DomainPointIterator itr(parent_dom); itr; itr++)
         {
           ptr_t cur_ptr = itr.p.get_index();
-          int c = fa_coloring.read(cur_ptr);
+          int c;
+          fa_coloring.read_untyped(cur_ptr, &c, sizeof(c));
           // Ignore all colors less than zero
           if (c >= 0)
           {

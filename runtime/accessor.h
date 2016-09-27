@@ -287,7 +287,9 @@ namespace LegionRuntime {
 #ifdef PRIVILEGE_CHECKS
           inline void set_privileges(AccessorPrivilege p) { priv = p; }
 #endif
-
+#ifdef __OPTIMIZE__ // These are slow, you can only use them in debug mode
+        private:
+#endif 
 	  template <typename PTRTYPE>
 	  inline T read(PTRTYPE ptr) const 
           { 
@@ -311,6 +313,22 @@ namespace LegionRuntime {
 #endif
             write_untyped(ptr, &newval, sizeof(newval)); 
           }
+#ifdef __OPTIMIZE__
+        public: // allow reduce for now cause regent binding libraries are still dumb
+#endif
+          template<typename REDOP, typename PTRTYPE>
+	  inline void reduce(PTRTYPE ptr, typename REDOP::RHS newval) const
+	  {
+#ifdef PRIVILEGE_CHECKS
+            check_privileges<ACCESSOR_REDUCE>(priv, region);
+#endif
+#ifdef CHECK_BOUNDS 
+	    check_bounds(region, ptr);
+#endif
+	    T val = read(ptr);
+	    REDOP::template apply<true>(val, newval);
+	    write(ptr, val);
+	  }
 
 	  void report_fault(ptr_t ptr) const
 	  {
@@ -342,20 +360,6 @@ namespace LegionRuntime {
 	  template <int DIM>
 	  T *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride) const
 	  { return (T*)(Untyped::raw_dense_ptr<DIM>(r, subrect, elem_stride)); }
-
-	  template<typename REDOP, typename PTRTYPE>
-	  inline void reduce(PTRTYPE ptr, typename REDOP::RHS newval) const
-	  {
-#ifdef PRIVILEGE_CHECKS
-            check_privileges<ACCESSOR_REDUCE>(priv, region);
-#endif
-#ifdef CHECK_BOUNDS 
-	    check_bounds(region, ptr);
-#endif
-	    T val = read(ptr);
-	    REDOP::template apply<true>(val, newval);
-	    write(ptr, val);
-	  }
 
 	  typedef AOS<sizeof(PT)> AOS_TYPE;
 
