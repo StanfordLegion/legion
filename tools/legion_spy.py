@@ -4895,29 +4895,7 @@ class VerificationState(object):
         if perform_registration and not self.perform_verification_registration(op, 
                                                         req, inst, perform_checks):
             return False
-        restricted = True if req.restricted_fields and \
-            self.field in req.restricted_fields else False
-        # If we are restricted and we're not read-only we have to issue
-        # copies back to the restricted instance
-        if restricted and req.priv != READ_ONLY:
-            restricted_inst = req.restricted_fields[self.field]
-            if inst is not restricted_inst:
-                error_str = "restricted region requirement "+str(req.index)+" of "+str(op)
-                # We need to issue a copy or a reduction back to the 
-                # restricted instance in order to have the proper semantics
-                if inst.redop != 0:
-                    # Have to perform a reduction back
-                    if not self.issue_update_reductions(restricted_inst, op, req,
-                                                        perform_checks, error_str):
-                        return False
-                else:
-                    # Perform a normal copy back
-                    if not self.issue_update_copies(restricted_inst, op, req, 
-                                                    perform_checks, error_str):
-                        return False
-                # Restrictions always overwrite everything when they are done
-                self.reset()
-                self.valid_instances.add(inst)
+        
         return True
 
     def perform_copy(self, src, dst, op, req):
@@ -5001,6 +4979,30 @@ class VerificationState(object):
                 other.physical_outgoing.add(op)
         # Record ourselves as a user for this instance
         inst.add_verification_user(self.depth, self.field, self.point, op, req)
+        restricted = True if req.restricted_fields and \
+            self.field in req.restricted_fields else False
+        # If we are restricted and we're not read-only we have to issue
+        # copies back to the restricted instance
+        if restricted and req.priv != READ_ONLY:
+            restricted_inst = req.restricted_fields[self.field]
+            if inst is not restricted_inst:
+                error_str = "restricted region requirement "+\
+                        str(req.index)+" of "+str(op)
+                # We need to issue a copy or a reduction back to the 
+                # restricted instance in order to have the proper semantics
+                if inst.redop != 0:
+                    # Have to perform a reduction back
+                    if not self.issue_update_reductions(restricted_inst, op, req,
+                                                        perform_checks, error_str):
+                        return False
+                else:
+                    # Perform a normal copy back
+                    if not self.issue_update_copies(restricted_inst, op, req, 
+                                                    perform_checks, error_str):
+                        return False
+                # Restrictions always overwrite everything when they are done
+                self.reset()
+                self.valid_instances.add(inst)
         return True
 
 class Requirement(object):
