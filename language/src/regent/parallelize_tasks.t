@@ -889,9 +889,6 @@ local compute_extent = {
   [std.int3d] = terra(dop : int, rect : std.rect3d) : std.int3d
     var factors : &int, num_factors : int
     factorize(dop, &factors, &num_factors)
-    for idx = 0, num_factors do
-      std.c.printf("%d\n", factors[idx])
-    end
     var sz = rect:size()
     var sz_remain : int[3], extent : int[3]
     sz_remain[0], sz_remain[1], sz_remain[2] = sz.__ptr.x, sz.__ptr.y, sz.__ptr.z
