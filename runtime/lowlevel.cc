@@ -1179,6 +1179,9 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset) const
     {
+#ifdef __OPTIMIZE__
+      issue_performance_warning();
+#endif
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
       // must have valid data by now - block if we have to
@@ -1202,6 +1205,9 @@ namespace LegionRuntime {
     //bool debug_mappings = false;
     void AccessorType::Generic::Untyped::read_untyped(const DomainPoint& dp, void *dst, size_t bytes, off_t offset) const
     {
+#ifdef __OPTIMIZE__
+      issue_performance_warning();
+#endif
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
       // must have valid data by now - block if we have to
@@ -1246,6 +1252,9 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset) const
     {
+#ifdef __OPTIMIZE__
+      issue_performance_warning();
+#endif
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
       // must have valid data by now - block if we have to
@@ -1269,6 +1278,9 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::write_untyped(const DomainPoint& dp, const void *src, size_t bytes, off_t offset) const
     {
+#ifdef __OPTIMIZE__
+      issue_performance_warning();
+#endif
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
       // must have valid data by now - block if we have to

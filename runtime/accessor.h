@@ -211,7 +211,14 @@ namespace LegionRuntime {
 #endif
             return result;
 	  }
-
+#ifdef __OPTIMIZE__
+          inline void issue_performance_warning(void) const
+          {
+            for (int i = 0; i < 1024; i++)
+              fprintf(stdout,"WARNING: STOP USING GENERIC ACCESSORS FOR "
+                      "PERFORMANCE MEASUREMENTS!\n");
+          }
+#endif
 	  void read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset = 0) const;
 	  void write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset = 0) const;
 
@@ -287,12 +294,12 @@ namespace LegionRuntime {
 #ifdef PRIVILEGE_CHECKS
           inline void set_privileges(AccessorPrivilege p) { priv = p; }
 #endif
-#ifdef __OPTIMIZE__ // These are slow, you can only use them in debug mode
-        private:
-#endif 
 	  template <typename PTRTYPE>
 	  inline T read(PTRTYPE ptr) const 
           { 
+#ifdef __OPTIMIZE__
+            issue_performance_warning(); 
+#endif
 #ifdef PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_READ>(priv, region);
 #endif
@@ -305,6 +312,9 @@ namespace LegionRuntime {
 	  template <typename PTRTYPE>
 	  inline void write(PTRTYPE ptr, const T& newval) const 
           { 
+#ifdef __OPTIMIZE__
+            issue_performance_warning(); 
+#endif
 #ifdef PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_WRITE>(priv, region);
 #endif
@@ -313,12 +323,12 @@ namespace LegionRuntime {
 #endif
             write_untyped(ptr, &newval, sizeof(newval)); 
           }
-#ifdef __OPTIMIZE__
-        public: // allow reduce for now cause regent binding libraries are still dumb
-#endif
           template<typename REDOP, typename PTRTYPE>
 	  inline void reduce(PTRTYPE ptr, typename REDOP::RHS newval) const
 	  {
+#ifdef __OPTIMIZE__
+            issue_performance_warning(); 
+#endif
 #ifdef PRIVILEGE_CHECKS
             check_privileges<ACCESSOR_REDUCE>(priv, region);
 #endif
