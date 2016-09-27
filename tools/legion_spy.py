@@ -77,6 +77,7 @@ ATTACH_OP_KIND = 15
 DETACH_OP_KIND = 16
 DEP_PART_OP_KIND = 17
 PENDING_PART_OP_KIND = 18
+DYNAMIC_COLLECTIVE_OP_KIND = 19
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -9729,6 +9730,11 @@ class GraphPrinter(object):
 
 prefix    = "\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_spy\}: "
 prefix_pat               = re.compile(prefix)
+# Configuration patterns
+config_pat               = re.compile(
+    prefix+"Legion Spy Logging")
+detailed_config_pat      = re.compile(
+    prefix+"Legion Spy Detailed Logging")
 # Patterns for the shape of the machine
 proc_kind_pat            = re.compile(
     prefix+"Processor Kind (?P<kind>[0-9]+) (?P<name>[-$()\w. ]+)")
@@ -9823,6 +9829,8 @@ attach_pat               = re.compile(
     prefix+"Attach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 detach_pat               = re.compile(
     prefix+"Detach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+dynamic_collective_pat   = re.compile(
+    prefix+"Dynamic Collective (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 dep_partition_op_pat     = re.compile(
     prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) "+
            "(?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
@@ -10448,6 +10456,14 @@ def parse_legion_spy_line(line, state):
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
+    m = dynamic_collective_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(DYNAMIC_COLLECTIVE_OP_KIND)
+        op.set_name("Dynamic Collective Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
     m = dep_partition_op_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
@@ -10668,6 +10684,14 @@ def parse_legion_spy_line(line, state):
         mem1.add_memory(mem2, bandwidth, latency)
         mem2.add_memory(mem1, bandwidth, latency)
         return True
+    m = config_pat.match(line)
+    if m is not None:
+        state.set_config(False)
+        return True
+    m = detailed_config_pat.match(line)
+    if m is not None:
+        state.set_config(True)
+        return True
     return False
 
 class State(object):
@@ -10678,8 +10702,10 @@ class State(object):
                  'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 
                  'no_event', 'slice_index', 'slice_slice', 'point_slice', 
                  'next_generation', 'next_realm_num', 'detailed_graphs', 
-                 'assert_on_error', 'assert_on_warning']
+                 'assert_on_error', 'assert_on_warning', 'config', 'detailed_logging']
     def __init__(self, verbose, details, assert_on_error, assert_on_warning):
+        self.config = False
+        self.detailed_logging = True
         self.verbose = verbose
         self.detailed_graphs = details
         self.assert_on_error = assert_on_error
@@ -10720,6 +10746,10 @@ class State(object):
         self.next_generation = 1
         self.next_realm_num = 1
 
+    def set_config(self, detailed):
+        self.config = True
+        self.detailed_logging = detailed
+
     def get_next_traversal_generation(self):
         result = self.next_generation
         self.next_generation += 1
@@ -10746,12 +10776,8 @@ class State(object):
         log.close()
         if matches == 0:
             print('WARNING: file %s contained no valid lines!' % file_name)
-            # FIXME: This causes trouble on tests that do not produce
-            # Legion Spy output---usually because they don't actually
-            # run anything. We should check this but for now turn it off.
-
-            # if self.assert_on_warning:
-            #     assert False
+            if self.assert_on_warning:
+                assert False
         if self.verbose:
             print('Matched %d lines in %s' % (matches,file_name))
         if skipped > 0:
@@ -10815,9 +10841,8 @@ class State(object):
                 break
         if unknown is not None:
             print('WARNING: operation %d has unknown operation kind!' % op.uid)
-            # FIXME: This fails on dynamic collectives.
-            # if self.assert_on_warning:
-            #     assert False
+            if self.assert_on_warning:
+                assert False
         # Update the instance 
         for inst in self.instances.itervalues():
             inst.update_creator()
@@ -10831,9 +10856,7 @@ class State(object):
         self.slice_index = None
         self.slice_slice = None
         self.point_slice = None
-        logical_enabled = self.has_mapping_deps
-        physical_enabled = not not self.events
-        if physical_enabled:
+        if self.detailed_logging:
             # Compute the physical reachable
             for op in self.ops.itervalues():
                 op.compute_physical_reachable()
@@ -10858,7 +10881,6 @@ class State(object):
             print("Found %d events" % len(self.events))
             print("Found %d copies" % len(self.copies))
             print("Found %d fills" % len(self.fills))
-        return logical_enabled,physical_enabled
 
     def simplify_physical_graph(self, need_cycle_check=True):
         print("Simplifying event graph...")
@@ -11021,8 +11043,8 @@ class State(object):
         assert self.top_level_uid is not None
         top_task = self.get_task(self.top_level_uid)
         # Perform the physical analysis on all the operations in program order
-        #if not top_task.perform_task_physical_verification(perform_checks):
-        if not top_task.perform_task_physical_analysis(perform_checks):
+        if not top_task.perform_task_physical_verification(perform_checks):
+            #if not top_task.perform_task_physical_analysis(perform_checks):
             print("FAIL")
             return
         print("Pass")
@@ -11584,27 +11606,22 @@ def main(temp_dir):
     if total_matches == 0:
         print('No matches found! Exiting...')
         return
-    logical_enabled,physical_enabled = state.post_parse(simplify_graphs, 
-                                          physical_checks or event_graphs)
-    if logical_checks and not logical_enabled:
+    state.post_parse(simplify_graphs, physical_checks or event_graphs)
+    if logical_checks and not self.detailed_logging:
         print("WARNING: Requested logical analysis but logging information is "+
               "missing. Please compile the runtime with -DLEGION_SPY to enable "+
               "validation of the runtime. Disabling logical checks.")
-        # FIXME: This is check is buggy (logical_enabled will be false
-        # if the top-level task does not launch any suboperations), so
-        # skip the asser it if is false.
-
-        # if state.assert_on_warning:
-        #     assert False
+        if state.assert_on_warning:
+            assert False
         logical_checks = False
-    if physical_checks and not physical_enabled:
+    if physical_checks and not self.detailed_logging:
         print("WARNING: Requested physical analysis but logging information is "+
               "missing. Please compile the runtime with -DLEGION_SPY to enable "+
               "validation of the runtime. Disabling physical checks.")
         if state.assert_on_warning:
             assert False
         physical_checks = False
-    if logical_checks and sanity_checks and not logical_enabled:
+    if logical_checks and sanity_checks and not self.detailed_logging:
         print("WARNING: Requested sanity checks for logical analysis but "+
               "logging information of logical analysis is missing. Please "+
               "compile the runtime with -DLEGION_SPY to enable validation "+
@@ -11612,7 +11629,7 @@ def main(temp_dir):
         if state.assert_on_warning:
             assert False
         sanity_checks = False
-    if physical_checks and sanity_checks and not physical_enabled:
+    if physical_checks and sanity_checks and not self.detailed_logging:
         print("WARNING: Requested sanity checks for physical analysis but "+
               "logging information of logical analysis is missing. Please "+
               "compile the runtime with -DLEGION_SPY to enable validation "+
@@ -11620,14 +11637,14 @@ def main(temp_dir):
         if state.assert_on_warning:
             assert False
         sanity_checks = False
-    if cycle_checks and not physical_enabled:
+    if cycle_checks and not self.detailed_logging:
         print("WARNING: Requested cycle checks but logging information is "+
               "missing. Please compile the runtime with -DLEGION_SPY to enable "+
               "validation of the runtime. Disabling cycle checks.")
         if state.assert_on_warning:
             assert False
         cycle_checks = False
-    if user_event_leaks and not physical_enabled:
+    if user_event_leaks and not self.detailed_logging:
         print("WARNING: Requested user event leak checks but logging information "+
               "is missing. Please compile the runtime with -DLEGION_SPY to enable "+
               "validation of the runtime. Disabling user event leak checks.")
@@ -11636,7 +11653,7 @@ def main(temp_dir):
         user_event_leaks = False
     # If we are doing logical checks or the user asked for the dataflow
     # graph but we don't have any logical data then perform the logical analysis
-    need_logical = dataflow_graphs and not logical_enabled
+    need_logical = dataflow_graphs and not self.detailed_logging: 
     if logical_checks or need_logical:
         if need_logical:
             print("INFO: No logical dependence data was found so we are running "+
@@ -11646,7 +11663,7 @@ def main(temp_dir):
         state.perform_logical_analysis(logical_checks, sanity_checks)
     # If we are doing physical checks or the user asked for the event
     # graph but we don't have any logical data then perform the physical analysis
-    need_physical = event_graphs and not physical_enabled
+    need_physical = event_graphs and not self.detailed_logging: 
     if physical_checks or need_physical:
         if need_physical:
             print("INFO: No physical dependence data was found so we are running "+
