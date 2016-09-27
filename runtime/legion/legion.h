@@ -29,7 +29,7 @@
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
 
 /**
- * \namespace LegionRuntime
+ * \namespace Legion
  * Namespace for all Legion runtime objects
  */
 namespace Legion {
