@@ -1983,7 +1983,6 @@ namespace Legion {
       // If we couldn't make it then we are done
       if (!instance.exists())
         return NULL;
-      // Figure out what kind of instance we just made
       PhysicalManager *result = NULL;
       DistributedID did = forest->runtime->get_available_distributed_id(false);
       AddressSpaceID local_space = forest->runtime->address_space;
@@ -1994,6 +1993,15 @@ namespace Legion {
       // store the pointer constraint separately in the physical instance
       PointerConstraint pointer_constraint = constraints.pointer_constraint;
       constraints.pointer_constraint = PointerConstraint();
+      // If we successfully made it then we can 
+      // switch over the polarity of our constraints, this
+      // shouldn't be necessary once Realm gets its act together
+      // and actually tells us what the resulting constraints are
+      constraints.field_constraint.contiguous = true;
+      constraints.field_constraint.inorder = true;
+      constraints.ordering_constraint.contiguous = true;
+      constraints.memory_constraint = MemoryConstraint(
+                                        memory_manager->memory.kind());
       // Now let's find the layout constraints to use for this instance
       LayoutDescription *layout = 
         field_node->find_layout_description(instance_mask, constraints);
@@ -2007,6 +2015,7 @@ namespace Legion {
         layout = field_node->create_layout_description(instance_mask,
                  layout_constraints, mask_index_map, serdez, field_sizes);
       }
+      // Figure out what kind of instance we just made
       switch (constraints.specialized_constraint.get_kind())
       {
         case NO_SPECIALIZE:
