@@ -18,6 +18,14 @@
 #define __LEGION_RUNTIME_H__
 
 /**
+ * \mainpage Legion Runtime Documentation
+ *
+ * This is the main page of the Legion Runtime documentation.
+ *
+ * @see Legion::Runtime
+ */
+
+/**
  * \file legion.h
  * Legion C++ API
  */
