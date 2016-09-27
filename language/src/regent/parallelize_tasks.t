@@ -195,58 +195,6 @@ local function shallow_copy(tbl)
   return new_tbl
 end
 
-local compute_extent = {
-  [std.int1d] = terra(dop : int, rect : std.rect1d) : std.int1d
-    return [std.int1d](dop)
-  end,
-  [std.int2d] = terra(dop : int, rect : std.rect2d) : std.int2d
-    var sz = rect:size()
-    var py = -1
-    var f : int = dop / 2
-    if f > sz.__ptr.y then f = sz.__ptr.y end
-    while f >= 1 do
-      if dop % f == 0 then py = f break end
-      f = f - 1
-    end
-    var px = dop / py
-    if px > sz.__ptr.x or py > sz.__ptr.y then
-      c.printf(
-        "Impossible to partition the rectangle (%d, %d) - (%d, %d) in %d pieces\n",
-        rect.lo.__ptr.x, rect.lo.__ptr.y, rect.hi.__ptr.x, rect.hi.__ptr.y, dop)
-      std.assert(false, "parallelization failed")
-    end
-    return std.int2d { [std.int2d.impl_type] { px, py } }
-  end,
-  [std.int3d] = terra(dop : int, rect : std.rect3d) : std.int3d
-    var sz = rect:size()
-    var pz = -1
-    var f = dop / 2
-    if f > sz.__ptr.z then f = sz.__ptr.z end
-    while f >= 1 do
-      if dop % f == 0 then pz = f break end
-      f = f - 1
-    end
-    dop = dop / pz
-    var py = -1
-    f = dop
-    if f > sz.__ptr.y then f = sz.__ptr.y end
-    while f >= 1 do
-      if dop % f == 0 then py = f break end
-      f = f - 1
-    end
-    var px = dop / py
-    if px > sz.__ptr.x or py > sz.__ptr.y or pz > sz.__ptr.z then
-      c.printf(
-        ["Impossible to partition the rectangle " ..
-         "(%d, %d, %d) - (%d, %d, %d) in %d pieces\n"],
-        rect.lo.__ptr.x, rect.lo.__ptr.y, rect.lo.__ptr.z,
-        rect.hi.__ptr.x, rect.hi.__ptr.y, rect.hi.__ptr.z, dop)
-      std.assert(false, "parallelization failed")
-    end
-    return std.int3d { [std.int3d.impl_type] { px, py, pz } }
-  end,
-}
-
 -- #####################################
 -- ## Utilities for AST node manipulation
 -- #################
@@ -895,15 +843,104 @@ end
 -- ## Code generation utilities for partition creation and indexspace launch
 -- #################
 
+local terra factorize(dop : int, factors : &&int, num_factors : &int)
+  @num_factors = 0
+  @factors = [&int](std.c.malloc([sizeof(int)] * dop))
+  while dop > 1 do
+    var factor = 1
+    while factor <= dop do
+      if factor ~= 1 and dop % factor == 0 then
+        (@factors)[@num_factors] = factor
+        @num_factors = @num_factors + 1
+        dop = dop / factor
+        break
+      end
+      factor = factor + 1
+    end
+  end
+
+  for i = 0, @num_factors - 1 do
+    for j = i + 1, @num_factors do
+      if (@factors)[i] < (@factors)[j] then
+        (@factors)[j], (@factors)[i]  = (@factors)[i], (@factors)[j]
+      end
+    end
+  end
+end
+
+local compute_extent = {
+  [std.int2d] = terra(dop : int, rect : std.rect2d) : std.int2d
+    var factors : &int, num_factors : int
+    factorize(dop, &factors, &num_factors)
+    var sz = rect:size()
+    var extent : std.int2d = std.int2d { [std.int2d.impl_type] { 1, 1 } }
+    for idx = 0, num_factors do
+      if sz.__ptr.x <= sz.__ptr.y then
+        extent.__ptr.y = extent.__ptr.y * factors[idx]
+        sz.__ptr.y = (sz.__ptr.y + factors[idx] - 1) / factors[idx]
+      else
+        extent.__ptr.x = extent.__ptr.x * factors[idx]
+        sz.__ptr.x = (sz.__ptr.x + factors[idx] - 1) / factors[idx]
+      end
+    end
+    std.c.free(factors)
+    return extent
+  end,
+  [std.int3d] = terra(dop : int, rect : std.rect3d) : std.int3d
+    var factors : &int, num_factors : int
+    factorize(dop, &factors, &num_factors)
+    for idx = 0, num_factors do
+      std.c.printf("%d\n", factors[idx])
+    end
+    var sz = rect:size()
+    var sz_remain : int[3], extent : int[3]
+    sz_remain[0], sz_remain[1], sz_remain[2] = sz.__ptr.x, sz.__ptr.y, sz.__ptr.z
+    for k = 0, 3 do extent[k] = 1 end
+    for idx = 0, num_factors do
+      var next_max = 0
+	    var max_sz = 0
+      for k = 2, -1, -1 do
+        if max_sz < sz_remain[k] then
+          next_max = k
+          max_sz = sz_remain[k]
+        end
+      end
+      extent[next_max] = extent[next_max] * factors[idx]
+      sz_remain[next_max] = (sz_remain[next_max] + factors[idx] - 1) / factors[idx]
+    end
+    std.c.free(factors)
+    return std.int3d { [std.int3d.impl_type] { extent[0], extent[1], extent[2] } }
+  end,
+}
+
 local function create_equal_partition(caller_cx, region_symbol, pparam)
   local region_type = region_symbol:gettype()
   local index_type = region_type:ispace().index_type
   local dim = index_type.dim
-  local extent_expr = mk_expr_call(
-    compute_extent[index_type], terralib.newlist {
-      mk_expr_constant(pparam:dop(), int),
-      mk_expr_bounds_access(mk_expr_id(region_symbol))
-    })
+  local factors = terralib.newlist()
+  local line = pparam:dop()
+  if string.len(line) > 0 then
+    local position = 0
+    while position do
+      local new_position = string.find(line, ",", position+1)
+      factors:insert(tonumber(string.sub(line, position+1, new_position and new_position-1)))
+      position = new_position
+    end
+  end
+  local extent_expr
+  if dim == 1 then
+    extent_expr = mk_expr_constant(factors[1], int)
+  elseif #factors == 1 then
+    extent_expr = mk_expr_call(
+      compute_extent[index_type], terralib.newlist {
+        mk_expr_constant(factors[1], int),
+        mk_expr_bounds_access(mk_expr_id(region_symbol))
+      })
+  else
+    extent_expr = mk_expr_ctor(factors:map(function(f)
+      return mk_expr_constant(f, int)
+    end))
+  end
 
   local color_space_expr = mk_expr_ispace(index_type, extent_expr)
   local partition_type =
