@@ -19859,6 +19859,8 @@ namespace Legion {
         assert(initial_task_window_hysteresis <= 100);
 #endif
       }
+      if (legion_spy_enabled)
+        LegionSpy::log_legion_spy_config();
 #ifdef DEBUG_LEGION
       if (num_profiling_nodes > 0)
       {
@@ -20093,8 +20095,7 @@ namespace Legion {
           delete pending_handshakes;
           pending_handshakes = NULL;
         }
-      }
-
+      } 
       // See if we are supposed to start the top-level task
       if (top_level_proc.exists())
       {

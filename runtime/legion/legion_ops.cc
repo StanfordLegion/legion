@@ -7563,6 +7563,8 @@ namespace Legion {
             runtime->get_available_distributed_id(true), runtime->address_space,
             runtime->address_space, this));
       collective = dc;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_dynamic_collective(ctx->get_unique_id(), unique_op_id);
       return future;
     }
 

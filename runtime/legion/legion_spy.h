@@ -36,6 +36,16 @@ namespace Legion {
 
       extern LegionRuntime::Logger::Category log_spy;
 
+      // One time logger calls to record what gets logged
+      static inline void log_legion_spy_config(void)
+      {
+#ifdef LEGION_SPY
+        log_spy.print("Legion Spy Detailed Logging");
+#else
+        log_spy.print("Legion Spy Logging");
+#endif
+      }
+
       // Logger calls for the machine architecture
       static inline void log_processor_kind(unsigned kind, const char *name)
       {
@@ -323,6 +333,12 @@ namespace Legion {
       {
         log_spy.print("Detach Operation %llu %llu",
                       context, detach);
+      }
+
+      static inline void log_dynamic_collective(UniqueID context, 
+                                                UniqueID collective)
+      {
+        log_spy.print("Dynamic Collective %llu %llu", context, collective);
       }
 
       static inline void log_dependent_partition_operation(UniqueID context,
