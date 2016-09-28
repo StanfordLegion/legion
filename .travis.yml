@@ -85,10 +85,18 @@ script:
 
   # Legion examples
   - |
+    make -s -C examples/attach_file
+    examples/attach_file/attach_file -logfile out_%.log
+    make -s -C examples/dependent_circuit
+    # examples/dependent_circuit/ckt_sim -logfile out_%.log
+    make -s -C examples/dynamic_registration
+    examples/dynamic_registration/dynamic_registration -logfile out_%.log
     make -s -C examples/full_circuit
     examples/full_circuit/ckt_sim -logfile out_%.log
     make -s -C examples/full_ghost
     examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
+    make -s -C examples/realm_saxpy
+    examples/realm_saxpy/realm_saxpy -logfile out_%.log
     make -s -C examples/spmd_cgsolver
     examples/spmd_cgsolver/cgsolver -ll:cpu 4 -perproc -logfile out_%.log
 

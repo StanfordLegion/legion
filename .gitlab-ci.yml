@@ -113,10 +113,14 @@ before_script:
 .tests: &tests
   script:
     - export LG_RT_DIR=$PWD/runtime
+
+    # Regent
     - |
       if [[ "$TEST_REGENT" -eq 1 ]]; then
         ./language/travis.py
       fi
+
+    # Legion tutorials
     - |
       make -s -C tutorial/00_hello_world -j$THREADS
       tutorial/00_hello_world/hello_world -logfile out_%.log
@@ -138,11 +142,25 @@ before_script:
       tutorial/08_multiple_partitions/multiple_partitions -logfile out_%.log
       make -s -C tutorial/09_custom_mapper
       tutorial/09_custom_mapper/custom_mapper -logfile out_%.log
+
+    # Legion examples
     - |
+      make -s -C examples/attach_file
+      examples/attach_file/attach_file -logfile out_%.log
+      make -s -C examples/dependent_circuit
+      # examples/dependent_circuit/ckt_sim -logfile out_%.log
+      make -s -C examples/dynamic_registration
+      examples/dynamic_registration/dynamic_registration -logfile out_%.log
       make -s -C examples/full_circuit
       examples/full_circuit/ckt_sim -logfile out_%.log
       make -s -C examples/full_ghost
       examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
+      make -s -C examples/realm_saxpy
+      examples/realm_saxpy/realm_saxpy -logfile out_%.log
+      make -s -C examples/spmd_cgsolver
+      examples/spmd_cgsolver/cgsolver -ll:cpu 4 -perproc -logfile out_%.log
+
+    # Legion fuzz tester
     - |
       # if [[ "$TEST_SPY" -eq 1 ]]; then
       if [[ "$DEBUG" -eq 1 ]]; then
@@ -151,6 +169,8 @@ before_script:
         WARN_AS_ERROR=0 python main.py
         popd
       fi
+
+    # Realm
     - |
       if [[ "$DEBUG" -eq 0 ]]; then
         make -s -C test/realm DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
