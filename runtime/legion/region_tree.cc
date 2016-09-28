@@ -59,6 +59,15 @@ namespace Legion {
     {
       lookup_lock.destroy_reservation();
       lookup_lock = Reservation::NO_RESERVATION;
+      // Log any index spaces with allocators
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::map<IndexSpace,IndexSpaceNode*>::const_iterator it = 
+              index_nodes.begin(); it != index_nodes.end(); it++)
+          if (it->second->has_allocator())
+            IndexSpaceNode::log_index_space_domain(it->first, 
+                it->second->get_domain_no_wait());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -79,7 +88,7 @@ namespace Legion {
     {
       create_node(handle, domain, NULL/*parent*/, 
                   ColorPoint(0)/*color*/, kind, mode);
-      if (Runtime::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled && (domain.get_dim() > 0))
         IndexSpaceNode::log_index_space_domain(handle, domain);
     }
 
@@ -97,7 +106,7 @@ namespace Legion {
       IndexSpaceNode *node = create_node(handle, hull, NULL/*parent*/, 
                                          ColorPoint(0)/*color*/, kind, mode);
       node->update_component_domains(domains);
-      if (Runtime::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled && (hull.get_dim() > 0))
       {
         for (std::set<Domain>::const_iterator it = domains.begin();
               it != domains.end(); it++)
@@ -179,7 +188,7 @@ namespace Legion {
         create_node(handle, it->second, new_part, ColorPoint(it->first),
                     parent_node->kind, mode);
 
-        if (Runtime::legion_spy_enabled)
+        if (Runtime::legion_spy_enabled && (it->second.get_dim() > 0))
         {
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
           IndexSpaceNode::log_index_space_domain(handle, it->second);
@@ -306,7 +315,7 @@ namespace Legion {
                                             parent_node->kind, mode);
         child->update_component_domains(comp_it->second);
 
-        if (Runtime::legion_spy_enabled)
+        if (Runtime::legion_spy_enabled && (it->second.get_dim() > 0))
         {
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
           for (std::set<Domain>::const_iterator cit = 

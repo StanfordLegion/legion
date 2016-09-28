@@ -832,6 +832,7 @@ namespace Legion {
                             Deserializer &derez, AddressSpaceID source);
       static void handle_colors_response(Deserializer &derez);
     public:
+      inline bool has_allocator(void) const { return (allocator != NULL); }
       IndexSpaceAllocator* get_allocator(void);
     public:
       static void log_index_space_domain(IndexSpace handle, const Domain &dom);
