@@ -188,10 +188,11 @@ namespace Legion {
         create_node(handle, it->second, new_part, ColorPoint(it->first),
                     parent_node->kind, mode);
 
-        if (Runtime::legion_spy_enabled && (it->second.get_dim() > 0))
+        if (Runtime::legion_spy_enabled)
         {
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-          IndexSpaceNode::log_index_space_domain(handle, it->second);
+          if (it->second.get_dim() > 0)
+            IndexSpaceNode::log_index_space_domain(handle, it->second);
         }
       } 
       if (part_kind == COMPUTE_KIND)
@@ -315,12 +316,13 @@ namespace Legion {
                                             parent_node->kind, mode);
         child->update_component_domains(comp_it->second);
 
-        if (Runtime::legion_spy_enabled && (it->second.get_dim() > 0))
+        if (Runtime::legion_spy_enabled)
         {
           LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-          for (std::set<Domain>::const_iterator cit = 
-                comp_it->second.begin(); cit != comp_it->second.end(); cit++)
-            IndexSpaceNode::log_index_space_domain(handle, *cit); 
+          if (it->second.get_dim() > 0)
+            for (std::set<Domain>::const_iterator cit = 
+                  comp_it->second.begin(); cit != comp_it->second.end(); cit++)
+              IndexSpaceNode::log_index_space_domain(handle, *cit); 
         }
       }
       if (part_kind == COMPUTE_KIND)
