@@ -2159,8 +2159,7 @@ class IndexSpace(object):
 
     def get_point_set(self):
         if self.point_set is None:
-            print("No Point set for %s" % self)
-        assert self.point_set is not None
+            self.point_set = PointSet()
         return self.point_set
 
     def intersection(self, other):
@@ -2300,9 +2299,9 @@ class IndexPartition(object):
                     assert False
         # Check disjointness
         if self.disjoint:
-            previous = Shape()
+            previous = PointSet()
             for child in self.children.itervalues():
-                child_shape = child.get_shape()
+                child_shape = child.get_point_set()
                 if not (child_shape & previous).empty():
                     print(('WARNING: %s was logged disjoint '+
                             'but there are overlapping children. This '+
@@ -4602,7 +4601,7 @@ class PhysicalState(object):
 
 class VerificationTraverser(object):
     def __init__(self, state, dst_depth, dst_field, dst_req, dst_inst, 
-                 op, src_req, error_str):
+                 op, src_req, error_str, same_tree = True):
         self.state = state
         self.target = dst_inst
         self.tree = state.tree
@@ -4615,17 +4614,18 @@ class VerificationTraverser(object):
         self.src_req = src_req
         self.dst_req = dst_req
         self.error_str = error_str
+        self.same_tree = same_tree
         if state.pending_reductions:
-            self.found_dataflow_path = inst in state.previous_instances
+            self.found_dataflow_path = dst_inst in state.previous_instances
         else:
-            assert inst not in state.valid_instances
+            assert dst_inst not in state.valid_instances
             self.found_dataflow_path = False
         if not self.found_dataflow_path:
             self.dataflow_stack = list()
             # If there are reductions we can't add the instance to 
             # the stack until we've gone through a reduction
             if not state.pending_reductions:
-                self.dataflow_stack.append(inst)    
+                self.dataflow_stack.append(dst_inst)    
         self.observed_reductions = set()
         self.failed_analysis = False
         
@@ -4666,9 +4666,8 @@ class VerificationTraverser(object):
         return False
 
     def visit_copy(self, copy):
-        # Quick checks to see if we can skip it
         # If it's not the same tree, we can't go through it
-        if copy.region.tree_id != self.tree.tree_id:
+        if self.same_tree and copy.region.tree_id != self.tree.tree_id:
             return False
         # Same tree, but doesn't have our point, we can still go through
         # if we have seen all our reductions (e.g. we have a dataflow stack)
@@ -4791,7 +4790,7 @@ class VerificationTraverser(object):
 
     def visit_fill(self, fill):
         # Quick checks to see if we can skip it
-        if fill.region.tree_id != self.tree.tree_id:
+        if self.same_tree and fill.region.tree_id != self.tree.tree_id:
             return False
         # See if this fill is for the current target
         if not self.found_dataflow_path and self.dataflow_stack and \
@@ -4832,14 +4831,24 @@ class VerificationTraverser(object):
             return False
         # If we didn't have a dataflow path then we're done
         if not self.found_dataflow_path:
-            if last and self.op.state.assert_on_error:
-                assert False
+            if last:
+                print("ERROR: No dataflow path found to update field "+
+                        str(self.dst_field)+" of instance "+str(self.target)+
+                        " of region requirement "+str(self.dst_req.index)+
+                        " of "+str(self.op))
+                if self.op.state.assert_on_error:
+                    assert False
             return False
         # See if we saw all the needed reductions
         if self.state.pending_reductions and \
             len(self.state.pending_reductions) != len(self.observed_reductions):
-            if last and self.op.state.assert_on_error:
-                assert False
+            if last:
+                print("ERROR: Missing reductions to apply to field "+
+                        str(self.dst_field)+" of instance "+str(self.target)+
+                        " of region requirement "+str(self.dst_req.index)+
+                        " of "+str(self.op))
+                if self.op.state.assert_on_error:
+                    assert False
             return False
         return True
 
@@ -4947,7 +4956,8 @@ class VerificationState(object):
             if not self.initialized:
                 self.initialized = True
                 return True
-            traverser = VerificationTraverser(self, inst, op, req, error_str)
+            traverser = VerificationTraverser(self, self.depth, self.field, 
+                                              req, inst, op, req, error_str)
             return traverser.verify(op)
         # First see if we have a valid instance we can copy from  
         if self.valid_instances:
@@ -4976,7 +4986,8 @@ class VerificationState(object):
     def issue_update_reductions(self, inst, op, req, perform_checks, error_str):
         assert self.pending_reductions
         if perform_checks:
-            traverser = VerificationTraverser(self, inst, op, req, error_str)
+            traverser = VerificationTraverser(self, self.depth, self.field, req,
+                                              inst, op, req, error_str)
             return traverser.verify(op)
         # Make sure a reduction was issued from each reduction instance
         for reduction_inst in self.pending_reductions:
@@ -5038,7 +5049,7 @@ class VerificationState(object):
                 error_str = "copy across from "+str(src_req.index)+" to "+\
                     str(dst_req.index)+" of "+str(op)
                 traverser = VerificationTraverser(self, dst_depth, 
-                    dst_field, dst_req, dst_inst, op, src_req, error_str)
+                    dst_field, dst_req, dst_inst, op, src_req, error_str, False)
                 return traverser.verify(op)
             else:
                 # Just have to find the copy operation and check it
