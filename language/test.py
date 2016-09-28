@@ -291,11 +291,11 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
         for test_name, test_counter in test_counters.items():
             test_total = test_counter.passed + test_counter.failed
             if test_total > 0:
-                print('%24s: Passed %3d of %3d tests (%5.1f%%)' % (
+                print('%24s: Passed %4d of %4d tests (%5.1f%%)' % (
                     '%s' % test_name, test_counter.passed, test_total,
                     float(100*test_counter.passed)/test_total))
         print('    ' + '~'*54)
-        print('%24s: Passed %3d of %3d tests (%5.1f%%)' % (
+        print('%24s: Passed %4d of %4d tests (%5.1f%%)' % (
             'total', global_counter.passed, global_total,
             (float(100*global_counter.passed)/global_total)))
 
