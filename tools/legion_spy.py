@@ -4628,7 +4628,6 @@ class VerificationTraverser(object):
                 self.dataflow_stack.append(dst_inst)    
         self.observed_reductions = set()
         self.failed_analysis = False
-        
         self.generation = op.state.get_next_traversal_generation()
 
     def visit_node(self, node):
@@ -4650,6 +4649,19 @@ class VerificationTraverser(object):
             if not self.visit_fill(node):
                 return
             self.traverse_node(node)
+        elif isinstance(node, Event):
+            if node.incoming:
+                for ev in node.incoming:
+                    self.visit_node(ev)
+            if node.incoming_ops:
+                for op in node.incoming_ops:
+                    self.visit_node(op)
+            if node.incoming_copies:
+                for copy in node.incoming_copies:
+                    self.visit_node(copy)
+            if node.incoming_fills:
+                for fill in node.incoming_fills:
+                    self.visit_node(fill)
         else:
             assert False # should never get here
 
@@ -4857,6 +4869,12 @@ class VerificationTraverser(object):
         self.traverse_node(node)
         return self.verified(True)
 
+    def verify_copy_across(self, node):
+        # Traverse from the finish event to get everything 
+        # that was done as part of the copy
+        self.visit_node(node.finish_event)
+        return self.verified(True)
+
 class VerificationState(object):
     __slots__ = ['tree', 'depth', 'field', 'point', 'valid_instances', 
                  'previous_instances', 'pending_reductions', 
@@ -4874,6 +4892,7 @@ class VerificationState(object):
         self.initialized = False
 
     def reset(self):
+        self.initialized = True
         self.pending_fill = False
         self.previous_instances = set()
         self.valid_instances = set()
@@ -4884,10 +4903,8 @@ class VerificationState(object):
 
     def perform_fill_verification(self, op, req):
         # Fills clear everything out so we are just done
+        self.reset()
         self.pending_fill = True
-        self.previous_instances = set()
-        self.valid_instances = set()
-        self.pending_reductions = set()
         return True
 
     def perform_physical_verification(self, op, req, inst, perform_checks, 
@@ -5050,7 +5067,7 @@ class VerificationState(object):
                     str(dst_req.index)+" of "+str(op)
                 traverser = VerificationTraverser(self, dst_depth, 
                     dst_field, dst_req, dst_inst, op, src_req, error_str, False)
-                return traverser.verify(op)
+                return traverser.verify_copy_across(op)
             else:
                 # Just have to find the copy operation and check it
                 # as all the other copies have already been checked
