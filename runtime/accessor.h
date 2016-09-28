@@ -214,9 +214,12 @@ namespace LegionRuntime {
 #ifdef __OPTIMIZE__
           inline void issue_performance_warning(void) const
           {
+            // Disable these warnings for now
+#if 0
             for (int i = 0; i < 1024; i++)
               fprintf(stdout,"WARNING: STOP USING GENERIC ACCESSORS IN "
                       "OPTIMIZED CODE!\n");
+#endif
           }
 #endif
 	  void read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset = 0) const;
