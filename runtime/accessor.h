@@ -121,6 +121,30 @@ namespace LegionRuntime {
       return region.get_field_accessor(fid).template typeify<ET>().template convert<AT>();
     }
 
+    namespace DebugHooks {
+      // these are calls that can be implemented by a higher level (e.g. Legion) to
+      //  perform privilege/bounds checks on accessor reference and produce more useful
+      //  information for debug
+
+      extern void (*check_bounds_ptr)(void *region, ptr_t ptr);
+      extern void (*check_bounds_dpoint)(void *region, const Realm::DomainPoint &dp);
+
+      // single entry point calls the right one (if present) using overloading
+      inline void check_bounds(void *region, ptr_t ptr)
+      {
+	if(check_bounds_ptr)
+	  (check_bounds_ptr)(region, ptr);
+      }
+
+      inline void check_bounds(void *region, const Realm::DomainPoint &dp)
+      {
+	if(check_bounds_dpoint)
+	  (check_bounds_dpoint)(region, dp);
+      }
+
+      extern const char *(*find_privilege_task_name)(void *region);
+    };
+
     namespace AccessorType {
       template <typename T, off_t val> 
       struct Const {
@@ -152,7 +176,6 @@ namespace LegionRuntime {
 
 #ifdef PRIVILEGE_CHECKS
       // TODO: Make these functions work for GPUs
-      const char* find_privilege_task_name(void *region);
       static inline const char* get_privilege_string(AccessorPrivilege priv)
       {
         switch (priv)
@@ -180,17 +203,13 @@ namespace LegionRuntime {
         {
           const char *held_string = get_privilege_string(held);
           const char *req_string = get_privilege_string(REQUESTED);
-          const char *task_name = find_privilege_task_name(region);
+          const char *task_name = (DebugHooks::find_privilege_task_name ?
+				   (DebugHooks::find_privilege_task_name)(region) : "(unknown)");
           fprintf(stderr,"PRIVILEGE CHECK ERROR IN TASK %s: Need %s privileges but "
                          "only hold %s privileges\n", task_name, req_string, held_string);
           assert(false);
         }
       }
-#endif
-#ifdef BOUNDS_CHECKS 
-      // TODO: Make these functions work for GPUs
-      void check_bounds(void *region, ptr_t ptr);
-      void check_bounds(void *region, const Realm::DomainPoint &dp);
 #endif
 
       struct Generic {
@@ -307,7 +326,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_READ>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(region , ptr);
+            DebugHooks::check_bounds(region, ptr);
 #endif
             T val; read_untyped(ptr, &val, sizeof(val)); return val; 
           }
@@ -322,7 +341,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_WRITE>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(region, ptr);
+            DebugHooks::check_bounds(region, ptr);
 #endif
             write_untyped(ptr, &newval, sizeof(newval)); 
           }
@@ -336,7 +355,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_REDUCE>(priv, region);
 #endif
 #ifdef CHECK_BOUNDS 
-	    check_bounds(region, ptr);
+            DebugHooks::check_bounds(region, ptr);
 #endif
 	    T val = read(ptr);
 	    REDOP::template apply<true>(val, newval);
@@ -597,7 +616,7 @@ namespace LegionRuntime {
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
 #ifdef BOUNDS_CHECKS 
-            check_bounds(region, ptr);
+            DebugHooks::check_bounds(region, ptr);
 #endif
 	    return(base + (ptr.value * Stride<STRIDE>::value));
 	  }
@@ -640,7 +659,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_READ>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *(const T *)(Untyped::elem_ptr(ptr)); 
           }
@@ -651,7 +670,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             *(T *)(Untyped::elem_ptr(ptr)) = newval; 
           }
@@ -663,7 +682,7 @@ namespace LegionRuntime {
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             return (T *)Untyped::elem_ptr(ptr); 
           }
@@ -675,7 +694,7 @@ namespace LegionRuntime {
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *((T*)Untyped::elem_ptr(ptr)); 
           }
@@ -687,7 +706,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
@@ -763,7 +782,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_READ>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *(const T *)(Untyped::elem_ptr(ptr)); 
           }
@@ -774,7 +793,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             *(T *)(Untyped::elem_ptr(ptr)) = newval; 
           }
@@ -786,7 +805,7 @@ namespace LegionRuntime {
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             return (T *)Untyped::elem_ptr(ptr); 
           }
@@ -798,7 +817,7 @@ namespace LegionRuntime {
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *((T*)Untyped::elem_ptr(ptr)); 
           }
@@ -810,7 +829,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
@@ -831,7 +850,7 @@ namespace LegionRuntime {
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
 #ifdef BOUNDS_CHECKS 
-            check_bounds(region, ptr);
+            DebugHooks::check_bounds(region, ptr);
 #endif
 	    return(base + (ptr.value * Stride<STRIDE>::value));
 	  }
@@ -874,7 +893,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_READ>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *(const T *)(Untyped::elem_ptr(ptr)); 
           }
@@ -885,7 +904,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             *(T *)(Untyped::elem_ptr(ptr)) = newval; 
           }
@@ -897,7 +916,7 @@ namespace LegionRuntime {
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             return (T *)Untyped::elem_ptr(ptr); 
           }
@@ -909,7 +928,7 @@ namespace LegionRuntime {
             //check_privileges<ACCESSOR_WRITE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
             return *((T*)Untyped::elem_ptr(ptr)); 
           }
@@ -921,7 +940,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
@@ -996,7 +1015,7 @@ namespace LegionRuntime {
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    return(base + (ptr.value * sizeof(typename REDOP::RHS)));
 	  }
@@ -1046,7 +1065,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    REDOP::template fold<false>(*(typename REDOP::RHS *)Untyped::elem_ptr(ptr), newval);
 	  }
@@ -1067,7 +1086,7 @@ namespace LegionRuntime {
 	  inline char *elem_ptr(ptr_t ptr) const
 	  {
 #ifdef BOUNDS_CHECKS 
-            check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    return(base + (ptr.value * sizeof(ReductionListEntry)));
 	  }
@@ -1126,7 +1145,7 @@ namespace LegionRuntime {
             check_privileges<ACCESSOR_REDUCE>(this->template priv, this->region);
 #endif
 #ifdef BOUNDS_CHECKS 
-	    check_bounds(this->region, ptr);
+            DebugHooks::check_bounds(this->region, ptr);
 #endif
 	    ptr_t listptr = Untyped::get_next();
 	    ReductionListEntry *entry = reinterpret_cast<ReductionListEntry *>(Untyped::elem_ptr(listptr));

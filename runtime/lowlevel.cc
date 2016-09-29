@@ -1177,6 +1177,17 @@ namespace LegionRuntime {
   namespace Accessor {
     using namespace LegionRuntime::LowLevel;
 
+    namespace DebugHooks {
+      // these are calls that can be implemented by a higher level (e.g. Legion) to
+      //  perform privilege/bounds checks on accessor reference and produce more useful
+      //  information for debug
+
+      /*extern*/ void (*check_bounds_ptr)(void *region, ptr_t ptr) = 0;
+      /*extern*/ void (*check_bounds_dpoint)(void *region, const Realm::DomainPoint &dp) = 0;
+
+      /*extern*/ const char *(*find_privilege_task_name)(void *region) = 0;
+    };
+
     void AccessorType::Generic::Untyped::read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset) const
     {
 #ifdef __OPTIMIZE__
@@ -1191,7 +1202,8 @@ namespace LegionRuntime {
       check_privileges<ACCESSOR_READ>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, ptr);
+      if(DebugHooks::check_bounds_ptr)
+	(DebugHooks::check_bounds_ptr)(region, ptr);
 #endif
 #ifdef USE_HDF
       // HDF memory doesn't support 
@@ -1217,7 +1229,8 @@ namespace LegionRuntime {
       check_privileges<ACCESSOR_READ>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, dp);
+      if(DebugHooks::check_bounds_dpoint)
+	(DebugHooks::check_bounds_dpoint)(region, dp);
 #endif
 #ifdef OLD_USE_HDF
       // we can directly access HDF memory by domain point
@@ -1264,7 +1277,8 @@ namespace LegionRuntime {
       check_privileges<ACCESSOR_WRITE>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, ptr);
+      if(DebugHooks::check_bounds_ptr)
+	(DebugHooks::check_bounds_ptr)(region, ptr);
 #endif
 #ifdef USE_HDF
      // HDF memory doesn't support enumerate type
@@ -1290,7 +1304,8 @@ namespace LegionRuntime {
       check_privileges<ACCESSOR_WRITE>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, dp);
+      if(DebugHooks::check_bounds_dpoint)
+	(DebugHooks::check_bounds_dpoint)(region, dp);
 #endif
 #ifdef OLD_USE_HDF
       if (impl->memory.kind() == Memory::HDF_MEM) {
@@ -1456,7 +1471,8 @@ namespace LegionRuntime {
       assert(ok);
 
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, ptr);
+      if(DebugHooks::check_bounds_ptr)
+	(DebugHooks::check_bounds_ptr)(region, ptr);
 #endif
 
       Arrays::Mapping<1, 1> *mapping = impl->metadata.linearization.get_mapping<1>();
