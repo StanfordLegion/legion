@@ -4737,7 +4737,7 @@ class VerificationTraverser(object):
             if self.dst_field in copy.dst_fields and \
                 copy.dsts[copy.dst_fields.index(self.dst_field)] is self.target and \
                     self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
-                src = copy.srcs[copy.dst_fields.index(self.src_field)]
+                src = copy.srcs[copy.dst_fields.index(self.dst_field)]
                 if src.redop != 0:
                     assert src in self.state.pending_reductions
                     self.observed_reductions.add(src)
@@ -4894,7 +4894,7 @@ class VerificationTraverser(object):
                 for copy in op.realm_copies:
                     if copy not in all_reachable:
                         self.traverse_node(copy)
-        elif op.kind == INTER_CLOSE_OP_KIND:
+        elif op.kind == INTER_CLOSE_OP_KIND or op.kind == POST_CLOSE_OP_KIND:
             # Close operations are similar to copies in that they don't
             # wait for data to be ready before starting, so we can't
             # start at their node. However, inter close ops are even
