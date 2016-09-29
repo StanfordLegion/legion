@@ -24,9 +24,6 @@ if(Legion_USE_HDF)
   add_subdirectory(attach-file)
 endif()
 
-# Currently broken with master
-#add_subdirectory(dependent_circuit)
-
 add_subdirectory(dynamic_registration)
 add_subdirectory(full_circuit)
 add_subdirectory(full_ghost)
