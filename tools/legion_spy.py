@@ -78,6 +78,7 @@ DETACH_OP_KIND = 16
 DEP_PART_OP_KIND = 17
 PENDING_PART_OP_KIND = 18
 DYNAMIC_COLLECTIVE_OP_KIND = 19
+TRACE_OP_KIND = 20
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -2117,7 +2118,7 @@ class IndexSpace(object):
         self.point_set.add_point(point.copy())
 
     def set_empty(self):
-        assert self.shape is None
+        assert self.shape is None or self.shape.empty()
         self.shape = Shape()
         self.point_set = PointSet()
 
@@ -3219,20 +3220,21 @@ class LogicalState(object):
         if perform_checks: 
             for prev_op,prev_req in self.current_epoch_users:
                 found = False
-                for dep in op.incoming:
-                    if dep.op1 is not prev_op:
-                        # If the prev op is a close op see if we have a dependence 
-                        # on its creator
-                        # We need this transitivity to deal with tracing properly
-                        if prev_op.is_internal() and prev_op.creator is dep.op1 and \
-                            prev_op.internal_idx == dep.idx1:
-                            found = True
-                            break
-                        continue
-                    if dep.idx1 is not prev_req.index:
-                        continue
-                    found = True
-                    break
+                if op.incoming:
+                    for dep in op.incoming:
+                        if dep.op1 is not prev_op:
+                            # If the prev op is a close op see if we have a dependence 
+                            # on its creator
+                            # We need this transitivity to deal with tracing properly
+                            if prev_op.is_internal() and prev_op.creator is dep.op1 and \
+                                prev_op.internal_idx == dep.idx1:
+                                found = True
+                                break
+                            continue
+                        if dep.idx1 is not prev_req.index:
+                            continue
+                        found = True
+                        break
                 if not found:
                     found = op.has_transitive_mapping_dependence(prev_op)
                 if not found:
@@ -4601,7 +4603,7 @@ class PhysicalState(object):
 
 class VerificationTraverser(object):
     def __init__(self, state, dst_depth, dst_field, dst_req, dst_inst, 
-                 op, src_req, error_str, same_tree = True):
+                 op, src_req, error_str, across = False):
         self.state = state
         self.target = dst_inst
         self.tree = state.tree
@@ -4614,7 +4616,9 @@ class VerificationTraverser(object):
         self.src_req = src_req
         self.dst_req = dst_req
         self.error_str = error_str
-        self.same_tree = same_tree
+        self.across = across 
+        self.skip_copies = False
+        self.skipped_nodes = list()
         if state.pending_reductions:
             self.found_dataflow_path = dst_inst in state.previous_instances
         else:
@@ -4679,7 +4683,7 @@ class VerificationTraverser(object):
 
     def visit_copy(self, copy):
         # If it's not the same tree, we can't go through it
-        if self.same_tree and copy.region.tree_id != self.tree.tree_id:
+        if not self.across and copy.region.tree_id != self.tree.tree_id:
             return False
         # Same tree, but doesn't have our point, we can still go through
         # if we have seen all our reductions (e.g. we have a dataflow stack)
@@ -4690,6 +4694,7 @@ class VerificationTraverser(object):
             if not self.found_dataflow_path and self.dataflow_stack and \
                 self.dst_field in copy.dst_fields and \
                 copy.dsts[copy.dst_fields.index(self.dst_field)] is self.dataflow_stack[-1]:
+                self.skipped_nodes.append(copy)
                 return True
             return False
         # Check to see if this is a reduction copy or not
@@ -4699,7 +4704,8 @@ class VerificationTraverser(object):
             if not self.found_dataflow_path and self.dataflow_stack:
                 if self.dst_field in copy.dst_fields and \
                     copy.dsts[copy.dst_fields.index(self.dst_field)] is \
-                       self.dataflow_stack[-1]:
+                       self.dataflow_stack[-1] and \
+                    self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
                     # Traverse the dataflow path
                     src = copy.srcs[copy.dst_fields.index(self.src_field)]
                     # See if the source is a valid instance or a
@@ -4725,27 +4731,30 @@ class VerificationTraverser(object):
         else:
             # Reduction copy
             if self.dst_field in copy.dst_fields and \
-                copy.dsts[copy.dst_fields.index(self.dst_field)] is self.target:
+                copy.dsts[copy.dst_fields.index(self.dst_field)] is self.target and \
+                    self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
                 src = copy.srcs[copy.dst_fields.index(self.src_field)]
-                assert src.redop != 0
-                assert src in self.state.pending_reductions
-                self.observed_reductions.add(src)
-                # See if we still need the dataflow path
-                if self.found_dataflow_path:
-                    # Already have the dataflow path, so just aanalysis the copy
-                    self.perform_copy_analysis(copy, src, self.target)
-                else:
-                    # Otherwise we can now push the target on the stack
-                    self.dataflow_stack.append(self.target)
-                    return True
+                if src.redop != 0:
+                    assert src in self.state.pending_reductions
+                    self.observed_reductions.add(src)
+                    # See if we still need the dataflow path
+                    if self.found_dataflow_path:
+                        # Already have the dataflow path, so just analyze the copy
+                        self.perform_copy_analysis(copy, src, self.target)
+                    else:
+                        # Otherwise we can now push the target on the stack
+                        self.dataflow_stack.append(self.target)
+                        return True
+        if self.skip_copies:
+            self.skipped_nodes.append(copy)
+            return True
         return False
 
     def post_visit_copy(self, copy):
         # If this was just something we traversed through then 
         # there is nothing to do on the way back
-        if not copy.region.get_point_set.has_point(self.point) or \
-            not copy.intersect or \
-            not copy.intersect.get_point_set().has_point(self.point):
+        if self.skipped_nodes and copy is self.skipped_nodes[-1]:
+            self.skipped_nodes.pop()
             return
         if self.failed_analysis:
             self.dataflow_stack.pop()
@@ -4802,7 +4811,7 @@ class VerificationTraverser(object):
 
     def visit_fill(self, fill):
         # Quick checks to see if we can skip it
-        if self.same_tree and fill.region.tree_id != self.tree.tree_id:
+        if not self.across and fill.region.tree_id != self.tree.tree_id:
             return False
         # See if this fill is for the current target
         if not self.found_dataflow_path and self.dataflow_stack and \
@@ -4864,15 +4873,31 @@ class VerificationTraverser(object):
             return False
         return True
 
-    def verify(self, node):
-        # Traverse the node and then see if we satisfied everything
-        self.traverse_node(node)
-        return self.verified(True)
-
-    def verify_copy_across(self, node):
-        # Traverse from the finish event to get everything 
-        # that was done as part of the copy
-        self.visit_node(node.finish_event)
+    def verify(self, op):
+        # Copies are a little weird in that they don't actually
+        # depend on their region requirements so we just need
+        # to traverse from their finish event
+        if op.kind == COPY_OP_KIND:
+            # Might have through some copies across in 
+            # this case to find dataflow paths
+            if not self.across:
+                self.skip_copies = True
+            self.visit_node(op.finish_event)
+        elif op.kind == INTER_CLOSE_OP_KIND:
+            # Close operations are similar to copies in that they don't
+            # wait for data to be ready before starting, so we can't
+            # start at their node. However, inter close ops are even
+            # more different in that they don't wait at the end, so
+            # just traverse over all their realm events
+            if op.realm_copies:
+                for copy in op.realm_copies:
+                    self.visit_node(copy)
+            if op.realm_fills:
+                for fill in op.realm_fills:
+                    self.visit_node(fill)
+        else:
+            # Traverse the node and then see if we satisfied everything
+            self.traverse_node(op)
         return self.verified(True)
 
 class VerificationState(object):
@@ -4900,6 +4925,7 @@ class VerificationState(object):
 
     def initialize_verification_state(self, inst):
         self.valid_instances.add(inst)
+        self.initialized = True
 
     def perform_fill_verification(self, op, req):
         # Fills clear everything out so we are just done
@@ -5066,8 +5092,8 @@ class VerificationState(object):
                 error_str = "copy across from "+str(src_req.index)+" to "+\
                     str(dst_req.index)+" of "+str(op)
                 traverser = VerificationTraverser(self, dst_depth, 
-                    dst_field, dst_req, dst_inst, op, src_req, error_str, False)
-                return traverser.verify_copy_across(op)
+                    dst_field, dst_req, dst_inst, op, src_req, error_str, True)
+                return traverser.verify(op)
             else:
                 # Just have to find the copy operation and check it
                 # as all the other copies have already been checked
@@ -6669,8 +6695,11 @@ class Operation(object):
             # Switch this to read-write privileges and then switch it back 
             # after we are done. The runtime does this too so that its 
             # analysis is correct
+            copy_redop = 0
             if is_reduce:
-                dst_req.priv = READ_WRITE
+                copy_redop = dst_req.redop
+                dst_req.redop = 0
+                dst_req.priv = READ_WRITE 
             if not src_inst.is_virtual() and \
                 not src_req.logical_node.perform_physical_verification(
                       src_depth, src_field, self, src_req, src_inst, 
@@ -6683,24 +6712,28 @@ class Operation(object):
             # Now we can issue the copy across
             if is_reduce:
                 # Reduction case
-                assert dst_req.redop != 0
+                assert copy_redop != 0
                 if src_inst.is_virtual():
                     # This is a runtime bug, there should never be
                     # any reductions across with a virtual source instance
                     assert False
                     return False
                 if not src_req.logical_node.perform_copy_across_verification(
-                      self, dst_req.redop, perform_checks, dst_points,  
+                      self, copy_redop, perform_checks, dst_points,  
                       src_depth, src_field, src_req, src_inst,
                       dst_depth, dst_field, dst_req, dst_inst):
                     return False
             else:
                 # Normal copy across
                 if not src_req.logical_node.perform_copy_across_verification(
-                      self, 0, perform_checks, dst_points,
+                      self, copy_redop, perform_checks, dst_points,
                       src_depth, src_field, src_req, src_inst,
                       dst_depth, dst_field, dst_req, dst_inst):
                     return False
+            # Restore these when we are done
+            if is_reduce:
+                dst_req.priv = REDUCE
+                dst_req.redop = copy_redop
         return True
 
     def verify_fill_requirement(self, index, req, perform_checks):
@@ -6728,7 +6761,7 @@ class Operation(object):
         # Single tasks are registered after all copies are issued
         # Post tasks never register users since they aren't necessary
         perform_registration = (self.kind != SINGLE_TASK_KIND) and \
-            (self.kind != POST_CLOSE_OP_KIND)
+            (self.kind != POST_CLOSE_OP_KIND) and (self.kind != INTER_CLOSE_OP_KIND)
         for field in req.fields:
             # Find the instance that we chose to map this field to
             if field.fid not in mappings:
@@ -6766,7 +6799,23 @@ class Operation(object):
         return True
 
     def perform_op_physical_verification(self, perform_checks):
-        # We can skip any internal operations, no need to do anything
+        prefix = ''
+        if self.context:
+            depth = self.context.get_depth()
+            for idx in range(depth):
+                prefix += '  '
+        # If we have any internal operations (e.g. close operations, then
+        # see if they performed any physical analysis
+        if self.inter_close_ops:
+            assert not self.kind == INTER_CLOSE_OP_KIND and \
+                   not self.kind == READ_ONLY_CLOSE_OP_KIND
+            for close in self.inter_close_ops:
+                if close.kind == READ_ONLY_CLOSE_OP_KIND:
+                    continue
+                print(prefix+"Performing physical verification analysis for "+
+                      str(close)+" generated by "+str(self))
+                if not close.perform_op_physical_verification(perform_checks):
+                    return False
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
             assert self.points is not None
@@ -6774,11 +6823,6 @@ class Operation(object):
                 if not point.op.perform_op_physical_verification(perform_checks):
                     return False
             return True
-        prefix = ''
-        if self.context:
-            depth = self.context.get_depth()
-            for idx in range(depth):
-                prefix += '  '
         print((prefix+"Performing physical verification analysis "+
                      "for %s (UID %d)...") % (str(self),self.uid))
         # As a small performance optimization get all our reachable operations
@@ -6803,9 +6847,6 @@ class Operation(object):
             # Skip deletions, they only impact logical analysis
             pass
         else:
-            # Only post close ops here
-            if self.is_close():
-                assert self.kind == POST_CLOSE_OP_KIND
             if self.reqs:
                 for index,req, in self.reqs.iteritems():
                     if not self.verify_physical_requirement(index, req, perform_checks):
@@ -6889,6 +6930,7 @@ class Operation(object):
             DEP_PART_OP_KIND : "steelblue",
             PENDING_PART_OP_KIND : "honeydew",
             DYNAMIC_COLLECTIVE_OP_KIND : "navy",
+            TRACE_OP_KIND : "springgreen",
             }[self.kind]
 
     def print_base_node(self, printer, dataflow):
@@ -10067,6 +10109,8 @@ advance_pat              = re.compile(
     prefix+"Advance Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 fence_pat                = re.compile(
     prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+trace_pat                = re.compile(
+    prefix+"Trace Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat              = re.compile(
     prefix+"Copy Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 fill_op_pat              = re.compile(
@@ -10649,6 +10693,14 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(FENCE_OP_KIND)
         op.set_name("Fence Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = trace_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(TRACE_OP_KIND)
+        op.set_name("Trace Op "+m.group('uid'))
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
