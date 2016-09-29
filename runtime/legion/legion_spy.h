@@ -293,6 +293,13 @@ namespace Legion {
 		      context, unique_id);
       }
 
+      static inline void log_trace_operation(UniqueID context,
+                                             UniqueID unique_id)
+      {
+        log_spy.print("Trace Operation %llu %llu",
+                      context, unique_id);
+      }
+
       static inline void log_copy_operation(UniqueID context,
                                             UniqueID unique_id)
       {
