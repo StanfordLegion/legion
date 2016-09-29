@@ -4617,7 +4617,6 @@ class VerificationTraverser(object):
         self.dst_req = dst_req
         self.error_str = error_str
         self.across = across 
-        self.skip_copies = False
         self.skipped_nodes = list()
         if state.pending_reductions:
             self.found_dataflow_path = dst_inst in state.previous_instances
@@ -4745,9 +4744,6 @@ class VerificationTraverser(object):
                         # Otherwise we can now push the target on the stack
                         self.dataflow_stack.append(self.target)
                         return True
-        if self.skip_copies:
-            self.skipped_nodes.append(copy)
-            return True
         return False
 
     def post_visit_copy(self, copy):
@@ -4878,11 +4874,21 @@ class VerificationTraverser(object):
         # depend on their region requirements so we just need
         # to traverse from their finish event
         if op.kind == COPY_OP_KIND:
-            # Might have through some copies across in 
-            # this case to find dataflow paths
-            if not self.across:
-                self.skip_copies = True
-            self.visit_node(op.finish_event)
+            # If we are looking for an across copy then
+            # we start from the finish event
+            if self.across:
+                self.visit_node(op.finish_event)  
+            # Otherwise we traverse from the copy operations
+            # that we generated
+            else:
+                # Find the latest copies that we generated
+                # and start our traversal by skipping those "across" copies
+                all_reachable = set()
+                for copy in op.realm_copies:
+                    copy.get_physical_reachable(all_reachable, False, copy, True)
+                for copy in op.realm_copies:
+                    if copy not in all_reachable:
+                        self.traverse_node(copy)
         elif op.kind == INTER_CLOSE_OP_KIND:
             # Close operations are similar to copies in that they don't
             # wait for data to be ready before starting, so we can't
