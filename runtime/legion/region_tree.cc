@@ -64,9 +64,11 @@ namespace Legion {
       {
         for (std::map<IndexSpace,IndexSpaceNode*>::const_iterator it = 
               index_nodes.begin(); it != index_nodes.end(); it++)
-          if (it->second->has_allocator())
-            IndexSpaceNode::log_index_space_domain(it->first, 
-                it->second->get_domain_no_wait());
+        {
+          const Domain &dom = it->second->get_domain_no_wait();
+          if (dom.get_dim() == 0)
+            IndexSpaceNode::log_index_space_domain(it->first, dom);
+        }
       }
     }
 
