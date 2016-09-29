@@ -141,6 +141,7 @@ static inline float get_node_voltage(const RegionAccessor<AT,float> &priv,
   return 0.f;
 }
 
+#ifdef __SSE__
 template<typename AT_VAL, typename AT_PTR>
 static inline __m128 get_vec_node_voltage(ptr_t current_wire,
                                           const RegionAccessor<AT_VAL,float> &priv,
@@ -171,6 +172,7 @@ static inline __m128 get_vec_node_voltage(ptr_t current_wire,
   }
   return _mm_set_ps(voltages[3],voltages[2],voltages[1],voltages[0]);
 }
+#endif
 
 /*static*/
 bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
@@ -238,6 +240,8 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
 
   const int steps = piece.steps;
   unsigned index = 0;
+#ifdef __SSE__
+  // using SSE intrinsics, we can work on wires 4-at-a-time
   {
     __m128 temp_v[WIRE_SEGMENTS+1];
     __m128 temp_i[WIRE_SEGMENTS];
@@ -294,6 +298,7 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
       index += 4;
     }
   }
+#endif
   // Handle any leftover elements
   while (index < piece.num_wires)
   {
