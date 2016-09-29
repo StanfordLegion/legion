@@ -11,11 +11,12 @@ env:
   global:
   - WARN_AS_ERROR=1
   - REALM_SYNTHETIC_CORE_MAP=""
+  - CCACHE_CPP2=yes #for clang
   matrix:
   - CC_FLAGS="-std=c++98" DEBUG=0
   - CC_FLAGS="-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1
   - CC_FLAGS="-std=c++98 -DLEGION_SPY" DEBUG=1 TEST_SPY=1
-  - CC_FLAGS="-std=c++0x" DEBUG=0
+  - CC_FLAGS="-std=c++0x" DEBUG=0 CMAKE=1
   # - CC_FLAGS="-std=c++98" DEBUG=1 USE_GASNET=1 USE_LLVM=1 DISABLE_INNER=1
 matrix:
   exclude:
@@ -33,12 +34,20 @@ before_install:
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
       sudo add-apt-repository ppa:pypy/ppa -y
       sudo apt-get update -qq
-      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy
+      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy libhwloc-dev cmake
+      export HWLOC=ON
+      mkdir $HOME/bin
+      ln -s /usr/bin/ccache "$HOME/bin/clang"
+      ln -s /usr/bin/ccache "$HOME/bin/clang-3.5"
+      ln -s /usr/bin/ccache "$HOME/bin/clang++"
+      ln -s /usr/bin/ccache "$HOME/bin/clang++-3.5"
+      export PATH="$HOME/bin${PATH:+:}${PATH}"
     fi
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
-      brew install pypy homebrew/versions/llvm35
+      brew unlink cmake
+      brew install pypy homebrew/versions/llvm35 cmake
     fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "g++" ]]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
@@ -121,3 +130,14 @@ script:
       make -s -C test/performance/realm SHARED_LOWLEVEL=0 clean_all
       make -s -C test/performance/realm SHARED_LOWLEVEL=0 run_all
     fi
+  - |
+    if [[ ${CMAKE} ]]; then
+      mkdir build
+      cd build
+      cmake  ${HWLOC:+-DLegion_USE_HWLOC=${HWLOC}} -DLegion_USE_GASNet=${USE_GASNET} ..
+      make -j2 VERBOSE=1
+      make install DESTDIR=$PWD
+    fi
+
+cache:
+  - ccache
