@@ -130,7 +130,7 @@ target_link_libraries(LowLevelRuntime
   PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
 )
 set_target_properties(LowLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
-set_target_properties(LowLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
+set_target_properties(LowLevelRuntime PROPERTIES VERSION ${Legion_VERSION})
 target_compile_definitions(LowLevelRuntime
   PRIVATE
     $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:DEBUG_LOW_LEVEL>
@@ -226,7 +226,7 @@ add_library(HighLevelRuntime ${MAPPER_SRC} ${HIGH_RUNTIME_SRC})
 target_link_libraries(HighLevelRuntime LowLevelRuntime)
 set_target_properties(HighLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(HighLevelRuntime PROPERTIES OUTPUT_NAME legion)
-set_target_properties(HighLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
+set_target_properties(HighLevelRuntime PROPERTIES VERSION ${Legion_VERSION})
 target_compile_definitions(HighLevelRuntime
   PRIVATE
     ASSUME_UNALLOCABLE
