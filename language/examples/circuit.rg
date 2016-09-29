@@ -593,7 +593,7 @@ task toplevel()
   var simulation_success = true
   var steps = conf.steps
   for j = 0, conf.num_loops do
-    c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+    --c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 
     __demand(__parallel)
     for i = 0, conf.num_pieces do
@@ -608,7 +608,7 @@ task toplevel()
       update_voltages(rp_private[i], rp_shared[i])
     end
 
-    c.legion_runtime_end_trace(__runtime(), __context(), 0)
+    --c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
   -- Force all previous tasks to complete before continuing.
   do
