@@ -3083,6 +3083,11 @@ class LogicalPartition(object):
         return physical_state.close_physical_tree(target, op, req, perform_checks, 
                                                   clear_state)
 
+    def perform_physical_verification(self, depth, field, op, req, inst, perform_checks,
+                                      perform_registration):
+        return self.parent.perform_physical_verification(depth, field, op, req, inst,
+                perform_checks, perform_registration, self.get_point_set())
+
     def mark_named_children(self):
         if self.name is not None:
             self.has_named_children = True
@@ -11086,8 +11091,8 @@ class State(object):
         log.close()
         if matches == 0:
             print('WARNING: file %s contained no valid lines!' % file_name)
-            if self.assert_on_warning:
-                assert False
+            #if self.assert_on_warning:
+            #    assert False
         if self.verbose:
             print('Matched %d lines in %s' % (matches,file_name))
         if skipped > 0:
@@ -11211,21 +11216,21 @@ class State(object):
                 traverser.order.append(node)
             return True
         # Build a topological order of everything 
-        topological_sorter = PhysicalTraverser(False, True,
+        topological_sorter = PhysicalTraverser(True, True,
             self.get_next_traversal_generation(), traverse_node)
         topological_sorter.order = list()
-        # Traverse all the sinks
+        # Traverse all the sources 
         for op in self.ops.itervalues():
-            if not op.physical_outgoing:
+            if not op.physical_incoming:
                 topological_sorter.visit_node(op)
         for copy in self.ops.itervalues():
-            if not copy.physical_outgoing:
+            if not copy.physical_incoming:
                 topological_sorter.visit_node(op)
         for fill in self.fills.itervalues():
-            if not fill.physical_outgoing:
+            if not fill.physical_incoming:
                 topological_sorter.visit_node(fill)
         # Now that we have everything sorter based on topology
-        # Do the simplification in reverse order
+        # Do the simplification in order
         count = 0;
         for src in topological_sorter.order:
             if self.verbose:
