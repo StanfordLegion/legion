@@ -30,10 +30,20 @@ __global__ void gpu_seqrd_kernel(int *buffer, size_t reps, size_t elements)
     size_t ofs = blockIdx.x * blockDim.x + threadIdx.x;
     size_t step = blockDim.x * gridDim.x;
     while(ofs < elements) {
-      int val = buffer[ofs];
-      if(val != 0)
-	errors++;
+      // manually unroll loop to get multiple loads in flight per thread
+      int val1 = buffer[ofs];
       ofs += step;
+      int val2 = (ofs < elements) ? buffer[ofs] : 0;
+      ofs += step;
+      int val3 = (ofs < elements) ? buffer[ofs] : 0;
+      ofs += step;
+      int val4 = (ofs < elements) ? buffer[ofs] : 0;
+      ofs += step;
+      // now check result of all the reads
+      if(val1 != 0) errors++;
+      if(val2 != 0) errors++;
+      if(val3 != 0) errors++;
+      if(val4 != 0) errors++;
     }
   }
   if(errors > 0)
@@ -82,15 +92,32 @@ __global__ void gpu_rndrd_kernel(int *buffer, size_t reps, size_t steps, size_t 
     size_t a = 548191;
     size_t v = 24819 + (p >> 5);  // velocity has to be different for each warp
 
-    for(size_t i = 0; i < steps; i++) {
-      size_t prev = p;
+    for(size_t i = 0; i < steps; i += 4) {
       // delta is multiplied by 32 elements so warp stays converged (velocity is the
       //  same for all threads in the warp)
+      // manually unroll loop to get multiple loads in flight per thread
+      size_t p0 = p;
+      p = (p + (v << 5)) % elements;
+      v = (v + a) % elements;
+      size_t p1 = p;
+      p = (p + (v << 5)) % elements;
+      v = (v + a) % elements;
+      size_t p2 = p;
+      p = (p + (v << 5)) % elements;
+      v = (v + a) % elements;
+      size_t p3 = p;
       p = (p + (v << 5)) % elements;
       v = (v + a) % elements;
 
-      if(buffer[prev] != p)
-	errors++;
+      int v0 = buffer[p0];
+      int v1 = buffer[p1];
+      int v2 = buffer[p2];
+      int v3 = buffer[p3];
+
+      if(v0 != p1) errors++;
+      if(v1 != p2) errors++;
+      if(v2 != p3) errors++;
+      if(v3 != p) errors++;
     }
   }
   if((errors > 0) && (reps > elements))
@@ -244,7 +271,7 @@ double gpu_rndrd_test(void *buffer, size_t reps, size_t elements)
   get_launch_params(&grid_size, &block_size);
   int total_threads = grid_size * block_size;
 
-  size_t steps = 64;
+  size_t steps = 64; // must be a multiple of 4 due to unrolling in kernel
 
   cudaEvent_t t_start, t_end;
   cudaEventCreate(&t_start);
