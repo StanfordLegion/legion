@@ -98,11 +98,19 @@ clean :
 	rm -f $(REALM_LIB) $(REALM_OBJS) $(TESTS)
 
 $(TESTS) : % : %.cc librealm.a
-	$(CXX) -o $@ $< -L. -lrealm $(INC_FLAGS) $(CC_FLAGS) $(LEGION_LD_FLAGS)
+	$(CXX) -o $@ $< $(EXTRAOBJS_$*) -L. -lrealm $(INC_FLAGS) $(CC_FLAGS) $(LEGION_LD_FLAGS)
 
 $(REALM_LIB) : $(REALM_OBJS)
 	rm -f $(REALM_LIB)
 	ar rc $(REALM_LIB) $(REALM_OBJS)
+
+ifeq ($(strip $(USE_CUDA)),1)
+EXTRAOBJS_memspeed := memspeed_gpu.o
+memspeed : memspeed_gpu.o
+
+%.o : %.cu
+	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)
+endif
 
 %.o : %.cc
 	$(CXX) -fPIC -o $@ -c $< $(INC_FLAGS) $(CC_FLAGS)
