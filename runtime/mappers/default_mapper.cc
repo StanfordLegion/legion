@@ -2062,7 +2062,7 @@ namespace Legion {
                        "ask Realm to allocate more memory, write a custom "
                        "mapper to better manage working sets, or find a bigger "
                        "machine. Good luck!", index, task.get_task_name(),
-                       task.get_unique_id(), target_proc.id, target_mem.id);
+                       task.get_unique_id(), target_mem.id, target_proc.id);
       assert(false);
     }
 
@@ -2327,8 +2327,8 @@ namespace Legion {
                          "a bigger machine. Good luck!", 
                          inline_op.parent_task->get_task_name(),
                          inline_op.parent_task->get_unique_id(),
-                         inline_op.parent_task->current_proc.id, 
-                         target_memory.id);
+                         target_memory.id,
+                         inline_op.parent_task->current_proc.id);
         assert(false);
       }
     }
@@ -2475,8 +2475,8 @@ namespace Legion {
                        IS_SRC ? "source" : "destination", idx, 
                        copy.parent_task->get_task_name(),
                        copy.parent_task->get_unique_id(),
-                       copy.parent_task->current_proc.id, 
-                       target_memory.id);
+		       target_memory.id,
+		       copy.parent_task->current_proc.id);
         assert(false);
       }
     }
