@@ -93,14 +93,14 @@ void find_memories(Processor cpu, Processor gpu,
         {
           system = *it;
           printf("System Memory " IDFMT " for CPU Processor " IDFMT 
-                 " has capacity %ld MB\n", it->id, cpu.id, 
+                 " has capacity %zd MB\n", it->id, cpu.id, 
                  (it->capacity() >> 20));
           break;
         }
       case Memory::Z_COPY_MEM:
         {
           printf("Zero-Copy Memory " IDFMT " for CPU Processor " IDFMT 
-                 " has capacity %ld MB\n", it->id, cpu.id, 
+                 " has capacity %zd MB\n", it->id, cpu.id, 
                  (it->capacity() >> 20));
           break;
         }
@@ -123,14 +123,14 @@ void find_memories(Processor cpu, Processor gpu,
           {
             framebuffer = *it;
             printf("Framebuffer Memory " IDFMT " for GPU Processor " IDFMT 
-                   " has capacity %ld MB\n", it->id, cpu.id, 
+                   " has capacity %zd MB\n", it->id, cpu.id, 
                    (it->capacity() >> 20));
             break;
           }
         case Memory::Z_COPY_MEM:
           {
             printf("Zero-Copy Memory " IDFMT " for GPU Processor " IDFMT 
-                   " has capacity %ld MB\n", it->id, cpu.id, 
+                   " has capacity %zd MB\n", it->id, cpu.id, 
                    (it->capacity() >> 20));
             break;
           }
