@@ -787,7 +787,7 @@ namespace Legion {
     RtEvent TaskOp::defer_launch_task(RtEvent precondition)
     //--------------------------------------------------------------------------
     {
-      DeferMappingArgs args;
+      DeferLaunchArgs args;
       args.proxy_this = this;
       return runtime->issue_runtime_meta_task(args,
           LG_DEFERRED_THROUGHPUT_PRIORITY, this, precondition);
@@ -4151,7 +4151,7 @@ namespace Legion {
           return this;
       }
       else // We created it, put it in the top context
-        return parent_ctx->find_top_context();
+        return find_top_context();
     }
 
     //--------------------------------------------------------------------------
