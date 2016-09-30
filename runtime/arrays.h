@@ -959,8 +959,26 @@ namespace LegionRuntime {
 
       Rect<IDIM> preimage(const Point<ODIM> p) const
       {
-	assert(0);
-	return Rect<IDIM>();
+	// we only have enough information to do this in the 1-D case
+	if(IDIM == 1) {
+	  coord_t delta = p[0] - offset;
+	  Point<IDIM> lo, hi;
+	  // stride must divide evenly, otherwise p has no preimage
+	  if(strides[0] == 1) { // optimize for common divide-by-1 case
+	    lo.x[0] = delta;
+	    hi = lo;
+	  } else if((delta % strides[0]) == 0) {
+	    lo.x[0] = delta / strides[0];
+	    hi = lo;
+	  } else {
+	    lo.x[0] = 0;
+	    hi.x[0] = -1; // hi < lo means empty rectangle
+	  }
+	  return Rect<IDIM>(lo, hi);
+	} else {
+	  assert(0);
+	  return Rect<IDIM>();
+	}
       }
 
       bool preimage_is_dense(const Point<ODIM> p) const

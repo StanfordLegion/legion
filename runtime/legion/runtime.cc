@@ -33,35 +33,6 @@
 #include "debug_mapper.h"
 #include <unistd.h> // sleep for warnings
 
-namespace LegionRuntime {
-
-#if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
-  namespace Accessor {
-    namespace AccessorType {
-#ifdef PRIVILEGE_CHECKS
-      const char* find_privilege_task_name(void *impl)
-      {
-        // Have to bounce this off the Runtime because C++ is stupid
-        return Legion::Internal::Runtime::find_privilege_task_name(impl); 
-      }
-#endif
-#ifdef BOUNDS_CHECKS
-      void check_bounds(void *impl, ptr_t ptr)
-      {
-        // Have to bounce this off the Runtime because C++ is stupid 
-        Legion::Internal::Runtime::check_bounds(impl, ptr);
-      }
-      void check_bounds(void *impl, const Realm::DomainPoint &dp)
-      {
-        // Have to bounce this off the Runtime because C++ is stupid
-        Legion::Internal::Runtime::check_bounds(impl, dp);
-      }
-#endif
-    };
-  };
-#endif
-};
-
 namespace Legion {
   namespace Internal {
 
@@ -7788,6 +7759,18 @@ namespace Legion {
 #ifdef DEBUG_SHUTDOWN_HANG
       outstanding_counts.resize(LG_LAST_TASK_ID, 0);
 #endif
+
+      // Attach any accessor debug hooks for privilege or bounds checks
+#ifdef PRIVILEGE_CHECKS
+      LegionRuntime::Accessor::DebugHooks::find_privilege_task_name =
+	&Legion::Internal::Runtime::find_privilege_task_name;
+#endif
+#ifdef BOUNDS_CHECKS
+      LegionRuntime::Accessor::DebugHooks::check_bounds_ptr =
+	&Legion::Internal::Runtime::check_bounds;
+      LegionRuntime::Accessor::DebugHooks::check_bounds_dpoint =
+	&Legion::Internal::Runtime::check_bounds;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -9170,7 +9153,8 @@ namespace Legion {
         for (Domain::DomainPointIterator itr(parent_dom); itr; itr++)
         {
           ptr_t cur_ptr = itr.p.get_index();
-          int c = fa_coloring.read(cur_ptr);
+          int c;
+          fa_coloring.read_untyped(cur_ptr, &c, sizeof(c));
           // Ignore all colors less than zero
           if (c >= 0)
           {
