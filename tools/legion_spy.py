@@ -185,10 +185,12 @@ def check_preconditions(preconditions, op):
     return None
 
 class Point(object):
-    __slots__ = ['dim', 'vals']
+    __slots__ = ['dim', 'vals', 'shape', 'index_set']
     def __init__(self, dim):
         self.dim = dim
         self.vals = array.array('i', (0,)*dim)
+        self.shape = None
+        self.index_set = None
 
     def mk_string(self, start, delim, end):
         return '%s%s%s' % (start, delim.join(map(str, self.vals)), end)
@@ -11104,9 +11106,11 @@ class State(object):
                 space.compute_reduced_shapes(dim_sets)            
         for index_sets in dim_sets.itervalues():
             point_value = 0
-            for index_set in index_sets.itervalues():
+            for shape,index_set in index_sets.iteritems():
                 point = Point(1)
                 point.vals[0] = point_value
+                point.shape = shape
+                point.index_set = index_set
                 point_value += 1
                 for index in index_set:
                     index.add_refined_point(point)
