@@ -3923,7 +3923,7 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         pending_frames++;
-        if ((outstanding_subtasks > 0) &&
+        if (currently_active_context && (outstanding_subtasks > 0) &&
             (pending_frames == context_configuration.min_frames_to_schedule))
         {
           wait_on = context_order_event;
@@ -3955,7 +3955,7 @@ namespace Legion {
         assert(pending_frames > 0);
 #endif
         pending_frames--;
-        if ((outstanding_subtasks > 0) &&
+        if (!currently_active_context && (outstanding_subtasks > 0) &&
             (pending_frames < context_configuration.min_frames_to_schedule))
         {
           wait_on = context_order_event;
