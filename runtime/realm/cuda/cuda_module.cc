@@ -1649,6 +1649,14 @@ namespace Realm {
       CHECK_CU( cuEventSynchronize(e) );
     }
       
+    void GPUProcessor::event_elapsed_time(float *ms, cudaEvent_t start, cudaEvent_t end)
+    {
+      // TODO: consider suspending task rather than busy-waiting here...
+      CUevent e1 = start;
+      CUevent e2 = end;
+      CHECK_CU( cuEventElapsedTime(ms, e1, e2) );
+    }
+      
     GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
       : grid(_grid), block(_block), shared(_shared)
     {}
