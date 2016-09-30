@@ -4624,10 +4624,11 @@ class VerificationTraverser(object):
         self.across = across 
         self.skipped_nodes = list()
         if state.pending_reductions:
+            assert state.initialized
             self.found_dataflow_path = dst_inst in state.previous_instances
         else:
             assert dst_inst not in state.valid_instances
-            self.found_dataflow_path = False
+            self.found_dataflow_path = not state.initialized
         if not self.found_dataflow_path:
             self.dataflow_stack = list()
             # If there are reductions we can't add the instance to 
@@ -4657,19 +4658,6 @@ class VerificationTraverser(object):
             if not self.visit_fill(node):
                 return
             self.traverse_node(node)
-        elif isinstance(node, Event):
-            if node.incoming:
-                for ev in node.incoming:
-                    self.visit_node(ev)
-            if node.incoming_ops:
-                for op in node.incoming_ops:
-                    self.visit_node(op)
-            if node.incoming_copies:
-                for copy in node.incoming_copies:
-                    self.visit_node(copy)
-            if node.incoming_fills:
-                for fill in node.incoming_fills:
-                    self.visit_node(fill)
         else:
             assert False # should never get here
 
@@ -4879,21 +4867,28 @@ class VerificationTraverser(object):
         # depend on their region requirements so we just need
         # to traverse from their finish event
         if op.kind == COPY_OP_KIND:
-            # If we are looking for an across copy then
-            # we start from the finish event
-            if self.across:
-                self.visit_node(op.finish_event)  
-            # Otherwise we traverse from the copy operations
-            # that we generated
-            else:
-                # Find the latest copies that we generated
-                # and start our traversal by skipping those "across" copies
+            # Find the latest copies that we generated
+            # and start our traversal by skipping those "across" copies
+            if op.realm_copies:
                 all_reachable = set()
                 for copy in op.realm_copies:
                     copy.get_physical_reachable(all_reachable, False, copy, True)
-                for copy in op.realm_copies:
-                    if copy not in all_reachable:
-                        self.traverse_node(copy)
+                # If we are across, we start by visiting the last
+                # copies because they are the across ones, otherwise
+                # we just traverse them
+                if self.across:
+                    for copy in op.realm_copies:
+                        if copy not in all_reachable:
+                            self.visit_node(copy)
+                else:
+                    for copy in op.realm_copies:
+                        if copy not in all_reachable:
+                            self.traverse_node(copy)
+            elif op.realm_fills:
+                # If there are just fills, we should be able to traverse
+                # them all without any trouble
+                for fill in op.realm_fills:
+                    self.visit_node(fill)
         elif op.kind == INTER_CLOSE_OP_KIND or op.kind == POST_CLOSE_OP_KIND:
             # Close operations are similar to copies in that they don't
             # wait for data to be ready before starting, so we can't
