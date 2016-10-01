@@ -220,6 +220,8 @@ class Point(object):
         result = Point(self.dim)
         for i in range(self.dim):
             result.vals[i] = self.vals[i]
+        result.shape = self.shape
+        result.index_set = self.index_set
         return result;
 
 class Rect(object):
@@ -4639,7 +4641,7 @@ class VerificationTraverser(object):
                 self.dataflow_stack.append(dst_inst)    
         self.observed_reductions = set()
         self.failed_analysis = False
-        self.generation = op.state.get_next_traversal_generation()
+        self.generation = None
 
     def visit_node(self, node):
         if node.generation == self.generation:
@@ -4663,8 +4665,10 @@ class VerificationTraverser(object):
         else:
             assert False # should never get here
 
-    def traverse_node(self, node):
+    def traverse_node(self, node, first = False):
         if node.physical_incoming:
+            if first:
+                self.generation = node.state.get_next_traversal_generation()
             for next_node in node.physical_incoming:
                 self.visit_node(next_node)
                 if self.verified() or self.failed_analysis:
@@ -4864,7 +4868,7 @@ class VerificationTraverser(object):
             return False
         return True
 
-    def verify(self, op):
+    def verify(self, op, restricted = False):
         # Copies are a little weird in that they don't actually
         # depend on their region requirements so we just need
         # to traverse from their finish event
@@ -4881,15 +4885,17 @@ class VerificationTraverser(object):
                 if self.across:
                     for copy in op.realm_copies:
                         if copy not in all_reachable:
+                            self.generation = op.state.get_next_traversal_generation()
                             self.visit_node(copy)
                 else:
                     for copy in op.realm_copies:
                         if copy not in all_reachable:
-                            self.traverse_node(copy)
+                            self.traverse_node(copy, True)
             elif op.realm_fills:
                 # If there are just fills, we should be able to traverse
                 # them all without any trouble
                 for fill in op.realm_fills:
+                    self.generation = op.state.get_next_traversal_generation()
                     self.visit_node(fill)
         elif op.kind == INTER_CLOSE_OP_KIND or op.kind == POST_CLOSE_OP_KIND:
             # Close operations are similar to copies in that they don't
@@ -4899,13 +4905,22 @@ class VerificationTraverser(object):
             # just traverse over all their realm events
             if op.realm_copies:
                 for copy in op.realm_copies:
+                    self.generation = op.state.get_next_traversal_generation()
                     self.visit_node(copy)
             if op.realm_fills:
                 for fill in op.realm_fills:
+                    self.generation = op.state.get_next_traversal_generation()
                     self.visit_node(fill)
+        elif restricted:
+            # If this is restricted, do the traversal from the copies
+            # themselves since they might have occurred after the op
+            if op.realm_copies:
+                for copy in op.realm_copies:
+                    self.generation = op.state.get_next_traversal_generation()
+                    self.visit_node(copy)
         else:
             # Traverse the node and then see if we satisfied everything
-            self.traverse_node(op)
+            self.traverse_node(op, True)
         return self.verified(True)
 
 class VerificationState(object):
@@ -4999,7 +5014,8 @@ class VerificationState(object):
         dst.add_verification_copy_user(self.depth, self.field, self.point,
                                        copy, req.index, False, src.redop)
 
-    def issue_update_copies(self, inst, op, req, perform_checks, error_str):
+    def issue_update_copies(self, inst, op, req, perform_checks, 
+                            error_str, restricted = False):
         assert inst not in self.valid_instances
         # If we're performing checks, we just need to check everything
         if perform_checks:
@@ -5009,7 +5025,7 @@ class VerificationState(object):
                 return True
             traverser = VerificationTraverser(self, self.depth, self.field, 
                                               req, inst, op, req, error_str)
-            return traverser.verify(op)
+            return traverser.verify(op, restricted)
         # First see if we have a valid instance we can copy from  
         if self.valid_instances:
             src = next(iter(self.valid_instances))
@@ -5034,12 +5050,13 @@ class VerificationState(object):
             return self.issue_update_reductions(inst, op, req, False, error_str)
         return True
 
-    def issue_update_reductions(self, inst, op, req, perform_checks, error_str):
+    def issue_update_reductions(self, inst, op, req, perform_checks, 
+                                error_str, restricted = False):
         assert self.pending_reductions
         if perform_checks:
             traverser = VerificationTraverser(self, self.depth, self.field, req,
                                               inst, op, req, error_str)
-            return traverser.verify(op)
+            return traverser.verify(op, restricted)
         # Make sure a reduction was issued from each reduction instance
         for reduction_inst in self.pending_reductions:
             self.perform_copy(reduction_inst, inst, op, req)
@@ -5077,12 +5094,12 @@ class VerificationState(object):
                 if inst.redop != 0:
                     # Have to perform a reduction back
                     if not self.issue_update_reductions(restricted_inst, op, req,
-                                                        perform_checks, error_str):
+                                                        perform_checks, error_str, True):
                         return False
                 else:
                     # Perform a normal copy back
                     if not self.issue_update_copies(restricted_inst, op, req, 
-                                                    perform_checks, error_str):
+                                                    perform_checks, error_str, True):
                         return False
                 # Restrictions always overwrite everything when they are done
                 self.reset()
