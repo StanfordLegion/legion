@@ -7588,6 +7588,7 @@ namespace Legion {
         {
           ApEvent term_event;
           derez.deserialize(term_event);
+          outstanding_gc_events.insert(term_event);
 #ifdef DEBUG_LEGION
           // should never have this event before now
           assert(reduction_users.find(term_event) == reduction_users.end());
