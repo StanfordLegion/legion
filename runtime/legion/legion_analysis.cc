@@ -5450,7 +5450,7 @@ namespace Legion {
       derez.deserialize(dedup_opens);
       ProjectionEpochID open_epoch = 0;
       if (dedup_opens)
-        derez.deserialize(dedup_opens);
+        derez.deserialize(open_epoch);
       bool dedup_advances;
       derez.deserialize(dedup_advances);
       ProjectionEpochID advance_epoch = 0;
