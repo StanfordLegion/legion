@@ -983,45 +983,50 @@ namespace Legion {
                                          RtEvent other_commit_event)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
       assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
       // If the generations match and we haven't committed yet, 
       // register an outgoing dependence
-      if ((our_gen == gen) && !committed)
+      if (our_gen == gen)
       {
-#ifdef DEBUG_LEGION
-        // should still have some mapping references
-        // if other operations are trying to register dependences
-        assert(outstanding_mapping_references > 0);
-#endif
-        // Check to see if we've already recorded this dependence
-        std::map<Operation*,GenerationID>::const_iterator finder = 
-          outgoing.find(op);
-        if (finder == outgoing.end())
+        AutoLock o_lock(op_lock);
+        // Retest generation to see if we lost the race
+        if ((our_gen == gen) && !committed)
         {
-          outgoing[op] = op_gen;
-          // Record that the operation has a mapping dependence
-          // on us as long as we haven't mapped
-          tracker->add_mapping_dependence(mapped_event);
-          tracker->add_resolution_dependence(resolved_event);
-          // Record that we have a commit dependence on the
-          // registering operation
 #ifdef DEBUG_LEGION
-          assert(dependence_tracker.commit != NULL);
+          // should still have some mapping references
+          // if other operations are trying to register dependences
+          assert(outstanding_mapping_references > 0);
 #endif
-          dependence_tracker.commit->add_commit_dependence(other_commit_event);
-          registered_dependence = true;
+          // Check to see if we've already recorded this dependence
+          std::map<Operation*,GenerationID>::const_iterator finder = 
+            outgoing.find(op);
+          if (finder == outgoing.end())
+          {
+            outgoing[op] = op_gen;
+            // Record that the operation has a mapping dependence
+            // on us as long as we haven't mapped
+            tracker->add_mapping_dependence(mapped_event);
+            tracker->add_resolution_dependence(resolved_event);
+            // Record that we have a commit dependence on the
+            // registering operation
+#ifdef DEBUG_LEGION
+            assert(dependence_tracker.commit != NULL);
+#endif
+            dependence_tracker.commit->add_commit_dependence(
+                                          other_commit_event);
+            registered_dependence = true;
+          }
+          else
+          {
+            // We already registered it
+            registered_dependence = false;
+          }
+          // Cannot prune this operation from the list since it
+          // is still not committed
+          return false;
         }
-        else
-        {
-          // We already registered it
-          registered_dependence = false;
-        }
-        // Cannot prune this operation from the list since it
-        // is still not committed
-        return false;
       }
       // We already committed so we're done and this
       // operation can be pruned from the list of users
