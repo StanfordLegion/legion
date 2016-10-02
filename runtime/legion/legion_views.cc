@@ -7071,6 +7071,8 @@ namespace Legion {
       ApEvent use_event = manager->get_use_event();
       if (use_event.exists())
         wait_on.insert(use_event);
+      if (!is_logical_owner() && reading)
+        perform_remote_valid_check();
 #ifdef DEBUG_LEGION
       assert(logical_node->is_region());
 #endif
@@ -7498,33 +7500,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!is_logical_owner());
 #endif
-      RtUserEvent request_event;
-      RtEvent wait_on;
+      bool send_request = false;
       // If we don't have any registered readers, we have to ask
       // the owner for all the current reducers
       {
         AutoLock v_lock(view_lock);  
         if (!remote_request_event.exists())
         {
-          request_event = Runtime::create_rt_user_event();
-          wait_on = request_event;
+          remote_request_event = Runtime::create_rt_user_event();
+          send_request = true;
         }
-        else // request was already sent
-          wait_on = remote_request_event;
+        // else request was already sent
       }
       // If we made the event send the request
-      if (request_event.exists())
+      if (send_request)
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(request_event);
+          rez.serialize(remote_request_event);
         }
         context->runtime->send_view_update_request(logical_owner, rez);
       }
-      if (!wait_on.has_triggered())
-        wait_on.wait();
+      if (!remote_request_event.has_triggered())
+        remote_request_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -7593,7 +7593,7 @@ namespace Legion {
           // should never have this event before now
           assert(reduction_users.find(term_event) == reduction_users.end());
 #endif
-          EventUsers current_users = reduction_users[term_event];
+          EventUsers &current_users = reduction_users[term_event];
           size_t num_users;
           derez.deserialize(num_users);
           if (num_users == 1)
