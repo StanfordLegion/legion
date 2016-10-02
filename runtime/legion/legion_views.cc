@@ -1044,13 +1044,17 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
       // If we are not the logical owner, we need to see if we are up to date 
-      const bool read_only = IS_READ_ONLY(usage);
       if (!is_logical_owner())
-        perform_remote_valid_check(user_mask, versions, read_only);
+      {
+        // Only way we are not reading is if we are doing a write-only
+        // update or we are reducing
+        const bool reading = !IS_WRITE_ONLY(usage) && !IS_REDUCE(usage);
+        perform_remote_valid_check(user_mask, versions, reading);
+      }
       std::set<ApEvent> dead_events;
       LegionMap<ApEvent,FieldMask>::aligned filter_current_users, 
                                            filter_previous_users;
-      if (read_only)
+      if (IS_READ_ONLY(usage))
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         FieldMask observed, non_dominated;
@@ -3100,6 +3104,7 @@ namespace Legion {
         if (!!need_valid_update)
         {
           request_event = Runtime::create_rt_user_event();
+          local_wait_on.insert(request_event);
           remote_update_requests[request_event] = need_valid_update;
         }
         else if (local_wait_on.empty())
