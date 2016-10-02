@@ -975,7 +975,8 @@ namespace Legion {
       if (our_gen == gen)
       {
         AutoLock o_lock(op_lock);
-        if (!committed)
+        // Retest generation to see if we lost the race
+        if ((our_gen == gen) && !committed)
         {
 #ifdef DEBUG_LEGION
           // should still have some mapping references
