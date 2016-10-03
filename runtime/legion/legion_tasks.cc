@@ -7175,12 +7175,24 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, start_condition, 
                                         completion_event);
         LegionSpy::log_task_priority(unique_op_id, task_priority);
+        for (unsigned idx = 0; idx < futures.size(); idx++)
+        {
+          FutureImpl *impl = futures[idx].impl;
+          if (impl->get_ready_event().exists())
+            LegionSpy::log_future_use(unique_op_id, impl->get_ready_event());
+        }
       }
 #else
       if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_variant_decision(unique_op_id, selected_variant);
         LegionSpy::log_task_priority(unique_op_id, task_priority);
+        for (unsigned idx = 0; idx < futures.size(); idx++)
+        {
+          FutureImpl *impl = futures[idx].impl;
+          if (impl->get_ready_event().exists())
+            LegionSpy::log_future_use(unique_op_id, impl->get_ready_event());
+        }
       }
 #endif
       ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
@@ -8134,6 +8146,8 @@ namespace Legion {
           ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
           LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
+        LegionSpy::log_future_creation(unique_op_id, 
+              result.impl->get_ready_event(), index_point);
       }
       return result;
     }
@@ -8171,9 +8185,13 @@ namespace Legion {
             runtime->address_space, runtime->address_space, this));
       check_empty_field_requirements();
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
                                        unique_op_id,
                                        task_id, get_task_name());
+        LegionSpy::log_future_creation(unique_op_id, 
+              result.impl->get_ready_event(), index_point);
+      }
       return result;
     }  
 
@@ -10884,6 +10902,8 @@ namespace Legion {
           ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
           LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
+        LegionSpy::log_future_creation(unique_op_id, 
+              reduction_future.impl->get_ready_event(), index_point);
       }
       return reduction_future;
     }
@@ -10996,9 +11016,13 @@ namespace Legion {
       if (check_privileges)
         perform_privilege_checks();
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
                                   unique_op_id, task_id,
                                   get_task_name());
+        LegionSpy::log_future_creation(unique_op_id, 
+              reduction_future.impl->get_ready_event(), index_point);
+      }
       return reduction_future;
     }
 

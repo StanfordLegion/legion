@@ -348,6 +348,17 @@ namespace Legion {
         log_spy.print("Dynamic Collective %llu %llu", context, collective);
       }
 
+      static inline void log_timing_operation(UniqueID context, UniqueID timing)
+      {
+        log_spy.print("Timing Operation %llu %llu", context, timing);
+      }
+
+      static inline void log_predicate_operation(UniqueID context, 
+                                                 UniqueID pred_op)
+      {
+        log_spy.print("Predicate Operation %llu %llu", context, pred_op);
+      }
+
       static inline void log_dependent_partition_operation(UniqueID context,
                                                            UniqueID unique_id,
                                                            IDType pid,
@@ -467,6 +478,29 @@ namespace Legion {
 		      DIM < 3 ? 0 : lower[2], higher[0],
 		      DIM < 2 ? 0 : higher[1],
 		      DIM < 3 ? 0 : higher[2]);
+      }
+
+      // Logger calls for futures
+      static inline void log_future_creation(UniqueID creator_id,
+                                             ApEvent future_event, 
+                                             const DomainPoint &point)
+      {
+        log_spy.print("Future Creation %llu " IDFMT " %u %d %d %d",
+                      creator_id, future_event.id, point.dim,
+                      (int)point.point_data[0], (int)point.point_data[1],
+                      (int)point.point_data[2]);
+      }
+
+      static inline void log_future_use(UniqueID user_id, 
+                                        ApEvent future_event)
+      {
+        log_spy.print("Future Usage %llu " IDFMT "", user_id, future_event.id);
+      }
+
+      static inline void log_predicate_use(UniqueID pred_id,
+                                           UniqueID previous_predicate)
+      {
+        log_spy.print("Predicate Use %llu %llu", pred_id, previous_predicate);
       }
 
       // Logger call for physical instances

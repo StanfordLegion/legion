@@ -1484,6 +1484,9 @@ namespace Legion {
         speculation_state = PENDING_MAP_STATE;
         predicate = p.impl;
         predicate->add_predicate_reference();
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_predicate_use(unique_op_id, 
+                                       predicate->get_unique_op_id());
       }
     }
 
@@ -7569,7 +7572,12 @@ namespace Legion {
             runtime->address_space, this));
       collective = dc;
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_dynamic_collective(ctx->get_unique_id(), unique_op_id);
+        DomainPoint empty_point;
+        LegionSpy::log_future_creation(unique_op_id, 
+                                 future.impl->get_ready_event(), empty_point);
+      }
       return future;
     }
 
@@ -7729,6 +7737,13 @@ namespace Legion {
       // the parent task have been removed.
       initialize_operation(ctx, false/*track*/);
       future = f;
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        if ((future.impl != NULL) && future.impl->get_ready_event().exists())
+          LegionSpy::log_future_use(unique_op_id, 
+                                    future.impl->get_ready_event());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7836,6 +7851,13 @@ namespace Legion {
 #endif
         pred_op = p.impl;
         pred_op->add_predicate_reference();
+      }
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        if ((p != Predicate::TRUE_PRED) && (p != Predicate::FALSE_PRED))
+          LegionSpy::log_predicate_use(unique_op_id, 
+                                       pred_op->get_unique_op_id());
       }
     }
 
@@ -7991,6 +8013,16 @@ namespace Legion {
         right_valid = false;
         right = p2.impl;
         right->add_predicate_reference();
+      }
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        if ((p1 != Predicate::TRUE_PRED) && (p1 != Predicate::FALSE_PRED))
+          LegionSpy::log_predicate_use(unique_op_id, 
+                                       p1.impl->get_unique_op_id());
+        if ((p2 != Predicate::TRUE_PRED) && (p2 != Predicate::FALSE_PRED))
+          LegionSpy::log_predicate_use(unique_op_id, 
+                                       p2.impl->get_unique_op_id());
       }
     }
 
@@ -8210,6 +8242,16 @@ namespace Legion {
         right = p2.impl;
         right_valid = false;
         right->add_predicate_reference();
+      }
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        if ((p1 != Predicate::TRUE_PRED) && (p1 != Predicate::FALSE_PRED))
+          LegionSpy::log_predicate_use(unique_op_id, 
+                                       p1.impl->get_unique_op_id());
+        if ((p2 != Predicate::TRUE_PRED) && (p2 != Predicate::FALSE_PRED))
+          LegionSpy::log_predicate_use(unique_op_id, 
+                                       p2.impl->get_unique_op_id());
       }
     }
 
@@ -10211,8 +10253,13 @@ namespace Legion {
       if (check_privileges)
         check_fill_privilege();
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                       unique_op_id);
+        if ((future.impl != NULL) && future.impl->get_ready_event().exists())
+          LegionSpy::log_future_use(unique_op_id, 
+                                    future.impl->get_ready_event());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10239,8 +10286,14 @@ namespace Legion {
       if (check_privileges)
         check_fill_privilege();
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                       unique_op_id);
+        if ((value_size == 0) && (future.impl != NULL) &&
+            future.impl->get_ready_event().exists())
+          LegionSpy::log_future_use(unique_op_id, 
+                                    future.impl->get_ready_event());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11512,6 +11565,15 @@ namespace Legion {
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
                   runtime->address_space, runtime->address_space, this));
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
+        DomainPoint empty_point;
+        LegionSpy::log_future_creation(unique_op_id, 
+            result.impl->get_ready_event(), empty_point); 
+        if ((pre.impl != NULL) && pre.impl->get_ready_event().exists())
+          LegionSpy::log_future_use(unique_op_id, pre.impl->get_ready_event());
+      }
       return result;
     }
 
@@ -11525,6 +11587,15 @@ namespace Legion {
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
                   runtime->address_space, runtime->address_space, this));
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
+        DomainPoint empty_point;
+        LegionSpy::log_future_creation(unique_op_id, 
+            result.impl->get_ready_event(), empty_point); 
+        if ((pre.impl != NULL) && pre.impl->get_ready_event().exists())
+          LegionSpy::log_future_use(unique_op_id, pre.impl->get_ready_event());
+      }
       return result;
     }
 
@@ -11538,6 +11609,15 @@ namespace Legion {
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
                   runtime->address_space, runtime->address_space, this));
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
+        DomainPoint empty_point;
+        LegionSpy::log_future_creation(unique_op_id, 
+            result.impl->get_ready_event(), empty_point); 
+        if ((pre.impl != NULL) && pre.impl->get_ready_event().exists())
+          LegionSpy::log_future_use(unique_op_id, pre.impl->get_ready_event());
+      }
       return result;
     }
 

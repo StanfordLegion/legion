@@ -887,6 +887,9 @@ namespace Legion {
         Future result = runtime->help_create_future(task);
         futures[point] = result;
         Runtime::release_reservation(lock);
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_future_creation(task->get_unique_id(),
+                                         result.impl->get_ready_event(), point);
         return result;
       }
       else

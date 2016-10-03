@@ -1307,6 +1307,7 @@ namespace Legion {
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \
     friend class Internal::MPILegionHandshakeImpl;          \
+    friend class Internal::FutureMapImpl;                   \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 
