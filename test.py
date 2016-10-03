@@ -90,7 +90,7 @@ def run_tests(test_modules=None,
         thread_count = multiprocessing.cpu_count()
 
     if root_dir is None:
-        root_dir = os.path.dirname(os.path.realpath(__file__))
+        root_dir = os.path.dirname(__file__)
 
     # Determine which test modules to run.
     def module_enabled(module, default=True):
