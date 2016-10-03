@@ -18,7 +18,7 @@
 from __future__ import print_function
 import argparse, multiprocessing, os, subprocess
 
-tutorials = [
+tutorial = [
     ['tutorial/00_hello_world/hello_world', []],
     ['tutorial/01_tasks_and_futures/task_and_futures', []],
     ['tutorial/02_index_tasks/index_tasks', []],
@@ -55,7 +55,7 @@ def run_cxx(tests, flags, root_dir, env, thread_count):
 
 def run_test_tutorial(root_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
-    run_cxx(tutorials, flags, root_dir, env, thread_count)
+    run_cxx(tutorial, flags, root_dir, env, thread_count)
 
 def run_test_examples(root_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
