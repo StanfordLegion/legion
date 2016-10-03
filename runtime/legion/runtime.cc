@@ -21217,11 +21217,6 @@ namespace Legion {
             MapperManager::handle_deferred_message(args);
             break;
           }
-        case LG_DEFER_COMPOSITE_HANDLE_TASK_ID:
-          {
-            InstanceRef::handle_deferred_composite_handle(args);
-            break;
-          }
         case LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID:
           {
             CompositeView::handle_deferred_view_ref(args);

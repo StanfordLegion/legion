@@ -1875,7 +1875,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < inst1.size(); idx++)
       {
         const InstanceRef &ref = inst1[idx];
-        if (ref.is_composite_ref())
+        if (ref.is_virtual_ref())
           continue;
         FieldMask overlap = intersection_mask & ref.get_valid_fields();
         if (!overlap)
@@ -1884,7 +1884,7 @@ namespace Legion {
         for (unsigned idx2 = 0; idx2 < inst2.size(); idx2++)
         {
           const InstanceRef &other = inst2[idx2];
-          if (other.is_composite_ref())
+          if (other.is_virtual_ref())
             continue;
           // If they are not the same instance we can keep going
           if (manager != other.get_manager())
@@ -2142,7 +2142,7 @@ namespace Legion {
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
       assert(!targets.empty());
-      assert(!targets[0].is_composite_ref());
+      assert(!targets.is_virtual_mapping());
 #endif
       RegionNode *child_node = get_node(req.region);
       FieldMask user_mask = 
@@ -2271,7 +2271,7 @@ namespace Legion {
         {
           InstanceRef &ref = targets[idx2];
 #ifdef DEBUG_LEGION
-          assert(!ref.is_composite_ref());
+          assert(!ref.is_virtual_ref());
 #endif
           ApEvent ready = target_views[idx2]->find_user_precondition(usage, 
                             term_event, ref.get_valid_fields(), op, idx1, 
@@ -2381,8 +2381,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &target_ref = targets[idx];
-        if (!target_ref.has_ref() || target_ref.is_composite_ref() ||
-            target_ref.get_manager()->is_virtual_manager())
+        if (!target_ref.has_ref() || target_ref.is_virtual_ref())
           continue;
         // Issue the update copies to this instance
         if (need_valid)
@@ -2515,7 +2514,7 @@ namespace Legion {
       {
         const InstanceRef &dst_ref = dst_targets[idx];
 #ifdef DEBUG_LEGION
-        assert(!dst_ref.is_composite_ref());
+        assert(!dst_ref.is_virtual_ref());
 #endif
         InstanceView *view = 
               dst_node->convert_reference(dst_ref, dst_context);
@@ -2563,7 +2562,7 @@ namespace Legion {
           {
             const InstanceRef &dst_ref = dst_targets[idx1];
 #ifdef DEBUG_LEGION
-            assert(!dst_ref.is_composite_ref());
+            assert(!dst_ref.is_virtual_ref());
 #endif
             const FieldMask &dst_mask = dst_ref.get_valid_fields(); 
             std::map<DeferredView*,std::vector<unsigned> > src_deferred_indexes;
@@ -2656,7 +2655,7 @@ namespace Legion {
         {
           const InstanceRef &dst_ref = dst_targets[idx1];
 #ifdef DEBUG_LEGION
-          assert(!dst_ref.is_composite_ref());
+          assert(!dst_ref.is_virtual_ref());
           assert(dst_ref.get_manager()->is_instance_manager());
 #endif
           InstanceManager *dst_manager = 
@@ -2675,7 +2674,7 @@ namespace Legion {
             {
               const InstanceRef &src_ref = src_targets[idx3];
 #ifdef DEBUG_LEGION
-              assert(!src_ref.is_composite_ref());
+              assert(!src_ref.is_virtual_ref());
               assert(src_ref.get_manager()->is_instance_manager());
 #endif
               const FieldMask &src_mask = src_ref.get_valid_fields();   
@@ -2766,7 +2765,7 @@ namespace Legion {
       {
         const InstanceRef &dst_ref = dst_targets[idx1];
 #ifdef DEBUG_LEGION
-        assert(!dst_ref.is_composite_ref());
+        assert(!dst_ref.is_virtual_ref());
 #endif
         PhysicalManager *dst_manager = dst_ref.get_manager();
         FieldMask dst_valid = dst_ref.get_valid_fields();
@@ -2781,7 +2780,7 @@ namespace Legion {
             // Otherwise, this is a normal copy, fill in offsets
             const InstanceRef &src_ref = src_targets[src_index];
 #ifdef DEBUG_LEGION
-            assert(!src_ref.is_composite_ref());
+            assert(!src_ref.is_virtual_ref());
 #endif
             PhysicalManager *src_manager = src_ref.get_manager();
             if (src_manager->is_reduction_manager())
@@ -13963,31 +13962,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!ref.is_composite_ref());
+      assert(!ref.is_virtual_ref());
 #endif
       PhysicalManager *manager = ref.get_manager();
       return convert_manager(manager, context);
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeView* RegionTreeNode::convert_reference(
-                                                   const InstanceRef &ref) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(ref.is_composite_ref());
-#endif
-      CompositeView *view = ref.get_composite_view();
-#ifdef DEBUG_LEGION
-      assert(get_tree_id() == view->logical_node->get_tree_id());
-#endif
-      // If we're already at the root then we are done
-      if (view->logical_node == this)
-        return view;
-      if (is_region())
-        return as_region_node()->convert_composite_view_region(view);
-      else
-        return as_partition_node()->convert_composite_view_partition(view);
     }
 
     //--------------------------------------------------------------------------
@@ -15354,7 +15332,7 @@ namespace Legion {
         {
           InstanceRef &ref = targets[idx];
 #ifdef DEBUG_LEGION
-          assert(!ref.is_composite_ref());
+          assert(!ref.is_virtual_ref());
 #endif
           LogicalView *view = convert_reference(ref, context);
 #ifdef DEBUG_LEGION
@@ -15436,7 +15414,7 @@ namespace Legion {
           {
             const InstanceRef &ref = targets[idx];
 #ifdef DEBUG_LEGION
-            assert(!ref.is_composite_ref());
+            assert(!ref.is_virtual_ref());
             assert(new_views[idx]->is_instance_view());
             assert(new_views[idx]->as_instance_view()->is_materialized_view());
 #endif
@@ -15531,7 +15509,7 @@ namespace Legion {
           {
             InstanceRef &ref = targets[0];
 #ifdef DEBUG_LEGION
-            assert(!ref.is_composite_ref());
+            assert(!ref.is_virtual_ref());
             assert(new_views[0]->is_instance_view());
 #endif
             ApEvent ready = new_views[0]->as_instance_view()->add_user_fused(
@@ -15552,7 +15530,7 @@ namespace Legion {
             {
               InstanceRef &ref = targets[idx];
 #ifdef DEBUG_LEGION
-              assert(!ref.is_composite_ref());
+              assert(!ref.is_virtual_ref());
               assert(new_views[idx]->is_instance_view());
 #endif
               ApEvent ready = 
@@ -15862,22 +15840,6 @@ namespace Legion {
         result = parent_view->get_instance_subview(row_source->color);
       }
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeView* RegionNode::convert_composite_view_region(
-                                                      CompositeView *view) const
-    //--------------------------------------------------------------------------
-    {
-      if (view->logical_node == this)
-        return view;
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      CompositeView *parent_view = 
-        parent->convert_composite_view_partition(view);
-      return parent_view->get_subview(row_source->color)->
-                                as_deferred_view()->as_composite_view();
     }
 
     //--------------------------------------------------------------------------
@@ -16890,20 +16852,6 @@ namespace Legion {
         parent->convert_reference_region(manager, context);
       result = parent_view->get_instance_subview(row_source->color);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeView* PartitionNode::convert_composite_view_partition(
-                                                      CompositeView *view) const
-    //--------------------------------------------------------------------------
-    {
-      // No need to bother with the check here
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      CompositeView *parent_view = parent->convert_composite_view_region(view);
-      return parent_view->get_subview(row_source->color)->
-                             as_deferred_view()->as_composite_view();
     }
 
     //--------------------------------------------------------------------------

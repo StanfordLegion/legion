@@ -280,7 +280,6 @@ namespace Legion {
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
-      LG_DEFER_COMPOSITE_HANDLE_TASK_ID,
       LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID,
       LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID,
       LG_DEFER_COMPOSITE_NODE_REF_TASK_ID,
@@ -373,7 +372,6 @@ namespace Legion {
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
-        "Deferred Composite Handle",                              \
         "Deferred Composite View Ref",                            \
         "Deferred Composite View Registration",                   \
         "Deferred Composite Node Ref",                            \

@@ -3160,7 +3160,7 @@ namespace Legion {
                                                   derez, ready_events);
       virtual_mapped.resize(regions.size());
       for (unsigned idx = 0; idx < num_phy; idx++)
-        virtual_mapped[idx] = physical_instances[idx].has_composite_ref();
+        virtual_mapped[idx] = physical_instances[idx].is_virtual_mapping();
       update_no_access_regions();
     }
 
@@ -4145,8 +4145,8 @@ namespace Legion {
       {
         // See if it is virtual mapped
         if (virtual_mapped[index])
-          return parent_ctx->find_parent_physical_context(
-                                  parent_req_indexes[index]);
+          return find_parent_context()->find_parent_physical_context(
+                                            parent_req_indexes[index]);
         else // We mapped a physical instance so we're it
           return this;
       }
