@@ -73,15 +73,12 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
 if(Legion_USE_GASNet)
-  set(GASNet_THREADING "par" CACHE STRING "GASNet Threading model to use")
-  set_property(CACHE GASNet_THREADING PROPERTY STRINGS seq par parsync)
-  mark_as_advanced(GASNet_THREADING)
+  set(GASNet_THREADING par)
+  set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
+  find_package(GASNet REQUIRED)
   if(NOT GASNet_THREADING STREQUAL "par")
     message(FATAL_ERROR "GASNet threading mode \"${GASNet_THREADING}\" is not currently supported by Legion")
   endif()
-  set(GASNet_CONDUIT "" CACHE STRING "GASNet communication conduit to use")
-  mark_as_advanced(GASNet_CONDUIT)
-  find_package(GASNet REQUIRED)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindGASNet.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
