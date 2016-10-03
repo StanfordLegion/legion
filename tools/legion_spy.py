@@ -4813,9 +4813,10 @@ class Operation(object):
                  'temporaries', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
-                 'advance_ops', 'task', 'task_id', 'index_owner', 'points', 
-                 'launch_rect', 'creator', 'realm_copies', 'realm_fills', 
-                 'internal_idx', 'disjoint_close_fields', 'partition_kind', 
+                 'advance_ops', 'task', 'task_id', 'predicate', 'futures', 
+                 'index_owner', 'points', 'launch_rect', 'creator', 
+                 'realm_copies', 'realm_fills', 'internal_idx', 
+                 'disjoint_close_fields', 'partition_kind', 
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
                  'need_logical_replay', 'reachable_cache', 
                  'transitive_warning_issued', 'arrival_barriers', 'wait_barriers']
@@ -4842,6 +4843,8 @@ class Operation(object):
         self.advance_ops = None
         self.realm_copies = None
         self.realm_fills = None
+        self.predicate = None
+        self.futures = None
         # Only valid for tasks
         self.task = None
         self.task_id = -1
@@ -4946,6 +4949,9 @@ class Operation(object):
         assert self.kind == INDEX_TASK_KIND
         assert not self.launch_rect
         self.launch_rect = rect
+
+    def set_predicate(self, pred):
+        self.predicate = pred
 
     def get_index_launch_rect(self):
         assert self.launch_rect
@@ -5077,6 +5083,11 @@ class Operation(object):
         if index not in self.temporaries:
             self.temporaries[index] = dict()
         self.temporaries[index][fid] = inst
+
+    def add_future(self, future):
+        if not self.futures:
+            self.futures = set()
+        self.futures.add(future)
 
     def update_instance_uses(self):
         if self.mappings:
@@ -6830,6 +6841,26 @@ class Task(object):
         else:
             replay_file.write(struct.pack('I',0))
 
+class Future(object):
+    __slots__ = ['state', 'iid', 'creator', 'point', 'user_ids']
+    def __init__(self, state, iid):
+        self.state = state
+        self.iid = iid
+        self.creator = None
+        self.point = None
+        self.user_ids = None
+
+    def set_creator(self, op):
+        self.creator = op
+
+    def set_point(self, point):
+        self.point = point
+
+    def add_uid(self, uid):
+        if not self.user_ids:
+            self.user_ids = set()
+        self.user_ids.add(uid)
+
 class PointUser(object):
     __slots__ = ['op', 'index', 'logical_op', 'priv', 'coher', 'redop']
     def __init__(self, op, index, priv, coher, redop):
@@ -8224,7 +8255,7 @@ mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
 future_create_pat       = re.compile(
-    prefix+"Future Creation (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+) (?<dim>[0-9]+) (?P<p1>[0-9]+) (?P<p2>[0-9]+) (?P<p3>[0-9]+)")
+    prefix+"Future Creation (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<p1>[0-9]+) (?P<p2>[0-9]+) (?P<p3>[0-9]+)")
 future_use_pat          = re.compile(
     prefix+"Future Usage (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 predicate_use_pat       = re.compile(
@@ -8527,25 +8558,24 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         future.set_creator(op)
         point = Point(int(m.group('dim')))
-        if dim > 0:
+        if point.dim > 0:
             point.vals[0] = int(m.group('p1'))
-            if dim > 1:
+            if point.dim > 1:
                 point.vals[1] = int(m.group('p2'))
-                if dim > 2:
+                if point.dim > 2:
                     point.vals[2] = int(m.group('p3'))
         future.set_point(point)
         return True 
     m = future_use_pat.match(line)
     if m is not None:
         future = state.get_future(int(m.group('iid'),16))
-        op = state.get_operation(int(m.group('uid')))
-        future.add_user(op)
+        future.add_uid(int(m.group('uid')))
         return True
     m = predicate_use_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         pred = state.get_operation(int(m.group('pred')))
-        op.add_predicate(pred)
+        op.set_predicate(pred)
         return True
     # Physical Instances and Mapping decisions happen frequently too
     m = instance_pat.match(line)
@@ -9107,7 +9137,7 @@ class State(object):
                  'field_spaces', 'regions', 'partitions', 'top_spaces', 'trees',
                  'ops', 'tasks', 'task_names', 'variants', 'projection_functions',
                  'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 
-                 'no_event', 'slice_index', 'slice_slice', 'point_slice', 
+                 'no_event', 'slice_index', 'slice_slice', 'point_slice', 'futures', 
                  'next_generation', 'next_realm_num', 'detailed_graphs', 
                  'assert_on_error', 'assert_on_warning', 'config', 'detailed_logging']
     def __init__(self, verbose, details, assert_on_error, assert_on_warning):
@@ -9149,6 +9179,7 @@ class State(object):
         self.slice_index = dict()
         self.slice_slice = dict()
         self.point_slice = dict()
+        self.futures = dict()
         # For physical traversals
         self.next_generation = 1
         self.next_realm_num = 1
@@ -9721,6 +9752,13 @@ class State(object):
         op.set_op_kind(SINGLE_TASK_KIND)
         result = Task(self, op)
         self.tasks[op] = result
+        return result
+
+    def get_future(self, iid):
+        if iid in self.futures:
+            return self.futures[iid]
+        result = Future(self, iid)
+        self.futures[iid] = result
         return result
 
     def get_variant(self, vid):
