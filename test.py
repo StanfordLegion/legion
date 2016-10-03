@@ -30,7 +30,7 @@ def run_test_cxx(tests, root_dir, env, thread_count):
         test_file, test_flags = test
         test_path = os.path.join(root_dir, test_file)
         test_dir = os.path.dirname(test_path)
-        cmd(['make', '-s', '-C', test_dir, '-j', thread_count], env=env)
+        cmd(['make', '-s', '-C', test_dir, '-j', str(thread_count)], env=env)
         cmd([test_path] + test_flags, env=env, cwd=test_dir)
 
 def run_test_tutorial(root_dir, env, thread_count):
