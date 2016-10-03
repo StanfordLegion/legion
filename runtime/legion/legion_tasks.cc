@@ -6335,7 +6335,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           // Don't skip early mapped regions
-          if (IS_READ_ONLY(regions[idx]))
+          if (IS_READ_ONLY(regions[idx]) && !virtual_mapped[idx])
             physical_instances[idx].find_read_only_reservations(
                                                   read_only_reservations);
         }
