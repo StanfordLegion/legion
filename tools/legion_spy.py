@@ -79,6 +79,8 @@ DEP_PART_OP_KIND = 17
 PENDING_PART_OP_KIND = 18
 DYNAMIC_COLLECTIVE_OP_KIND = 19
 TRACE_OP_KIND = 20
+TIMING_OP_KIND = 21,
+PREDICATE_OP_KIND = 22,
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -106,6 +108,9 @@ OpNames = [
 "Detach Op",
 "Dependent Partition Op",
 "Pending Partition Op",
+"Trace Op",
+"Timing Op",
+"Predicate Op",
 ]
 
 def check_for_anti_dependence(req1, req2, actual):
@@ -8202,6 +8207,10 @@ detach_pat               = re.compile(
     prefix+"Detach Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 dynamic_collective_pat   = re.compile(
     prefix+"Dynamic Collective (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+timing_op_pat            = re.compile(
+    prefix+"Timing Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+predicate_op_pat         = re.compile(
+    prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 dep_partition_op_pat     = re.compile(
     prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) "+
            "(?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
@@ -8243,6 +8252,12 @@ index_launch_domain_pat = re.compile(
 mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
+future_create_pat       = re.compile(
+    prefix+"Future Creation (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+) (?<dim>[0-9]+) (?P<p1>[0-9]+) (?P<p2>[0-9]+) (?P<p3>[0-9]+)")
+future_use_pat          = re.compile(
+    prefix+"Future Usage (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
+predicate_use_pat       = re.compile(
+    prefix+"Predicate Use (?P<uid>[0-9]+) (?P<pred>[0-9]+)")
 # Physical instance and mapping decision patterns
 instance_pat            = re.compile(
     prefix+"Physical Instance (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<redop>[0-9]+)")
@@ -8534,6 +8549,32 @@ def parse_legion_spy_line(line, state):
         op1.add_outgoing(dep)
         # Record that we found a mapping dependence
         state.has_mapping_deps = True
+        return True
+    m = future_create_pat.match(line)
+    if m is not None:
+        future = state.get_future(int(m.group('iid'),16))
+        op = state.get_operation(int(m.group('uid')))
+        future.set_creator(op)
+        point = Point(int(m.group('dim')))
+        if dim > 0:
+            point.vals[0] = int(m.group('p1'))
+            if dim > 1:
+                point.vals[1] = int(m.group('p2'))
+                if dim > 2:
+                    point.vals[2] = int(m.group('p3'))
+        future.set_point(point)
+        return True 
+    m = future_use_pat.match(line)
+    if m is not None:
+        future = state.get_future(int(m.group('iid'),16))
+        op = state.get_operation(int(m.group('uid')))
+        future.add_user(op)
+        return True
+    m = predicate_use_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        pred = state.get_operation(int(m.group('pred')))
+        op.add_predicate(pred)
         return True
     # Physical Instances and Mapping decisions happen frequently too
     m = instance_pat.match(line)
@@ -8840,6 +8881,22 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(DYNAMIC_COLLECTIVE_OP_KIND)
         op.set_name("Dynamic Collective Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = timing_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(TIMING_OP_KIND)
+        op.set_name("Timing Op "+m.group('uid'))
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context)
+        return True
+    m = predicate_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(PREDICATE_OP_KIND)
+        op.set_name("Predicate Op "+m.group('uid'))
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
         return True
