@@ -20,7 +20,7 @@ import argparse, multiprocessing, os, subprocess
 
 tutorial = [
     ['tutorial/00_hello_world/hello_world', []],
-    ['tutorial/01_tasks_and_futures/task_and_futures', []],
+    ['tutorial/01_tasks_and_futures/tasks_and_futures', []],
     ['tutorial/02_index_tasks/index_tasks', []],
     ['tutorial/03_global_vars/global_vars', []],
     ['tutorial/04_logical_regions/logical_regions', []],
