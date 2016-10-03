@@ -19,24 +19,24 @@ from __future__ import print_function
 import argparse, multiprocessing, os, subprocess
 
 tutorials = [
-    ['tutorial/00_hello_world/hello_world', flags],
-    ['tutorial/01_tasks_and_futures/task_and_futures', flags],
-    ['tutorial/02_index_tasks/index_tasks', flags],
-    ['tutorial/03_global_vars/global_vars', flags],
-    ['tutorial/04_logical_regions/logical_regions', flags],
-    ['tutorial/05_physical_regions/phsyical_regions', flags],
-    ['tutorial/06_privileges/privileges', flags],
-    ['tutorial/07_partitioning/partitioning', flags],
-    ['tutorial/08_multiple_partitions/multiple_partitions', flags],
-    ['tutorial/09_custom_mapper/custom_mapper', flags],
+    ['tutorial/00_hello_world/hello_world', []],
+    ['tutorial/01_tasks_and_futures/task_and_futures', []],
+    ['tutorial/02_index_tasks/index_tasks', []],
+    ['tutorial/03_global_vars/global_vars', []],
+    ['tutorial/04_logical_regions/logical_regions', []],
+    ['tutorial/05_physical_regions/phsyical_regions', []],
+    ['tutorial/06_privileges/privileges', []],
+    ['tutorial/07_partitioning/partitioning', []],
+    ['tutorial/08_multiple_partitions/multiple_partitions', []],
+    ['tutorial/09_custom_mapper/custom_mapper', []],
 ]
 
 examples = [
-    ['examples/attach_file/attach_file', flags],
-    ['examples/dynamic_registration/dynamic_registration', flags],
-    ['examples/full_circuit/ckt_sim', flags],
-    ['examples/full_ghost/ghost', ['-ll:cpu', '4'] + flags],
-    ['examples/spmd_cgsolver/cgsolver', ['-ll:cpu', '4', '-perproc'] + flags],
+    ['examples/attach_file/attach_file', []],
+    ['examples/dynamic_registration/dynamic_registration', []],
+    ['examples/full_circuit/ckt_sim', []],
+    ['examples/full_ghost/ghost', ['-ll:cpu', '4']],
+    ['examples/spmd_cgsolver/cgsolver', ['-ll:cpu', '4', '-perproc']],
 ]
 
 def cmd(command, env=None, cwd=None):
