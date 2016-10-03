@@ -24,7 +24,7 @@ tutorial = [
     ['tutorial/02_index_tasks/index_tasks', []],
     ['tutorial/03_global_vars/global_vars', []],
     ['tutorial/04_logical_regions/logical_regions', []],
-    ['tutorial/05_physical_regions/phsyical_regions', []],
+    ['tutorial/05_physical_regions/physical_regions', []],
     ['tutorial/06_privileges/privileges', []],
     ['tutorial/07_partitioning/partitioning', []],
     ['tutorial/08_multiple_partitions/multiple_partitions', []],
