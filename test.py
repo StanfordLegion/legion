@@ -60,22 +60,30 @@ def run_test_examples(root_dir, env, thread_count):
     ]
     run_test_cxx(tutorials, root_dir, env, thread_count)
 
+def run_test_realm(root_dir, env, thread_count):
+    test_dir = os.path.join(root_dir, 'test/realm')
+    cmd(['make', '-s', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'clean'])
+    cmd(['make', '-s', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'])
+
+    perf_dir = os.path.join(root_dir, 'test/performance/realm')
+    cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean'])
+    cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'])
+
 def run_test_fuzzer(root_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
     fuzz_dir = os.path.join(root_dir, 'fuzz-tester')
     cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir], cwd=root_dir)
     cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
 
-def run_tests(test_regent=True,
-              test_tutorial=True,
-              test_examples=True,
-              test_fuzzer=True,
-              test_spy=False,
+def option_enabled(option, options, var_prefix='', default=True):
+    if options is not None: return option in options
+    option_var = '%s%s' % (var_prefix, option.upper())
+    if option_var in os.environ: return os.environ[option_var] == '1'
+    return default
+
+def run_tests(test_modules=None,
               debug=True,
-              use_gasnet=False,
-              use_cuda=False,
-              use_llvm=False,
-              use_hdf=False,
+              use_features=None,
               thread_count=None,
               root_dir=None):
     if thread_count is None:
@@ -84,11 +92,31 @@ def run_tests(test_regent=True,
     if root_dir is None:
         root_dir = os.path.dirname(os.path.realpath(__file__))
 
+    # Determine which test modules to run.
+    def module_enabled(module, default=True):
+        return option_enabled(module, test_modules, 'TEST_', default)
+    test_regent = module_enabled('regent')
+    test_tutorial = module_enabled('tutorial')
+    test_examples = module_enabled('examples')
+    test_realm = module_enabled('realm', not debug)
+    test_fuzzer = module_enabled('fuzzer', debug)
+    test_spy = module_enabled('spy')
+
+    # Determine which features to build with.
+    def feature_enabled(feature, default=True):
+        return option_enabled(feature, use_features, 'USE_', default)
+    test_gasnet = feature_enabled('gasnet', False)
+    test_cuda = feature_enabled('cuda', False)
+    test_llvm = feature_enabled('llvm', False)
+    test_hdf = feature_enabled('hdf', False)
+    test_rdir = feature_enabled('rdir', True)
+
     # Normalize the test environment.
     env = dict(list(os.environ.items()) + [
         ('TEST_REGENT', '1' if test_regent else '0'),
         ('TEST_TUTORIAL', '1' if test_tutorial else '0'),
         ('TEST_EXAMPLES', '1' if test_examples else '0'),
+        ('TEST_REALM', '1' if test_realm else '0'),
         ('TEST_FUZZER', '1' if test_fuzzer else '0'),
         ('TEST_SPY', '1' if test_spy else '0'),
         ('DEBUG', '1' if debug else '0'),
@@ -96,9 +124,11 @@ def run_tests(test_regent=True,
         ('USE_CUDA', '1' if use_cuda else '0'),
         ('USE_LLVM', '1' if use_llvm else '0'),
         ('USE_HDF', '1' if use_hdf else '0'),
+        ('USE_RDIR', '1' if use_rdir else '0'),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
     ])
 
+    # Run tests.
     if test_regent:
         run_test_regent(root_dir, env, thread_count)
 
@@ -107,6 +137,9 @@ def run_tests(test_regent=True,
 
     if test_examples:
         run_test_examples(root_dir, env, thread_count)
+
+    if test_realm:
+        run_test_realm(root_dir, env, thread_count)
 
     if test_fuzzer:
         run_test_fuzzer(root_dir, env, thread_count)
@@ -117,47 +150,21 @@ def driver():
 
     # What tests to run:
     parser.add_argument(
-        '--regent', dest='test_regent', action='store_true', required=False,
-        default=os.environ['TEST_REGENT'] == '1' if 'TEST_REGENT' in os.environ else True,
-        help='Test Regent (also via environment variable TEST_REGENT).')
-    parser.add_argument(
-        '--tutorial', dest='test_tutorial', action='store_true', required=False,
-        default=os.environ['TEST_TUTORIAL'] == '1' if 'TEST_TUTORIAL' in os.environ else True,
-        help='Test Legion tutorial (also via environment variable TEST_TUTORIAL).')
-    parser.add_argument(
-        '--examples', dest='test_examples', action='store_true', required=False,
-        default=os.environ['TEST_EXAMPLES'] == '1' if 'TEST_EXAMPLES' in os.environ else True,
-        help='Test Legion examples (also via environment variable TEST_EXAMPLES).')
-    parser.add_argument(
-        '--fuzzer', dest='test_fuzzer', action='store_true', required=False,
-        default=os.environ['TEST_FUZZER'] == '1' if 'TEST_FUZZER' in os.environ else False,
-        help='Test Legion fuzzer (also via environment variable TEST_FUZZER).')
-    parser.add_argument(
-        '--spy', dest='test_spy', action='store_true', required=False,
-        default=os.environ['TEST_SPY'] == '1' if 'TEST_SPY' in os.environ else False,
-        help='Test Legion Spy (also via environment variable TEST_SPY).')
+        '--test', dest='test_modules', action='append',
+        choices=['regent', 'tutorial', 'examples', 'realm', 'fuzzer', 'spy'],
+        default=None,
+        help='Test modules to run (also via TEST_*).')
 
     # Build options:
     parser.add_argument(
-        '--debug', dest='debug', action='store_true', required=False,
+        '--debug', dest='debug', action='store_true',
         default=os.environ['DEBUG'] == '1' if 'DEBUG' in os.environ else True,
-        help='Build Legion in debug mode (also via environment variable DEBUG).')
+        help='Build Legion in debug mode (also via DEBUG).')
     parser.add_argument(
-        '--gasnet', dest='use_gasnet', action='store_true', required=False,
-        default=os.environ['USE_GASNET'] == '1' if 'USE_GASNET' in os.environ else False,
-        help='Build Legion with GASNet (also via environment variable USE_GASNET).')
-    parser.add_argument(
-        '--cuda', dest='use_cuda', action='store_true', required=False,
-        default=os.environ['USE_CUDA'] == '1' if 'USE_CUDA' in os.environ else False,
-        help='Build Legion with CUDA (also via environment variable USE_CUDA).')
-    parser.add_argument(
-        '--llvm', dest='use_llvm', action='store_true', required=False,
-        default=os.environ['USE_LLVM'] == '1' if 'USE_LLVM' in os.environ else False,
-        help='Build Legion with LLVM (also via environment variable USE_LLVM).')
-    parser.add_argument(
-        '--hdf', dest='use_hdf', action='store_true', required=False,
-        default=os.environ['USE_HDF'] == '1' if 'USE_HDF' in os.environ else False,
-        help='Build Legion with HDF (also via environment variable USE_HDF).')
+        '--use', dest='use_features', action='append',
+        choices=['gasnet', 'cuda', 'llvm', 'hdf', 'rdir'],
+        default=None,
+        help='Build Legion with features (also via USE_*).')
 
     parser.add_argument(
         '-C', '--directory', dest='root_dir', metavar='DIR', action='store', required=False,
