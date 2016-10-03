@@ -18,6 +18,27 @@
 from __future__ import print_function
 import argparse, multiprocessing, os, subprocess
 
+tutorials = [
+    ['tutorial/00_hello_world/hello_world', flags],
+    ['tutorial/01_tasks_and_futures/task_and_futures', flags],
+    ['tutorial/02_index_tasks/index_tasks', flags],
+    ['tutorial/03_global_vars/global_vars', flags],
+    ['tutorial/04_logical_regions/logical_regions', flags],
+    ['tutorial/05_physical_regions/phsyical_regions', flags],
+    ['tutorial/06_privileges/privileges', flags],
+    ['tutorial/07_partitioning/partitioning', flags],
+    ['tutorial/08_multiple_partitions/multiple_partitions', flags],
+    ['tutorial/09_custom_mapper/custom_mapper', flags],
+]
+
+examples = [
+    ['examples/attach_file/attach_file', flags],
+    ['examples/dynamic_registration/dynamic_registration', flags],
+    ['examples/full_circuit/ckt_sim', flags],
+    ['examples/full_ghost/ghost', ['-ll:cpu', '4'] + flags],
+    ['examples/spmd_cgsolver/cgsolver', ['-ll:cpu', '4', '-perproc'] + flags],
+]
+
 def cmd(command, env=None, cwd=None):
     print(' '.join(command))
     return subprocess.check_call(command, env=env, cwd=cwd)
@@ -25,40 +46,26 @@ def cmd(command, env=None, cwd=None):
 def run_test_regent(root_dir, env, thread_count):
     cmd([os.path.join(root_dir, 'language/travis.py')], env=env)
 
-def run_test_cxx(tests, root_dir, env, thread_count):
-    for test in tests:
-        test_file, test_flags = test
+def run_cxx(tests, flags, root_dir, env, thread_count):
+    for test_file, test_flags in tests:
         test_path = os.path.join(root_dir, test_file)
         test_dir = os.path.dirname(test_path)
         cmd(['make', '-s', '-C', test_dir, '-j', str(thread_count)], env=env)
-        cmd([test_path] + test_flags, env=env, cwd=test_dir)
+        cmd([test_path] + flags + test_flags, env=env, cwd=test_dir)
 
 def run_test_tutorial(root_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
-    tutorials = [
-        ['tutorial/00_hello_world/hello_world', flags],
-        ['tutorial/01_tasks_and_futures/task_and_futures', flags],
-        ['tutorial/02_index_tasks/index_tasks', flags],
-        ['tutorial/03_global_vars/global_vars', flags],
-        ['tutorial/04_logical_regions/logical_regions', flags],
-        ['tutorial/05_physical_regions/phsyical_regions', flags],
-        ['tutorial/06_privileges/privileges', flags],
-        ['tutorial/07_partitioning/partitioning', flags],
-        ['tutorial/08_multiple_partitions/multiple_partitions', flags],
-        ['tutorial/09_custom_mapper/custom_mapper', flags],
-    ]
-    run_test_cxx(tutorials, root_dir, env, thread_count)
+    run_cxx(tutorials, flags, root_dir, env, thread_count)
 
 def run_test_examples(root_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
-    tutorials = [
-        ['examples/attach_file/attach_file', flags],
-        ['examples/dynamic_registration/dynamic_registration', flags],
-        ['examples/full_circuit/ckt_sim', flags],
-        ['examples/full_ghost/ghost', ['-ll:cpu', '4'] + flags],
-        ['examples/spmd_cgsolver/cgsolver', ['-ll:cpu', '4', '-perproc'] + flags],
-    ]
-    run_test_cxx(tutorials, root_dir, env, thread_count)
+    run_cxx(examples, flags, root_dir, env, thread_count)
+
+def run_test_fuzzer(root_dir, env, thread_count):
+    env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
+    fuzz_dir = os.path.join(root_dir, 'fuzz-tester')
+    cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir], cwd=root_dir)
+    cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
 
 def run_test_realm(root_dir, env, thread_count):
     test_dir = os.path.join(root_dir, 'test/realm')
@@ -69,11 +76,19 @@ def run_test_realm(root_dir, env, thread_count):
     cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean'])
     cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'])
 
-def run_test_fuzzer(root_dir, env, thread_count):
-    env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
-    fuzz_dir = os.path.join(root_dir, 'fuzz-tester')
-    cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir], cwd=root_dir)
-    cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
+def build_cmake(root_dir, env, thread_count, test_tutorial, test_examples):
+    assert False
+
+def clean_cxx(tests, root_dir, env, thread_count):
+    for test_file, test_flags in tests:
+        test_dir = os.path.dirname(os.path.join(root_dir, test_file))
+        cmd(['make', '-s', '-C', test_dir, 'clean'], env=env)
+
+def build_make_clean(root_dir, env, thread_count, test_tutorial, test_examples):
+    if test_tutorial:
+        clean_cxx(tutorial, root_dir, env, thread_count)
+    if test_examples:
+        clean_cxx(examples, root_dir, env, thread_count)
 
 def option_enabled(option, options, var_prefix='', default=True):
     if options is not None: return option in options
@@ -98,8 +113,8 @@ def run_tests(test_modules=None,
     test_regent = module_enabled('regent')
     test_tutorial = module_enabled('tutorial')
     test_examples = module_enabled('examples')
-    test_realm = module_enabled('realm', not debug)
     test_fuzzer = module_enabled('fuzzer', debug)
+    test_realm = module_enabled('realm', not debug)
     test_spy = module_enabled('spy')
 
     # Determine which features to build with.
@@ -109,6 +124,7 @@ def run_tests(test_modules=None,
     use_cuda = feature_enabled('cuda', False)
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
+    use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
 
     # Normalize the test environment.
@@ -123,6 +139,15 @@ def run_tests(test_modules=None,
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
     ])
 
+    # Build tests.
+    if use_cmake:
+        build_cmake(root_dir, env, thread_count,
+                    test_tutorial, test_examples)
+    else:
+        # With GNU Make, builds happen inline. But clean here.
+        build_make_clean(root_dir, env, thread_count,
+                         test_tutorial, test_examples)
+
     # Run tests.
     if test_regent:
         run_test_regent(root_dir, env, thread_count)
@@ -133,11 +158,11 @@ def run_tests(test_modules=None,
     if test_examples:
         run_test_examples(root_dir, env, thread_count)
 
-    if test_realm:
-        run_test_realm(root_dir, env, thread_count)
-
     if test_fuzzer:
         run_test_fuzzer(root_dir, env, thread_count)
+
+    if test_realm:
+        run_test_realm(root_dir, env, thread_count)
 
 def driver():
     parser = argparse.ArgumentParser(
@@ -146,7 +171,7 @@ def driver():
     # What tests to run:
     parser.add_argument(
         '--test', dest='test_modules', action='append',
-        choices=['regent', 'tutorial', 'examples', 'realm', 'fuzzer', 'spy'],
+        choices=['regent', 'tutorial', 'examples', 'fuzzer', 'realm', 'spy'],
         default=None,
         help='Test modules to run (also via TEST_*).')
 
@@ -157,7 +182,7 @@ def driver():
         help='Build Legion in debug mode (also via DEBUG).')
     parser.add_argument(
         '--use', dest='use_features', action='append',
-        choices=['gasnet', 'cuda', 'llvm', 'hdf', 'rdir'],
+        choices=['gasnet', 'cuda', 'llvm', 'hdf', 'cmake', 'rdir'],
         default=None,
         help='Build Legion with features (also via USE_*).')
 
