@@ -9282,11 +9282,14 @@ namespace Legion {
           }
         }
         // Now we can record our version numbers just like everyone else
+        // We can skip the check for virtual version information because
+        // our owner slice already did it
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
                                       one_below_path, version_infos[idx], 
                                       ready_events, false/*partial*/, 
                                       false/*disjoint close*/,
-                                      one_below, &proj_epochs);
+                                      one_below, &proj_epochs, 
+                                      true/*skip parent check*/);
       }
     }
 

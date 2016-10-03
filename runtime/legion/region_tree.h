@@ -266,7 +266,8 @@ namespace Legion {
                                        RegionTreeNode *parent_node = NULL,
               // For computing split masks for projection epochs only
               const LegionMap<ProjectionEpochID,
-                              FieldMask>::aligned *advance_epochs = NULL);
+                              FieldMask>::aligned *advance_epochs = NULL,
+                                       bool skip_parent_check = false);
       void advance_version_numbers(Operation *op, unsigned idx,
                                    bool update_parent_state,
                                    bool parent_is_upper_bound,

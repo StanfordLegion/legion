@@ -108,11 +108,13 @@ namespace Legion {
           { return result; }
         inline iterator& operator++(/*prefix*/void)
           { if (single) result = NULL; 
-            else result = set->next(result->first); return *this; }
+            else result = set->next(result->first); 
+            return *this; }
         inline iterator operator++(/*postfix*/int)
           { iterator copy(*this); 
             if (single) result = NULL; 
-            else result = set->next(result->first); return copy; }
+            else result = set->next(result->first); 
+            return copy; }
       public:
         inline operator bool(void) const
           { return (result != NULL); }

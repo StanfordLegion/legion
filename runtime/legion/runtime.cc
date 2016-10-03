@@ -788,26 +788,17 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(SingleTask *ctx, TaskOp *t, Runtime *rt)
-      : Collectable(), context(ctx), task(t), task_gen(t->get_generation()),
-        valid(true), runtime(rt), ready_event(t->get_completion_event()),
+    FutureMapImpl::FutureMapImpl(SingleTask *ctx, Operation *o, Runtime *rt)
+      : Collectable(), context(ctx), op(o), op_gen(o->get_generation()),
+        valid(true), runtime(rt), ready_event(o->get_completion_event()),
         lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl::FutureMapImpl(SingleTask *ctx,ApEvent comp_event,Runtime *rt)
-      : Collectable(), context(ctx), task(NULL), task_gen(0),
-        valid(true), runtime(rt), ready_event(comp_event),
-        lock(Reservation::create_reservation())
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(SingleTask *ctx, Runtime *rt)
-      : Collectable(), context(ctx), task(NULL), task_gen(0),
+      : Collectable(), context(ctx), op(NULL), op_gen(0),
         valid(false), runtime(rt), ready_event(ApEvent::NO_AP_EVENT), 
         lock(Reservation::NO_RESERVATION)
     //--------------------------------------------------------------------------
@@ -816,7 +807,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(const FutureMapImpl &rhs)
-      : Collectable(), context(NULL), task(NULL), task_gen(0), 
+      : Collectable(), context(NULL), op(NULL), op_gen(0), 
         valid(false), runtime(NULL) 
     //--------------------------------------------------------------------------
     {
@@ -884,11 +875,11 @@ namespace Legion {
         }
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
-        Future result = runtime->help_create_future(task);
+        Future result = runtime->help_create_future(op);
         futures[point] = result;
         Runtime::release_reservation(lock);
         if (Runtime::legion_spy_enabled)
-          LegionSpy::log_future_creation(task->get_unique_id(),
+          LegionSpy::log_future_creation(op->get_unique_op_id(),
                                          result.impl->get_ready_event(), point);
         return result;
       }

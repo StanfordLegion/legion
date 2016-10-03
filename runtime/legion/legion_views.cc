@@ -645,7 +645,10 @@ namespace Legion {
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
       // If we are not the logical owner, we need to see if we are up to date 
       if (!is_logical_owner())
-        perform_remote_valid_check(copy_mask, versions, reading);  
+      {
+        // We are also reading if we are doing a reductions
+        perform_remote_valid_check(copy_mask, versions,reading || (redop != 0));
+      }
       FieldMask filter_mask;
       std::set<ApEvent> dead_events;
       LegionMap<ApEvent,FieldMask>::aligned filter_current_users, 
@@ -751,7 +754,10 @@ namespace Legion {
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
       // If we are not the logical owner, we need to see if we are up to date 
       if (!is_logical_owner())
-        perform_remote_valid_check(copy_mask, versions, reading);  
+      {
+        // We are also reading if we are doing reductions
+        perform_remote_valid_check(copy_mask, versions,reading || (redop != 0));
+      }
       FieldMask filter_mask;
       std::set<ApEvent> dead_events;
       LegionMap<ApEvent,FieldMask>::aligned filter_current_users; 
@@ -1046,10 +1052,11 @@ namespace Legion {
       // If we are not the logical owner, we need to see if we are up to date 
       if (!is_logical_owner())
       {
-        // Only way we are not reading is if we are doing a write-only
-        // update or we are reducing
-        const bool reading = !IS_WRITE_ONLY(usage) && !IS_REDUCE(usage);
-        perform_remote_valid_check(user_mask, versions, reading);
+#ifdef DEBUG_LEGION
+        assert(!IS_REDUCE(usage)); // no user reductions currently, might change
+#endif
+        // Only writing if we are overwriting, otherwise we are also reading
+        perform_remote_valid_check(user_mask, versions, !IS_WRITE_ONLY(usage));
       }
       std::set<ApEvent> dead_events;
       LegionMap<ApEvent,FieldMask>::aligned filter_current_users, 
@@ -1127,12 +1134,17 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
       // If we are not the logical owner, we need to see if we are up to date 
-      const bool read_only = IS_READ_ONLY(usage);
       if (!is_logical_owner())
-        perform_remote_valid_check(user_mask, versions, read_only);
+      {
+#ifdef DEBUG_LEGION
+        assert(!IS_REDUCE(usage)); // no reductions for now, might change
+#endif
+        // We are reading if we are not overwriting
+        perform_remote_valid_check(user_mask, versions, !IS_WRITE_ONLY(usage));
+      }
       std::set<ApEvent> dead_events;
       LegionMap<ApEvent,FieldMask>::aligned filter_current_users;
-      if (read_only)
+      if (IS_READ_ONLY(usage))
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         FieldMask observed, non_dominated;

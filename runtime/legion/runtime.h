@@ -228,8 +228,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
-      FutureMapImpl(SingleTask *ctx, TaskOp *task, Runtime *rt);
-      FutureMapImpl(SingleTask *ctx, ApEvent completion_event, Runtime *rt);
+      FutureMapImpl(SingleTask *ctx, Operation *op, Runtime *rt);
       FutureMapImpl(SingleTask *ctx, Runtime *rt); // empty map
       FutureMapImpl(const FutureMapImpl &rhs);
       ~FutureMapImpl(void);
@@ -248,8 +247,9 @@ namespace Legion {
 #endif
     public:
       SingleTask *const context;
-      TaskOp *const task;
-      const GenerationID task_gen;
+      // Either an index space task or a must epoch op
+      Operation *const op;
+      const GenerationID op_gen;
       const bool valid;
       Runtime *const runtime;
     private:

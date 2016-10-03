@@ -3121,6 +3121,7 @@ namespace Legion {
                                                      src_privilege_paths[idx],
                                                      src_versions[idx],
                                                      preconditions);
+      const unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
@@ -3128,7 +3129,7 @@ namespace Legion {
         // so that we can get the version numbers correct
         if (is_reduce_req)
           dst_requirements[idx].privilege = READ_WRITE;
-        runtime->forest->perform_versioning_analysis(this, idx,
+        runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                      dst_requirements[idx],
                                                      dst_privilege_paths[idx],
                                                      dst_versions[idx],
@@ -8472,8 +8473,7 @@ namespace Legion {
       mapper_tag = launcher.mapping_tag;
       // Make a new future map for storing our results
       // We'll fill it in later
-      result_map = FutureMap(legion_new<FutureMapImpl>(ctx, 
-                                             get_completion_event(), runtime));
+      result_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime)); 
 #ifdef DEBUG_LEGION
       size_t total_points = 0;
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
@@ -8499,6 +8499,8 @@ namespace Legion {
         assert(false);
       }
 #endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
     }
 

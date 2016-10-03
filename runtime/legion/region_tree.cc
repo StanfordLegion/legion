@@ -1627,7 +1627,8 @@ namespace Legion {
                         const RegionTreePath &path, VersionInfo &version_info,
                         std::set<RtEvent> &ready_events, bool partial_traversal,
                         bool disjoint_close, RegionTreeNode *parent_node,
-          const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
+          const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs,
+                        bool skip_parent_check)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1647,7 +1648,7 @@ namespace Legion {
       // any version infromation from our parent context (e.g. because
       // it virtually mapped above where we have privileges)
       const unsigned depth = parent_node->get_depth();
-      if (depth > 0)
+      if (!skip_parent_check && (depth > 0))
       {
         SingleTask *parent_ctx = op->get_parent();
         unsigned parent_req_index = op->find_parent_index(idx);

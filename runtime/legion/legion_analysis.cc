@@ -7693,7 +7693,10 @@ namespace Legion {
     {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
-      assert(!(capture_mask - (dirty_mask | reduction_mask)));
+      // This assertion doesn't hold true under virtual mappings where
+      // an advance operation might think there is dirty field data but
+      // it was never actually initialized in the outermost task
+      //assert(!(capture_mask - (dirty_mask | reduction_mask)));
       assert((this->version_number + 1) == target->version_number);
 #endif
       FieldMask dirty_overlap = dirty_mask & capture_mask;

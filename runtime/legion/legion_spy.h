@@ -140,7 +140,7 @@ namespace Legion {
                                 unsigned field_id, size_t size)
       {
         log_spy.print("Field Creation %u %u %ld", 
-		      unique_id, field_id, size);
+		      unique_id, field_id, long(size));
       }
 
       static inline void log_field_name(unsigned unique_id,
@@ -357,6 +357,12 @@ namespace Legion {
                                                  UniqueID pred_op)
       {
         log_spy.print("Predicate Operation %llu %llu", context, pred_op);
+      }
+
+      static inline void log_must_epoch_operation(UniqueID context,
+                                                  UniqueID must_op)
+      {
+        log_spy.print("Must Epoch Operation %llu %llu", context, must_op);
       }
 
       static inline void log_dependent_partition_operation(UniqueID context,
