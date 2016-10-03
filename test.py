@@ -105,11 +105,11 @@ def run_tests(test_modules=None,
     # Determine which features to build with.
     def feature_enabled(feature, default=True):
         return option_enabled(feature, use_features, 'USE_', default)
-    test_gasnet = feature_enabled('gasnet', False)
-    test_cuda = feature_enabled('cuda', False)
-    test_llvm = feature_enabled('llvm', False)
-    test_hdf = feature_enabled('hdf', False)
-    test_rdir = feature_enabled('rdir', True)
+    use_gasnet = feature_enabled('gasnet', False)
+    use_cuda = feature_enabled('cuda', False)
+    use_llvm = feature_enabled('llvm', False)
+    use_hdf = feature_enabled('hdf', False)
+    use_rdir = feature_enabled('rdir', True)
 
     # Normalize the test environment.
     env = dict(list(os.environ.items()) + [
