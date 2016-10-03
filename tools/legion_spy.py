@@ -81,6 +81,7 @@ DYNAMIC_COLLECTIVE_OP_KIND = 19
 TRACE_OP_KIND = 20
 TIMING_OP_KIND = 21,
 PREDICATE_OP_KIND = 22,
+MUST_EPOCH_OP_KIND = 23,
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -111,6 +112,7 @@ OpNames = [
 "Trace Op",
 "Timing Op",
 "Predicate Op",
+"Must Epoch Op",
 ]
 
 def check_for_anti_dependence(req1, req2, actual):
@@ -5965,6 +5967,9 @@ class Operation(object):
             PENDING_PART_OP_KIND : "honeydew",
             DYNAMIC_COLLECTIVE_OP_KIND : "navy",
             TRACE_OP_KIND : "springgreen",
+            TIMING_OP_KIND : "turqoise",
+            PREDICATE_OP_KIND : "olivedrab1",
+            MUST_EPOCH_OP_KIND : "tomato",
             }[self.kind]
 
     def print_base_node(self, printer, dataflow):
@@ -8213,6 +8218,8 @@ timing_op_pat            = re.compile(
     prefix+"Timing Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 predicate_op_pat         = re.compile(
     prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+must_epoch_op_pat        = re.compile(
+    prefix+"Must Epoch Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 dep_partition_op_pat     = re.compile(
     prefix+"Dependent Partition Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) "+
            "(?P<pid>[0-9a-f]+) (?P<kind>[0-9]+)")
@@ -8900,6 +8907,12 @@ def parse_legion_spy_line(line, state):
         op.set_name("Predicate Op "+m.group('uid'))
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context)
+        return True
+    m = must_epoch_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(MUST_EPOCH_OP_KIND)
+        # Don't add it to the context for now
         return True
     m = dep_partition_op_pat.match(line)
     if m is not None:
