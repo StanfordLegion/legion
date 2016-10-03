@@ -156,37 +156,8 @@ def compute_dependence_type(req1, req2):
 def check_preconditions(preconditions, op):
     assert op.reachable_cache is not None
     for pre in preconditions:
-        # Make sure they are in the same context before testing them
-        pre_ctx = pre.get_context()
-        op_ctx = op.get_context()
-        if pre_ctx is not op_ctx:
-            # Need to make sure these are in the same context 
-            pre_ancestor = pre
-            op_ancestor = op
-            # First get the contexts at the same depth 
-            while pre_ctx.get_depth() < op_ctx.get_depth():
-                op_ancestor = op_ancestor.get_context().op
-                op_ctx = op_ancestor.get_context()
-            while op_ctx.get_depth() < pre_ctx.get_depth():
-                pre_ancestor =  pre_ancestor.get_context().op
-                pre_ctx = pre_ancestor.get_context()
-            # Contexts are the at the same depth, walk up until contexts are the same
-            while pre_ctx is not op_ctx:
-                op_ancestor = op_ancestor.get_context().op
-                op_ctx = op_ancestor.get_context()
-                pre_ancestor = pre_ancestor.get_context().op
-                pre_ctx = pre_ancestor.get_context()
-            # Special case, if they are the same op, then we are done :)
-            if pre_ancestor is op_ancestor:
-                continue
-            # Now we can test for reachability
-            assert op_ancestor.reachable_cache is not None
-            if pre_ancestor not in op.reachable_cache:
-                return pre
-        else:
-            # Easy, we can test these directly 
-            if pre not in op.reachable_cache:
-                return pre
+        if pre not in op.reachable_cache:
+            return pre
     return None
 
 class Point(object):

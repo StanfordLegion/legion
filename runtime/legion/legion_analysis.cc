@@ -5405,11 +5405,11 @@ namespace Legion {
           rez.serialize(node->as_partition_node()->handle);
         }
         rez.serialize(advance_mask);
-        rez.serialize(update_parent_state);
-        rez.serialize(dedup_opens);
+        rez.serialize<bool>(update_parent_state);
+        rez.serialize<bool>(dedup_opens);
         if (dedup_opens)
           rez.serialize(open_epoch);
-        rez.serialize(dedup_advances);
+        rez.serialize<bool>(dedup_advances);
         if (dedup_advances)
           rez.serialize(advance_epoch);
       }
@@ -5461,8 +5461,8 @@ namespace Legion {
       ContextID ctx = context->get_context_id();
       VersionManager &manager = node->get_current_version_manager(ctx);
       std::set<RtEvent> done_preconditions;
-      manager.advance_versions(advance_mask, context, source_space, 
-                               update_parent, done_preconditions, dedup_opens,
+      manager.advance_versions(advance_mask, context, update_parent, 
+                               source_space, done_preconditions, dedup_opens,
                                open_epoch, dedup_advances, advance_epoch);
       if (!done_preconditions.empty())
         Runtime::trigger_event(done_event, 
@@ -7850,67 +7850,40 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(bool comp)
-      : ready_event(ApEvent::NO_AP_EVENT), composite(comp), local(true)
+      : ready_event(ApEvent::NO_AP_EVENT), manager(NULL), local(true)
     //--------------------------------------------------------------------------
     {
-      if (composite)
-        ptr.view = NULL;
-      else
-        ptr.manager = NULL;
     }
 
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(const InstanceRef &rhs)
       : valid_fields(rhs.valid_fields), ready_event(rhs.ready_event),
-        composite(rhs.composite), local(rhs.local)
+        manager(rhs.manager), local(rhs.local)
     //--------------------------------------------------------------------------
     {
-      if (composite)
-      {
-        ptr.view = rhs.ptr.view;
-        if (ptr.view != NULL)
-          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
-      }
-      else
-        ptr.manager = rhs.ptr.manager;
     }
 
     //--------------------------------------------------------------------------
     InstanceRef::InstanceRef(PhysicalManager *man, const FieldMask &m,ApEvent r)
-      : valid_fields(m), ready_event(r), composite(false), local(true)
+      : valid_fields(m), ready_event(r), manager(man), local(true)
     //--------------------------------------------------------------------------
     {
-      ptr.manager = man;
     }
 
     //--------------------------------------------------------------------------
     InstanceRef::~InstanceRef(void)
     //--------------------------------------------------------------------------
     {
-      if (composite && (ptr.view != NULL) && 
-          ptr.view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
-        legion_delete(ptr.view);
     }
 
     //--------------------------------------------------------------------------
     InstanceRef& InstanceRef::operator=(const InstanceRef &rhs)
     //--------------------------------------------------------------------------
     {
-      if (composite && (ptr.view != NULL) && 
-          ptr.view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
-        legion_delete(ptr.view);
       valid_fields = rhs.valid_fields;
       ready_event = rhs.ready_event;
-      composite = rhs.composite;
       local = rhs.local;
-      if (composite)
-      {
-        ptr.view = rhs.ptr.view;
-        if (ptr.view != NULL)
-          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
-      }
-      else
-        ptr.manager = rhs.ptr.manager;
+      manager = rhs.manager;
       return *this;
     }
 
@@ -7918,22 +7891,12 @@ namespace Legion {
     bool InstanceRef::operator==(const InstanceRef &rhs) const
     //--------------------------------------------------------------------------
     {
-      if (composite != rhs.composite)
-        return false;
       if (valid_fields != rhs.valid_fields)
         return false;
       if (ready_event != rhs.ready_event)
         return false;
-      if (composite)
-      {
-        if (ptr.manager != rhs.ptr.manager)
-          return false;
-      }
-      else
-      {
-        if (ptr.view != rhs.ptr.view)
-          return false;
-      }
+      if (manager != rhs.manager)
+        return false;
       return true;
     }
 
@@ -7945,93 +7908,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceRef::set_composite_view(CompositeView *view,
-                                         ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (composite && (ptr.view != NULL) && 
-          ptr.view->remove_base_valid_ref(COMPOSITE_HANDLE_REF, mutator))
-        legion_delete(ptr.view);
-      ptr.view = view;
-      if (ptr.view != NULL)
-      {
-        ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF, mutator);
-        composite = true;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeView* InstanceRef::get_composite_view(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(composite);
-      assert(ptr.view != NULL);
-#endif     
-      return ptr.view;
-    }
-
-    //--------------------------------------------------------------------------
     MappingInstance InstanceRef::get_mapping_instance(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!composite);
-#endif
-      return MappingInstance(ptr.manager);
+      return MappingInstance(manager);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceRef::is_virtual_ref(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (manager == NULL)
+        return true;
+      return manager->is_virtual_manager(); 
     }
 
     //--------------------------------------------------------------------------
     void InstanceRef::add_valid_reference(ReferenceSource source) const
     //--------------------------------------------------------------------------
     {
-      if (composite)
-      {
 #ifdef DEBUG_LEGION
-        assert(ptr.view != NULL);
+      assert(manager != NULL);
 #endif
-        ptr.view->add_base_valid_ref(source);
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(ptr.manager != NULL);
-#endif
-        ptr.manager->add_base_valid_ref(source);
-      }
+      manager->add_base_valid_ref(source);
     }
 
     //--------------------------------------------------------------------------
     void InstanceRef::remove_valid_reference(ReferenceSource source) const
     //--------------------------------------------------------------------------
     {
-      if (composite)
-      {
 #ifdef DEBUG_LEGION
-        assert(ptr.view != NULL);
+      assert(manager != NULL);
 #endif
-        if (ptr.view->remove_base_valid_ref(source))
-          legion_delete(ptr.view);
-      }
-      else
+      if (manager->remove_base_valid_ref(source))
       {
-#ifdef DEBUG_LEGION
-        assert(ptr.manager != NULL);
-#endif
-        if (ptr.manager->remove_base_valid_ref(source))
+        if (manager->is_reduction_manager())
         {
-          if (ptr.manager->is_reduction_manager())
-          {
-            ReductionManager *reduc_manager = 
-              ptr.manager->as_reduction_manager();
-            if (reduc_manager->is_list_manager())
-              legion_delete(reduc_manager->as_list_manager());
-            else
-              legion_delete(reduc_manager->as_fold_manager());
-          }
+          ReductionManager *reduc_manager = 
+            manager->as_reduction_manager();
+          if (reduc_manager->is_list_manager())
+            legion_delete(reduc_manager->as_list_manager());
           else
-            legion_delete(ptr.manager->as_instance_manager());
+            legion_delete(reduc_manager->as_fold_manager());
         }
+        else
+          legion_delete(manager->as_instance_manager());
       }
     }
 
@@ -8040,10 +7961,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!composite);
-      assert(ptr.manager != NULL);
+      assert(manager != NULL);
 #endif
-      return ptr.manager->get_memory();
+      return manager->get_memory();
     }
 
     //--------------------------------------------------------------------------
@@ -8051,12 +7971,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!composite);
-      assert(ptr.manager != NULL);
-      assert(ptr.manager->is_instance_manager());
+      assert(manager != NULL);
+      assert(manager->is_instance_manager());
 #endif
       return 
-        ptr.manager->as_instance_manager()->get_read_only_mapping_reservation();
+        manager->as_instance_manager()->get_read_only_mapping_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -8064,10 +7983,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!composite);
-      assert(ptr.manager != NULL);
+      assert(manager != NULL);
 #endif
-      FieldSpaceNode *field_node = ptr.manager->region_node->column_source; 
+      FieldSpaceNode *field_node = manager->region_node->column_source; 
       unsigned index = field_node->get_field_index(fid);
       return valid_fields.is_set(index);
     }
@@ -8079,10 +7997,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!composite);
-      assert(ptr.manager != NULL);
+      assert(manager != NULL);
 #endif
-      return ptr.manager->get_accessor();
+      return manager->get_accessor();
     }
 
     //--------------------------------------------------------------------------
@@ -8092,10 +8009,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!composite);
-      assert(ptr.manager != NULL);
+      assert(manager != NULL);
 #endif
-      return ptr.manager->get_field_accessor(fid);
+      return manager->get_field_accessor(fid);
     }
 
     //--------------------------------------------------------------------------
@@ -8104,21 +8020,10 @@ namespace Legion {
     {
       rez.serialize(valid_fields);
       rez.serialize(ready_event);
-      rez.serialize(composite);
-      if (composite)
-      {
-        if (ptr.view != NULL)
-          rez.serialize(ptr.view->did);
-        else
-          rez.serialize<DistributedID>(0);
-      }
+      if (manager != NULL)
+        rez.serialize(manager->did);
       else
-      {
-        if (ptr.manager != NULL)
-          rez.serialize(ptr.manager->did);
-        else
-          rez.serialize<DistributedID>(0);
-      }
+        rez.serialize<DistributedID>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -8128,49 +8033,13 @@ namespace Legion {
     {
       derez.deserialize(valid_fields);
       derez.deserialize(ready_event);
-      derez.deserialize(composite);
       DistributedID did;
       derez.deserialize(did);
       if (did == 0)
         return;
-      if (composite)
-      {
-        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          // Otherwise we need to defer adding the handle reference until 
-          // the view is actually ready
-          // Have to static cast this to avoid touching it
-          ptr.view = static_cast<CompositeView*>(view);
-          DeferCompositeHandleArgs args;
-          args.view = ptr.view;
-          ready = runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                                   task, ready);
-        }
-        else
-        {
-          std::set<RtEvent> ready_events;
-          WrapperReferenceMutator mutator(ready_events);
-          // No need to wait, we are done now
-          ptr.view = view->as_composite_view();
-          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF, &mutator);
-          if (!ready_events.empty())
-            ready = Runtime::merge_events(ready_events);
-        }
-      }
-      else
-        ptr.manager = runtime->find_or_request_physical_manager(did, ready);
+      manager = runtime->find_or_request_physical_manager(did, ready);
       local = false;
     } 
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceRef::handle_deferred_composite_handle(const void *a)
-    //--------------------------------------------------------------------------
-    {
-      const DeferCompositeHandleArgs *args = (const DeferCompositeHandleArgs*)a;
-      LocalReferenceMutator mutator;
-      args->view->add_base_valid_ref(COMPOSITE_HANDLE_REF, &mutator);
-    }
 
     /////////////////////////////////////////////////////////////
     // InstanceSet 
@@ -8181,22 +8050,10 @@ namespace Legion {
                                          const InstanceSet::CollectableRef &rhs)
     //--------------------------------------------------------------------------
     {
-      // Do not copy references
-      if (composite && (ptr.view != NULL) && 
-          ptr.view->remove_base_valid_ref(COMPOSITE_HANDLE_REF))
-        legion_delete(ptr.view);
       valid_fields = rhs.valid_fields;
       ready_event = rhs.ready_event;
-      composite = rhs.composite;
       local = rhs.local;
-      if (composite)
-      {
-        ptr.view = rhs.ptr.view;
-        if (ptr.view != NULL)
-          ptr.view->add_base_valid_ref(COMPOSITE_HANDLE_REF);
-      }
-      else
-        ptr.manager = rhs.ptr.manager;
+      manager = rhs.manager;
       return *this;
     }
 
@@ -8589,48 +8446,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool InstanceSet::has_composite_ref(void) const
+    bool InstanceSet::is_virtual_mapping(void) const
     //--------------------------------------------------------------------------
     {
-      if (single)
-      {
-        if (refs.single == NULL)
-          return false;
-        return refs.single->is_composite_ref();
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-        {
-          if (refs.multi->vector[idx].is_composite_ref())
-            return true;
-        }
+      if (empty())
+        return true;
+      if (size() > 1)
         return false;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    const InstanceRef& InstanceSet::get_composite_ref(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (single)
-      {
-#ifdef DEBUG_LEGION
-        assert(refs.single != NULL);
-        assert(refs.single->is_composite_ref());
-#endif
-        return (*refs.single);
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-        {
-          if (refs.multi->vector[idx].is_composite_ref())
-            return refs.multi->vector[idx];
-        }
-        assert(false);
-        return refs.multi->vector[0];
-      }
+      return refs.single->is_virtual_ref();
     }
 
     //--------------------------------------------------------------------------

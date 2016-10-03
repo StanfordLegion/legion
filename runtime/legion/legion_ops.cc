@@ -1161,7 +1161,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!ref.is_composite_ref());
+      assert(!ref.is_virtual_ref());
 #endif
       instance = ref.get_mapping_instance();
     }
@@ -1177,7 +1177,7 @@ namespace Legion {
       {
         const InstanceRef &ref = valid[idx];
 #ifdef DEBUG_LEGION
-        assert(!ref.is_composite_ref());
+        assert(!ref.is_virtual_ref());
 #endif
         MappingInstance &inst = input_valid[offset+idx];
         inst = ref.get_mapping_instance();
@@ -1197,7 +1197,7 @@ namespace Legion {
       {
         const InstanceRef &ref = valid[idx];
 #ifdef DEBUG_LEGION
-        assert(!ref.is_composite_ref());
+        assert(!ref.is_virtual_ref());
 #endif
         if (visible_filter.find(ref.get_manager()->get_memory()) == 
             visible_filter.end())
@@ -5814,8 +5814,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
       {
         const InstanceRef &ref = chosen_instances[idx];
-        if (!ref.has_ref() || ref.is_composite_ref() || 
-            ref.get_manager()->is_virtual_manager())
+        if (!ref.has_ref() || ref.is_virtual_ref())
           continue;
         if (!ref.get_manager()->meets_regions(regions_to_check))
         {

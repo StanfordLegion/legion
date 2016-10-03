@@ -1526,7 +1526,6 @@ namespace Legion {
           FieldMask &complete_fields);
       InstanceView* convert_manager(PhysicalManager *manager, SingleTask *ctx);
       InstanceView* convert_reference(const InstanceRef &ref, SingleTask *ctx);
-      CompositeView* convert_reference(const InstanceRef &ref) const;
       void convert_target_views(const InstanceSet &targets, SingleTask *context, 
                                 std::vector<InstanceView*> &target_views);
       // I hate the container problem, same as previous except MaterializedView
@@ -1810,7 +1809,6 @@ namespace Legion {
                                               SingleTask *context);
       InstanceView* convert_reference_region(PhysicalManager *manager, 
                                              SingleTask *context);
-      CompositeView* convert_composite_view_region(CompositeView *view) const;
       void convert_references_region(
                               const std::vector<PhysicalManager*> &managers,
                               std::vector<bool> &up_mask, SingleTask *context,
@@ -1911,7 +1909,6 @@ namespace Legion {
                                               SingleTask *context);
       InstanceView* convert_reference_partition(PhysicalManager *manager,
                                                 SingleTask *context);
-      CompositeView* convert_composite_view_partition(CompositeView *v) const;
       void convert_references_partition(
                                   const std::vector<PhysicalManager*> &managers,
                                   std::vector<bool> &up_mask, 

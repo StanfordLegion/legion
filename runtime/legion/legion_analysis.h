@@ -1424,14 +1424,6 @@ namespace Legion {
      */
     class InstanceRef {
     public:
-      struct DeferCompositeHandleArgs : 
-        public LgTaskArgs<DeferCompositeHandleArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_HANDLE_TASK_ID;
-      public:
-        CompositeView *view;
-      };
-    public:
       InstanceRef(bool composite = false);
       InstanceRef(const InstanceRef &rhs);
       InstanceRef(PhysicalManager *manager, const FieldMask &valid_fields,
@@ -1443,30 +1435,16 @@ namespace Legion {
       bool operator==(const InstanceRef &rhs) const;
       bool operator!=(const InstanceRef &rhs) const;
     public:
-      inline bool has_ref(void) const 
-      {
-#ifdef DEBUG_LEGION
-        assert(!composite);
-#endif
-        return (ptr.manager != NULL);
-      }
+      inline bool has_ref(void) const { return (manager != NULL); }
       inline ApEvent get_ready_event(void) const { return ready_event; }
       inline void set_ready_event(ApEvent ready) { ready_event = ready; }
-      inline PhysicalManager* get_manager(void) const 
-      { 
-#ifdef DEBUG_LEGION
-        assert(!composite);
-#endif
-        return ptr.manager; 
-      }
+      inline PhysicalManager* get_manager(void) const { return manager; }
       inline const FieldMask& get_valid_fields(void) const 
         { return valid_fields; }
     public:
-      inline bool is_composite_ref(void) const { return composite; }
       inline bool is_local(void) const { return local; }
-      void set_composite_view(CompositeView *view, ReferenceMutator *mutator);
-      CompositeView* get_composite_view(void) const;
       MappingInstance get_mapping_instance(void) const;
+      bool is_virtual_ref(void) const; 
     public:
       // These methods are used by PhysicalRegion::Impl to hold
       // valid references to avoid premature collection
@@ -1487,15 +1465,10 @@ namespace Legion {
       void pack_reference(Serializer &rez, AddressSpaceID target);
       void unpack_reference(Runtime *rt, TaskOp *task,
                             Deserializer &derez, RtEvent &ready);
-      static void handle_deferred_composite_handle(const void *args);
     protected:
       FieldMask valid_fields; 
       ApEvent ready_event;
-      union {
-        PhysicalManager *manager;
-        CompositeView *view;
-      } ptr;
-      bool composite;
+      PhysicalManager *manager;
       bool local;
     };
 
@@ -1549,9 +1522,7 @@ namespace Legion {
       void resize(size_t new_size);
       void clear(void);
       void add_instance(const InstanceRef &ref);
-    public:
-      bool has_composite_ref(void) const;
-      const InstanceRef& get_composite_ref(void) const;
+      bool is_virtual_mapping(void) const;
     public:
       void pack_references(Serializer &rez, AddressSpaceID target) const;
       void unpack_references(Runtime *runtime, TaskOp *task,
