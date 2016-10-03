@@ -113,11 +113,6 @@ def run_tests(test_modules=None,
 
     # Normalize the test environment.
     env = dict(list(os.environ.items()) + [
-        ('TEST_REGENT', '1' if test_regent else '0'),
-        ('TEST_TUTORIAL', '1' if test_tutorial else '0'),
-        ('TEST_EXAMPLES', '1' if test_examples else '0'),
-        ('TEST_REALM', '1' if test_realm else '0'),
-        ('TEST_FUZZER', '1' if test_fuzzer else '0'),
         ('TEST_SPY', '1' if test_spy else '0'),
         ('DEBUG', '1' if debug else '0'),
         ('USE_GASNET', '1' if use_gasnet else '0'),
