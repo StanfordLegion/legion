@@ -46,7 +46,7 @@ def cmd(command, env=None, cwd=None):
 def run_test_regent(launcher, root_dir, env, thread_count):
     cmd([os.path.join(root_dir, 'language/travis.py')], env=env)
 
-def run_cxx(tests, flags, root_dir, launcher, env, thread_count):
+def run_cxx(tests, flags, launcher, root_dir, env, thread_count):
     for test_file, test_flags in tests:
         test_path = os.path.join(root_dir, test_file)
         test_dir = os.path.dirname(test_path)
@@ -167,15 +167,15 @@ def run_tests(test_modules=None,
 
         # Run tests.
         if test_regent:
-            run_test_regent(root_dir, launcher, env, thread_count)
+            run_test_regent(launcher, root_dir, env, thread_count)
         if test_tutorial:
-            run_test_tutorial(root_dir, launcher, env, thread_count)
+            run_test_tutorial(launcher, root_dir, env, thread_count)
         if test_examples:
-            run_test_examples(root_dir, launcher, env, thread_count)
+            run_test_examples(launcher, root_dir, env, thread_count)
         if test_fuzzer:
-            run_test_fuzzer(root_dir, launcher, env, thread_count)
+            run_test_fuzzer(launcher, root_dir, env, thread_count)
         if test_realm:
-            run_test_realm(root_dir, launcher, env, thread_count)
+            run_test_realm(launcher, root_dir, env, thread_count)
     except Exception as e:
         if verbose:
             traceback.print_exc()
