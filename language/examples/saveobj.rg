@@ -43,3 +43,8 @@ assert(os.execute(env .. exe) == 0)
 -- FIXME: This freezes on multi-node.
 -- assert(os.execute(env .. exe) == 0)
 -- assert(os.execute(env .. exe) == 0)
+
+-- Hack: And now we're going to call regentlib.start anyway. This is
+-- to make sure that we generate a proper log file on multi-node runs,
+-- where it would otherwise be impossible to synchronize safely.
+regentlib.start(main)
