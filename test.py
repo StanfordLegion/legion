@@ -130,7 +130,7 @@ def run_tests(test_modules=None,
     use_cuda = feature_enabled('cuda', False)
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
-    use_spy = module_enabled('spy', False)
+    use_spy = feature_enabled('spy', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
 
