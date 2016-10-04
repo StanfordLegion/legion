@@ -43,7 +43,7 @@ def cmd(command, env=None, cwd=None):
     print(' '.join(command))
     return subprocess.check_call(command, env=env, cwd=cwd)
 
-def run_test_regent(launcher, root_dir, env, thread_count):
+def run_test_regent(launcher, root_dir, scratch_dir, env, thread_count):
     cmd([os.path.join(root_dir, 'language/travis.py')], env=env)
 
 def run_cxx(tests, flags, launcher, root_dir, env, thread_count):
@@ -53,21 +53,21 @@ def run_cxx(tests, flags, launcher, root_dir, env, thread_count):
         cmd(['make', '-s', '-C', test_dir, '-j', str(thread_count)], env=env)
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
-def run_test_tutorial(launcher, root_dir, env, thread_count):
+def run_test_tutorial(launcher, root_dir, scratch_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
     run_cxx(tutorial, flags, launcher, root_dir, env, thread_count)
 
-def run_test_examples(launcher, root_dir, env, thread_count):
+def run_test_examples(launcher, root_dir, scratch_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
     run_cxx(examples, flags, launcher, root_dir, env, thread_count)
 
-def run_test_fuzzer(launcher, root_dir, env, thread_count):
+def run_test_fuzzer(launcher, root_dir, scratch_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
-    fuzz_dir = os.path.join(root_dir, 'fuzz-tester')
-    cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir], cwd=root_dir)
+    fuzz_dir = os.path.join(scratch_dir, 'fuzz-tester')
+    cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir])
     cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
 
-def run_test_realm(launcher, root_dir, env, thread_count):
+def run_test_realm(launcher, root_dir, scratch_dir, env, thread_count):
     test_dir = os.path.join(root_dir, 'test/realm')
     cmd(['make', '-s', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'clean'])
     cmd(['make', '-s', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'])
@@ -167,15 +167,15 @@ def run_tests(test_modules=None,
 
         # Run tests.
         if test_regent:
-            run_test_regent(launcher, root_dir, env, thread_count)
+            run_test_regent(launcher, root_dir, scratch_dir, env, thread_count)
         if test_tutorial:
-            run_test_tutorial(launcher, root_dir, env, thread_count)
+            run_test_tutorial(launcher, root_dir, scratch_dir, env, thread_count)
         if test_examples:
-            run_test_examples(launcher, root_dir, env, thread_count)
+            run_test_examples(launcher, root_dir, scratch_dir, env, thread_count)
         if test_fuzzer:
-            run_test_fuzzer(launcher, root_dir, env, thread_count)
+            run_test_fuzzer(launcher, root_dir, scratch_dir, env, thread_count)
         if test_realm:
-            run_test_realm(launcher, root_dir, env, thread_count)
+            run_test_realm(launcher, root_dir, scratch_dir, env, thread_count)
     except Exception as e:
         if verbose:
             traceback.print_exc()
