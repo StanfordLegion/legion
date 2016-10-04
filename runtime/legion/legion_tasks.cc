@@ -12112,10 +12112,52 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::check_target_processors(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!points.empty());
+#endif
+      if (points.size() == 1)
+        return;
+      const AddressSpaceID target_space = 
+        runtime->find_address_space(points[0]->target_proc);
+      for (unsigned idx = 1; idx < points.size(); idx++)
+      {
+        if (target_space != 
+            runtime->find_address_space(points[idx]->target_proc))
+        {
+          log_run.error("Invalid mapper output: two different points in "
+              "one slice of %s (UID %lld) mapped to processors in two "
+              "different address spaces (%d and %d) which is illegal.",
+              get_task_name(), get_unique_id(), target_space,
+              runtime->find_address_space(points[idx]->target_proc));
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::update_target_processor(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch != NULL);
+      assert(!points.empty());
+      check_target_processors();
+#endif
+      this->target_proc = points[0]->target_proc;
+    }
+
+    //--------------------------------------------------------------------------
     bool SliceTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_DISTRIBUTE_CALL);
+      update_target_processor();
       if (target_proc.exists() && (target_proc != current_proc))
       {
         runtime->send_task(this);

@@ -22,9 +22,18 @@ def test(root_dir, debug, spy, env):
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     debug_flag = ['--debug'] if debug else []
     inner_flag = ['--extra=-flegion-inner', '--extra=0'] if 'DISABLE_INNER' in env else []
+    if 'USE_RDIR' in env:
+        regent_dir = os.path.dirname(os.path.realpath(__file__))
+        rdir_config = os.path.join(regent_dir, '.rdir.json')
+        if env['USE_RDIR'] == '1' and not os.path.exists(rdir_config):
+            rdir = 'auto'
+        else:
+            rdir = 'skip'
+    else:
+        rdir = 'auto'
 
     subprocess.check_call(
-        ['time', './install.py', '--rdir=auto'] + threads + terra + debug_flag,
+        ['time', './install.py', '--rdir=%s' % rdir] + threads + terra + debug_flag,
         env = env,
         cwd = root_dir)
     if not spy:
@@ -52,4 +61,4 @@ if __name__ == '__main__':
     if 'MAKEFLAGS' not in env:
         env['MAKEFLAGS'] = 's'
 
-    test(root_dir, env['DEBUG'], 'TEST_SPY' in env and env['TEST_SPY'], env)
+    test(root_dir, env['DEBUG'], 'TEST_SPY' in env and env['TEST_SPY'] == '1', env)

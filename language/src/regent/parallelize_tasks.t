@@ -1824,8 +1824,7 @@ function stencil_analysis.explode_expr(cx, expr)
   -- where e is for-list loop symbol and r is a region
   if expr:is(ast.typed.expr.Binary) then
     if expr.op == "%" then
-      assert(expr.rhs:is(ast.typed.expr.ID) and
-             std.is_rect_type(expr.rhs.expr_type))
+      assert(std.is_rect_type(expr.rhs.expr_type))
       return stencil_analysis.explode_expr(cx, expr.lhs):map(function(lhs)
         return expr { lhs = lhs }
       end)

@@ -129,6 +129,9 @@ add_library(LowLevelRuntime ${LOW_RUNTIME_SRC})
 target_link_libraries(LowLevelRuntime
   PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
 )
+if(UNIX AND NOT APPLE)
+  target_link_libraries(LowLevelRuntime PRIVATE rt)
+endif()
 set_target_properties(LowLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LowLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(LowLevelRuntime

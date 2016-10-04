@@ -10021,7 +10021,7 @@ def main(temp_dir):
         '--assert-warning', dest='assert_on_warning', action='store_true',
         help='assert on warnings (implies -a)')
     parser.add_argument(
-        dest='filenames', action='append',
+        dest='filenames', nargs='+',
         help='input legion spy log filenames')
     args = parser.parse_args()
 

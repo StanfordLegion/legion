@@ -99,12 +99,13 @@ def install_rdir(rdir, legion_dir, regent_dir):
         print(prompt_text)
         while rdir not in ['auto', 'manual', 'never']:
             rdir = _input('Enable RDIR? (auto/manual/never) ')
-    assert rdir in ['auto', 'manual', 'never']
+    assert rdir in ['auto', 'manual', 'skip', 'never']
 
     if rdir == 'auto':
         git_submodule_update(legion_dir)
 
-    dump_json_config(config_filename, rdir)
+    if rdir != 'skip':
+        dump_json_config(config_filename, rdir)
 
 def build_terra(terra_dir, thread_count):
     subprocess.check_call(
@@ -276,7 +277,7 @@ def driver():
         help = 'Build Legion with the detailed Legion Spy enabled.')
     parser.add_argument(
         '--rdir', dest = 'rdir', required = False,
-        choices = ['prompt', 'auto', 'manual', 'never'], default = None,
+        choices = ['prompt', 'auto', 'manual', 'skip', 'never'], default = None,
         help = 'Enable RDIR compiler plugin.')
     parser.add_argument(
         '--noclean', dest = 'clean_first', action = 'store_false', required = False,
