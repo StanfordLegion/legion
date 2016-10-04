@@ -12344,9 +12344,14 @@ namespace Legion {
     void SliceTask::check_target_processors(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!points.empty());
+#endif
+      if (points.size() == 1)
+        return;
       const AddressSpaceID target_space = 
-        runtime->find_address_space(target_proc);
-      for (unsigned idx = 0; idx < points.size(); idx++)
+        runtime->find_address_space(points[0]->target_proc);
+      for (unsigned idx = 1; idx < points.size(); idx++)
       {
         if (target_space != 
             runtime->find_address_space(points[idx]->target_proc))
