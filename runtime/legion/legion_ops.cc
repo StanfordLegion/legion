@@ -8933,6 +8933,7 @@ namespace Legion {
       for (std::set<SliceTask*>::const_iterator it = 
             slice_tasks.begin(); it != slice_tasks.end(); it++)
       {
+        (*it)->update_target_processor();
         if (!runtime->is_local((*it)->target_proc))
         {
           dist_args.task = *it;
