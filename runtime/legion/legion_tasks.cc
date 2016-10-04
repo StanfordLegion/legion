@@ -7672,7 +7672,7 @@ namespace Legion {
                       "on mapper %s. Mapper returned slices with a total "
                       "volume %ld that does not match the expected volume of "
                       "%zd when slicing task %s (ID %lld).", 
-                      mapper->get_mapper_name(), total_points,
+                      mapper->get_mapper_name(), long(total_points),
                       index_domain.get_volume(), 
                       get_task_name(), get_unique_id());
         assert(false);
