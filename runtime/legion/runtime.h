@@ -3109,7 +3109,7 @@ namespace Legion {
     {
       ApEvent result(Realm::Event::merge_events(e1, e2)); 
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == e1) || (result == e2))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
@@ -3128,7 +3128,7 @@ namespace Legion {
     {
       ApEvent result(Realm::Event::merge_events(e1, e2, e3)); 
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == e1) || (result == e2) ||(result == e3))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
@@ -3156,7 +3156,7 @@ namespace Legion {
         reinterpret_cast<const std::set<Realm::Event>*>(&events);
       ApEvent result(Realm::Event::merge_events(*realm_events));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (events.find(result) != events.end()))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
         rename.trigger();
