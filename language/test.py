@@ -132,7 +132,7 @@ def test_run_pass(filename, debug, verbose, flags, env):
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
 def test_spy(filename, debug, verbose, flags, env):
-    spy_dir = tempfile.mkdtemp()
+    spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     spy_log = os.path.join(spy_dir, 'spy_%.log')
     spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
 
