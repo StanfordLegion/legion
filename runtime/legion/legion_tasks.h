@@ -1415,6 +1415,7 @@ namespace Legion {
       void apply_local_version_infos(std::set<RtEvent> &map_conditions);
       std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      get_acquired_instances_ref(void);
+      void check_target_processors(void) const;
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);

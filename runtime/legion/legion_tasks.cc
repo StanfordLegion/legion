@@ -12341,6 +12341,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::check_target_processors(void) const
+    //--------------------------------------------------------------------------
+    {
+      const AddressSpaceID target_space = 
+        runtime->find_address_space(target_proc);
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        if (target_space != 
+            runtime->find_address_space(points[idx]->target_proc))
+        {
+          log_run.error("Invalid mapper output: two different points in "
+              "one slice of %s (UID %lld) mapped to processors in two "
+              "different address spaces (%d and %d) which is illegal.",
+              get_task_name(), get_unique_id(), target_space,
+              runtime->find_address_space(points[idx]->target_proc));
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool SliceTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
@@ -12385,6 +12409,18 @@ namespace Legion {
         }
         // If we succeeded in mapping we are no longer stealable
         stealable = false;
+        // If this is a must epoch operation, update the target proc
+        if (must_epoch != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!points.empty());
+          assert(points[0]->target_proc.exists());
+#endif
+          this->target_proc = points[0]->target_proc;
+        }
+#ifdef DEBUG_LEGION
+        check_target_processors();
+#endif
       }
       else
       {
@@ -12492,6 +12528,9 @@ namespace Legion {
         // is possible that this slice task object can be recycled
         next_point->launch_task();
       }
+#ifdef DEBUG_LEGION
+      check_target_processors();
+#endif
       return true;
     }
 
