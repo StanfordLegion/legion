@@ -253,7 +253,7 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
                     _test_name, _filename, saved_temps, outcome, output = result.get(timeout=30)
                     assert _test_name == test_name and _filename == filename
                 except multiprocessing.TimeoutError:
-                    print('Potential Hang: (%s) %s' % (test_name, test_path))
+                    print('Potential Hang: (%s) %s' % (test_name, filename))
                 else:
                     break
             if len(saved_temps) > 0:
