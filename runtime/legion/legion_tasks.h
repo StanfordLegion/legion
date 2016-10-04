@@ -1416,6 +1416,7 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      get_acquired_instances_ref(void);
       void check_target_processors(void) const;
+      void update_target_processor(void);
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);

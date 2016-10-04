@@ -12365,6 +12365,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::update_target_processor(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(must_epoch != NULL);
+      assert(!points.empty());
+      check_target_processors();
+#endif
+      this->target_proc = points[0]->target_proc;
+    }
+
+    //--------------------------------------------------------------------------
     bool SliceTask::distribute_task(void)
     //--------------------------------------------------------------------------
     {
@@ -12409,15 +12421,6 @@ namespace Legion {
         }
         // If we succeeded in mapping we are no longer stealable
         stealable = false;
-        // If this is a must epoch operation, update the target proc
-        if (must_epoch != NULL)
-        {
-#ifdef DEBUG_LEGION
-          assert(!points.empty());
-          assert(points[0]->target_proc.exists());
-#endif
-          this->target_proc = points[0]->target_proc;
-        }
 #ifdef DEBUG_LEGION
         check_target_processors();
 #endif
