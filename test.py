@@ -120,7 +120,7 @@ def run_tests(test_modules=None,
     test_examples = module_enabled('examples')
     test_fuzzer = module_enabled('fuzzer', debug)
     test_realm = module_enabled('realm', not debug)
-    test_spy = module_enabled('spy')
+    test_spy = module_enabled('spy', False)
 
     # Determine which features to build with.
     def feature_enabled(feature, default=True):
