@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- This file is not meant to be run directly.
+
+-- runs-with:
+-- []
+
 -- Lua/Terra implementation of DE Shaw's Philox 2x32 PRNG
 -- (http://dx.doi.org/10.1145/2063384.2063405)
 

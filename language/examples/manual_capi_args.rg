@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- This file is not meant to be run directly.
+
+-- runs-with:
+-- []
+
 local args = rawget(_G, "arg")
 local argc = #args
 local argv = terralib.newsymbol((&int8)[argc], "argv")
