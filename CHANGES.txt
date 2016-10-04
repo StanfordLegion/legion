@@ -8,9 +8,13 @@ Version 16.10.0 (October ??, 2016)
   * Build flow
     - Fixes to support compilation in 32-bit mode
     - Numerous improvements to CMake build
+  * Regent
+    - Improvements to vectorization of structured codes
   * Apps
     - Removed bit-rotted applications - some have been replaced by examples
         or Regent applications
+  * Tests
+    - New test infrastructure and top-level test script `test.py`
 
 Version 16.08.0 (August 30, 2016)
   * Realm
