@@ -12410,7 +12410,7 @@ namespace Legion {
         // If we succeeded in mapping we are no longer stealable
         stealable = false;
         // If this is a must epoch operation, update the target proc
-        if (epoch_owner != NULL)
+        if (must_epoch != NULL)
         {
 #ifdef DEBUG_LEGION
           assert(!points.empty());
