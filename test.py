@@ -120,7 +120,6 @@ def run_tests(test_modules=None,
     test_examples = module_enabled('examples')
     test_fuzzer = module_enabled('fuzzer', debug)
     test_realm = module_enabled('realm', not debug)
-    test_spy = module_enabled('spy', False)
 
     # Determine which features to build with.
     def feature_enabled(feature, default=True):
@@ -129,18 +128,19 @@ def run_tests(test_modules=None,
     use_cuda = feature_enabled('cuda', False)
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
+    use_spy = module_enabled('spy', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
 
     # Normalize the test environment.
     env = dict(list(os.environ.items()) + [
-        ('TEST_SPY', '1' if test_spy else '0'),
-        ('USE_SPY', '1' if test_spy else '0'),
         ('DEBUG', '1' if debug else '0'),
         ('USE_GASNET', '1' if use_gasnet else '0'),
         ('USE_CUDA', '1' if use_cuda else '0'),
         ('USE_LLVM', '1' if use_llvm else '0'),
         ('USE_HDF', '1' if use_hdf else '0'),
+        ('USE_SPY', '1' if use_spy else '0'),
+        ('TEST_SPY', '1' if use_spy else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
     ])
@@ -186,7 +186,7 @@ def driver():
     # What tests to run:
     parser.add_argument(
         '--test', dest='test_modules', action='append',
-        choices=['regent', 'tutorial', 'examples', 'fuzzer', 'realm', 'spy'],
+        choices=['regent', 'tutorial', 'examples', 'fuzzer', 'realm'],
         default=None,
         help='Test modules to run (also via TEST_*).')
 
@@ -197,7 +197,7 @@ def driver():
         help='Build Legion in debug mode (also via DEBUG).')
     parser.add_argument(
         '--use', dest='use_features', action='append',
-        choices=['gasnet', 'cuda', 'llvm', 'hdf', 'cmake', 'rdir'],
+        choices=['gasnet', 'cuda', 'llvm', 'hdf', 'spy', 'cmake', 'rdir'],
         default=None,
         help='Build Legion with features (also via USE_*).')
 
