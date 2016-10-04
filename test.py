@@ -76,6 +76,15 @@ def run_test_realm(launcher, root_dir, scratch_dir, env, thread_count):
     cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean'])
     cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'])
 
+def run_test_external(launcher, root_dir, scratch_dir, env, thread_count):
+    flags = ['-logfile', 'out_%.log']
+
+    solver_dir = os.path.join(scratch_dir, 'fastSolver2')
+    cmd(['git', 'clone', 'https://github.com/Charles-Chao-Chen/fastSolver2.git', solver_dir])
+    solver = [[os.path.join(solver_dir, 'spmd_benchMark/solver'),
+               ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8']]]
+    run_cxx(solver, flags, launcher, root_dir, env, thread_count)
+
 def build_cmake(root_dir, scratch_dir, env, thread_count,
                 test_tutorial, test_examples):
     cmd(['cmake'] +
@@ -122,6 +131,7 @@ def run_tests(test_modules=None,
     test_examples = module_enabled('examples')
     test_fuzzer = module_enabled('fuzzer', debug)
     test_realm = module_enabled('realm', not debug)
+    test_external = module_enabled('external', False)
 
     # Determine which features to build with.
     def feature_enabled(feature, default=True):
@@ -176,6 +186,8 @@ def run_tests(test_modules=None,
             run_test_fuzzer(launcher, root_dir, scratch_dir, env, thread_count)
         if test_realm:
             run_test_realm(launcher, root_dir, scratch_dir, env, thread_count)
+        if test_external:
+            run_test_external(launcher, root_dir, scratch_dir, env, thread_count)
     except Exception as e:
         if verbose:
             traceback.print_exc()
@@ -196,7 +208,7 @@ def driver():
     # What tests to run:
     parser.add_argument(
         '--test', dest='test_modules', action='append',
-        choices=['regent', 'tutorial', 'examples', 'fuzzer', 'realm'],
+        choices=['regent', 'tutorial', 'examples', 'fuzzer', 'realm', 'external'],
         default=None,
         help='Test modules to run (also via TEST_*).')
 
