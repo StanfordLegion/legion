@@ -60,7 +60,7 @@ def run(filename, debug, verbose, flags, env):
     if retcode != 0:
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
 
-def run_spy(logfile, verbose):
+def run_spy(logfiles, verbose):
     cmd = ['pypy', os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
            '--logical',
            '--physical',
@@ -69,8 +69,7 @@ def run_spy(logfile, verbose):
            '--leaks',
            # '--geometry', # FIXME: This is *very* slow.
            '--assert-error',
-           '--assert-warning',
-           logfile]
+           '--assert-warning'] + logfiles
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
