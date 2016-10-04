@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, multiprocessing, os, subprocess
+import argparse, multiprocessing, os, shutil, subprocess, sys, tempfile
 
 tutorial = [
     ['tutorial/00_hello_world/hello_world', []],
@@ -76,8 +76,13 @@ def run_test_realm(root_dir, env, thread_count):
     cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean'])
     cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'])
 
-def build_cmake(root_dir, env, thread_count, test_tutorial, test_examples):
-    assert False
+def build_cmake(root_dir, scratch_dir, env, thread_count,
+                test_tutorial, test_examples):
+    cmd(['cmake'] +
+        (['-DLegion_BUILD_EXAMPLES=ON'] if test_tutorial or test_examples else []) +
+        [root_dir],
+        env=env, cwd=scratch_dir)
+    cmd(['make', '-j', str(thread_count)], env=env, cwd=scratch_dir)
 
 def clean_cxx(tests, root_dir, env, thread_count):
     for test_file, test_flags in tests:
@@ -139,30 +144,39 @@ def run_tests(test_modules=None,
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
     ])
 
-    # Build tests.
-    if use_cmake:
-        build_cmake(root_dir, env, thread_count,
-                    test_tutorial, test_examples)
+    scratch_dir = tempfile.mkdtemp(prefix='build_', dir=root_dir)
+    print('Using build directory: %s' % scratch_dir)
+    print()
+    try:
+        # Build tests.
+        if use_cmake:
+            build_cmake(root_dir, scratch_dir, env, thread_count,
+                        test_tutorial, test_examples)
+        else:
+            # With GNU Make, builds happen inline. But clean here.
+            build_make_clean(root_dir, env, thread_count,
+                             test_tutorial, test_examples)
+
+        # Run tests.
+        if test_regent:
+            run_test_regent(root_dir, env, thread_count)
+        if test_tutorial:
+            run_test_tutorial(root_dir, env, thread_count)
+        if test_examples:
+            run_test_examples(root_dir, env, thread_count)
+        if test_fuzzer:
+            run_test_fuzzer(root_dir, env, thread_count)
+        if test_realm:
+            run_test_realm(root_dir, env, thread_count)
+    except Exception as e:
+        print(e, file=sys.stderr)
+        print(file=sys.stderr)
+        print('Tests finished with errors. Leaving build directory:', file=sys.stderr)
+        print('  %s' % scratch_dir, file=sys.stderr)
     else:
-        # With GNU Make, builds happen inline. But clean here.
-        build_make_clean(root_dir, env, thread_count,
-                         test_tutorial, test_examples)
-
-    # Run tests.
-    if test_regent:
-        run_test_regent(root_dir, env, thread_count)
-
-    if test_tutorial:
-        run_test_tutorial(root_dir, env, thread_count)
-
-    if test_examples:
-        run_test_examples(root_dir, env, thread_count)
-
-    if test_fuzzer:
-        run_test_fuzzer(root_dir, env, thread_count)
-
-    if test_realm:
-        run_test_realm(root_dir, env, thread_count)
+        print()
+        print('Removing build directory: %s' % scratch_dir)
+        shutil.rmtree(scratch_dir)
 
 def driver():
     parser = argparse.ArgumentParser(
