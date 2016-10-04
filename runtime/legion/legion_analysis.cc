@@ -4374,11 +4374,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::record_advance_versions(const FieldMask &version_mask,
-                                                 VersionInfo &version_info)
+                                                VersionInfo &version_info,
+                                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      // We're about to produce the first version of this instance
-      // so there's no need to request it
+      // See if we are the owner
+      if (!is_owner)
+      {
+        FieldMask request_mask = version_mask - remote_valid_fields;
+        if (!!request_mask)
+        {
+          RtEvent wait_on = send_remote_version_request(request_mask,
+                                                        ready_events);
+          wait_on.wait();
+#ifdef DEBUG_LEGION
+          // When we wake up everything should be good
+          assert(!(version_mask - remote_valid_fields));
+#endif
+        }
+      }
       for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
             vit = current_version_infos.begin(); vit != 
             current_version_infos.end(); vit++)
