@@ -135,6 +135,7 @@ def run_tests(test_modules=None,
     # Normalize the test environment.
     env = dict(list(os.environ.items()) + [
         ('TEST_SPY', '1' if test_spy else '0'),
+        ('USE_SPY', '1' if test_spy else '0'),
         ('DEBUG', '1' if debug else '0'),
         ('USE_GASNET', '1' if use_gasnet else '0'),
         ('USE_CUDA', '1' if use_cuda else '0'),
