@@ -118,7 +118,7 @@ def test_compile_fail(filename, debug, verbose, flags, env):
         expected_lines = expected_failure.split('\n')
         for expected_line in expected_lines:
             if expected_line not in lines:
-                raise Exception('Expected failure:\n%s\n\nInstead got:\n%s' % (expected_failure, failure))
+                raise Exception('Command failed:\n%s\n\nExpected failure:\n%s\n\nInstead got:\n%s' % (e.command, expected_failure, failure))
     else:
         raise Exception('Expected failure, but test passed')
 
