@@ -12144,9 +12144,9 @@ namespace Legion {
     void SliceTask::update_target_processor(void)
     //--------------------------------------------------------------------------
     {
+      if (points.empty())
+        return;
 #ifdef DEBUG_LEGION
-      assert(must_epoch != NULL);
-      assert(!points.empty());
       check_target_processors();
 #endif
       this->target_proc = points[0]->target_proc;
