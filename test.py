@@ -174,8 +174,8 @@ def run_tests(test_modules=None,
         print('Tests finished with errors. Leaving build directory:', file=sys.stderr)
         print('  %s' % scratch_dir, file=sys.stderr)
     else:
-        print()
-        print('Removing build directory: %s' % scratch_dir)
+        print('Tests finished successfully. Removing build directory:')
+        print('  %s' % scratch_dir)
         shutil.rmtree(scratch_dir)
 
 def driver():
