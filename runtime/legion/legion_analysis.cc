@@ -6747,7 +6747,10 @@ namespace Legion {
               rez.serialize(valid_rez.get_buffer(), valid_rez.get_used_bytes());
             }
             else
-              rez.serialize<size_t>(0);
+            {
+              rez.serialize<size_t>(0); // instance views
+              rez.serialize<size_t>(0); // valid views
+            }
             if (!reduction_views.empty())
             {
               Serializer reduc_rez;
