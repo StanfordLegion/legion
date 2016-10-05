@@ -33,10 +33,11 @@ tutorial = [
 
 examples = [
     ['examples/attach_file/attach_file', []],
+    ['examples/circuit/circuit', []],
     ['examples/dynamic_registration/dynamic_registration', []],
-    ['examples/full_circuit/full_circuit', []],
-    ['examples/full_ghost/full_ghost', ['-ll:cpu', '4']],
-    ['examples/full_ghost_pull_model/full_ghost_pull_model', ['-ll:cpu', '4']],
+    ['examples/ghost/ghost', ['-ll:cpu', '4']],
+    ['examples/ghost_pull/ghost_pull', ['-ll:cpu', '4']],
+    ['examples/realm_saxpy/realm_saxpy', []],
     ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
 ]
 

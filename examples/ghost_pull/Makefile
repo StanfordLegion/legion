@@ -28,12 +28,10 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= full_circuit
+OUTFILE		?= ghost_pull
 # List all the application source files here
-GEN_SRC		?= circuit.cc circuit_cpu.cc circuit_mapper.cc	# .cc files
-ifeq ($(strip $(USE_CUDA)),1)
-GEN_GPU_SRC	?= circuit_gpu.cu				# .cu files
-endif
+GEN_SRC		?= ghost.cc 					# .cc files
+GEN_GPU_SRC	?= 					# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=

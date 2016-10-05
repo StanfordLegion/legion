@@ -21,10 +21,10 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 add_subdirectory(attach_file)
+add_subdirectory(circuit)
 add_subdirectory(dynamic_registration)
-add_subdirectory(full_circuit)
-add_subdirectory(full_ghost)
-add_subdirectory(full_ghost_pull_model)
+add_subdirectory(ghost)
+add_subdirectory(ghost_pull)
 add_subdirectory(realm_saxpy)
 add_subdirectory(spmd_cgsolver)
 
