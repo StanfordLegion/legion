@@ -117,7 +117,8 @@ before_script:
 # Some additional tests are only run on certain configurations.
 .external_tests: &external_tests
   script:
-    - if [[ -n $GITLAB_DEPLOY_KEY ]]; then
+    - |
+      if [[ -n $GITLAB_DEPLOY_KEY ]]; then
         eval $(ssh-agent -s)
         ssh-add <(echo "$GITLAB_DEPLOY_KEY")
       fi
