@@ -22,5 +22,5 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(06_privileges privileges.cc)
-target_link_libraries(06_privileges Legion::Legion)
+add_executable(privileges privileges.cc)
+target_link_libraries(privileges Legion::Legion)

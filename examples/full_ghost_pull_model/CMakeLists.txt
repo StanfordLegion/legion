@@ -15,12 +15,12 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_08_multiple_partitions)
+project(LegionExample_full_ghost_pull_model)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(multiple_partitions multiple_partitions.cc)
-target_link_libraries(multiple_partitions Legion::Legion)
+add_executable(full_ghost_pull_model ghost.cc)
+target_link_libraries(full_ghost_pull_model Legion::Legion)

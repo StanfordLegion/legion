@@ -34,40 +34,44 @@ tutorial = [
 examples = [
     ['examples/attach_file/attach_file', []],
     ['examples/dynamic_registration/dynamic_registration', []],
-    ['examples/full_circuit/ckt_sim', []],
-    ['examples/full_ghost/ghost', ['-ll:cpu', '4']],
-    ['examples/spmd_cgsolver/cgsolver', ['-ll:cpu', '4', '-perproc']],
+    ['examples/full_circuit/full_circuit', []],
+    ['examples/full_ghost/full_ghost', ['-ll:cpu', '4']],
+    ['examples/full_ghost_pull_model/full_ghost_pull_model', ['-ll:cpu', '4']],
+    ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
 ]
 
 def cmd(command, env=None, cwd=None):
     print(' '.join(command))
     return subprocess.check_call(command, env=env, cwd=cwd)
 
-def run_test_regent(launcher, root_dir, tmp_dir, env, thread_count):
+def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd([os.path.join(root_dir, 'language/travis.py')], env=env)
 
-def run_cxx(tests, flags, launcher, root_dir, env, thread_count):
+def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
     for test_file, test_flags in tests:
-        test_path = os.path.join(root_dir, test_file)
-        test_dir = os.path.dirname(test_path)
-        cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
+        test_dir = os.path.dirname(os.path.join(root_dir, test_file))
+        if bin_dir:
+            test_path = os.path.join(bin_dir, os.path.basename(test_file))
+        else:
+            test_path = os.path.join(root_dir, test_file)
+            cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
-def run_test_tutorial(launcher, root_dir, tmp_dir, env, thread_count):
+def run_test_tutorial(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
-    run_cxx(tutorial, flags, launcher, root_dir, env, thread_count)
+    run_cxx(tutorial, flags, launcher, root_dir, bin_dir, env, thread_count)
 
-def run_test_examples(launcher, root_dir, tmp_dir, env, thread_count):
+def run_test_examples(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
-    run_cxx(examples, flags, launcher, root_dir, env, thread_count)
+    run_cxx(examples, flags, launcher, root_dir, bin_dir, env, thread_count)
 
-def run_test_fuzzer(launcher, root_dir, tmp_dir, env, thread_count):
+def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
     fuzz_dir = os.path.join(tmp_dir, 'fuzz-tester')
     cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir])
     cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
 
-def run_test_realm(launcher, root_dir, tmp_dir, env, thread_count):
+def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     test_dir = os.path.join(root_dir, 'test/realm')
     cmd(['make', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'clean'], env=env)
     cmd(['make', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'], env=env)
@@ -76,7 +80,7 @@ def run_test_realm(launcher, root_dir, tmp_dir, env, thread_count):
     cmd(['make', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean_all'], env=env)
     cmd(['make', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'], env=env)
 
-def run_test_external(launcher, root_dir, tmp_dir, env, thread_count):
+def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
     solver_dir = os.path.join(tmp_dir, 'fastSolver2')
@@ -85,7 +89,7 @@ def run_test_external(launcher, root_dir, tmp_dir, env, thread_count):
                ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8']]]
     run_cxx(solver, flags, launcher, root_dir, env, thread_count)
 
-def run_test_private(launcher, root_dir, tmp_dir, env, thread_count):
+def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
     miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
@@ -99,11 +103,17 @@ def run_test_private(launcher, root_dir, tmp_dir, env, thread_count):
 
 def build_cmake(root_dir, tmp_dir, env, thread_count,
                 test_tutorial, test_examples):
-    cmd(['cmake'] +
+    build_dir = os.path.join(tmp_dir, 'build')
+    install_dir = os.path.join(tmp_dir, 'install')
+    os.mkdir(build_dir)
+    os.mkdir(install_dir)
+    cmd(['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir] +
         (['-DLegion_BUILD_EXAMPLES=ON'] if test_tutorial or test_examples else []) +
         [root_dir],
-        env=env, cwd=tmp_dir)
-    cmd(['make', '-j', str(thread_count)], env=env, cwd=tmp_dir)
+        env=env, cwd=build_dir)
+    cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
+    cmd(['make', '-C', build_dir, 'install'], env=env)
+    return os.path.join(build_dir, 'bin')
 
 def clean_cxx(tests, root_dir, env, thread_count):
     for test_file, test_flags in tests:
@@ -176,35 +186,36 @@ def run_tests(test_modules=None,
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
     ])
 
-    tmp_dir = tempfile.mkdtemp(prefix='build_', dir=root_dir)
+    tmp_dir = tempfile.mkdtemp(dir=root_dir)
     if verbose:
         print('Using build directory: %s' % tmp_dir)
         print()
     try:
         # Build tests.
         if use_cmake:
-            build_cmake(root_dir, tmp_dir, env, thread_count,
-                        test_tutorial, test_examples)
+            bin_dir = build_cmake(root_dir, tmp_dir, env, thread_count,
+                                  test_tutorial, test_examples)
         else:
             # With GNU Make, builds happen inline. But clean here.
             build_make_clean(root_dir, env, thread_count,
                              test_tutorial, test_examples)
+            bin_dir = None
 
         # Run tests.
         if test_regent:
-            run_test_regent(launcher, root_dir, tmp_dir, env, thread_count)
+            run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_tutorial:
-            run_test_tutorial(launcher, root_dir, tmp_dir, env, thread_count)
+            run_test_tutorial(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_examples:
-            run_test_examples(launcher, root_dir, tmp_dir, env, thread_count)
+            run_test_examples(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_fuzzer:
-            run_test_fuzzer(launcher, root_dir, tmp_dir, env, thread_count)
+            run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_realm:
-            run_test_realm(launcher, root_dir, tmp_dir, env, thread_count)
+            run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_external:
-            run_test_external(launcher, root_dir, tmp_dir, env, thread_count)
+            run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_private:
-            run_test_private(launcher, root_dir, tmp_dir, env, thread_count)
+            run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
