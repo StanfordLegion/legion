@@ -551,7 +551,10 @@ namespace Realm {
     act.sa_sigaction = &signal_handler;
     act.sa_flags = SA_SIGINFO;
 
-    int ret = sigaction(handler_signal, &act, 0);
+#ifndef NDEBUG
+    int ret =
+#endif
+              sigaction(handler_signal, &act, 0);
     assert(ret == 0);
   }
 
