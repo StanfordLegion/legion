@@ -3112,7 +3112,12 @@ namespace Legion {
       if (!result.exists() || (result == e1) || (result == e2))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
+        if (result == e1)
+          rename.trigger(e1);
+        else if (result == e2)
+          rename.trigger(e2);
+        else
+          rename.trigger();
         result = ApEvent(rename);
       }
       LegionSpy::log_event_dependence(e1, result);
@@ -3131,7 +3136,14 @@ namespace Legion {
       if (!result.exists() || (result == e1) || (result == e2) ||(result == e3))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
+        if (result == e1)
+          rename.trigger(e1);
+        else if (result == e2)
+          rename.trigger(e2);
+        else if (result == e3)
+          rename.trigger(e3);
+        else
+          rename.trigger();
         result = ApEvent(rename);
       }
       LegionSpy::log_event_dependence(e1, result);
@@ -3159,7 +3171,10 @@ namespace Legion {
       if (!result.exists() || (events.find(result) != events.end()))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
+        if (events.find(result) != events.end())
+          rename.trigger(result);
+        else
+          rename.trigger();
         result = ApEvent(rename);
       }
       for (std::set<ApEvent>::const_iterator it = events.begin();

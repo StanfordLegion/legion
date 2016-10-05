@@ -639,7 +639,7 @@ namespace Legion {
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);
       void post_end_task(const void *res, size_t res_size, bool owned);
-      void unmap_all_mapped_regions(bool need_lock = true);
+      void unmap_all_regions(void);
     public:
       VariantImpl* select_inline_variant(TaskOp *child, 
                                          InlineTask *inline_task);

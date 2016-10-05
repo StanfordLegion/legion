@@ -1158,6 +1158,7 @@ namespace Legion {
     {
       if (!mapped)
         return;
+      wait_until_valid();
       if (trigger_on_unmap)
       {
         trigger_on_unmap = false;
@@ -12024,7 +12025,7 @@ namespace Legion {
     void Runtime::unmap_all_regions(Context ctx)
     //--------------------------------------------------------------------------
     {
-      ctx->unmap_all_mapped_regions();
+      ctx->unmap_all_regions();
     }
 
     //--------------------------------------------------------------------------

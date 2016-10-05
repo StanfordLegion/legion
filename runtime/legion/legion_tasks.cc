@@ -7361,6 +7361,7 @@ namespace Legion {
       // are done executing
       bool need_complete = false;
       bool need_commit = false;
+      std::vector<PhysicalRegion> unmap_regions;
       if (!is_leaf())
       {
         std::set<RtEvent> preconditions;
@@ -7404,7 +7405,12 @@ namespace Legion {
           assert((regions.size() + 
                     created_requirements.size()) == physical_regions.size());
 #endif
-          unmap_all_mapped_regions(false/*need lock*/);
+          for (std::vector<PhysicalRegion>::const_iterator it = 
+                physical_regions.begin(); it != physical_regions.end(); it++)
+          {
+            if (it->impl->is_mapped())
+              unmap_regions.push_back(*it);
+          }
         }
         if (!preconditions.empty())
           handle_post_mapped(Runtime::merge_events(preconditions));
@@ -7440,7 +7446,19 @@ namespace Legion {
         assert((regions.size() + 
                   created_requirements.size()) == physical_regions.size());
 #endif
-        unmap_all_mapped_regions(false/*need lock*/);
+        for (std::vector<PhysicalRegion>::const_iterator it = 
+              physical_regions.begin(); it != physical_regions.end(); it++)
+        {
+          if (it->impl->is_mapped())
+            unmap_regions.push_back(*it);
+        }
+      }
+      // Do the unmappings while not holding the lock in case we block
+      if (!unmap_regions.empty())
+      {
+        for (std::vector<PhysicalRegion>::const_iterator it = 
+              unmap_regions.begin(); it != unmap_regions.end(); it++)
+          it->impl->unmap_region();
       }
       // Mark that we are done executing this operation
       // We're not actually done until we have registered our pending
@@ -7460,26 +7478,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::unmap_all_mapped_regions(bool need_lock)
+    void SingleTask::unmap_all_regions(void)
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
+      // Can't be holding the lock when we unmap in case we block
+      std::vector<PhysicalRegion> unmap_regions;
       {
-        AutoLock o_lock(op_lock);
-        unmap_all_mapped_regions(false/*need lock*/);
+        AutoLock o_lock(op_lock,1,false/*exclusive*/);
+        for (std::vector<PhysicalRegion>::const_iterator it = 
+              physical_regions.begin(); it != physical_regions.end(); it++)
+        {
+          if (it->impl->is_mapped())
+            unmap_regions.push_back(*it);
+        }
+        // Also unmap any of our inline mapped physical regions
+        for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::
+              tracked::const_iterator it = inline_regions.begin();
+              it != inline_regions.end(); it++)
+        {
+          if (it->impl->is_mapped())
+            unmap_regions.push_back(*it);
+        }
         return;
       }
-      // Unmap any of our original physical instances
+      // Perform the unmappings after we've released the lock
       for (std::vector<PhysicalRegion>::const_iterator it = 
-            physical_regions.begin(); it != physical_regions.end(); it++)
-      {
-        if (it->impl->is_mapped())
-          it->impl->unmap_region();
-      }
-      // Also unmap any of our inline mapped physical regions
-      for (LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::
-            tracked::const_iterator it = inline_regions.begin();
-            it != inline_regions.end(); it++)
+            unmap_regions.begin(); it != unmap_regions.end(); it++)
       {
         if (it->impl->is_mapped())
           it->impl->unmap_region();
@@ -7489,7 +7513,7 @@ namespace Legion {
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     RtEvent SingleTask::update_previous_mapped_event(RtEvent next)
-    ///--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     {
       RtEvent result = previous_mapped_event;
       previous_mapped_event = next;
