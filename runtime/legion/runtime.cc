@@ -18628,6 +18628,9 @@ namespace Legion {
         // We already know the answer cause we sent the message
         return result;
       }
+      // Can't wait in some cases
+      if (return_null_if_not_found && !wait_on.has_triggered())
+        return NULL;
       // We wait for the results to be ready
       wait_on.wait();
       // When we wake up the context should be here
