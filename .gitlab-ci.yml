@@ -124,6 +124,8 @@ before_script:
       if [[ -n $GITLAB_DEPLOY_KEY ]]; then
         eval $(ssh-agent -s)
         ssh-add <(echo "$GITLAB_DEPLOY_KEY")
+        mkdir -p ~/.ssh
+        [[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
       fi
     - ./test.py --test=external --test=private
 
