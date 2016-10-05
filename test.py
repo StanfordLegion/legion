@@ -190,6 +190,12 @@ def run_tests(test_modules=None,
             run_test_realm(launcher, root_dir, tmp_dir, env, thread_count)
         if test_external:
             run_test_external(launcher, root_dir, tmp_dir, env, thread_count)
+    except KeyboardInterrupt:
+        # Hack: KeyboardInterrupt is a really bizarre exception. If
+        # you *don't* catch it, then the finally clause won't run
+        # either. This no-op except clause exists to make sure the
+        # finally clause is able to run.
+        raise
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
