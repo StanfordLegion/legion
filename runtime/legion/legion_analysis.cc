@@ -1066,8 +1066,6 @@ namespace Legion {
           if ((*it) == NULL)
           {
             rez.serialize<bool>(true); // empty
-            // Reverse the polarity
-            is_region = !is_region;
             continue;
           }
           rez.serialize<bool>(false); // not empty
@@ -1094,18 +1092,13 @@ namespace Legion {
         size_t num_states;
         derez.deserialize(num_states);
         physical_states.resize(num_states, NULL);
-        unsigned start_depth = upper_bound_node->get_depth();
         bool is_region = upper_bound_node->is_region();
-        for (unsigned idx = start_depth; idx < num_states; idx++)
+        for (unsigned idx = 0; idx < num_states; idx++)
         {
           bool empty;
           derez.deserialize(empty);
           if (empty)
-          {
-            // Reverse the polarity
-            is_region = !is_region;
             continue;
-          }
           bool is_path_only;
           derez.deserialize(is_path_only);
           RegionTreeNode *node = NULL;
