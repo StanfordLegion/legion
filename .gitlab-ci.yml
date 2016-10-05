@@ -50,6 +50,9 @@ variables:
   LD_FLAGS: "-m32"
   MARCH: "i686"
 
+.cmake: &cmake
+  USE_CMAKE: "1"
+
 .skip_regent: &skip_regent
   TEST_REGENT: "0"
 
@@ -157,6 +160,10 @@ linux_gcc49_terra35_cxx98_32bit_debug_noregent:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *debug, *cxx98_32bit_normal, *skip_regent]
+linux_gcc49_terra35_cxx98_debug_checks_cmake_noregent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *cmake, *skip_regent]
 linux_gcc49_terra35_cxx98_debug_checks_external:
   <<: [*linux, *image, *external_tests]
   variables:
@@ -183,6 +190,10 @@ linux_clang35_terra35_cxx98_32bit_debug_noregent:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *debug, *cxx98_32bit_normal, *skip_regent]
+linux_clang35_terra35_cxx98_debug_checks_cmake_noregent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_checks, *cmake, *skip_regent]
 linux_clang35_terra35_cxx98_debug_checks_external:
   <<: [*linux, *image, *external_tests]
   variables:
