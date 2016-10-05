@@ -31,11 +31,12 @@ namespace Realm {
       fd = open(_file.c_str(), O_CREAT | O_EXCL | O_RDWR, 00777);
       assert(fd != -1);
       // resize the file to what we want
-#ifndef NDEBUG
-      int ret =
-#endif
-	ftruncate(fd, _size);
+      int ret =	ftruncate(fd, _size);
+#ifdef NDEBUG
+      (void)ret;
+#else
       assert(ret == 0);
+#endif
       free_blocks[0] = _size;
     }
 
@@ -82,21 +83,23 @@ namespace Realm {
     void DiskMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
       // this is a blocking operation
-#ifndef NDEBUG
-      ssize_t amt =
-#endif
-	pread(fd, dst, size, offset);
+      ssize_t amt = pread(fd, dst, size, offset);
+#ifdef NDEBUG
+      (void)amt;
+#else
       assert(amt == (ssize_t)size);
+#endif
     }
 
     void DiskMemory::put_bytes(off_t offset, const void *src, size_t size)
     {
       // this is a blocking operation
-#ifndef NDEBUG
-      ssize_t amt =
-#endif
-	pwrite(fd, src, size, offset);
+      ssize_t amt = pwrite(fd, src, size, offset);
+#ifdef NDEBUG
+      (void)amt;
+#else
       assert(amt == (ssize_t)size);
+#endif
     }
 
     void DiskMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
@@ -189,11 +192,12 @@ namespace Realm {
           for(std::vector<size_t>::const_iterator it = field_sizes.begin(); it != field_sizes.end(); it++) {
             field_size += *it;
           }
-#ifndef NDEBUG
-          int ret =
-#endif
-	    ftruncate(fd, field_size * domain.get_volume());
+          int ret = ftruncate(fd, field_size * domain.get_volume());
+#ifdef NDEBUG
+	  (void)ret;
+#else
           assert(ret == 0);
+#endif
           break;
         }
         default:
@@ -247,11 +251,12 @@ namespace Realm {
       pthread_mutex_lock(&vector_lock);
       int fd = file_vec[inst_id];
       pthread_mutex_unlock(&vector_lock);
-#ifndef NDEBUG
-      size_t ret =
-#endif
-	pread(fd, dst, size, offset);
+      size_t ret = pread(fd, dst, size, offset);
+#ifdef NDEBUG
+      (void)ret;
+#else
       assert(ret == size);
+#endif
     }
 
     void FileMemory::put_bytes(off_t offset, const void *src, size_t)
@@ -264,11 +269,12 @@ namespace Realm {
       pthread_mutex_lock(&vector_lock);
       int fd = file_vec[inst_id];
       pthread_mutex_unlock(&vector_lock);
-#ifndef NDEBUG
-      size_t ret =
-#endif
-	pwrite(fd, src, size, offset);
+      size_t ret = pwrite(fd, src, size, offset);
+#ifdef NDEBUG
+      (void)ret;
+#else
       assert(ret == size);
+#endif
     }
 
     void FileMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
