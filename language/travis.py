@@ -57,8 +57,5 @@ if __name__ == '__main__':
         'LG_RT_DIR': runtime_dir,
         'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
     })
-    # reduce output spewage by default
-    if 'MAKEFLAGS' not in env:
-        env['MAKEFLAGS'] = 's'
 
     test(root_dir, env['DEBUG'], 'TEST_SPY' in env and env['TEST_SPY'] == '1', env)

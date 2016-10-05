@@ -50,7 +50,7 @@ def run_cxx(tests, flags, launcher, root_dir, env, thread_count):
     for test_file, test_flags in tests:
         test_path = os.path.join(root_dir, test_file)
         test_dir = os.path.dirname(test_path)
-        cmd(['make', '-s', '-C', test_dir, '-j', str(thread_count)], env=env)
+        cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
 def run_test_tutorial(launcher, root_dir, tmp_dir, env, thread_count):
@@ -69,12 +69,12 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, env, thread_count):
 
 def run_test_realm(launcher, root_dir, tmp_dir, env, thread_count):
     test_dir = os.path.join(root_dir, 'test/realm')
-    cmd(['make', '-s', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'clean'], env=env)
-    cmd(['make', '-s', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'], env=env)
+    cmd(['make', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'clean'], env=env)
+    cmd(['make', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'], env=env)
 
     perf_dir = os.path.join(root_dir, 'test/performance/realm')
-    cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean_all'], env=env)
-    cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'], env=env)
+    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean_all'], env=env)
+    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'], env=env)
 
 def run_test_external(launcher, root_dir, tmp_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
@@ -91,7 +91,7 @@ def run_test_private(launcher, root_dir, tmp_dir, env, thread_count):
     miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
     cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
          'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
-    cmd(['make', '-s', '-C', miniaero_dir, '-j', str(thread_count)], env=env,
+    cmd(['make', '-C', miniaero_dir, '-j', str(thread_count)], env=env,
         cwd=miniaero_dir)
     for test in ['3D_Sod', '3D_Sod_2nd_Order', 'FlatPlate', 'Ramp']:
         test_dir = os.path.join(miniaero_dir, 'tests', test)
@@ -108,7 +108,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
 def clean_cxx(tests, root_dir, env, thread_count):
     for test_file, test_flags in tests:
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
-        cmd(['make', '-s', '-C', test_dir, 'clean'], env=env)
+        cmd(['make', '-C', test_dir, 'clean'], env=env)
 
 def build_make_clean(root_dir, env, thread_count, test_tutorial, test_examples):
     if test_tutorial:
