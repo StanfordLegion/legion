@@ -8867,6 +8867,8 @@ namespace Legion {
       derez.deserialize(top_level_task);
       if (is_locally_mapped())
         unpack_version_infos(derez, version_infos, ready_events);
+      else
+        version_infos.resize(regions.size());
       unpack_restrict_infos(derez, restrict_infos, ready_events);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
