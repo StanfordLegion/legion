@@ -250,7 +250,7 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
         for test_name, filename, result in results:
             while True:
                 try:
-                    _test_name, _filename, saved_temps, outcome, output = result.get(timeout=30)
+                    _test_name, _filename, saved_temps, outcome, output = result.get(timeout=60)
                     assert _test_name == test_name and _filename == filename
                 except multiprocessing.TimeoutError:
                     print('Potential Hang: (%s) %s' % (test_name, filename))
