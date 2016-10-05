@@ -1056,27 +1056,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pack_version_numbers(rez);
-      rez.serialize<size_t>(physical_states.size());
-      bool is_region = upper_bound_node->is_region();
-      for (std::vector<PhysicalState*>::const_iterator it = 
-            physical_states.begin(); it != physical_states.end(); it++)
+      if (upper_bound_node != NULL)
       {
-        if ((*it) == NULL)
+        rez.serialize<size_t>(physical_states.size());
+        bool is_region = upper_bound_node->is_region();
+        for (std::vector<PhysicalState*>::const_iterator it = 
+              physical_states.begin(); it != physical_states.end(); it++)
         {
-          rez.serialize<bool>(true); // empty
-          // Reverse the polarity
+          if ((*it) == NULL)
+          {
+            rez.serialize<bool>(true); // empty
+            // Reverse the polarity
+            is_region = !is_region;
+            continue;
+          }
+          rez.serialize<bool>(false); // not empty
+          rez.serialize<bool>((*it)->path_only);
+          if (is_region)
+            rez.serialize((*it)->node->as_region_node()->handle);
+          else
+            rez.serialize((*it)->node->as_partition_node()->handle);
+          (*it)->pack_physical_state(rez);
+          // Reverse polarity
           is_region = !is_region;
-          continue;
         }
-        rez.serialize<bool>(false); // not empty
-        rez.serialize<bool>((*it)->path_only);
-        if (is_region)
-          rez.serialize((*it)->node->as_region_node()->handle);
-        else
-          rez.serialize((*it)->node->as_partition_node()->handle);
-        (*it)->pack_physical_state(rez);
-        // Reverse polarity
-        is_region = !is_region;
       }
     }
 
@@ -1086,41 +1089,44 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unpack_version_numbers(derez, runtime->forest);
-      size_t num_states;
-      derez.deserialize(num_states);
-      physical_states.resize(num_states, NULL);
-      unsigned start_depth = upper_bound_node->get_depth();
-      bool is_region = upper_bound_node->is_region();
-      for (unsigned idx = start_depth; idx < num_states; idx++)
+      if (upper_bound_node != NULL)
       {
-        bool empty;
-        derez.deserialize(empty);
-        if (empty)
+        size_t num_states;
+        derez.deserialize(num_states);
+        physical_states.resize(num_states, NULL);
+        unsigned start_depth = upper_bound_node->get_depth();
+        bool is_region = upper_bound_node->is_region();
+        for (unsigned idx = start_depth; idx < num_states; idx++)
         {
+          bool empty;
+          derez.deserialize(empty);
+          if (empty)
+          {
+            // Reverse the polarity
+            is_region = !is_region;
+            continue;
+          }
+          bool is_path_only;
+          derez.deserialize(is_path_only);
+          RegionTreeNode *node = NULL;
+          if (is_region)
+          {
+            LogicalRegion handle;
+            derez.deserialize(handle);
+            node = runtime->forest->get_node(handle);
+          }
+          else
+          {
+            LogicalPartition handle;
+            derez.deserialize(handle);
+            node = runtime->forest->get_node(handle);
+          }
+          PhysicalState *next = legion_new<PhysicalState>(node, is_path_only);
+          next->unpack_physical_state(derez, runtime, ready_events);
+          physical_states[idx] = next;
           // Reverse the polarity
           is_region = !is_region;
-          continue;
         }
-        bool is_path_only;
-        derez.deserialize(is_path_only);
-        RegionTreeNode *node = NULL;
-        if (is_region)
-        {
-          LogicalRegion handle;
-          derez.deserialize(handle);
-          node = runtime->forest->get_node(handle);
-        }
-        else
-        {
-          LogicalPartition handle;
-          derez.deserialize(handle);
-          node = runtime->forest->get_node(handle);
-        }
-        PhysicalState *next = legion_new<PhysicalState>(node, is_path_only);
-        next->unpack_physical_state(derez, runtime, ready_events);
-        physical_states[idx] = next;
-        // Reverse the polarity
-        is_region = !is_region;
       }
     }
 

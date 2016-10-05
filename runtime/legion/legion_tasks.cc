@@ -8840,13 +8840,7 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
-      if (!is_locally_mapped())
-      {
-        // Indicate we have to send full version infos for all requirements
-        std::vector<bool> full_version_infos(regions.size(), true);
-        pack_version_infos(rez, version_infos, full_version_infos);
-      }
-      else // Only virtual mapped regions require full infos
+      if (is_locally_mapped())
         pack_version_infos(rez, version_infos, virtual_mapped);
       pack_restrict_infos(rez, restrict_infos);
       // Mark that we sent this task remotely
@@ -8871,7 +8865,8 @@ namespace Legion {
       set_current_proc(current);
       derez.deserialize(remote_owner_uid);
       derez.deserialize(top_level_task);
-      unpack_version_infos(derez, version_infos, ready_events);
+      if (is_locally_mapped())
+        unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
