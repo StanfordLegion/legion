@@ -73,7 +73,7 @@ def run_test_realm(launcher, root_dir, tmp_dir, env, thread_count):
     cmd(['make', '-s', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'], env=env)
 
     perf_dir = os.path.join(root_dir, 'test/performance/realm')
-    cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean'], env=env)
+    cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean_all'], env=env)
     cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'], env=env)
 
 def run_test_external(launcher, root_dir, tmp_dir, env, thread_count):
