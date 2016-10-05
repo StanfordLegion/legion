@@ -189,13 +189,9 @@ def run_tests(test_modules=None,
         if test_external:
             run_test_external(launcher, root_dir, scratch_dir, env, thread_count)
     except Exception as e:
-        if verbose:
-            traceback.print_exc()
-        else:
-            print(e, file=sys.stderr)
-        print(file=sys.stderr)
         print('Tests finished with errors. Leaving build directory:', file=sys.stderr)
         print('  %s' % scratch_dir, file=sys.stderr)
+        raise
     else:
         print('Tests finished successfully. Removing build directory:')
         print('  %s' % scratch_dir)
