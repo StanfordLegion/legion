@@ -3158,9 +3158,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_phy; idx++)
         physical_instances[idx].unpack_references(runtime, this,
                                                   derez, ready_events);
-      virtual_mapped.resize(regions.size());
-      for (unsigned idx = 0; idx < num_phy; idx++)
-        virtual_mapped[idx] = physical_instances[idx].is_virtual_mapping();
       update_no_access_regions();
     }
 
@@ -6916,10 +6913,18 @@ namespace Legion {
       DETAILED_PROFILER(runtime, LAUNCH_TASK_CALL);
 #ifdef DEBUG_LEGION
       assert(regions.size() == physical_instances.size());
-      assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == no_access_regions.size());
       assert(physical_regions.empty());
 #endif 
+      // If we haven't computed our virtual mapping information
+      // yet (e.g. because we mapped locally) then we have to
+      // do that now
+      if (virtual_mapped.size() != regions.size())
+      {
+        virtual_mapped.resize(regions.size());
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          virtual_mapped[idx] = physical_instances[idx].is_virtual_mapping();
+      }
       VariantImpl *variant = 
         runtime->find_variant_impl(task_id, selected_variant);
       // STEP 1: Compute the precondition for the task launch
@@ -6975,7 +6980,7 @@ namespace Legion {
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
             physical_regions.push_back(PhysicalRegion(
-                  legion_new<PhysicalRegionImpl>(regions[idx],
+                  legion_new<PhysicalRegionImpl>(clone_requirements[idx],
                     ApEvent::NO_AP_EVENT, false/*mapped*/,
                     this, map_id, tag, false/*leaf*/, runtime)));
             // Don't switch coherence modes since we virtually
@@ -6995,7 +7000,7 @@ namespace Legion {
             // people to wait on the value
             clone_requirements[idx].privilege = READ_WRITE;
             physical_regions.push_back(PhysicalRegion(
-                  legion_new<PhysicalRegionImpl>(regions[idx],
+                  legion_new<PhysicalRegionImpl>(clone_requirements[idx],
                     ApEvent::NO_AP_EVENT, false/*mapped*/,
                     this, map_id, tag, false/*leaf*/, runtime)));
             unmap_events[idx] = Runtime::create_ap_user_event();

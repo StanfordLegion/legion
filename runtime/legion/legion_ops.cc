@@ -235,6 +235,9 @@ namespace Legion {
 #endif
       r.parent = r.region;
       r.prop = EXCLUSIVE;
+      // Write discard privileges become read-write inside the operation
+      if (r.privilege == WRITE_DISCARD)
+        r.privilege = READ_WRITE;
     }
 
     //--------------------------------------------------------------------------
@@ -6021,10 +6024,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_close(ctx, ctx->regions[idx], true/*track*/);
-      // If it was write-discard from the task's perspective, make it
-      // read-write within the task's context
-      if (requirement.privilege == WRITE_DISCARD)
-        requirement.privilege = READ_WRITE;
       parent_idx = idx;
       localize_region_requirement(requirement);
       if (Runtime::legion_spy_enabled)
@@ -6304,9 +6303,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_close(ctx, req, true/*track*/);
-      // Make this read-write to pick up the earlier changes
-      if (requirement.privilege == WRITE_DISCARD)
-        requirement.privilege = READ_WRITE;
       parent_idx = index;
       localize_region_requirement(requirement);
       if (Runtime::legion_spy_enabled)
