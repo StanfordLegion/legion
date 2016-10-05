@@ -85,6 +85,18 @@ def run_test_external(launcher, root_dir, tmp_dir, env, thread_count):
                ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8']]]
     run_cxx(solver, flags, launcher, root_dir, env, thread_count)
 
+def run_test_private(launcher, root_dir, tmp_dir, env, thread_count):
+    flags = ['-logfile', 'out_%.log']
+
+    miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
+    cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
+         'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
+    cmd(['make', '-s', '-C', miniaero_dir, '-j', str(thread_count)], env=env,
+        cwd=miniaero_dir)
+    for test in ['3D_Sod', '3D_Sod_2nd_Order', 'FlatPlate', 'Ramp']:
+        test_dir = os.path.join(miniaero_dir, 'tests', test)
+        cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir)
+
 def build_cmake(root_dir, tmp_dir, env, thread_count,
                 test_tutorial, test_examples):
     cmd(['cmake'] +
@@ -133,6 +145,7 @@ def run_tests(test_modules=None,
     test_fuzzer = module_enabled('fuzzer', debug)
     test_realm = module_enabled('realm', not debug)
     test_external = module_enabled('external', False)
+    test_private = module_enabled('private', False)
 
     # Determine which features to build with.
     def feature_enabled(feature, default=True):
@@ -190,6 +203,8 @@ def run_tests(test_modules=None,
             run_test_realm(launcher, root_dir, tmp_dir, env, thread_count)
         if test_external:
             run_test_external(launcher, root_dir, tmp_dir, env, thread_count)
+        if test_private:
+            run_test_private(launcher, root_dir, tmp_dir, env, thread_count)
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
@@ -207,7 +222,8 @@ def driver():
     # What tests to run:
     parser.add_argument(
         '--test', dest='test_modules', action='append',
-        choices=['regent', 'tutorial', 'examples', 'fuzzer', 'realm', 'external'],
+        choices=['regent', 'tutorial', 'examples', 'fuzzer', 'realm',
+                 'external', 'private'],
         default=None,
         help='Test modules to run (also via TEST_*).')
 
