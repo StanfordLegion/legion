@@ -3042,7 +3042,7 @@ class LogicalState(object):
         assert not open_local or not unopened
         arrived = next_child is None
         # If we already did the open operation above there is no need to do it here
-        if unopened and open_local:
+        if open_local:
             # Find or make our open operation
             if not self.perform_open_operation(op, req, previous_deps, perform_checks):
                 return (False,None,None,None)
@@ -3091,8 +3091,8 @@ class LogicalState(object):
                 self.current_redop = req.redop                
             return (True,None,None,None)
         else:
-            next_unopened = unopened and not next_open
-            return (True,next_open and not open_local,next_unopened,advance_op)
+            next_unopened = unopened and not next_open 
+            return (True,next_open and unopened,next_unopened,advance_op)
 
     def register_logical_user(self, op, req):
         self.current_epoch_users.append((op,req))
@@ -4192,7 +4192,7 @@ class VerificationTraverser(object):
             # Normal copy, definitely do the analysis if this is part
             # of the analysis
             if copy.region.get_point_set().has_point(self.point) and \
-                self.found_datflow_path and (not copy.intersect or 
+                self.found_dataflow_path and (not copy.intersect or 
                     copy.intersect.get_point_set().has_point(self.point)): 
                 assert len(self.dataflow_stack) > 1
                 # Perform the copy analysis

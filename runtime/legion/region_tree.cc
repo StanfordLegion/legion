@@ -10997,10 +10997,6 @@ namespace Legion {
                     if (!already_open || 
                         are_children_disjoint(cit->first, next_child))
                       continue;
-                    // Add the already open fields to this open_below mask
-                    // since either they are already open for the right child
-                    // or we're going to mark them open in a new FieldState
-                    open_below |= already_open;
                     // Case 2
                     if (cit->first != (next_child))
                     {
@@ -11023,6 +11019,8 @@ namespace Legion {
                         to_delete.push_back(cit->first);
                       needs_recompute = true;
                     }
+                    else // Case 1: same child so they are already open
+                      open_below |= already_open;
                     // Otherwise same child so case 1 and everything just
                     // stays in SINGLE_REDUCE_MODE
                   }
