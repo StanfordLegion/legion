@@ -100,6 +100,12 @@ before_script:
   tags:
     - macos
 
+# For compute-heavy tests:
+.linux_compute: &linux_compute
+  tags:
+    - linux
+    - compute
+
 ###
 ### Docker Image
 ###
@@ -167,7 +173,7 @@ linux_gcc49_terra35_cxx98_debug_checks_cmake_noregent:
   variables:
     <<: [*gcc49, *terra35, *debug, *cxx98_checks, *cmake, *skip_regent]
 linux_gcc49_terra35_cxx98_debug_checks_external:
-  <<: [*linux, *image, *external_tests]
+  <<: [*linux_compute, *image, *external_tests]
   variables:
     <<: [*gcc49, *terra35, *debug, *cxx98_checks]
 
@@ -197,7 +203,7 @@ linux_clang35_terra35_cxx98_debug_checks_cmake_noregent:
   variables:
     <<: [*clang35, *terra35, *debug, *cxx98_checks, *cmake, *skip_regent]
 linux_clang35_terra35_cxx98_debug_checks_external:
-  <<: [*linux, *image, *external_tests]
+  <<: [*linux_compute, *image, *external_tests]
   variables:
     <<: [*clang35, *terra35, *debug, *cxx98_checks]
 
