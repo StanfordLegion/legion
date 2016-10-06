@@ -88,7 +88,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd(['git', 'clone', 'https://github.com/Charles-Chao-Chen/fastSolver2.git', solver_dir])
     solver = [[os.path.join(solver_dir, 'spmd_benchMark/solver'),
                ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8']]]
-    run_cxx(solver, flags, launcher, root_dir, env, thread_count)
+    run_cxx(solver, flags, launcher, root_dir, None, env, thread_count)
 
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
