@@ -10018,6 +10018,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<bool>(true); // top level context, all we need to pack
+      rez.serialize(get_context_uid());
     }
 
     //--------------------------------------------------------------------------
@@ -10049,17 +10050,6 @@ namespace Legion {
     {
       assert(false);
       return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    AddressSpaceID TopLevelTask::get_version_owner(RegionTreeNode *node,
-                                                   AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // Use a static partitioning of the nodes
-      // Whichever node made the region tree node is the
-      // one that owns the context, no communication necessary
-      return node->get_row_source()->get_owner_space();
     }
 
     //--------------------------------------------------------------------------
@@ -10270,14 +10260,13 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      // If we are the top-level context then there is an easy answer
-      if (top_level_context)
-      {
-        // Use a static partitioning of the nodes
-        // Whichever node made the region tree node is the
-        // one that owns the context, no communication necessary
-        return node->get_row_source()->get_owner_space();
-      }
+      const AddressSpaceID owner_space = node->get_owner_space(); 
+      // If we are the top-level context then we handle the request
+      // on the node that made the region
+      if (top_level_context && (owner_space == runtime->address_space))
+        return SingleTask::get_version_owner(node, source);
+        // Otherwise we fall through and issue the request to the 
+        // the node that actually made the region
 #ifdef DEBUG_LEGION
       assert(source == runtime->address_space); // should always be local
 #endif
@@ -10320,7 +10309,10 @@ namespace Legion {
           rez.serialize<bool>(false);
           rez.serialize(node->as_partition_node()->handle);
         }
-        AddressSpaceID target = runtime->get_runtime_owner(remote_owner_uid);
+        // Send it to the owner space if we are the top-level context
+        // otherwise we send it to the owner of the context
+        const AddressSpaceID target = top_level_context ? owner_space :  
+                          runtime->get_runtime_owner(remote_owner_uid);
         runtime->send_version_owner_request(target, rez);
       }
       wait_on.wait();
@@ -10470,7 +10462,10 @@ namespace Legion {
       derez.deserialize(top_level_context);
       // If we're the top-level context then we're already done
       if (top_level_context)
+      {
+        derez.deserialize(remote_owner_uid);
         return;
+      }
       derez.deserialize(depth);
       WrapperReferenceMutator mutator(preconditions);
       unpack_base_external_task(derez, &mutator);

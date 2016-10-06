@@ -1177,8 +1177,6 @@ namespace Legion {
       virtual const std::vector<VersionInfo>* get_version_infos(void);
     public:
       virtual SingleTask* find_parent_context(void);
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
