@@ -23,7 +23,7 @@ local common = require("stencil_common")
 
 local DTYPE = double
 local RADIUS = 2
-local USE_FOREIGN = false
+local USE_FOREIGN = true
 
 local c = regentlib.c
 
@@ -57,6 +57,42 @@ if USE_FOREIGN then
                               "-DDTYPE=" .. tostring(DTYPE),
                               "-DRESTRICT=__restrict__",
                               "-DRADIUS=" .. tostring(RADIUS)})
+end
+
+do
+  local root_dir = arg[0]:match(".*/") or "./"
+  local runtime_dir = root_dir .. "../../runtime/"
+  local legion_dir = runtime_dir .. "legion/"
+  local mapper_dir = runtime_dir .. "mappers/"
+  local realm_dir = runtime_dir .. "realm/"
+  local mapper_cc = root_dir .. "stencil_mapper.cc"
+  if os.getenv('SAVEOBJ') == '1' then
+    mapper_so = root_dir .. "libstencil_mapper.so"
+  else
+    mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
+  end
+  local cxx = os.getenv('CXX') or 'c++'
+
+  local cxx_flags = "-O2 -Wall -Werror"
+  if os.execute('test "$(uname)" = Darwin') == 0 then
+    cxx_flags =
+      (cxx_flags ..
+         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
+  else
+    cxx_flags = cxx_flags .. " -shared -fPIC"
+  end
+
+  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
+                 " -I " .. realm_dir .. " " .. mapper_cc .. " -o " .. mapper_so)
+  if os.execute(cmd) ~= 0 then
+    print("Error: failed to compile " .. mapper_cc)
+    assert(false)
+  end
+  terralib.linklibrary(mapper_so)
+  cmapper = terralib.includec("stencil_mapper.h", {"-I", root_dir, "-I", runtime_dir,
+                                                   "-I", mapper_dir, "-I", legion_dir,
+                                                   "-I", realm_dir})
 end
 
 local min = regentlib.fmin
@@ -214,13 +250,17 @@ function make_ghost_y_partition(is_complete)
   return ghost_y_partition
 end
 
+local function off(i, x, y)
+  return rexpr int2d { x = i.x + x, y = i.y + y } end
+end
+
 local function make_stencil_pattern(points, index, off_x, off_y, radius)
   local value
   for i = 1, radius do
     local neg = off_x < 0 or off_y < 0
     local coeff = ((neg and -1) or 1)/(2*i*radius)
     local x, y = off_x*i, off_y*i
-    local component = rexpr coeff*points[ index + {x, y} ].input end
+    local component = rexpr coeff*points[ [off(index, x, y)] ].input end
     if value then
       value = rexpr value + component end
     else
@@ -255,9 +295,8 @@ end
 local function make_stencil_interior(private, interior, radius)
   if not USE_FOREIGN then
     return rquote
-      __demand(__vectorize)
       for i in interior do
-        private[i].output +=
+        private[i].output = private[i].output +
           [make_stencil_pattern(private, i,  0, -1, radius)] +
           [make_stencil_pattern(private, i, -1,  0, radius)] +
           [make_stencil_pattern(private, i,  1,  0, radius)] +
@@ -351,9 +390,8 @@ local stencil = make_stencil(RADIUS)
 local function make_increment_interior(private, exterior)
   if not USE_FOREIGN then
     return rquote
-      __demand(__vectorize)
       for i in exterior do
-        private[i].input += 1
+        private[i].input = private[i].input + 1
       end
     end
   else
@@ -412,6 +450,13 @@ where reads(private.{input, output}) do
   c.printf("check completed successfully\n")
 end
 
+task fill_(r : region(ispace(int2d), point), v : DTYPE)
+where reads writes(r.{input, output}) do
+  -- fill(r.{input, output}, v)
+  for x in r do x.input = v end
+  for x in r do x.output = v end
+end
+
 task main()
   var conf = common.read_config()
 
@@ -455,8 +500,28 @@ task main()
   var tprune : int64 = conf.tprune
   regentlib.assert(tsteps > 2*tprune, "too few time steps")
 
+  -- __demand(__spmd)
+  -- do
+  --   for i = 0, nt2 do
+  --     fill_(pxm_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pxp_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pym_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pyp_out[i], init)
+  --   end
+  -- end
+
   __demand(__spmd)
   do
+    -- for i = 0, nt2 do
+    --   fill_(private[i], init)
+    -- end
+
     for t = 0, tsteps do
       -- __demand(__parallel)
       for i = 0, nt2 do
@@ -473,4 +538,10 @@ task main()
     end
   end
 end
-regentlib.start(main)
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local link_flags = {"-L" .. root_dir, "-lstencil", "-lstencil_mapper"}
+  regentlib.saveobj(main, "stencil", "executable", cmapper.register_mappers, link_flags)
+else
+  regentlib.start(main, cmapper.register_mappers)
+end
