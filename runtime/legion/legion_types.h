@@ -519,8 +519,9 @@ namespace Legion {
       UPDATE_VIRTUAL_CHANNEL = 10,
       VARIANT_VIRTUAL_CHANNEL = 11,
       VERSION_VIRTUAL_CHANNEL = 12,
-      ANALYSIS_VIRTUAL_CHANNEL = 13,
-      MAX_NUM_VIRTUAL_CHANNELS = 14, // this one must be last
+      VERSION_MANAGER_VIRTUAL_CHANNEL = 13,
+      ANALYSIS_VIRTUAL_CHANNEL = 14,
+      MAX_NUM_VIRTUAL_CHANNELS = 15, // this one must be last
     };
 
     enum MessageKind {
