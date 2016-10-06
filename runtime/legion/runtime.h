@@ -508,6 +508,8 @@ namespace Legion {
     public:
       ProcessorManager& operator=(const ProcessorManager &rhs);
     public:
+      void prepare_for_shutdown(void);
+    public:
       void add_mapper(MapperID mid, MapperManager *m, bool check, bool own);
       void replace_default_mapper(MapperManager *m, bool own);
       MapperManager* find_mapper(MapperID mid, bool need_lock = true) const;
@@ -895,12 +897,21 @@ namespace Legion {
      */
     class ShutdownManager {
     public:
+      enum ShutdownPhase {
+        CHECK_TERMINATION = 1,
+        CONFIRM_TERMINATION = 2,
+        CHECK_SHUTDOWN = 3,
+        CONFIRM_SHUTDOWN = 4,
+      };
+    public:
       struct RetryShutdownArgs : public LgTaskArgs<RetryShutdownArgs> {
       public:
         static const LgTaskID TASK_ID = LG_RETRY_SHUTDOWN_TASK_ID;
+      public:
+        ShutdownPhase phase;
       };
     public:
-      ShutdownManager(bool phase_one, Runtime *rt, AddressSpaceID source,
+      ShutdownManager(ShutdownPhase phase, Runtime *rt, AddressSpaceID source,
                       unsigned radix, ShutdownManager *owner = NULL);
       ShutdownManager(const ShutdownManager &rhs);
       ~ShutdownManager(void);
@@ -921,7 +932,7 @@ namespace Legion {
       void record_recent_message(void);
       void record_pending_message(RtEvent pending_event);
     public:
-      const bool phase_one;
+      const ShutdownPhase phase;
       Runtime *const runtime;
       const AddressSpaceID source; 
       const unsigned radix;
@@ -1371,10 +1382,6 @@ namespace Legion {
         SingleTask *task;
         FutureImpl *result;
       }; 
-      struct RetryShutdownArgs : public LgTaskArgs<RetryShutdownArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_RETRY_SHUTDOWN_TASK_ID;
-      };
     public:
       struct ProcessorGroupInfo {
       public:
@@ -2347,11 +2354,12 @@ namespace Legion {
       void decrement_outstanding_top_level_tasks(void);
     public:
       void issue_runtime_shutdown_attempt(void);
-      void attempt_runtime_shutdown(void);
-      void initiate_runtime_shutdown(AddressSpaceID source, bool phase_one,
+      void initiate_runtime_shutdown(AddressSpaceID source, 
+                                     ShutdownManager::ShutdownPhase phase,
                                      ShutdownManager *owner = NULL);
       void confirm_runtime_shutdown(ShutdownManager *shutdown_manager, 
                                     bool phase_one);
+      void prepare_runtime_shutdown(void);
       void finalize_runtime_shutdown(void);
     public:
       bool has_outstanding_tasks(void);
@@ -2567,6 +2575,8 @@ namespace Legion {
       RegionTreeForest *const forest;
       Processor utility_group;
       const bool has_explicit_utility_procs;
+    protected:
+      bool prepared_for_shutdown;
     protected:
 #ifdef DEBUG_LEGION
       Reservation outstanding_task_lock;

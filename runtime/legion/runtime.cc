@@ -1798,14 +1798,7 @@ namespace Legion {
     ProcessorManager::~ProcessorManager(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<MapperID,std::pair<MapperManager*,bool> >::iterator it = 
-            mappers.begin(); it != mappers.end(); it++)
-      {
-        if (it->second.second)
-          delete it->second.first;
-      }
       ready_queues.clear();
-      mappers.clear();
       local_queue_lock.destroy_reservation();
       local_queue_lock = Reservation::NO_RESERVATION;
       queue_lock.destroy_reservation();
@@ -1825,6 +1818,19 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::prepare_for_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<MapperID,std::pair<MapperManager*,bool> >::iterator it = 
+            mappers.begin(); it != mappers.end(); it++)
+      {
+        if (it->second.second)
+          delete it->second.first;
+      }
+      mappers.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -5680,9 +5686,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShutdownManager::ShutdownManager(bool one, Runtime *rt, AddressSpaceID s, 
-                                     unsigned r, ShutdownManager *own)
-      : phase_one(one), runtime(rt), source(s), radix(r), owner(own),
+    ShutdownManager::ShutdownManager(ShutdownPhase p, Runtime *rt, 
+                                     AddressSpaceID s, unsigned r, 
+                                     ShutdownManager *own)
+      : phase(p), runtime(rt), source(s), radix(r), owner(own),
         shutdown_lock(Reservation::create_reservation()), 
         needed_responses(0), result(true)
     //--------------------------------------------------------------------------
@@ -5691,7 +5698,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShutdownManager::ShutdownManager(const ShutdownManager &rhs)
-      : phase_one(false), runtime(NULL), source(0), radix(0), owner(NULL)
+      : phase(rhs.phase), runtime(NULL), source(0), radix(0), owner(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5742,7 +5749,7 @@ namespace Legion {
         needed_responses = targets.size();
         Serializer rez;
         rez.serialize(this);
-        rez.serialize<bool>(phase_one);
+        rez.serialize(phase);
         for (std::vector<AddressSpaceID>::const_iterator it = 
               targets.begin(); it != targets.end(); it++)
           runtime->send_shutdown_notification(*it, rez); 
@@ -5785,7 +5792,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do our local check
-      runtime->confirm_runtime_shutdown(this, phase_one);
+      runtime->confirm_runtime_shutdown(this, phase);
 #ifdef DEBUG_SHUTDOWN_HANG
       if (!result)
       {
@@ -5802,10 +5809,13 @@ namespace Legion {
 #endif
       if (result && (runtime->address_space == source))
       {
-        if (phase_one)
+        log_shutdown.info("SHUTDOWN PHASE %d SUCCESS!", phase);
+        if (phase != CONFIRM_SHUTDOWN)
         {
-          log_shutdown.info("SHUTDOWN PHASE 1 SUCCESS!");
-          runtime->initiate_runtime_shutdown(source, false/*phase one*/);
+          if (phase == CONFIRM_TERMINATION)
+            runtime->prepare_runtime_shutdown();
+          // Do the next phase
+          runtime->initiate_runtime_shutdown(source, (ShutdownPhase)(phase+1));
         }
         else
         {
@@ -5833,12 +5843,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!result);
 #endif
-        log_shutdown.info("FAILED SHUTDOWN! Trying again...");
+        log_shutdown.info("FAILED SHUTDOWN PHASE %d! Trying again...", phase);
         RtEvent precondition;
         if (!wait_for.empty())
           precondition = Runtime::merge_events(wait_for);
-        // We failed, launch a task to retry phase 1 
+        // If we failed an even phase we go back to the one before it
         RetryShutdownArgs args;
+        if ((phase % 2) == 0)
+          args.phase = (ShutdownPhase)(phase-1);
+        else
+          args.phase = phase;
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY, 
                                          NULL, precondition);
       }
@@ -5851,9 +5865,9 @@ namespace Legion {
     {
       ShutdownManager *owner;
       derez.deserialize(owner);
-      bool phase_one;
-      derez.deserialize(phase_one);
-      runtime->initiate_runtime_shutdown(source, phase_one, owner);
+      ShutdownPhase phase;
+      derez.deserialize(phase);
+      runtime->initiate_runtime_shutdown(source, phase, owner);
     }
 
     //--------------------------------------------------------------------------
@@ -7594,6 +7608,7 @@ namespace Legion {
         runtime_stride(address_spaces.size()), profiler(NULL),
         forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
+        prepared_for_shutdown(false),
 #ifdef DEBUG_LEGION
         outstanding_task_lock(Reservation::create_reservation()),
 #endif
@@ -17265,38 +17280,23 @@ namespace Legion {
     void Runtime::issue_runtime_shutdown_attempt(void)
     //--------------------------------------------------------------------------
     {
-      RetryShutdownArgs args;
+      ShutdownManager::RetryShutdownArgs args;
+      args.phase = ShutdownManager::CHECK_TERMINATION;
       // Issue this with a low priority so that other meta-tasks
       // have an opportunity to run
       issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::attempt_runtime_shutdown(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(address_space == 0); // should only happen on node 0
-#endif
-      // As long as we still don't have any top-level tasks, 
-      // keep trying to shutdown the runtime
-      if (__sync_fetch_and_add(&outstanding_top_level_tasks,0) == 0)
-        initiate_runtime_shutdown(address_space, true/*phase one*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::initiate_runtime_shutdown(AddressSpaceID source,
-                                         bool phase_one, ShutdownManager *owner)
+                                           ShutdownManager::ShutdownPhase phase,
+                                           ShutdownManager *owner)
     //--------------------------------------------------------------------------
     {
-      if (phase_one)
-        log_shutdown.info("Received notification on node %d for phase one",
-                          address_space);
-      else
-        log_shutdown.info("Received notification on node %d for phase two",
-                          address_space);
+      log_shutdown.info("Received notification on node %d for phase %d",
+                        address_space, phase);
       // If this is the first phase, do all our normal stuff
-      if (phase_one)
+      if (phase == ShutdownManager::CHECK_TERMINATION)
       {
         // Launch our last garbage collection epoch and wait for it to
         // finish so we can try to have no outstanding tasks
@@ -17309,27 +17309,17 @@ namespace Legion {
             current_gc_epoch = NULL;
           }
         }
-        // Also try deleting any instances we have outstanding
-        std::vector<MemoryManager*> mem_managers;
-        {
-          AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
-          mem_managers.resize(memory_managers.size());
-          unsigned idx = 0;
-          for (std::map<Memory,MemoryManager*>::const_iterator it = 
-                memory_managers.begin(); it != 
-                memory_managers.end(); it++, idx++)
-            mem_managers[idx] = it->second;
-        }
-        for (std::vector<MemoryManager*>::const_iterator it = 
-              mem_managers.begin(); it != mem_managers.end(); it++)
-        {
-          (*it)->prepare_for_shutdown();
-        }
         if (!gc_done.has_triggered())
           gc_done.wait();
       }
+      else if ((phase == ShutdownManager::CHECK_SHUTDOWN) && 
+                !prepared_for_shutdown)
+      {
+        // First time we check for shutdown we do the prepare for shutdown
+        prepare_runtime_shutdown();  
+      }
       ShutdownManager *shutdown_manager = 
-        new ShutdownManager(phase_one, this, source, 
+        new ShutdownManager(phase, this, source, 
                             LEGION_SHUTDOWN_RADIX, owner);
       if (shutdown_manager->attempt_shutdown())
         delete shutdown_manager;
@@ -17369,9 +17359,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::prepare_runtime_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!prepared_for_shutdown);
+#endif
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+        it->second->prepare_for_shutdown();
+      for (std::map<Memory,MemoryManager*>::const_iterator it = 
+            memory_managers.begin(); it != memory_managers.end(); it++)
+        it->second->prepare_for_shutdown();
+      prepared_for_shutdown = true;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::finalize_runtime_shutdown(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(address_space == 0); // only happens on node 0
+#endif
       std::set<RtEvent> shutdown_events;
       // Launch tasks to shutdown all the runtime instances
       Machine::ProcessorQuery all_procs(machine);
@@ -21324,9 +21333,11 @@ namespace Legion {
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
+            const ShutdownManager::RetryShutdownArgs *shutdown_args = 
+              (const ShutdownManager::RetryShutdownArgs*)args;
             Runtime *runtime = Runtime::get_runtime(p);
             runtime->initiate_runtime_shutdown(runtime->address_space,
-                                               true/*phase one*/);
+                                               shutdown_args->phase);
             break;
           }
         default:
