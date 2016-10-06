@@ -6962,16 +6962,22 @@ namespace Legion {
         // malloc a temporary buffer here and copy the data to ensure
         // alignment.
         void *impl_buffer = malloc(impl_size);
+#ifdef DEBUG_LEGION
         assert(impl_buffer);
+#endif
         memcpy(impl_buffer, derez.get_current_pointer(), impl_size);
         derez.advance_pointer(impl_size);
         Realm::Serialization::FixedBufferDeserializer
           deserializer(impl_buffer, impl_size);
+#ifdef DEBUG_LEGION
 #ifndef NDEBUG
         bool ok =
 #endif
                   realm_desc->deserialize(deserializer);
         assert(ok);
+#else
+        realm_desc->deserialize(deserializer);
+#endif
         free(impl_buffer);
       }
       size_t user_data_size;
