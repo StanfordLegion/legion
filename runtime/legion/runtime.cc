@@ -15345,8 +15345,9 @@ namespace Legion {
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, 
-        SEND_VERSION_STATE_UPDATE_REQUEST,DEFAULT_VIRTUAL_CHANNEL,true/*flush*/);
+      find_messenger(target)->send_message(rez,
+                               SEND_VERSION_STATE_UPDATE_REQUEST,
+                               ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15355,7 +15356,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-      SEND_VERSION_STATE_UPDATE_RESPONSE,DEFAULT_VIRTUAL_CHANNEL,true/*flush*/);
+                                SEND_VERSION_STATE_UPDATE_RESPONSE,
+                                ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15363,10 +15365,8 @@ namespace Legion {
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // Put this on the default channel in case we need to page in any 
-      // version managers from remote nodes
       find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_ADVANCE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                      ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15375,7 +15375,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_INVALIDATE,
-                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+                                       ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15383,10 +15383,10 @@ namespace Legion {
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This goes on the version virtual channel so that it can 
+      // This goes on the analysis virtual channel so that it can 
       // be ordered with respect to advances
       find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_REQUEST,
-                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+                                       ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15394,10 +15394,10 @@ namespace Legion {
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This comes back on the default channel in case we need to page
+      // This comes back on the analysis channel in case we need to page
       // in any version managers from remote nodes
       find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                       ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
