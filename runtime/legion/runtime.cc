@@ -7788,6 +7788,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Make sure we don't send anymore messages
+      message_manager_lock.destroy_reservation();
+      message_manager_lock = Reservation::NO_RESERVATION;
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
@@ -8157,9 +8159,7 @@ namespace Legion {
       layout_constraints_lock.destroy_reservation();
       layout_constraints_lock = Reservation::NO_RESERVATION;
       memory_manager_lock.destroy_reservation();
-      memory_manager_lock = Reservation::NO_RESERVATION;
-      message_manager_lock.destroy_reservation();
-      message_manager_lock = Reservation::NO_RESERVATION;
+      memory_manager_lock = Reservation::NO_RESERVATION; 
       memory_managers.clear();
       projection_lock.destroy_reservation();
       projection_lock = Reservation::NO_RESERVATION;
@@ -14237,6 +14237,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(sid < MAX_NUM_NODES);
       assert(sid != address_space); // shouldn't be sending messages to ourself
+      assert(message_manager_lock.exists());
 #endif
       MessageManager *result = message_managers[sid];
       if (result != NULL)
