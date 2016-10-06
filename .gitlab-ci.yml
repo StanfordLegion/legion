@@ -5,7 +5,7 @@
 # Global variables (will be set in every job):
 variables:
   WARN_AS_ERROR: "1"
-  MAKEFLAGS: "-s"
+  # MAKEFLAGS: "-s"
   REALM_BACKTRACE: "1"
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
 

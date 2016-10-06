@@ -58,4 +58,4 @@ if __name__ == '__main__':
         'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
     })
 
-    test(root_dir, env['DEBUG'], 'TEST_SPY' in env and env['TEST_SPY'] == '1', env)
+    test(root_dir, env['DEBUG'] == '1', 'TEST_SPY' in env and env['TEST_SPY'] == '1', env)

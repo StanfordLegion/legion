@@ -2232,6 +2232,7 @@ function parallelize_tasks.top_task(global_cx, node)
   -- Now make a new task AST node
   local task_name = node.name .. data.newtuple("parallelized")
   local prototype = std.newtask(task_name)
+  node.prototype:set_parallel_variant(prototype)
   local params = terralib.newlist()
   -- Existing region-typed parameters will now refer to the subregions
   -- passed by indexspace launch. this will avoid rewriting types in AST nodes
