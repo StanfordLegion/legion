@@ -15,12 +15,22 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_08_multiple_partitions)
+project(LegionExample_circuit)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(multiple_partitions multiple_partitions.cc)
-target_link_libraries(multiple_partitions Legion::Legion)
+set(CPU_SOURCES
+  circuit.h         circuit.cc
+                    circuit_cpu.cc
+  circuit_mapper.h  circuit_mapper.cc
+)
+if(Legion_USE_CUDA)
+  set(GPU_SOURCES circuit_gpu.cu)
+  cuda_add_executable(circuit ${CPU_SOURCES} ${GPU_SOURCES})
+else()
+  add_executable(circuit ${CPU_SOURCES})
+endif()
+target_link_libraries(circuit Legion::Legion)

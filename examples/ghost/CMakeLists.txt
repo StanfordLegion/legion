@@ -15,12 +15,12 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_full_ghost)
+project(LegionExample_ghost)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(full_ghost ghost.cc)
-target_link_libraries(full_ghost Legion::Legion)
+add_executable(ghost ghost.cc)
+target_link_libraries(ghost Legion::Legion)

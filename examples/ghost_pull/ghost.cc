@@ -233,13 +233,13 @@ void top_level_task(const Task *task,
             region_requirement = RegionRequirement(disjoint_subregions[left_neighbor_color],
                                                   READ_ONLY, SIMULTANEOUS, 
                                                   disjoint_subregions[left_neighbor_color]);
-            region_requirement.flags |= NO_ACCESS_FLAG;
+            region_requirement.add_flags(NO_ACCESS_FLAG);
             spmd_launcher.add_region_requirement(region_requirement);
 
             region_requirement = RegionRequirement(disjoint_subregions[right_neighbor_color],
                                                   READ_ONLY, SIMULTANEOUS, 
                                                   disjoint_subregions[right_neighbor_color]);
-            region_requirement.flags |= NO_ACCESS_FLAG;
+            region_requirement.add_flags(NO_ACCESS_FLAG);
             spmd_launcher.add_region_requirement(region_requirement);
 
             /* Add the fields we will access to the launcher */
@@ -687,7 +687,7 @@ int check_field_task(const Task *task,
 
         if(!ok) 
         {
-            printf("ERROR: check for location %d failed: expected=%g, actual=%g\n",
+            printf("ERROR: check for location %lld failed: expected=%g, actual=%g\n",
             pir.p[0], exp_value, act_value);
             errors++;
         }

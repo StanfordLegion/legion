@@ -5,9 +5,9 @@
 # Global variables (will be set in every job):
 variables:
   WARN_AS_ERROR: "1"
+  MAKEFLAGS: "-s"
   REALM_BACKTRACE: "1"
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
-  TEST_REGENT: "1"
 
 # Local variables (included on a case-by-case basis in each job):
 .gcc48: &gcc48
@@ -42,13 +42,16 @@ variables:
   CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 .cxx98_spy: &cxx98_spy
   CC_FLAGS: "-std=c++98 -DLEGION_SPY"
-  TEST_SPY: "1"
+  USE_SPY: "1"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
 .cxx98_32bit_normal: &cxx98_32bit_normal
   CC_FLAGS: "-std=c++98 -m32"
   LD_FLAGS: "-m32"
   MARCH: "i686"
+
+.cmake: &cmake
+  USE_CMAKE: "1"
 
 .skip_regent: &skip_regent
   TEST_REGENT: "0"
@@ -97,6 +100,12 @@ before_script:
   tags:
     - macos
 
+# For compute-heavy tests:
+.linux_compute: &linux_compute
+  tags:
+    - linux
+    - compute
+
 ###
 ### Docker Image
 ###
@@ -114,73 +123,17 @@ before_script:
   script:
     - ./test.py
 
-    # - export LG_RT_DIR=$PWD/runtime
-
-    # # Regent
-    # - |
-    #   if [[ "$TEST_REGENT" -eq 1 ]]; then
-    #     ./language/travis.py
-    #   fi
-
-    # # Legion tutorials
-    # - |
-    #   make -s -C tutorial/00_hello_world -j$THREADS
-    #   tutorial/00_hello_world/hello_world -logfile out_%.log
-    #   make -s -C tutorial/01_tasks_and_futures
-    #   tutorial/01_tasks_and_futures/tasks_and_futures -logfile out_%.log
-    #   make -s -C tutorial/02_index_tasks
-    #   tutorial/02_index_tasks/index_tasks -logfile out_%.log
-    #   make -s -C tutorial/03_global_vars
-    #   tutorial/03_global_vars/global_vars -logfile out_%.log
-    #   make -s -C tutorial/04_logical_regions
-    #   tutorial/04_logical_regions/logical_regions -logfile out_%.log
-    #   make -s -C tutorial/05_physical_regions
-    #   tutorial/05_physical_regions/physical_regions -logfile out_%.log
-    #   make -s -C tutorial/06_privileges
-    #   tutorial/06_privileges/privileges -logfile out_%.log
-    #   make -s -C tutorial/07_partitioning
-    #   tutorial/07_partitioning/partitioning -logfile out_%.log
-    #   make -s -C tutorial/08_multiple_partitions
-    #   tutorial/08_multiple_partitions/multiple_partitions -logfile out_%.log
-    #   make -s -C tutorial/09_custom_mapper
-    #   tutorial/09_custom_mapper/custom_mapper -logfile out_%.log
-
-    # # Legion examples
-    # - |
-    #   make -s -C examples/attach_file
-    #   examples/attach_file/attach_file -logfile out_%.log
-    #   make -s -C examples/dynamic_registration
-    #   examples/dynamic_registration/dynamic_registration -logfile out_%.log
-    #   make -s -C examples/full_circuit
-    #   examples/full_circuit/ckt_sim -logfile out_%.log
-    #   make -s -C examples/full_ghost
-    #   examples/full_ghost/ghost -ll:cpu 4 -logfile out_%.log
-    #   make -s -C examples/realm_saxpy
-    #   examples/realm_saxpy/realm_saxpy -logfile out_%.log
-    #   make -s -C examples/spmd_cgsolver
-    #   examples/spmd_cgsolver/cgsolver -ll:cpu 4 -perproc -logfile out_%.log
-
-    # # Legion fuzz tester
-    # - |
-    #   # if [[ "$TEST_SPY" -eq 1 ]]; then
-    #   if [[ "$DEBUG" -eq 1 ]]; then
-    #     git clone https://github.com/StanfordLegion/fuzz-tester fuzz-tester
-    #     pushd fuzz-tester
-    #     WARN_AS_ERROR=0 python main.py
-    #     popd
-    #   fi
-
-    # # Realm
-    # - |
-    #   if [[ "$DEBUG" -eq 0 ]]; then
-    #     make -s -C test/realm DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 clean
-    #     make -s -C test/realm DEBUG=0 SHARED_LOWLEVEL=0 USE_CUDA=0 USE_GASNET=0 run_all
-    #   fi
-    # - |
-    #   if [[ "$DEBUG" -eq 0 ]]; then
-    #     make -s -C test/performance/realm SHARED_LOWLEVEL=0 clean_all
-    #     make -s -C test/performance/realm SHARED_LOWLEVEL=0 run_all
-    #   fi
+# Some additional tests are only run on certain configurations.
+.external_tests: &external_tests
+  script:
+    - |
+      if [[ -n $GITLAB_DEPLOY_KEY ]]; then
+        eval $(ssh-agent -s)
+        ssh-add <(echo "$GITLAB_DEPLOY_KEY")
+        mkdir -p ~/.ssh
+        [[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+      fi
+    - ./test.py --test=external --test=private
 
 ###
 ### Jobs
@@ -215,6 +168,14 @@ linux_gcc49_terra35_cxx98_32bit_debug_noregent:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *debug, *cxx98_32bit_normal, *skip_regent]
+linux_gcc49_terra35_cxx98_debug_checks_cmake_noregent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *cmake, *skip_regent]
+linux_gcc49_terra35_cxx98_debug_checks_external:
+  <<: [*linux_compute, *image, *external_tests]
+  variables:
+    <<: [*gcc49, *terra35, *debug, *cxx98_checks]
 
 # Linux with Clang 3.5
 linux_clang35_terra35_cxx98_release:
@@ -237,6 +198,14 @@ linux_clang35_terra35_cxx98_32bit_debug_noregent:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *debug, *cxx98_32bit_normal, *skip_regent]
+linux_clang35_terra35_cxx98_debug_checks_cmake_noregent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_checks, *cmake, *skip_regent]
+linux_clang35_terra35_cxx98_debug_checks_external:
+  <<: [*linux_compute, *image, *external_tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_checks]
 
 # # macOS with Clang 3.5
 # macos_clang35_cxx98_debug_checks:

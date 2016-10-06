@@ -33,61 +33,93 @@ tutorial = [
 
 examples = [
     ['examples/attach_file/attach_file', []],
+    ['examples/circuit/circuit', []],
     ['examples/dynamic_registration/dynamic_registration', []],
-    ['examples/full_circuit/ckt_sim', []],
-    ['examples/full_ghost/ghost', ['-ll:cpu', '4']],
-    ['examples/spmd_cgsolver/cgsolver', ['-ll:cpu', '4', '-perproc']],
+    ['examples/ghost/ghost', ['-ll:cpu', '4']],
+    ['examples/ghost_pull/ghost_pull', ['-ll:cpu', '4']],
+    ['examples/realm_saxpy/realm_saxpy', []],
+    ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
 ]
 
 def cmd(command, env=None, cwd=None):
     print(' '.join(command))
     return subprocess.check_call(command, env=env, cwd=cwd)
 
-def run_test_regent(launcher, root_dir, env, thread_count):
+def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd([os.path.join(root_dir, 'language/travis.py')], env=env)
 
-def run_cxx(tests, flags, launcher, root_dir, env, thread_count):
+def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
     for test_file, test_flags in tests:
-        test_path = os.path.join(root_dir, test_file)
-        test_dir = os.path.dirname(test_path)
-        cmd(['make', '-s', '-C', test_dir, '-j', str(thread_count)], env=env)
+        test_dir = os.path.dirname(os.path.join(root_dir, test_file))
+        if bin_dir:
+            test_path = os.path.join(bin_dir, os.path.basename(test_file))
+        else:
+            test_path = os.path.join(root_dir, test_file)
+            cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
-def run_test_tutorial(launcher, root_dir, env, thread_count):
+def run_test_tutorial(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
-    run_cxx(tutorial, flags, launcher, root_dir, env, thread_count)
+    run_cxx(tutorial, flags, launcher, root_dir, bin_dir, env, thread_count)
 
-def run_test_examples(launcher, root_dir, env, thread_count):
+def run_test_examples(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
-    run_cxx(examples, flags, launcher, root_dir, env, thread_count)
+    run_cxx(examples, flags, launcher, root_dir, bin_dir, env, thread_count)
 
-def run_test_fuzzer(launcher, root_dir, env, thread_count):
+def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
-    fuzz_dir = os.path.join(root_dir, 'fuzz-tester')
-    cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir], cwd=root_dir)
+    fuzz_dir = os.path.join(tmp_dir, 'fuzz-tester')
+    cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir])
     cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
 
-def run_test_realm(launcher, root_dir, env, thread_count):
+def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     test_dir = os.path.join(root_dir, 'test/realm')
-    cmd(['make', '-s', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'clean'])
-    cmd(['make', '-s', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'])
+    cmd(['make', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'clean'], env=env)
+    cmd(['make', '-C', test_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'], env=env)
 
     perf_dir = os.path.join(root_dir, 'test/performance/realm')
-    cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean'])
-    cmd(['make', '-s', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'])
+    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'clean_all'], env=env)
+    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'SHARED_LOWLEVEL=0', 'run_all'], env=env)
 
-def build_cmake(root_dir, scratch_dir, env, thread_count,
+def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    flags = ['-logfile', 'out_%.log']
+
+    solver_dir = os.path.join(tmp_dir, 'fastSolver2')
+    cmd(['git', 'clone', 'https://github.com/Charles-Chao-Chen/fastSolver2.git', solver_dir])
+    solver = [[os.path.join(solver_dir, 'spmd_benchMark/solver'),
+               ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8']]]
+    run_cxx(solver, flags, launcher, root_dir, None, env, thread_count)
+
+def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    flags = ['-logfile', 'out_%.log']
+
+    miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
+    cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
+         'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
+    cmd(['make', '-C', miniaero_dir, '-j', str(thread_count)], env=env,
+        cwd=miniaero_dir)
+    for test in ['3D_Sod', '3D_Sod_2nd_Order', 'FlatPlate', 'Ramp']:
+        test_dir = os.path.join(miniaero_dir, 'tests', test)
+        cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir)
+
+def build_cmake(root_dir, tmp_dir, env, thread_count,
                 test_tutorial, test_examples):
-    cmd(['cmake'] +
+    build_dir = os.path.join(tmp_dir, 'build')
+    install_dir = os.path.join(tmp_dir, 'install')
+    os.mkdir(build_dir)
+    os.mkdir(install_dir)
+    cmd(['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir] +
         (['-DLegion_BUILD_EXAMPLES=ON'] if test_tutorial or test_examples else []) +
         [root_dir],
-        env=env, cwd=scratch_dir)
-    cmd(['make', '-j', str(thread_count)], env=env, cwd=scratch_dir)
+        env=env, cwd=build_dir)
+    cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
+    cmd(['make', '-C', build_dir, 'install'], env=env)
+    return os.path.join(build_dir, 'bin')
 
 def clean_cxx(tests, root_dir, env, thread_count):
     for test_file, test_flags in tests:
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
-        cmd(['make', '-s', '-C', test_dir, 'clean'], env=env)
+        cmd(['make', '-C', test_dir, 'clean'], env=env)
 
 def build_make_clean(root_dir, env, thread_count, test_tutorial, test_examples):
     if test_tutorial:
@@ -107,6 +139,7 @@ def run_tests(test_modules=None,
               launcher=None,
               thread_count=None,
               root_dir=None,
+              keep_tmp_dir=False,
               verbose=False):
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
@@ -122,6 +155,8 @@ def run_tests(test_modules=None,
     test_examples = module_enabled('examples')
     test_fuzzer = module_enabled('fuzzer', debug)
     test_realm = module_enabled('realm', not debug)
+    test_external = module_enabled('external', False)
+    test_private = module_enabled('private', False)
 
     # Determine which features to build with.
     def feature_enabled(feature, default=True):
@@ -152,42 +187,45 @@ def run_tests(test_modules=None,
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
     ])
 
-    scratch_dir = tempfile.mkdtemp(prefix='build_', dir=root_dir)
-    print('Using build directory: %s' % scratch_dir)
-    print()
+    tmp_dir = tempfile.mkdtemp(dir=root_dir)
+    if verbose:
+        print('Using build directory: %s' % tmp_dir)
+        print()
     try:
         # Build tests.
         if use_cmake:
-            build_cmake(root_dir, scratch_dir, env, thread_count,
-                        test_tutorial, test_examples)
+            bin_dir = build_cmake(root_dir, tmp_dir, env, thread_count,
+                                  test_tutorial, test_examples)
         else:
             # With GNU Make, builds happen inline. But clean here.
             build_make_clean(root_dir, env, thread_count,
                              test_tutorial, test_examples)
+            bin_dir = None
 
         # Run tests.
         if test_regent:
-            run_test_regent(launcher, root_dir, env, thread_count)
+            run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_tutorial:
-            run_test_tutorial(launcher, root_dir, env, thread_count)
+            run_test_tutorial(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_examples:
-            run_test_examples(launcher, root_dir, env, thread_count)
+            run_test_examples(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_fuzzer:
-            run_test_fuzzer(launcher, root_dir, env, thread_count)
+            run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_realm:
-            run_test_realm(launcher, root_dir, env, thread_count)
-    except Exception as e:
-        if verbose:
-            traceback.print_exc()
+            run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+        if test_external:
+            run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+        if test_private:
+            run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+    finally:
+        if keep_tmp_dir:
+            print('Leaving build directory:')
+            print('  %s' % tmp_dir)
         else:
-            print(e, file=sys.stderr)
-        print(file=sys.stderr)
-        print('Tests finished with errors. Leaving build directory:', file=sys.stderr)
-        print('  %s' % scratch_dir, file=sys.stderr)
-    else:
-        print('Tests finished successfully. Removing build directory:')
-        print('  %s' % scratch_dir)
-        shutil.rmtree(scratch_dir)
+            if verbose:
+                print('Removing build directory:')
+                print('  %s' % tmp_dir)
+            shutil.rmtree(tmp_dir)
 
 def driver():
     parser = argparse.ArgumentParser(
@@ -196,7 +234,8 @@ def driver():
     # What tests to run:
     parser.add_argument(
         '--test', dest='test_modules', action='append',
-        choices=['regent', 'tutorial', 'examples', 'fuzzer', 'realm'],
+        choices=['regent', 'tutorial', 'examples', 'fuzzer', 'realm',
+                 'external', 'private'],
         default=None,
         help='Test modules to run (also via TEST_*).')
 
@@ -222,6 +261,10 @@ def driver():
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,
         help='Number threads used to compile.')
+
+    parser.add_argument(
+        '--keep', dest='keep_tmp_dir', action='store_true',
+        help='Keep temporary directory.')
 
     parser.add_argument(
         '-v', '--verbose', dest='verbose', action='store_true',

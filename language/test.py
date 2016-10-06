@@ -118,7 +118,7 @@ def test_compile_fail(filename, debug, verbose, flags, env):
         expected_lines = expected_failure.split('\n')
         for expected_line in expected_lines:
             if expected_line not in lines:
-                raise Exception('Expected failure:\n%s\n\nInstead got:\n%s' % (expected_failure, failure))
+                raise Exception('Command failed:\n%s\n\nExpected failure:\n%s\n\nInstead got:\n%s' % (e.command, expected_failure, failure))
     else:
         raise Exception('Expected failure, but test passed')
 
@@ -236,7 +236,7 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
                 continue
             if skip_patterns and any(re.search(p,test_path) for p in skip_patterns):
                 continue
-            results.append(thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path)))
+            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path))))
 
     thread_pool.close()
 
@@ -247,8 +247,15 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
 
     all_saved_temps = []
     try:
-        for result in results:
-            test_name, filename, saved_temps, outcome, output = result.get()
+        for test_name, filename, result in results:
+            while True:
+                try:
+                    _test_name, _filename, saved_temps, outcome, output = result.get(timeout=60)
+                    assert _test_name == test_name and _filename == filename
+                except multiprocessing.TimeoutError:
+                    print('Potential Hang: (%s) %s' % (test_name, filename))
+                else:
+                    break
             if len(saved_temps) > 0:
                 all_saved_temps.append((test_name, filename, saved_temps))
             if outcome == PASS:

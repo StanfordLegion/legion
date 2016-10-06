@@ -6948,7 +6948,11 @@ namespace Legion {
         derez.advance_pointer(impl_size);
         Realm::Serialization::FixedBufferDeserializer
           deserializer(impl_buffer, impl_size);
-        assert(realm_desc->deserialize(deserializer));
+#ifndef NDEBUG
+        bool ok =
+#endif
+                  realm_desc->deserialize(deserializer);
+        assert(ok);
         free(impl_buffer);
       }
       size_t user_data_size;

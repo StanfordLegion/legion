@@ -1,6 +1,21 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 16.10.0 (October ??, 2016)
+  * Realm
+    - HDF5 support: moved to Realm module, added DMA channels
+    - PAPI support: basic profiling (instructions, caches, branches) added
+  * Build flow
+    - Fixes to support compilation in 32-bit mode
+    - Numerous improvements to CMake build
+  * Regent
+    - Improvements to vectorization of structured codes
+  * Apps
+    - Removed bit-rotted applications - some have been replaced by examples
+        or Regent applications
+  * Tests
+    - New test infrastructure and top-level test script `test.py`
+
 Version 16.08.0 (August 30, 2016)
   * Realm
     - Critical-enough ("error" and "fatal" by default, controlled with

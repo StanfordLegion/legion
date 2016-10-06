@@ -3098,7 +3098,10 @@ namespace Legion {
 	  }
 	}
 
-	bool ok = default_policy_select_must_epoch_processors(ctx,
+#ifndef NDEBUG
+	bool ok =
+#endif
+                  default_policy_select_must_epoch_processors(ctx,
 							      task_groups,
 							      it->first,
 							      proc_map);

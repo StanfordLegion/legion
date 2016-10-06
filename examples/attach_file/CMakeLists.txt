@@ -21,10 +21,6 @@ project(LegionExample_attach_file)
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
-if(NOT Legion_USE_HDF)
-  message(FATAL_ERROR
-    "The attach-file example requires Legion to be built with HDF5 support")
-endif()
 
-add_executable(attach_file multiple_partitions.cc)
+add_executable(attach_file attach_file.cc)
 target_link_libraries(attach_file Legion::Legion)

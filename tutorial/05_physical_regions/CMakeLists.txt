@@ -22,5 +22,5 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(05_physical_regions physical_regions.cc)
-target_link_libraries(05_physical_regions Legion::Legion)
+add_executable(physical_regions physical_regions.cc)
+target_link_libraries(physical_regions Legion::Legion)
