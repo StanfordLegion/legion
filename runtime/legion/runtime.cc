@@ -4843,7 +4843,8 @@ namespace Legion {
       }
       else
       {
-        if (observed_recent || (packaged_messages > 0))
+        if (observed_recent || (packaged_messages > 0) || 
+            !last_message_event.has_triggered())
           shutdown_manager->record_recent_message();
       }
     }
@@ -5883,9 +5884,7 @@ namespace Legion {
     {
       // Instant death
       result = false;
-#ifdef DEBUG_SHUTDOWN_HANG
       log_shutdown.info("Outstanding tasks on node %d", runtime->address_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5894,10 +5893,8 @@ namespace Legion {
     {
       // Instant death
       result = false;
-#ifdef DEBUG_SHUTDOWN_HANG
       log_shutdown.info("Outstanding profiling requests on node %d", 
                         runtime->address_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5906,10 +5903,8 @@ namespace Legion {
     {
       // Instant death
       result = false;
-#ifdef DEBUG_SHUTDOWN_HANG
       log_shutdown.info("Outstanding message on node %d", 
                         runtime->address_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5919,9 +5914,7 @@ namespace Legion {
       // Instant death
       result = false;
       wait_for.insert(pending_event);
-#ifdef DEBUG_SHUTDOWN_HANG
       log_shutdown.info("Pending message on node %d", runtime->address_space);
-#endif
     }
 
     /////////////////////////////////////////////////////////////
