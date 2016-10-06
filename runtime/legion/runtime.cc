@@ -15363,8 +15363,10 @@ namespace Legion {
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Put this on the default channel in case we need to page in any 
+      // version managers from remote nodes
       find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_ADVANCE,
-                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
