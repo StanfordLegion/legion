@@ -5666,12 +5666,10 @@ namespace Legion {
     CompositeNode::CompositeNode(RegionTreeNode* node, CompositeBase *p,
                                  DistributedID own_did)
       : CompositeBase(node_lock), logical_node(node), parent(p), 
-        owner_did(own_did), node_lock(Reservation::create_reservation()) 
+        owner_did(own_did), node_lock(Reservation::create_reservation()),
+        currently_valid(true)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      currently_valid = true;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6007,12 +6005,19 @@ namespace Legion {
     void CompositeNode::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(currently_valid);
-#endif
-      // No need to add valid references to the version states
-      // That is maintained by the CompositeView root holding
-      // references to the root version states
+      if (!currently_valid)
+      {
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+          it->first->notify_valid(mutator);
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+              valid_views.begin(); it != valid_views.end(); it++)
+          it->first->add_nested_valid_ref(owner_did, mutator);
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+              reduction_views.begin(); it != reduction_views.end(); it++)
+          it->first->add_nested_valid_ref(owner_did, mutator);
+        currently_valid = true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6021,7 +6026,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(currently_valid);
-      currently_valid = false;
 #endif
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -6032,6 +6036,7 @@ namespace Legion {
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
         it->first->remove_nested_valid_ref(owner_did, mutator);
+      currently_valid = false;
     } 
 
     //--------------------------------------------------------------------------
@@ -6046,6 +6051,9 @@ namespace Legion {
     void CompositeNode::record_valid_view(LogicalView *view, const FieldMask &m)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+#endif
       // should already hold the lock from the caller
       LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
         valid_views.find(view);
@@ -6074,6 +6082,9 @@ namespace Legion {
                                               const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+#endif
       // should already hold the lock from the caller
       LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
         reduction_views.find(view);

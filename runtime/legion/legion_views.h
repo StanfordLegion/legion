@@ -1228,10 +1228,13 @@ namespace Legion {
       // Keep track of the fields that are valid because we've captured them
       FieldMask valid_fields;
       LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;
-#ifdef DEBUG_LEGION
     protected:
+      // Track whether we are currently valid or not, we start off
+      // currently valid so we can add as many views as we want before
+      // we are first made valid, but then if we become no longer
+      // valid (e.g. on a remote node) then we have to remove our
+      // references and possibly add them again
       bool currently_valid;
-#endif
     };
 
     /**
