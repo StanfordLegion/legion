@@ -10372,9 +10372,6 @@ namespace Legion {
                                                     AddressSpaceID result)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-#endif
       RtUserEvent to_trigger;
       {
         AutoLock o_lock(op_lock);
