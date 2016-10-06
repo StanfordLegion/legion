@@ -7788,6 +7788,15 @@ namespace Legion {
     Runtime::~Runtime(void)
     //--------------------------------------------------------------------------
     {
+      // Make sure we don't send anymore messages
+      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      {
+        if (message_managers[idx] != NULL)
+        {
+          delete message_managers[idx];
+          message_managers[idx] = NULL;
+        }
+      }
       if (profiler != NULL)
       {
         profiler->finalize();
@@ -7803,11 +7812,6 @@ namespace Legion {
         delete it->second;
       }
       proc_managers.clear();
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
-      {
-        if (message_managers[idx] != NULL)
-          delete message_managers[idx];
-      }
       for (std::map<ProjectionID,ProjectionFunction*>::
             iterator it = projection_functions.begin(); 
             it != projection_functions.end(); it++)
