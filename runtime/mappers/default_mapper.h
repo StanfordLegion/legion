@@ -64,6 +64,15 @@ namespace Legion {
         PROFILING_SAMPLE = 1,
         ADVERTISEMENT = 2,
       };
+      enum MappingTags { // mapping tags understood by the default mapper
+	// should the region be virtually mapped?
+	VIRTUAL_MAP = (1 << 0),
+
+	// should the instance be for exactly this subregion?  (by default,
+	//  the default mapper tries to make larger instances that will be
+	//  reused for other mappings)
+	EXACT_REGION = (1 << 1),
+      };
     protected: // Internal types
       struct VariantInfo {
       public:
