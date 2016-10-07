@@ -3978,6 +3978,9 @@ namespace LegionRuntime {
       result += ((elmts+1) * sizeof(IDType)); // +1 for fill size in bytes
       // TODO: unbreak once the serialization stuff is repaired
       //result += requests.compute_size();
+      ByteCountSerializer counter;
+      counter << requests;
+      result += sizeof(size_t) + counter.bytes_used();
       return result;
     }
 
