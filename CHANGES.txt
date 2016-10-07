@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 16.10.0 (October ??, 2016)
+Version 16.10.0 (October 7, 2016)
   * Realm
     - HDF5 support: moved to Realm module, added DMA channels
     - PAPI support: basic profiling (instructions, caches, branches) added
