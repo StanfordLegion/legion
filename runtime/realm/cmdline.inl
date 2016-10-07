@@ -132,6 +132,24 @@ namespace Realm {
       return false;
   }
 
+  template <typename T>
+  bool IntegerCommandLineOption<T>::parse_argument(int& pos, int argc,
+						   const char *argv[])
+  {
+    // requires an additional argument
+    if(pos >= argc) return false;
+
+    // parse into a copy to avoid corrupting the value on failure
+    T val;
+    if(convert_integer_cmdline_argument(argv[pos], val)) {
+      target = val;
+      // can't update this array - have to keep
+      ++pos;
+      return true;
+    } else
+      return false;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -164,5 +182,22 @@ namespace Realm {
     } else
       return false;
   }
+
+  template <typename T>
+  bool MethodCommandLineOption<T>::parse_argument(int& pos, int argc,
+						  const char *argv[])
+  {
+    // requires an additional argument
+    if(pos >= argc) return false;
+
+    // call method - true means it parsed ok
+    if((target->*method)(argv[pos])) {
+      // can't update this array - have to keep
+      ++pos;
+      return true;
+    } else
+      return false;
+  }
+
 
 }; // namespace Realm
