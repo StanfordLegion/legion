@@ -5364,7 +5364,10 @@ namespace Legion {
             LegionMap<CompositeView*,FieldMask>::aligned::iterator finder = 
               nested_composite_views.find(composite_view);
             if (finder == nested_composite_views.end())
+            {
+              composite_view->add_nested_resource_ref(did);
               nested_composite_views[composite_view] = m;
+            }
             else
               finder->second |= m;
           }
