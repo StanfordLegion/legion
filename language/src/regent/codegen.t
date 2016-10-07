@@ -2090,8 +2090,9 @@ local function expr_call_setup_task_args(
   for i, arg in ipairs(args) do
     local arg_type = arg_types[i]
     if not std.is_future(arg_type) then
+      local param_type = param_types[i] -- arg has already been cast to param_type
       local size_actions, size_value = std.compute_serialized_size(
-        arg_type, arg)
+        param_type, arg)
       task_args_setup:insert(size_actions)
       task_args_setup:insert(quote [size] = [size] + [size_value] end)
    end
