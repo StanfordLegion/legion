@@ -8287,6 +8287,8 @@ namespace Legion {
     {
       if (single && (refs.single == NULL))
         return true;
+      else if (!single && refs.multi->empty())
+        return true;
       return false;
     }
 

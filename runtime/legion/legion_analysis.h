@@ -1506,6 +1506,8 @@ namespace Legion {
         InternalSet& operator=(const InternalSet &rhs)
           { assert(false); return *this; }
       public:
+        inline bool empty(void) const { return vector.empty(); }
+      public:
         LegionVector<InstanceRef>::aligned vector; 
       };
     public:
