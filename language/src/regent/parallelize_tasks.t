@@ -71,38 +71,28 @@ local print_point = {
 }
 
 -- TODO: needs to automatically generate these functions
-local function get_ghost_rect_body(res, sz, r, s, f)
+local function get_ghost_rect_body(res, sz, r, s, polarity, f)
   local acc = function(expr) return `([expr].[f]) end
   if f == nil then acc = function(expr) return expr end end
   return quote
-    if [acc(`([s].lo.__ptr))] == [acc(`([r].lo.__ptr))] then
+    if [acc(`([polarity].__ptr))] == 0 then
       [acc(`([res].lo.__ptr))] = [acc(`([r].lo.__ptr))]
       [acc(`([res].hi.__ptr))] = [acc(`([r].hi.__ptr))]
-    else
-      -- wrapped around left, periodic boundary
+    elseif [acc(`([polarity].__ptr))] > 0 then
       if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
-        -- shift left
-        if [acc(`([r].lo.__ptr))] <= [acc(`([s].hi.__ptr))] then
-          [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
-          [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
-        -- shift right
-        elseif [acc(`([s].lo.__ptr))] <= [acc(`([r].hi.__ptr))] then
           [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
           [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
-        else
-          std.assert(false,
-            "ambiguous ghost region, primary region should be bigger for this stencil")
-        end
-      else -- [acc(`([s].lo.__ptr))] < [acc(`([r].hi.__ptr))]
-        -- shift left
-        if [acc(`([s].lo.__ptr))] < [acc(`([r].lo.__ptr))] then
-          [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
-          [acc(`([res].hi.__ptr))] = [acc(`([r].lo.__ptr))] - 1
-        -- shift right
-        else -- [acc(`([s].lo.__ptr)) > [acc(`([r].lo.__ptr))
-          [acc(`([res].lo.__ptr))] = [acc(`([r].hi.__ptr))] + 1
-          [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
-        end
+      else
+        [acc(`([res].lo.__ptr))] = [acc(`([r].hi.__ptr))] + 1
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+      end
+    elseif [acc(`([polarity].__ptr))] < 0 then
+      if [acc(`([r].lo.__ptr))] <= [acc(`([s].hi.__ptr))] then
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
+      else
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([r].lo.__ptr))] - 1
       end
     end
   end
@@ -121,27 +111,27 @@ local function bounds_checks(res)
 end
 
 local get_ghost_rect = {
-  [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d) : std.rect1d
+  [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d, polarity : std.int1d) : std.rect1d
     var sz = root:size()
     var diff_rect : std.rect1d
-    [get_ghost_rect_body(diff_rect, sz, r, s)]
+    [get_ghost_rect_body(diff_rect, sz, r, s, polarity)]
     [bounds_checks(diff_rect)]
     return diff_rect
   end,
-  [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d) : std.rect2d
+  [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d, polarity : std.int2d) : std.rect2d
     var sz = root:size()
     var diff_rect : std.rect2d
-    [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
+    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "x")]
+    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "y")]
     [bounds_checks(diff_rect)]
     return diff_rect
   end,
-  [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d) : std.rect3d
+  [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d, polarity : std.int3d) : std.rect3d
     var sz = root:size()
     var diff_rect : std.rect3d
-    [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, "z")]
+    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "x")]
+    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "y")]
+    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "z")]
     [bounds_checks(diff_rect)]
     return diff_rect
   end
@@ -297,6 +287,50 @@ local function rewrite_symbol(node, from, to)
   return rewrite_symbol_pred(node,
     function(node) return node.value == from end,
     to)
+end
+
+local function extract_constant_offsets(n)
+  assert(n:is(ast.typed.expr.Ctor) and
+         data.all(n.fields:map(function(field)
+           return field.expr_type.type == "integer"
+         end)))
+  local num_nonzeros = 0
+  local offsets = terralib.newlist()
+  for idx = 1, #n.fields do
+    if n.fields[idx].value:is(ast.typed.expr.Constant) then
+      offsets:insert(n.fields[idx].value.value)
+    elseif n.fields[idx].value:is(ast.typed.expr.Unary) and
+           n.fields[idx].value.op == "-" and
+           n.fields[idx].value.rhs:is(ast.typed.expr.Constant) then
+      offsets:insert(-n.fields[idx].value.rhs.value)
+    else
+      assert(false)
+    end
+    if offsets[#offsets] ~= 0 then num_nonzeros = num_nonzeros + 1 end
+  end
+  return offsets, num_nonzeros
+end
+
+local function extract_polarity(node)
+  if Lambda.is_lambda(node) then
+    return extract_polarity(node:expr())
+  elseif node:is(ast.typed.expr.Binary) then
+    if node.op == "%" then
+      return extract_polarity(node.lhs)
+    elseif node.op == "+" then
+      return extract_polarity(node.rhs)
+    else
+      assert(false)
+    end
+  elseif node:is(ast.typed.expr.Ctor) then
+    return extract_constant_offsets(node):map(function(c)
+      if c > 0 then return 1
+      elseif c < 0 then return -1
+      else return 0 end
+    end)
+  else
+    assert(false)
+  end
 end
 
 -- #####################################
@@ -475,6 +509,10 @@ do
     return fields
   end
 
+  function stencil:polarity()
+    return self.__polarity
+  end
+
   function stencil:has_field(field)
     return self.__fields[field:hash()] ~= nil
   end
@@ -535,6 +573,7 @@ do
       __index_expr = args.index,
       __range = args.range,
       __fields = args.fields,
+      __polarity = extract_polarity(args.index),
     }, stencil)
   end
 
@@ -1013,8 +1052,12 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
   local sr_bounds_expr = mk_expr_bounds_access(sr_expr)
   local sr_lo_expr = mk_expr_field_access(sr_bounds_expr, "lo", pr_index_type)
   local sr_hi_expr = mk_expr_field_access(sr_bounds_expr, "hi", pr_index_type)
-  local shift_lo_expr = stencil(sr_lo_expr)
-  local shift_hi_expr = stencil(sr_hi_expr)
+  local shift_lo_expr = stencil:index()(sr_lo_expr)
+  local shift_hi_expr = stencil:index()(sr_hi_expr)
+  local polarity_expr =
+    mk_expr_ctor(stencil:polarity():map(function(c)
+      return mk_expr_constant(c, int)
+    end))
   local tmp_var = get_new_tmp_var(pr_rect_type)
   loop_body:insert(mk_stat_var(tmp_var, nil,
     mk_expr_ctor(terralib.newlist {shift_lo_expr, shift_hi_expr})))
@@ -1022,7 +1065,8 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
     mk_expr_call(get_ghost_rect[pr_rect_type],
                  terralib.newlist { pr_bounds_expr,
                                     sr_bounds_expr,
-                                    mk_expr_id(tmp_var) })
+                                    mk_expr_id(tmp_var),
+                                    polarity_expr })
   --loop_body:insert(mk_stat_block(mk_block(terralib.newlist {
   --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
   --                            pr_bounds_expr)),
@@ -1416,7 +1460,7 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
           assert(partition_symbol)
           local partition_symbol, partition_stats =
             create_image_partition(caller_cx, range_symbol, partition_symbol,
-                                   stencil:index(), pparam)
+                                   stencil, pparam)
           ghost_partition_symbols:insert(partition_symbol)
           stats:insertall(partition_stats)
         end
@@ -1788,28 +1832,6 @@ function reduction_analysis.top_task(task_cx, node)
     symbol = reduction_var,
     declaration = decl,
   }
-end
-
-local function extract_constant_offsets(n)
-  assert(n:is(ast.typed.expr.Ctor) and
-         data.all(n.fields:map(function(field)
-           return field.expr_type.type == "integer"
-         end)))
-  local num_nonzeros = 0
-  local offsets = terralib.newlist()
-  for idx = 1, #n.fields do
-    if n.fields[idx].value:is(ast.typed.expr.Constant) then
-      offsets:insert(n.fields[idx].value.value)
-    elseif n.fields[idx].value:is(ast.typed.expr.Unary) and
-           n.fields[idx].value.op == "-" and
-           n.fields[idx].value.rhs:is(ast.typed.expr.Constant) then
-      offsets:insert(-n.fields[idx].value.rhs.value)
-    else
-      assert(false)
-    end
-    if offsets[#offsets] ~= 0 then num_nonzeros = num_nonzeros + 1 end
-  end
-  return offsets, num_nonzeros
 end
 
 -- #####################################
