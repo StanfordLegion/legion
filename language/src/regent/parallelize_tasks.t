@@ -71,7 +71,7 @@ local print_point = {
 }
 
 -- TODO: needs to automatically generate these functions
-local function get_ghost_rect_body(res, sz, r, s, polarity, f)
+local function get_ghost_rect_body(res, sz, root, r, s, polarity, f)
   local acc = function(expr) return `([expr].[f]) end
   if f == nil then acc = function(expr) return expr end end
   return quote
@@ -80,20 +80,42 @@ local function get_ghost_rect_body(res, sz, r, s, polarity, f)
       [acc(`([res].hi.__ptr))] = [acc(`([r].hi.__ptr))]
     elseif [acc(`([polarity].__ptr))] > 0 then
       if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
-          [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
-          [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+        [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+      -- if the stencil access is completely off, then we can just leave it as it is
+      elseif [acc(`([r].hi.__ptr))] < [acc(`([s].lo.__ptr))] or
+             [acc(`([r].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
       else
         [acc(`([res].lo.__ptr))] = [acc(`([r].hi.__ptr))] + 1
         [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
       end
     elseif [acc(`([polarity].__ptr))] < 0 then
-      if [acc(`([r].lo.__ptr))] <= [acc(`([s].hi.__ptr))] then
+      if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
         [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
         [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
+      elseif [acc(`([r].hi.__ptr))] < [acc(`([s].lo.__ptr))] or
+             [acc(`([r].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
       else
         [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
         [acc(`([res].hi.__ptr))] = [acc(`([r].lo.__ptr))] - 1
       end
+    end
+  end
+end
+
+-- If all stencil accesses fall into the private region,
+-- we do not need to calculate the size of the ghost region
+local function clear_unnecessary_polarity(root, r, polarity, f)
+  local acc = function(expr) return `([expr].[f]) end
+  if f == nil then acc = function(expr) return expr end end
+  return quote
+    if [acc(`([root].lo.__ptr))] == [acc(`([r].lo.__ptr))] and
+       [acc(`([root].hi.__ptr))] == [acc(`([r].hi.__ptr))] then
+      [acc(`([polarity].__ptr))] = 0
     end
   end
 end
@@ -114,24 +136,45 @@ local get_ghost_rect = {
   [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d, polarity : std.int1d) : std.rect1d
     var sz = root:size()
     var diff_rect : std.rect1d
-    [get_ghost_rect_body(diff_rect, sz, r, s, polarity)]
+    diff_rect.lo = root.lo
+    diff_rect.hi = root.lo
+    [clear_unnecessary_polarity(root, r, polarity)]
+    -- If the ghost region is not necessary at all for this stencil,
+    -- make a dummy region with only one element.
+    if polarity == [std.int1d:zero()] then return diff_rect end
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity)]
     [bounds_checks(diff_rect)]
     return diff_rect
   end,
   [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d, polarity : std.int2d) : std.rect2d
     var sz = root:size()
     var diff_rect : std.rect2d
-    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "x")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "y")]
+    diff_rect.lo = root.lo
+    diff_rect.hi = root.lo
+    [clear_unnecessary_polarity(root, r, polarity, "x")]
+    [clear_unnecessary_polarity(root, r, polarity, "y")]
+    -- If the ghost region is not necessary at all for this stencil,
+    -- make a dummy region with only one element.
+    if polarity == [std.int2d:zero()] then return diff_rect end
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "x")]
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "y")]
     [bounds_checks(diff_rect)]
     return diff_rect
   end,
   [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d, polarity : std.int3d) : std.rect3d
     var sz = root:size()
     var diff_rect : std.rect3d
-    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "x")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "y")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, polarity, "z")]
+    diff_rect.lo = root.lo
+    diff_rect.hi = root.lo
+    [clear_unnecessary_polarity(root, r, polarity, "x")]
+    [clear_unnecessary_polarity(root, r, polarity, "y")]
+    [clear_unnecessary_polarity(root, r, polarity, "z")]
+    -- If the ghost region is not necessary at all for this stencil,
+    -- make a dummy region with only one element.
+    if polarity == [std.int3d:zero()] then return diff_rect end
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "x")]
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "y")]
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "z")]
     [bounds_checks(diff_rect)]
     return diff_rect
   end
@@ -319,6 +362,10 @@ local function extract_polarity(node)
       return extract_polarity(node.lhs)
     elseif node.op == "+" then
       return extract_polarity(node.rhs)
+    elseif node.op == "-" then
+      return extract_polarity(node.rhs):map(function(c)
+        return -c
+      end)
     else
       assert(false)
     end
@@ -328,6 +375,9 @@ local function extract_polarity(node)
       elseif c < 0 then return -1
       else return 0 end
     end)
+  elseif node:is(ast.typed.expr.Constant) and
+         node.expr_type.type == "integer" then
+    return terralib.newlist { node.value }
   else
     assert(false)
   end
@@ -812,6 +862,15 @@ end
 
 function caller_context:add_parent_region(region, parent_region)
   self.__parent_region[region] = parent_region
+end
+
+function caller_context:has_parent_region(region)
+  return self.__parent_region[region] ~= nil
+end
+
+function caller_context:get_parent_region(region)
+  assert(self.__parent_region[region] ~= nil)
+  return self.__parent_region[region]
 end
 
 function caller_context:add_color_space(param, color)
@@ -1458,6 +1517,9 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
           local partition_symbol =
             caller_cx:find_primary_partition(pparam, range_symbol)
           assert(partition_symbol)
+          while caller_cx:has_parent_region(range_symbol) do
+            range_symbol = caller_cx:get_parent_region(range_symbol)
+          end
           local partition_symbol, partition_stats =
             create_image_partition(caller_cx, range_symbol, partition_symbol,
                                    stencil, pparam)
@@ -2162,11 +2224,13 @@ function parallelize_tasks.stat(task_cx)
       end
       assert(case_split_if)
       if std.config["debug"] then
+        local index_symbol = get_new_tmp_var(std.as_read(index_expr.expr_type))
         case_split_if.else_block.stats:insertall(terralib.newlist {
-          --mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
-          --             terralib.newlist {
-          --               index_expr
-          --             })),
+          mk_stat_var(index_symbol, nil, index_expr),
+          mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
+                       terralib.newlist {
+                         mk_expr_id(index_symbol),
+                       })),
           mk_stat_expr(mk_expr_call(std.assert,
                        terralib.newlist {
                          mk_expr_constant(false, bool),
