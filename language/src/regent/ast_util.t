@@ -112,7 +112,6 @@ function ast_util.mk_expr_call(fn, args)
       end
       return query:gettype()
     end
-    test()
     local valid, query_type = pcall(test)
     assert(valid)
     fn_type = query_type

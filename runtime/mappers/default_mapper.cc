@@ -1488,6 +1488,13 @@ namespace Legion {
           }
           continue;
         }
+	// Did the application request a virtual mapping for this requirement?
+	if ((task.regions[idx].tag & DefaultMapper::VIRTUAL_MAP) != 0)
+	{
+	  PhysicalInstance virt_inst = PhysicalInstance::get_virtual_instance();
+	  output.chosen_instances[idx].push_back(virt_inst);
+	  continue;
+	}
         // Otherwise make normal instances for the given region
         if (!default_create_custom_instances(ctx, task.target_proc,
                 target_memory, task.regions[idx], idx, missing_fields[idx],
@@ -1995,6 +2002,12 @@ namespace Legion {
       LogicalRegion result = req.region; 
       if (!meets_constraints || (req.privilege == REDUCE))
         return result;
+
+      // If the application requested that we use the exact region requested,
+      // honor that
+      if ((req.tag & DefaultMapper::EXACT_REGION) != 0)
+	return result;
+
       // Simple heuristic here, if we are on a single node, we go all the
       // way to the root since the first-level partition is likely just
       // across processors in the node, however, if we are on multiple nodes

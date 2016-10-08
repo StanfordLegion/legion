@@ -71,39 +71,51 @@ local print_point = {
 }
 
 -- TODO: needs to automatically generate these functions
-local function get_ghost_rect_body(res, sz, r, s, f)
+local function get_ghost_rect_body(res, sz, root, r, s, polarity, f)
   local acc = function(expr) return `([expr].[f]) end
   if f == nil then acc = function(expr) return expr end end
   return quote
-    if [acc(`([s].lo.__ptr))] == [acc(`([r].lo.__ptr))] then
+    if [acc(`([polarity].__ptr))] == 0 then
       [acc(`([res].lo.__ptr))] = [acc(`([r].lo.__ptr))]
       [acc(`([res].hi.__ptr))] = [acc(`([r].hi.__ptr))]
-    else
-      -- wrapped around left, periodic boundary
+    elseif [acc(`([polarity].__ptr))] > 0 then
       if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
-        -- shift left
-        if [acc(`([r].lo.__ptr))] <= [acc(`([s].hi.__ptr))] then
-          [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
-          [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
-        -- shift right
-        elseif [acc(`([s].lo.__ptr))] <= [acc(`([r].hi.__ptr))] then
-          [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
-          [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
-        else
-          std.assert(false,
-            "ambiguous ghost region, primary region should be bigger for this stencil")
-        end
-      else -- [acc(`([s].lo.__ptr))] < [acc(`([r].hi.__ptr))]
-        -- shift left
-        if [acc(`([s].lo.__ptr))] < [acc(`([r].lo.__ptr))] then
-          [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
-          [acc(`([res].hi.__ptr))] = [acc(`([r].lo.__ptr))] - 1
-        -- shift right
-        else -- [acc(`([s].lo.__ptr)) > [acc(`([r].lo.__ptr))
-          [acc(`([res].lo.__ptr))] = [acc(`([r].hi.__ptr))] + 1
-          [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
-        end
+        [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+      -- if the stencil access is completely off, then we can just leave it as it is
+      elseif [acc(`([r].hi.__ptr))] < [acc(`([s].lo.__ptr))] or
+             [acc(`([r].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+      else
+        [acc(`([res].lo.__ptr))] = [acc(`([r].hi.__ptr))] + 1
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
       end
+    elseif [acc(`([polarity].__ptr))] < 0 then
+      if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
+      elseif [acc(`([r].hi.__ptr))] < [acc(`([s].lo.__ptr))] or
+             [acc(`([r].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+      else
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([r].lo.__ptr))] - 1
+      end
+    end
+  end
+end
+
+-- If all stencil accesses fall into the private region,
+-- we do not need to calculate the size of the ghost region
+local function clear_unnecessary_polarity(root, r, polarity, f)
+  local acc = function(expr) return `([expr].[f]) end
+  if f == nil then acc = function(expr) return expr end end
+  return quote
+    if [acc(`([root].lo.__ptr))] == [acc(`([r].lo.__ptr))] and
+       [acc(`([root].hi.__ptr))] == [acc(`([r].hi.__ptr))] then
+      [acc(`([polarity].__ptr))] = 0
     end
   end
 end
@@ -121,27 +133,48 @@ local function bounds_checks(res)
 end
 
 local get_ghost_rect = {
-  [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d) : std.rect1d
+  [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d, polarity : std.int1d) : std.rect1d
     var sz = root:size()
     var diff_rect : std.rect1d
-    [get_ghost_rect_body(diff_rect, sz, r, s)]
+    diff_rect.lo = root.lo
+    diff_rect.hi = root.lo
+    [clear_unnecessary_polarity(root, r, polarity)]
+    -- If the ghost region is not necessary at all for this stencil,
+    -- make a dummy region with only one element.
+    if polarity == [std.int1d:zero()] then return diff_rect end
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity)]
     [bounds_checks(diff_rect)]
     return diff_rect
   end,
-  [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d) : std.rect2d
+  [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d, polarity : std.int2d) : std.rect2d
     var sz = root:size()
     var diff_rect : std.rect2d
-    [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
+    diff_rect.lo = root.lo
+    diff_rect.hi = root.lo
+    [clear_unnecessary_polarity(root, r, polarity, "x")]
+    [clear_unnecessary_polarity(root, r, polarity, "y")]
+    -- If the ghost region is not necessary at all for this stencil,
+    -- make a dummy region with only one element.
+    if polarity == [std.int2d:zero()] then return diff_rect end
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "x")]
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "y")]
     [bounds_checks(diff_rect)]
     return diff_rect
   end,
-  [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d) : std.rect3d
+  [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d, polarity : std.int3d) : std.rect3d
     var sz = root:size()
     var diff_rect : std.rect3d
-    [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, "z")]
+    diff_rect.lo = root.lo
+    diff_rect.hi = root.lo
+    [clear_unnecessary_polarity(root, r, polarity, "x")]
+    [clear_unnecessary_polarity(root, r, polarity, "y")]
+    [clear_unnecessary_polarity(root, r, polarity, "z")]
+    -- If the ghost region is not necessary at all for this stencil,
+    -- make a dummy region with only one element.
+    if polarity == [std.int3d:zero()] then return diff_rect end
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "x")]
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "y")]
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "z")]
     [bounds_checks(diff_rect)]
     return diff_rect
   end
@@ -297,6 +330,57 @@ local function rewrite_symbol(node, from, to)
   return rewrite_symbol_pred(node,
     function(node) return node.value == from end,
     to)
+end
+
+local function extract_constant_offsets(n)
+  assert(n:is(ast.typed.expr.Ctor) and
+         data.all(n.fields:map(function(field)
+           return field.expr_type.type == "integer"
+         end)))
+  local num_nonzeros = 0
+  local offsets = terralib.newlist()
+  for idx = 1, #n.fields do
+    if n.fields[idx].value:is(ast.typed.expr.Constant) then
+      offsets:insert(n.fields[idx].value.value)
+    elseif n.fields[idx].value:is(ast.typed.expr.Unary) and
+           n.fields[idx].value.op == "-" and
+           n.fields[idx].value.rhs:is(ast.typed.expr.Constant) then
+      offsets:insert(-n.fields[idx].value.rhs.value)
+    else
+      assert(false)
+    end
+    if offsets[#offsets] ~= 0 then num_nonzeros = num_nonzeros + 1 end
+  end
+  return offsets, num_nonzeros
+end
+
+local function extract_polarity(node)
+  if Lambda.is_lambda(node) then
+    return extract_polarity(node:expr())
+  elseif node:is(ast.typed.expr.Binary) then
+    if node.op == "%" then
+      return extract_polarity(node.lhs)
+    elseif node.op == "+" then
+      return extract_polarity(node.rhs)
+    elseif node.op == "-" then
+      return extract_polarity(node.rhs):map(function(c)
+        return -c
+      end)
+    else
+      assert(false)
+    end
+  elseif node:is(ast.typed.expr.Ctor) then
+    return extract_constant_offsets(node):map(function(c)
+      if c > 0 then return 1
+      elseif c < 0 then return -1
+      else return 0 end
+    end)
+  elseif node:is(ast.typed.expr.Constant) and
+         node.expr_type.type == "integer" then
+    return terralib.newlist { node.value }
+  else
+    assert(false)
+  end
 end
 
 -- #####################################
@@ -475,6 +559,10 @@ do
     return fields
   end
 
+  function stencil:polarity()
+    return self.__polarity
+  end
+
   function stencil:has_field(field)
     return self.__fields[field:hash()] ~= nil
   end
@@ -535,6 +623,7 @@ do
       __index_expr = args.index,
       __range = args.range,
       __fields = args.fields,
+      __polarity = extract_polarity(args.index),
     }, stencil)
   end
 
@@ -775,6 +864,15 @@ function caller_context:add_parent_region(region, parent_region)
   self.__parent_region[region] = parent_region
 end
 
+function caller_context:has_parent_region(region)
+  return self.__parent_region[region] ~= nil
+end
+
+function caller_context:get_parent_region(region)
+  assert(self.__parent_region[region] ~= nil)
+  return self.__parent_region[region]
+end
+
 function caller_context:add_color_space(param, color)
   assert(self.__color_spaces[param] == nil)
   self.__color_spaces[param] = color
@@ -1013,8 +1111,12 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
   local sr_bounds_expr = mk_expr_bounds_access(sr_expr)
   local sr_lo_expr = mk_expr_field_access(sr_bounds_expr, "lo", pr_index_type)
   local sr_hi_expr = mk_expr_field_access(sr_bounds_expr, "hi", pr_index_type)
-  local shift_lo_expr = stencil(sr_lo_expr)
-  local shift_hi_expr = stencil(sr_hi_expr)
+  local shift_lo_expr = stencil:index()(sr_lo_expr)
+  local shift_hi_expr = stencil:index()(sr_hi_expr)
+  local polarity_expr =
+    mk_expr_ctor(stencil:polarity():map(function(c)
+      return mk_expr_constant(c, int)
+    end))
   local tmp_var = get_new_tmp_var(pr_rect_type)
   loop_body:insert(mk_stat_var(tmp_var, nil,
     mk_expr_ctor(terralib.newlist {shift_lo_expr, shift_hi_expr})))
@@ -1022,7 +1124,8 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
     mk_expr_call(get_ghost_rect[pr_rect_type],
                  terralib.newlist { pr_bounds_expr,
                                     sr_bounds_expr,
-                                    mk_expr_id(tmp_var) })
+                                    mk_expr_id(tmp_var),
+                                    polarity_expr })
   --loop_body:insert(mk_stat_block(mk_block(terralib.newlist {
   --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
   --                            pr_bounds_expr)),
@@ -1414,9 +1517,12 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
           local partition_symbol =
             caller_cx:find_primary_partition(pparam, range_symbol)
           assert(partition_symbol)
+          while caller_cx:has_parent_region(range_symbol) do
+            range_symbol = caller_cx:get_parent_region(range_symbol)
+          end
           local partition_symbol, partition_stats =
             create_image_partition(caller_cx, range_symbol, partition_symbol,
-                                   stencil:index(), pparam)
+                                   stencil, pparam)
           ghost_partition_symbols:insert(partition_symbol)
           stats:insertall(partition_stats)
         end
@@ -1790,28 +1896,6 @@ function reduction_analysis.top_task(task_cx, node)
   }
 end
 
-local function extract_constant_offsets(n)
-  assert(n:is(ast.typed.expr.Ctor) and
-         data.all(n.fields:map(function(field)
-           return field.expr_type.type == "integer"
-         end)))
-  local num_nonzeros = 0
-  local offsets = terralib.newlist()
-  for idx = 1, #n.fields do
-    if n.fields[idx].value:is(ast.typed.expr.Constant) then
-      offsets:insert(n.fields[idx].value.value)
-    elseif n.fields[idx].value:is(ast.typed.expr.Unary) and
-           n.fields[idx].value.op == "-" and
-           n.fields[idx].value.rhs:is(ast.typed.expr.Constant) then
-      offsets:insert(-n.fields[idx].value.rhs.value)
-    else
-      assert(false)
-    end
-    if offsets[#offsets] ~= 0 then num_nonzeros = num_nonzeros + 1 end
-  end
-  return offsets, num_nonzeros
-end
-
 -- #####################################
 -- ## Stencil analyzer
 -- #################
@@ -2140,11 +2224,13 @@ function parallelize_tasks.stat(task_cx)
       end
       assert(case_split_if)
       if std.config["debug"] then
+        local index_symbol = get_new_tmp_var(std.as_read(index_expr.expr_type))
         case_split_if.else_block.stats:insertall(terralib.newlist {
-          --mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
-          --             terralib.newlist {
-          --               index_expr
-          --             })),
+          mk_stat_var(index_symbol, nil, index_expr),
+          mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
+                       terralib.newlist {
+                         mk_expr_id(index_symbol),
+                       })),
           mk_stat_expr(mk_expr_call(std.assert,
                        terralib.newlist {
                          mk_expr_constant(false, bool),

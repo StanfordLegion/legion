@@ -1625,6 +1625,9 @@ namespace Legion {
       Color get_logical_region_color(MapperContext ctx, 
                                      LogicalRegion handle) const;
 
+      DomainPoint get_logical_region_color_point(MapperContext ctx,
+                                                 LogicalRegion handle) const;
+
       Color get_logical_partition_color(MapperContext ctx,
                                                 LogicalPartition handle) const;
 

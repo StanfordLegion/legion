@@ -466,6 +466,8 @@ namespace Legion {
                                           FieldSpace fspace, RegionTreeID tid);
       Color get_logical_region_color(MappingCallInfo *info, 
                                      LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(MappingCallInfo *info, 
+                                                 LogicalRegion handle);
       Color get_logical_partition_color(MappingCallInfo *info,
                                         LogicalPartition handle);
       LogicalRegion get_parent_logical_region(MappingCallInfo *info,

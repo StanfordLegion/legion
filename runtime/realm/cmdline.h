@@ -43,6 +43,7 @@ namespace Realm {
 					 bool (T::*method)(const std::string&), bool keep = false);
 
     bool parse_command_line(std::vector<std::string>& cmdline);
+    bool parse_command_line(int argc, const char *argv[]);
 
   protected:
     std::vector<CommandLineOption *> options;
@@ -58,6 +59,7 @@ namespace Realm {
 
     virtual bool parse_argument(std::vector<std::string>& cmdline,
 				std::vector<std::string>::iterator& pos) = 0;
+    virtual bool parse_argument(int& pos, int argc, const char *argv[]) = 0;
 
   protected:
     std::string optname;
@@ -71,6 +73,7 @@ namespace Realm {
     
     virtual bool parse_argument(std::vector<std::string>& cmdline,
 				std::vector<std::string>::iterator& pos);
+    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
 
   protected:
     T& target;
@@ -82,6 +85,7 @@ namespace Realm {
     
     virtual bool parse_argument(std::vector<std::string>& cmdline,
 				std::vector<std::string>::iterator& pos);
+    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
 
   protected:
     std::string& target;
@@ -93,6 +97,7 @@ namespace Realm {
     
     virtual bool parse_argument(std::vector<std::string>& cmdline,
 				std::vector<std::string>::iterator& pos);
+    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
 
   protected:
     bool& target;
@@ -106,6 +111,7 @@ namespace Realm {
     
     virtual bool parse_argument(std::vector<std::string>& cmdline,
 				std::vector<std::string>::iterator& pos);
+    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
 
   protected:
     T *target;

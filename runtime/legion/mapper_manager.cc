@@ -2581,6 +2581,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint MapperManager::get_logical_region_color_point(
+                                                           MappingCallInfo *ctx,
+                                                           LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      DomainPoint result = runtime->get_logical_region_color_point(handle);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Color MapperManager::get_logical_partition_color(MappingCallInfo *ctx,
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
