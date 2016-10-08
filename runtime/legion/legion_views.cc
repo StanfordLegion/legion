@@ -4003,6 +4003,25 @@ namespace Legion {
       }
     }
 
+#if 0
+    //--------------------------------------------------------------------------
+    void CompositeBase::filter_invalid_fields(PhysicalManager *manager,
+                                              FieldMask &already_valid)
+    //--------------------------------------------------------------------------
+    {
+      // Have to make sure that we have all our meta-data first
+      perform_ready_check(already_valid);
+      // If there are any reductions we can immediately invalidate those fields
+      if (!!reduction_mask)
+      {
+        already_valid -= reduction_mask;
+        if (!already_valid)
+          return;
+      }
+      // Otherwise check to see if it is in the set of valid views
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void CompositeBase::perform_local_analysis(MaterializedView *dst,
         RegionTreeNode *logical_node,
@@ -4139,11 +4158,33 @@ namespace Legion {
                          current_valid_views, false/*need lock*/);
         // Check to see if the destination is already in the set of 
         // valid views in which case we don't need a top copy
+        std::vector<CompositeView*> to_delete;
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
              current_valid_views.begin(); it != current_valid_views.end(); it++)
         {
           if (it->first->is_deferred_view())
+          {
+#if 0
+            // If this is a composite view see if it is already valid
+            // for this particular target instance, if not we can just
+            // keep going
+            if (it->first->is_composite_view())
+            {
+              FieldMask already_valid = it->second;
+              CompositeView *current = it->first->as_composite_view();
+              current->filter_invalid_fields(dst->manager, already_valid);
+              if (!!already_valid)
+              {
+                // Can remove these fields as being needed
+                top_need_copy -= already_valid;
+                it->second -= already_valid;
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+            }
+#endif
             continue;
+          }
 #ifdef DEBUG_LEGION
           assert(it->first->is_materialized_view());
 #endif
@@ -4153,6 +4194,12 @@ namespace Legion {
             top_need_copy -= it->second;
             break;
           }
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<CompositeView*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            current_valid_views.erase(*it);
         }
         // If we still have top-copy fields, then they must be udpated
         if (!!top_need_copy)
@@ -4936,22 +4983,30 @@ namespace Legion {
           return;
       }
       // For any non-dominated fields, see if any of our composite views change
+      FieldMask changed_mask;
       LegionMap<CompositeView*,FieldMask>::aligned local_replacements;
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
             nested_composite_views.begin(); it != 
             nested_composite_views.end(); it++)
       {
         FieldMask overlap = it->second & non_dominated;
         if (!overlap)
           continue;
-        it->first->prune(new_tree, overlap, local_replacements);
+        FieldMask still_valid = overlap;
+        it->first->prune(new_tree, still_valid, local_replacements);
+        // See if any fields were pruned, if so they are changed
+        FieldMask changed = overlap - still_valid;
+        if (!!changed)
+          changed_mask |= changed;
       }
       if (!local_replacements.empty())
       {
-        FieldMask changed_mask;
         for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
               local_replacements.begin(); it != local_replacements.end(); it++)
           changed_mask |= it->second;
+      }
+      if (!!changed_mask)
+      {
         CompositeView *view = clone(changed_mask, local_replacements);
         replacements[view] = changed_mask;
         // Any fields that changed are no longer valid
