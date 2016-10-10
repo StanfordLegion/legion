@@ -4923,8 +4923,7 @@ local function expr_copy_setup_region(
       c.legion_predicate_true(), 0, [tag])
   end)
 
-  local region_src_i
-  local region_dst_i
+  local region_src_i, region_dst_i
   for i, src_field in ipairs(src_fields) do
     local dst_field = dst_fields[i]
     local src_copy_fields = data.filter(
@@ -4940,6 +4939,9 @@ local function expr_copy_setup_region(
     local dst_parent = get_container_root(
       cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
 
+    local scratch = any_fields_are_scratch(cx, src_container_type, src_copy_fields) or
+      any_fields_are_scratch(cx, dst_container_type, dst_copy_fields)
+
     for j, src_copy_field in ipairs(src_copy_fields) do
       local dst_copy_field = dst_copy_fields[j]
       local src_field_id = cx:region_or_list(src_container_type):field_id(src_copy_field)
@@ -4951,12 +4953,13 @@ local function expr_copy_setup_region(
         dst_mode = std.reduction_op_ids[op][dst_field_type]
       end
 
-      local scratch = any_fields_are_scratch(cx, src_container_type, src_copy_fields) or
-        any_fields_are_scratch(cx, dst_container_type, dst_copy_fields)
-
       local src_i, dst_i
       local add_new_requirement = false
-      if not scratch then
+      if scratch or op then
+        src_i = terralib.newsymbol(uint, "src_i")
+        dst_i = terralib.newsymbol(uint, "dst_i")
+        add_new_requirement = true
+      else
         if not region_src_i then
           region_src_i = terralib.newsymbol(uint, "region_src_i")
           region_dst_i = terralib.newsymbol(uint, "region_dst_i")
@@ -4964,10 +4967,6 @@ local function expr_copy_setup_region(
         end
         src_i = region_src_i
         dst_i = region_dst_i
-      else
-        src_i = terralib.newsymbol(uint, "src_i")
-        dst_i = terralib.newsymbol(uint, "dst_i")
-        add_new_requirement = true
       end
 
       if add_new_requirement then
