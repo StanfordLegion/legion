@@ -49,6 +49,10 @@ namespace Realm {
     PMID_PCTRS_IPC,  // instructions/clocks performance counters
     PMID_PCTRS_TLB,  // TLB miss counters
     PMID_PCTRS_BP,   // branch predictor performance counters
+
+    // as the name suggests, this should always be last, allowing apps/runtimes
+    // sitting on top of Realm to use some of the ID space
+    PMID_REALM_LAST = 10000,
   };
 
   namespace ProfilingMeasurements {

@@ -222,6 +222,37 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // ProfilingRequest
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void ProfilingRequest::populate_realm_profiling_request(
+					      Realm::ProfilingRequest& req)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<ProfilingMeasurementID>::const_iterator it =
+	     requested_measurements.begin();
+	   it != requested_measurements.end();
+	   ++it)
+      {
+	if((int)(*it) <= (int)(Realm::PMID_REALM_LAST))
+	  req.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ProfilingResponse
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void ProfilingResponse::attach_realm_profiling_response(
+					const Realm::ProfilingResponse& resp)
+    //--------------------------------------------------------------------------
+    {
+      realm_resp = &resp;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Mapper 
     /////////////////////////////////////////////////////////////
 
