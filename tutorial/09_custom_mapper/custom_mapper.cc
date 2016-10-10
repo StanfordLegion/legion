@@ -117,8 +117,8 @@ public:
       Runtime *rt, Processor local);
 public:
   virtual void select_task_options(const MapperContext    ctx,
-                                       const Task&            task,
-                                             TaskOptions&     output);
+				   const Task&            task,
+				         TaskOptions&     output);
   virtual void slice_task(const MapperContext ctx,
                           const Task& task,
                           const SliceTaskInput& input,
@@ -127,6 +127,9 @@ public:
                         const Task& task,
                         const MapTaskInput& input,
                               MapTaskOutput& output);
+  virtual void report_profiling(const MapperContext      ctx,
+				const Task&              task,
+				const TaskProfilingInfo& input);
 };
 
 class PartitioningMapper : public DefaultMapper {
@@ -608,6 +611,57 @@ void AdversarialMapper::map_task(const MapperContext         ctx,
   }
   // Give it a random priority
   output.task_priority = default_generate_random_integer();
+
+  // Finally, let's ask for some profiling data to see the impact of our choices
+  {
+    using namespace ProfilingMeasurements;
+    output.task_prof_requests.add_measurement<OperationTimeline>();
+    output.task_prof_requests.add_measurement<RuntimeOverhead>();
+  }
+}
+
+void AdversarialMapper::report_profiling(const MapperContext      ctx,
+					 const Task&              task,
+					 const TaskProfilingInfo& input)
+{
+  // Local import of measurement names saves typing here without polluting
+  // namespace for everybody else
+  using namespace ProfilingMeasurements;
+
+  // You are not guaranteed to get measurements you asked for, so make sure to
+  // check the result of calls to get_measurement (or just call has_measurement
+  // first).  Also, the call returns a copy of the result that you must delete
+  // yourself.
+  OperationTimeline *timeline =
+    input.profiling_responses.get_measurement<OperationTimeline>();
+  if (timeline)
+  {
+    printf("Operation timeline for task %s: ready=%lld start=%lld stop=%lld\n",
+	   task.get_task_name(),
+	   timeline->ready_time,
+	   timeline->start_time,
+	   timeline->end_time);
+    delete timeline;
+  }
+  else
+    printf("No operation timeline for task %s\n", task.get_task_name());
+
+  RuntimeOverhead *overhead =
+    input.profiling_responses.get_measurement<RuntimeOverhead>();
+  if (overhead)
+  {
+    long long total = (overhead->application_time +
+		       overhead->runtime_time +
+		       overhead->wait_time);
+    if (total <= 0) total = 1;
+    printf("Runtime overhead for task %s: runtime=%.1f%% wait=%.1f%%\n",
+	   task.get_task_name(),
+	   (100.0 * overhead->runtime_time / total),
+	   (100.0 * overhead->wait_time / total));
+    delete overhead;
+  }
+  else
+    printf("No runtime overhead data for task %s\n", task.get_task_name());
 }
 
 PartitioningMapper::PartitioningMapper(Machine m,
