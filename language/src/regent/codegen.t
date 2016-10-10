@@ -2268,16 +2268,20 @@ local terra get_root_of_tree(runtime : c.legion_runtime_t,
   return r
 end
 
+local function any_fields_are_scratch(cx, container_type, field_paths)
+  assert(cx:has_region_or_list(container_type))
+  local are_scratch = field_paths:map(
+    function(field_path) return cx:region_or_list(container_type):field_is_scratch(field_path) end)
+  return #are_scratch > 0 and data.all(unpack(are_scratch))
+end
+
 local function raise_privilege_depth(cx, value, container_type, field_paths, optional)
   -- This method is also used to adjust privilege depth for the
   -- callee's side, so check optional before asserting that
   -- container_type is not defined.
   local scratch = false
   if not optional or cx:has_region_or_list(container_type) then
-    assert(cx:has_region_or_list(container_type))
-    local are_scratch = field_paths:map(
-      function(field_path) return cx:region_or_list(container_type):field_is_scratch(field_path) end)
-    scratch = #are_scratch > 0 and data.all(unpack(are_scratch))
+    scratch = any_fields_are_scratch(cx, container_type, field_paths)
   end
 
   if scratch then
@@ -4918,6 +4922,9 @@ local function expr_copy_setup_region(
     var [launcher] = c.legion_copy_launcher_create(
       c.legion_predicate_true(), 0, [tag])
   end)
+
+  local region_src_i
+  local region_dst_i
   for i, src_field in ipairs(src_fields) do
     local dst_field = dst_fields[i]
     local src_copy_fields = data.filter(
@@ -4944,17 +4951,41 @@ local function expr_copy_setup_region(
         dst_mode = std.reduction_op_ids[op][dst_field_type]
       end
 
+      local scratch = any_fields_are_scratch(cx, src_container_type, src_copy_fields) or
+        any_fields_are_scratch(cx, dst_container_type, dst_copy_fields)
+
+      local src_i, dst_i
+      local add_new_requirement = false
+      if not scratch then
+        if not region_src_i then
+          region_src_i = terralib.newsymbol(uint, "region_src_i")
+          region_dst_i = terralib.newsymbol(uint, "region_dst_i")
+          add_new_requirement = true
+        end
+        src_i = region_src_i
+        dst_i = region_dst_i
+      else
+        src_i = terralib.newsymbol(uint, "src_i")
+        dst_i = terralib.newsymbol(uint, "dst_i")
+        add_new_requirement = true
+      end
+
+      if add_new_requirement then
+        actions:insert(quote
+          var [src_i] = add_src_region(
+            [launcher], [src_value].impl, c.READ_ONLY, c.EXCLUSIVE,
+            [src_parent], 0, false)
+          var [dst_i] = add_dst_region(
+            [launcher], [dst_value].impl, dst_mode, c.EXCLUSIVE,
+            [dst_parent], 0, false)
+        end)
+      end
+
       actions:insert(quote
-        var src_i = add_src_region(
-          [launcher], [src_value].impl, c.READ_ONLY, c.EXCLUSIVE,
-          [src_parent], 0, false)
         c.legion_copy_launcher_add_src_field(
-          [launcher], src_i, src_field_id, true)
-        var dst_i = add_dst_region(
-          [launcher], [dst_value].impl, dst_mode, c.EXCLUSIVE,
-          [dst_parent], 0, false)
+          [launcher], [src_i], [src_field_id], true)
         c.legion_copy_launcher_add_dst_field(
-          [launcher], dst_i, dst_field_id, true)
+          [launcher], [dst_i], [dst_field_id], true)
       end)
     end
   end
