@@ -4080,7 +4080,7 @@ namespace Legion {
         physical_regions.push_back(PhysicalRegion(
               legion_new<PhysicalRegionImpl>(created_requirements.back(), 
                 ApEvent::NO_AP_EVENT, false/*mapped*/, this, map_id, tag, 
-                is_leaf(), runtime)));
+                is_leaf(), false/*virtual mapped*/, runtime)));
     }
 
     //--------------------------------------------------------------------------
@@ -5113,7 +5113,7 @@ namespace Legion {
         physical_regions.push_back(PhysicalRegion(
               legion_new<PhysicalRegionImpl>(created_requirements.back(),
                 ApEvent::NO_AP_EVENT, false/*mapped*/, this, map_id, tag, 
-                is_leaf(), runtime)));
+                is_leaf(), false/*virtual mapped*/, runtime)));
       return int(regions.size() + created_requirements.size() - 1);
     }
 
@@ -6982,7 +6982,8 @@ namespace Legion {
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegionImpl>(clone_requirements[idx],
                     ApEvent::NO_AP_EVENT, false/*mapped*/,
-                    this, map_id, tag, false/*leaf*/, runtime)));
+                    this, map_id, tag, false/*leaf*/, 
+                    virtual_mapped[idx], runtime)));
             // Don't switch coherence modes since we virtually
             // mapped it which means we will map in the parent's
             // context
@@ -7002,7 +7003,8 @@ namespace Legion {
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegionImpl>(clone_requirements[idx],
                     ApEvent::NO_AP_EVENT, false/*mapped*/,
-                    this, map_id, tag, false/*leaf*/, runtime)));
+                    this, map_id, tag, false/*leaf*/, 
+                    false/*virtual mapped*/, runtime)));
             unmap_events[idx] = Runtime::create_ap_user_event();
             // Trigger the user event when the region is 
             // actually ready to be used
@@ -7022,7 +7024,8 @@ namespace Legion {
             physical_regions.push_back(PhysicalRegion(
                   legion_new<PhysicalRegionImpl>(clone_requirements[idx],
                     ApEvent::NO_AP_EVENT/*already mapped*/, true/*mapped*/,
-                    this, map_id, tag, variant->is_leaf(), runtime)));
+                    this, map_id, tag, variant->is_leaf(), 
+                    false/*virtual mapped*/, runtime)));
             // Now set the reference for this physical region 
             // which is pretty much a dummy physical reference except
             // it references the same view as the outer reference

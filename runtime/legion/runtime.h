@@ -284,7 +284,7 @@ namespace Legion {
     public:
       PhysicalRegionImpl(const RegionRequirement &req, ApEvent ready_event,
                          bool mapped, SingleTask *ctx, MapperID mid,
-                         MappingTagID tag, bool leaf, Runtime *rt);
+                         MappingTagID tag, bool leaf, bool virt, Runtime *rt);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
       ~PhysicalRegionImpl(void);
     public:
@@ -327,6 +327,7 @@ namespace Legion {
       const MapperID map_id;
       const MappingTagID tag;
       const bool leaf_region;
+      const bool virtual_mapped;
     private:
       // Event for when the instance ref is ready
       ApEvent ready_event;
