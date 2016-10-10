@@ -253,7 +253,7 @@ void use_data_task(const Task *task,
 					      my_lr,
 					      DefaultMapper::EXACT_REGION)
 			    .add_field(FID_DATA));
-    PhysicalRegion pr = runtime->map_region(ctx, launcher);
+    pr = runtime->map_region(ctx, launcher);
   }
 
   coord_t bounds_lo = my_bounds.lo[0];
