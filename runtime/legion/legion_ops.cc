@@ -235,6 +235,8 @@ namespace Legion {
 #endif
       r.parent = r.region;
       r.prop = EXCLUSIVE;
+      if (r.privilege == WRITE_DISCARD)
+        r.privilege = READ_WRITE;
     }
 
     //--------------------------------------------------------------------------

@@ -6989,7 +6989,7 @@ namespace Legion {
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
             physical_regions.push_back(PhysicalRegion(
-                  legion_new<PhysicalRegionImpl>(regions[idx],
+                  legion_new<PhysicalRegionImpl>(clone_requirements[idx],
                     ApEvent::NO_AP_EVENT, false/*mapped*/,
                     this, map_id, tag, false/*leaf*/, runtime)));
             // Don't switch coherence modes since we virtually
@@ -7009,7 +7009,7 @@ namespace Legion {
             // people to wait on the value
             clone_requirements[idx].privilege = READ_WRITE;
             physical_regions.push_back(PhysicalRegion(
-                  legion_new<PhysicalRegionImpl>(regions[idx],
+                  legion_new<PhysicalRegionImpl>(clone_requirements[idx],
                     ApEvent::NO_AP_EVENT, false/*mapped*/,
                     this, map_id, tag, false/*leaf*/, runtime)));
             unmap_events[idx] = Runtime::create_ap_user_event();
