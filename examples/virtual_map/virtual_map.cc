@@ -39,6 +39,10 @@ enum {
   PID_ALLOCED_DATA = 4,
 };
 
+enum {
+  PFID_USE_DATA_TASK = 77,
+};
+
 LegionRuntime::Logger::Category log_app("app");
 
 struct MakeDataTaskArgs {
@@ -54,6 +58,7 @@ void top_level_task(const Task *task,
   size_t average_output_size = 100;
   size_t total_region_size = 1 << 30;
   int random_seed = 12345;
+  bool use_projection_functor = false;
 
   const InputArgs &command_args = HighLevelRuntime::get_input_args();
 
@@ -62,6 +67,7 @@ void top_level_task(const Task *task,
     .add_option_int("-s", average_output_size)
     .add_option_int("-l", total_region_size)
     .add_option_int("-seed", random_seed)
+    .add_option_bool("-proj", use_projection_functor)
     .parse_command_line(command_args.argc, (const char **)command_args.argv);
 
   if(!ok) {
@@ -123,13 +129,28 @@ void top_level_task(const Task *task,
     IndexLauncher launcher(USE_DATA_TASK_ID, Domain::from_rect<1>(subregion_idxs),
 			   TaskArgument(0, 0),
 			   ArgumentMap());
-    launcher.add_region_requirement(RegionRequirement(lp,
-						      0, // identity projection
-						      READ_ONLY,
-						      EXCLUSIVE,
-						      lr,
-						      DefaultMapper::VIRTUAL_MAP)
-				    .add_field(FID_DATA));
+    if(use_projection_functor) {
+      // use a projection functor to tell the runtime precisely which sub-subregion
+      // each point task will use so that it can be mapped before the task executes -
+      // make sure the default mapper doesn't try to map the parent region though
+      launcher.add_region_requirement(RegionRequirement(lp,
+							PFID_USE_DATA_TASK,
+							READ_ONLY,
+							EXCLUSIVE,
+							lr,
+							DefaultMapper::EXACT_REGION)
+				      .add_field(FID_DATA));
+    } else {
+      // OR, use another virtual mapping and let the use_data_task walk the region
+      // tree itself and do an inline mapping within the task
+      launcher.add_region_requirement(RegionRequirement(lp,
+							0, // identity projection
+							READ_ONLY,
+							EXCLUSIVE,
+							lr,
+							DefaultMapper::VIRTUAL_MAP)
+				      .add_field(FID_DATA));
+    }
     FutureMap fm = runtime->execute_index_space(ctx, launcher);
     fm.wait_all_results();
   }
@@ -143,7 +164,7 @@ void make_data_task(const Task *task,
   int subregion_index = task->index_point.get_point<1>();
 
   // we should _NOT_ have a mapping of our region
-  //assert(!regions[0].is_mapped());
+  assert(!regions[0].is_mapped());
 
   // first, decide how much data we're going to produce
   unsigned short xsubi[3];
@@ -219,12 +240,11 @@ void use_data_task(const Task *task,
 		   const std::vector<PhysicalRegion> &regions,
 		   Context ctx, Runtime *runtime)
 {
-  runtime->unmap_all_regions(ctx);
   int subregion_index = task->index_point.get_point<1>();
 
   PhysicalRegion pr = regions[0];
   Rect<1> my_bounds;
-  bool was_virtual_mapped = true;
+  bool was_virtual_mapped = !regions[0].is_mapped();
   if(was_virtual_mapped) {
     // find the actual subregion containing our input data by walking the
     // region tree
@@ -254,12 +274,18 @@ void use_data_task(const Task *task,
 					      DefaultMapper::EXACT_REGION)
 			    .add_field(FID_DATA));
     pr = runtime->map_region(ctx, launcher);
+  } else {
+    // we've got the exact region mapped for us, so ask for its size
+    LogicalRegion my_lr = regions[0].get_logical_region();
+    IndexSpace my_is = my_lr.get_index_space();
+    my_bounds = runtime->get_index_space_domain(my_is).get_rect<1>();
   }
 
   coord_t bounds_lo = my_bounds.lo[0];
   coord_t input_size = my_bounds.volume();
 
-  log_app.print() << "use data: subregion " << subregion_index << ", input size = " << input_size;
+  log_app.print() << "use data: subregion " << subregion_index << ", input size = " << input_size
+		  << (was_virtual_mapped ? " (virtual mapped)" : " (NOT virtual mapped)");
 
 
   // check that the data is what we expect
@@ -271,8 +297,10 @@ void use_data_task(const Task *task,
       int exp = (subregion_index * 10000) + i;
       int act = ra.read(DomainPoint::from_point<1>(bounds_lo + i));
       if(exp != act) {
-	log_app.error() << "mismatch in subregion " << subregion_index << ": ["
-			<< (bounds_lo + i) << "] = " << act << " (expected " << exp << ")";
+	// don't print more than 10 errors
+	if(errors < 10)
+	  log_app.error() << "mismatch in subregion " << subregion_index << ": ["
+			  << (bounds_lo + i) << "] = " << act << " (expected " << exp << ")";
 	errors++;
       }
     }	       
@@ -283,6 +311,48 @@ void use_data_task(const Task *task,
     runtime->unmap_region(ctx, pr);
 
   //return errors;
+}
+
+class UseDataProjectionFunctor : public ProjectionFunctor {
+public:
+  UseDataProjectionFunctor(void);
+
+  virtual LogicalRegion project(Context ctx, Task *task,
+				unsigned index,
+				LogicalRegion upper_bound,
+				const DomainPoint &point);
+
+  virtual LogicalRegion project(Context ctx, Task *task, 
+				unsigned index,
+				LogicalPartition upper_bound,
+				const DomainPoint &point);
+};
+
+UseDataProjectionFunctor::UseDataProjectionFunctor(void) {}
+
+// region -> region: UNUSED
+LogicalRegion UseDataProjectionFunctor::project(Context ctx, Task *task,
+						unsigned index,
+						LogicalRegion upper_bound,
+						const DomainPoint &point)
+{
+  assert(0);
+  return LogicalRegion::NO_REGION;
+}
+
+// partition -> region path: [index].PID_ALLOCED_DATA.0
+LogicalRegion UseDataProjectionFunctor::project(Context ctx, Task *task, 
+						unsigned index,
+						LogicalPartition upper_bound,
+						const DomainPoint &point)
+{
+  // if our application did more than one index launch using this projection functor,
+  // we could consider memoizing the result of this lookup to reduce overhead on subsequent
+  // launches
+  LogicalRegion lr1 = runtime->get_logical_subregion_by_color(ctx, upper_bound, point);
+  LogicalPartition lp1 = runtime->get_logical_partition_by_color(ctx, lr1, PID_ALLOCED_DATA);
+  LogicalRegion lr2 = runtime->get_logical_subregion_by_color(ctx, lp1, 0);
+  return lr2;
 }
 
 int main(int argc, char **argv)
@@ -307,6 +377,9 @@ int main(int argc, char **argv)
     Runtime::preregister_task_variant<use_data_task>(use_data_registrar, 
 						     "Use Data Task");
   }
+
+  Runtime::preregister_projection_functor(PFID_USE_DATA_TASK,
+					  new UseDataProjectionFunctor);
 
   // Fire up the runtime
   return Runtime::start(argc, argv);
