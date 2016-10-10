@@ -326,6 +326,8 @@ public:
 				unsigned index,
 				LogicalPartition upper_bound,
 				const DomainPoint &point);
+
+  virtual unsigned get_depth(void) const;
 };
 
 UseDataProjectionFunctor::UseDataProjectionFunctor(void) {}
@@ -353,6 +355,11 @@ LogicalRegion UseDataProjectionFunctor::project(Context ctx, Task *task,
   LogicalPartition lp1 = runtime->get_logical_partition_by_color(ctx, lr1, PID_ALLOCED_DATA);
   LogicalRegion lr2 = runtime->get_logical_subregion_by_color(ctx, lp1, 0);
   return lr2;
+}
+
+unsigned UseDataProjectionFunctor::get_depth(void) const
+{
+  return 1;
 }
 
 int main(int argc, char **argv)
