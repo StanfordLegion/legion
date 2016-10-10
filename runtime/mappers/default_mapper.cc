@@ -2068,7 +2068,7 @@ namespace Legion {
     {
       log_mapper.error("Default mapper failed allocation for region "
                        "requirement %d of task %s (UID %lld) in memory " IDFMT
-                       "for processor " IDFMT ". This means the working set "
+                       " for processor " IDFMT ". This means the working set "
                        "of your application is too big for the allotted "
                        "capacity of the given memory under the default "
                        "mapper's mapping scheme. You have three choices: "
