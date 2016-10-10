@@ -7584,6 +7584,18 @@ namespace Legion {
             task->get_task_name(), task->get_unique_id());
         assert(false);
       }
+      const unsigned projection_depth = 
+        runtime->forest->get_projection_depth(result, req.region);
+      if (projection_depth != functor->get_depth())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which has projection depth %d which "
+            "is different from stated projection depth of the functor "
+            "which is %d for region requirement %d of task %s (ID %lld)",
+            projection_id, projection_depth, functor->get_depth(),
+            idx, task->get_task_name(), task->get_unique_id());
+        assert(false);
+      }
 #endif
     }
 
@@ -7614,6 +7626,18 @@ namespace Legion {
             "upper bound region for region requirement %d of "
             "task %s (UID %lld)", projection_id, idx,
             task->get_task_name(), task->get_unique_id());
+        assert(false);
+      }
+      const unsigned projection_depth = 
+        runtime->forest->get_projection_depth(result, req.partition);
+      if (projection_depth != functor->get_depth())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which has projection depth %d which "
+            "is different from stated projection depth of the functor "
+            "which is %d for region requirement %d of task %s (ID %lld)",
+            projection_id, projection_depth, functor->get_depth(),
+            idx, task->get_task_name(), task->get_unique_id());
         assert(false);
       }
 #endif

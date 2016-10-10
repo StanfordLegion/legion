@@ -4349,6 +4349,44 @@ namespace Legion {
       }
     }
 
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    unsigned RegionTreeForest::get_projection_depth(LogicalRegion result,
+                                                    LogicalRegion upper)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *start = get_node(result);
+      RegionNode *finish = get_node(upper);
+      unsigned depth = 0;
+      while (start != finish)
+      {
+        assert(start->get_depth() > finish->get_depth());
+        start = start->parent->parent;
+        depth++;
+      }
+      return depth;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RegionTreeForest::get_projection_depth(LogicalRegion result,
+                                                    LogicalPartition upper)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *start = get_node(result);
+      assert(start->parent != NULL);
+      PartitionNode *finish = get_node(upper);
+      unsigned depth = 0;
+      while (start->parent != finish)
+      {
+        assert(start->parent->get_depth() > finish->get_depth());
+        start = start->parent->parent;
+        depth++;
+        assert(start->parent != NULL);
+      }
+      return depth;
+    }
+#endif
+
     //--------------------------------------------------------------------------
     PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
                     Memory target, const std::vector<size_t> &field_sizes, 

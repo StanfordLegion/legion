@@ -509,6 +509,12 @@ namespace Legion {
                            RegionTreePath &path);
       void initialize_path(IndexTreeNode* child, IndexTreeNode *parent,
                            RegionTreePath &path);
+#ifdef DEBUG_LEGION
+    public:
+      unsigned get_projection_depth(LogicalRegion result, LogicalRegion upper);
+      unsigned get_projection_depth(LogicalRegion result, 
+                                    LogicalPartition upper);
+#endif
     public:
 #ifdef NEW_INSTANCE_CREATION
       ApEvent create_instance(const Domain &dom, Memory target,
