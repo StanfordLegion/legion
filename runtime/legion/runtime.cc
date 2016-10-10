@@ -971,10 +971,10 @@ namespace Legion {
     PhysicalRegionImpl::PhysicalRegionImpl(const RegionRequirement &r, 
                                    ApEvent ready, bool m, SingleTask *ctx, 
                                    MapperID mid, MappingTagID t, 
-                                   bool leaf, Runtime *rt)
+                                   bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
-        leaf_region(leaf), ready_event(ready), req(r), mapped(m), 
-        valid(false), trigger_on_unmap(false)
+        leaf_region(leaf), virtual_mapped(virt), ready_event(ready), 
+        req(r), mapped(m), valid(false), trigger_on_unmap(false)
     //--------------------------------------------------------------------------
     {
 #ifdef BOUNDS_CHECKS
@@ -985,7 +985,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalRegionImpl::PhysicalRegionImpl(const PhysicalRegionImpl &rhs)
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
-        leaf_region(false), ready_event(ApEvent::NO_AP_EVENT), mapped(false),
+        leaf_region(false), virtual_mapped(false), 
+        ready_event(ApEvent::NO_AP_EVENT), mapped(false),
         valid(false), trigger_on_unmap(false)
     //--------------------------------------------------------------------------
     {
@@ -1080,6 +1081,16 @@ namespace Legion {
       // map it before we can return an accessor
       if (!mapped)
       {
+        if (virtual_mapped)
+        {
+          log_run.error("Illegal inline mapping of virtual mapped region in "
+                        "task %s (UID %lld)", context->get_task_name(),
+                        context->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_ILLEGAL_IMPLICIT_MAPPING);
+        }
         runtime->remap_region(context, PhysicalRegion(this));
         // At this point we should have a new ready event
         // and be mapped
@@ -1128,6 +1139,16 @@ namespace Legion {
       // map it before we can return an accessor
       if (!mapped)
       {
+        if (virtual_mapped)
+        {
+          log_run.error("Illegal inline mapping of virtual mapped region in "
+                        "task %s (UID %lld)", context->get_task_name(),
+                        context->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_ILLEGAL_IMPLICIT_MAPPING);
+        }
         runtime->remap_region(context, PhysicalRegion(this));
         // At this point we should have a new ready event
         // and be mapped

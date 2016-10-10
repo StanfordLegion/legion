@@ -1808,7 +1808,8 @@ namespace Legion {
       termination_event = Runtime::create_ap_user_event();
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
-                              map_id, tag, false/*leaf*/, runtime));
+                              map_id, tag, false/*leaf*/, 
+                              false/*virtual mapped*/, runtime));
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
@@ -1856,7 +1857,8 @@ namespace Legion {
       termination_event = Runtime::create_ap_user_event();
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
-                              map_id, tag, false/*leaf*/, runtime));
+                              map_id, tag, false/*leaf*/, 
+                              false/*virtual mapped*/, runtime));
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
@@ -10386,7 +10388,8 @@ namespace Legion {
       file_mode = mode;
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx,
-                              0/*map id*/, 0/*tag*/, false/*leaf*/, runtime));
+                              0/*map id*/, 0/*tag*/, false/*leaf*/, 
+                              false/*virtual mapped*/, runtime));
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
@@ -10440,7 +10443,8 @@ namespace Legion {
       file_mode = mode;
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx,
-                              0/*map id*/, 0/*tag*/, false/*leaf*/, runtime));
+                              0/*map id*/, 0/*tag*/, false/*leaf*/, 
+                              false/*virtual mapped*/, runtime));
       if (check_privileges)
         check_privilege();
       initialize_privilege_path(privilege_path, requirement);
