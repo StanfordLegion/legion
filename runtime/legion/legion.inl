@@ -2286,10 +2286,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const LogicalPartition& lp)
+    //--------------------------------------------------------------------------
+    {
+      os << "LogicalPartition(" << lp.tree_id << "," 
+         << lp.index_partition << "," << lp.field_space << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
     inline std::ostream& operator<<(std::ostream& os, const IndexSpace& is)
     //--------------------------------------------------------------------------
     {
       os << "IndexSpace(" << is.id << "," << is.tid << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const IndexPartition& ip)
+    //--------------------------------------------------------------------------
+    {
+      os << "IndexPartition(" << ip.id << "," << ip.tid << ")";
       return os;
     }
 

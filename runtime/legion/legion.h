@@ -104,6 +104,7 @@ namespace Legion {
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
     public:
+      friend std::ostream& operator<<(std::ostream& os, const IndexPartition& ip);
       IndexPartitionID id;
       IndexTreeID tid;
     };
@@ -219,6 +220,7 @@ namespace Legion {
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); }
     private:
+      friend std::ostream& operator<<(std::ostream& os, const LogicalPartition& lp);
       // These are private so the user can't just arbitrary change them
       RegionTreeID tree_id;
       IndexPartition index_partition;
