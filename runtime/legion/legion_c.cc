@@ -5044,10 +5044,11 @@ legion_task_postamble(
 
 class FunctorWrapper : public ProjectionFunctor {
 public:
-  FunctorWrapper(Runtime *rt,
+  FunctorWrapper(Runtime *rt, unsigned dep,
                  legion_projection_functor_logical_region_t region_fn,
                  legion_projection_functor_logical_partition_t partition_fn)
     : ProjectionFunctor(rt)
+    , depth(dep)
     , region_functor(region_fn)
     , partition_functor(partition_fn)
   {
@@ -5089,7 +5090,10 @@ public:
     return CObjectWrapper::unwrap(result);
   }
 
+  unsigned get_depth(void) const { return depth; }
+
 private:
+  const unsigned depth;
   legion_projection_functor_logical_region_t region_functor;
   legion_projection_functor_logical_partition_t partition_functor;
 };
@@ -5098,13 +5102,14 @@ void
 legion_runtime_register_projection_functor(
   legion_runtime_t runtime_,
   legion_projection_id_t id,
+  unsigned depth,
   legion_projection_functor_logical_region_t region_functor,
   legion_projection_functor_logical_partition_t partition_functor)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
   FunctorWrapper *functor =
-    new FunctorWrapper(runtime, region_functor, partition_functor);
+    new FunctorWrapper(runtime, depth, region_functor, partition_functor);
   runtime->register_projection_functor(id, functor);
 }
 

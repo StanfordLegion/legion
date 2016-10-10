@@ -1280,6 +1280,7 @@ namespace Legion {
                                     unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
+      virtual unsigned get_depth(void) const;
     };
 
     /**

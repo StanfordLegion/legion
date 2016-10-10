@@ -2093,7 +2093,7 @@ namespace Legion {
        * in the immediate partition. Depth 0 is the default
        * for the identity projection function.
        */
-      virtual unsigned get_depth(void) const { return 0; };
+      virtual unsigned get_depth(void) const = 0;
     private:
       friend class Internal::Runtime;
       // For pre-registered projection functors the runtime will
