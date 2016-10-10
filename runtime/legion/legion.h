@@ -1531,7 +1531,7 @@ namespace Legion {
       /**
        * Check to see if this represents a mapped physical region. 
        */
-      inline bool is_mapped(void) const;
+      bool is_mapped(void) const;
       /**
        * For physical regions returned as the result of an
        * inline mapping, this call will block until the physical
