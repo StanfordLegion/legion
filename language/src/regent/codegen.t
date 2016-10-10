@@ -7750,6 +7750,57 @@ local function filter_fields(fields, privileges)
   return fields
 end
 
+local function unpack_param_helper(cx, node, param_type, params_map_type, i)
+  -- Inputs/outputs:
+  local c_task = terralib.newsymbol(c.legion_task_t, "task")
+  local params_map = terralib.newsymbol(params_map_type, "params_map_type")
+  local param = terralib.newsymbol(&param_type, "param")
+  local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
+  local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
+  local future_count = terralib.newsymbol(int32, "future_count")
+  local future_i = terralib.newsymbol(&int32, "future_i")
+
+  -- Generate code to unpack a future.
+  local future = terralib.newsymbol(c.legion_future_t, "future")
+  local future_type = std.future(param_type)
+  local future_result = codegen.expr(
+    cx,
+    ast.typed.expr.FutureGetResult {
+      value = ast.typed.expr.Internal {
+        value = values.value(
+          node,
+          expr.just(quote end, `([future_type]{ __result = [future] })),
+          future_type),
+        expr_type = future_type,
+        annotations = node.annotations,
+        span = node.span,
+      },
+      expr_type = param_type,
+      annotations = node.annotations,
+      span = node.span,
+  }):read(cx)
+
+  -- Generate code to unpack a non-future.
+  local deser_actions, deser_value = std.deserialize(
+    param_type, fixed_ptr, data_ptr)
+
+  local terra helper([c_task], [params_map], [param], [fixed_ptr], [data_ptr],
+                     [future_count], [future_i])
+    if ([params_map][ [math.floor((i-1)/64)] ] and [2ULL ^ math.fmod(i-1, 64)]) == 0 then
+      [deser_actions]
+      @[param] = [deser_value]
+    else
+      std.assert(@[future_i] < [future_count], "missing future in task param")
+      var [future] = c.legion_task_get_future([c_task], @[future_i])
+      [future_result.actions]
+      @[param] = [future_result.value]
+      @[future_i] = @[future_i] + 1
+    end
+  end
+  helper:setinlined(false)
+  return helper
+end
+
 function codegen.top_task(cx, node)
   local task = node.prototype
   -- we temporaily turn off generating two task versions for cuda tasks
@@ -7873,41 +7924,14 @@ function codegen.top_task(cx, node)
       local param_type = node.params[i].param_type
       local param_symbol = param:getsymbol()
 
-      local future = terralib.newsymbol(c.legion_future_t, "future")
-      local future_type = std.future(param_type)
-      local future_result = codegen.expr(
-        cx,
-        ast.typed.expr.FutureGetResult {
-          value = ast.typed.expr.Internal {
-            value = values.value(
-              node,
-              expr.just(quote end, `([future_type]{ __result = [future] })),
-              future_type),
-            expr_type = future_type,
-            annotations = node.annotations,
-            span = node.span,
-          },
-          expr_type = param_type,
-          annotations = node.annotations,
-          span = node.span,
-      }):read(cx)
+      local helper = unpack_param_helper(cx, node, param_type, params_map_type, i)
 
-      local deser_actions, deser_value = std.deserialize(
-        param_type,
-        `(&args.[param:getlabel()]),
-        `(&[data_ptr]))
       local actions = quote
         var [param_symbol]
-        if ([params_map_symbol][ [math.floor((i-1)/64)] ] and [2ULL ^ math.fmod(i-1, 64)]) == 0 then
-          [deser_actions]
-          [param_symbol] = [deser_value]
-        else
-          std.assert([future_i] < [future_count], "missing future in task param")
-          var [future] = c.legion_task_get_future([c_task], [future_i])
-          [future_result.actions]
-          [param_symbol] = [future_result.value]
-          [future_i] = [future_i] + 1
-        end
+        [helper](
+          [c_task], [params_map_symbol], &[param_symbol],
+          &args.[param:getlabel()], &[data_ptr],
+          [future_count], &[future_i])
       end
       if std.is_ispace(param_type) and not cx:has_ispace(param_type) then
         local bounds
