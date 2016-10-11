@@ -4677,11 +4677,7 @@ namespace Legion {
       create_gen = creator->get_generation();
       creator_req_idx = intern_idx;
       if (trace_info.trace != NULL)
-        set_trace(trace_info.trace, !trace_info.already_traced);
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_internal_op_creator(unique_op_id, 
-                                           creator->get_unique_op_id(), 
-                                           intern_idx);
+        set_trace(trace_info.trace, !trace_info.already_traced); 
     }
 
     //--------------------------------------------------------------------------
@@ -4791,6 +4787,9 @@ namespace Legion {
       {
         LegionSpy::log_open_operation(creator->get_parent()->get_unique_id(),
                                       unique_op_id);
+        LegionSpy::log_internal_op_creator(unique_op_id, 
+                                           creator->get_unique_op_id(), 
+                                           req_idx);
         unsigned parent_index = find_parent_index(0);
         IndexSpace parent_space = 
           parent_ctx->find_logical_region(parent_index).get_index_space();
@@ -4935,6 +4934,9 @@ namespace Legion {
       {
         LegionSpy::log_advance_operation(creator->get_parent()->get_unique_id(),
                                          unique_op_id);
+        LegionSpy::log_internal_op_creator(unique_op_id, 
+                                           creator->get_unique_op_id(), 
+                                           req_idx);
         unsigned parent_index = find_parent_index(0);
         IndexSpace parent_space = 
           parent_ctx->find_logical_region(parent_index).get_index_space();
@@ -5205,6 +5207,9 @@ namespace Legion {
       parent_task = parent_ctx;
       requirement = req;
       initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_internal_op_creator(unique_op_id, 
+                                           creator->get_unique_op_id(), idx);
     }
 
     //--------------------------------------------------------------------------
