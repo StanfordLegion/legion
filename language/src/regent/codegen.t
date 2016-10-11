@@ -2268,16 +2268,20 @@ local terra get_root_of_tree(runtime : c.legion_runtime_t,
   return r
 end
 
+local function any_fields_are_scratch(cx, container_type, field_paths)
+  assert(cx:has_region_or_list(container_type))
+  local are_scratch = field_paths:map(
+    function(field_path) return cx:region_or_list(container_type):field_is_scratch(field_path) end)
+  return #are_scratch > 0 and data.all(unpack(are_scratch))
+end
+
 local function raise_privilege_depth(cx, value, container_type, field_paths, optional)
   -- This method is also used to adjust privilege depth for the
   -- callee's side, so check optional before asserting that
   -- container_type is not defined.
   local scratch = false
   if not optional or cx:has_region_or_list(container_type) then
-    assert(cx:has_region_or_list(container_type))
-    local are_scratch = field_paths:map(
-      function(field_path) return cx:region_or_list(container_type):field_is_scratch(field_path) end)
-    scratch = #are_scratch > 0 and data.all(unpack(are_scratch))
+    scratch = any_fields_are_scratch(cx, container_type, field_paths)
   end
 
   if scratch then
@@ -4918,6 +4922,8 @@ local function expr_copy_setup_region(
     var [launcher] = c.legion_copy_launcher_create(
       c.legion_predicate_true(), 0, [tag])
   end)
+
+  local region_src_i, region_dst_i
   for i, src_field in ipairs(src_fields) do
     local dst_field = dst_fields[i]
     local src_copy_fields = data.filter(
@@ -4933,6 +4939,9 @@ local function expr_copy_setup_region(
     local dst_parent = get_container_root(
       cx, `([dst_value].impl), dst_container_type, dst_copy_fields)
 
+    local scratch = any_fields_are_scratch(cx, src_container_type, src_copy_fields) or
+      any_fields_are_scratch(cx, dst_container_type, dst_copy_fields)
+
     for j, src_copy_field in ipairs(src_copy_fields) do
       local dst_copy_field = dst_copy_fields[j]
       local src_field_id = cx:region_or_list(src_container_type):field_id(src_copy_field)
@@ -4944,17 +4953,38 @@ local function expr_copy_setup_region(
         dst_mode = std.reduction_op_ids[op][dst_field_type]
       end
 
+      local src_i, dst_i
+      local add_new_requirement = false
+      if scratch or op then
+        src_i = terralib.newsymbol(uint, "src_i")
+        dst_i = terralib.newsymbol(uint, "dst_i")
+        add_new_requirement = true
+      else
+        if not region_src_i then
+          region_src_i = terralib.newsymbol(uint, "region_src_i")
+          region_dst_i = terralib.newsymbol(uint, "region_dst_i")
+          add_new_requirement = true
+        end
+        src_i = region_src_i
+        dst_i = region_dst_i
+      end
+
+      if add_new_requirement then
+        actions:insert(quote
+          var [src_i] = add_src_region(
+            [launcher], [src_value].impl, c.READ_ONLY, c.EXCLUSIVE,
+            [src_parent], 0, false)
+          var [dst_i] = add_dst_region(
+            [launcher], [dst_value].impl, dst_mode, c.EXCLUSIVE,
+            [dst_parent], 0, false)
+        end)
+      end
+
       actions:insert(quote
-        var src_i = add_src_region(
-          [launcher], [src_value].impl, c.READ_ONLY, c.EXCLUSIVE,
-          [src_parent], 0, false)
         c.legion_copy_launcher_add_src_field(
-          [launcher], src_i, src_field_id, true)
-        var dst_i = add_dst_region(
-          [launcher], [dst_value].impl, dst_mode, c.EXCLUSIVE,
-          [dst_parent], 0, false)
+          [launcher], [src_i], [src_field_id], true)
         c.legion_copy_launcher_add_dst_field(
-          [launcher], dst_i, dst_field_id, true)
+          [launcher], [dst_i], [dst_field_id], true)
       end)
     end
   end
@@ -7720,6 +7750,57 @@ local function filter_fields(fields, privileges)
   return fields
 end
 
+local function unpack_param_helper(cx, node, param_type, params_map_type, i)
+  -- Inputs/outputs:
+  local c_task = terralib.newsymbol(c.legion_task_t, "task")
+  local params_map = terralib.newsymbol(params_map_type, "params_map_type")
+  local param = terralib.newsymbol(&param_type, "param")
+  local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
+  local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
+  local future_count = terralib.newsymbol(int32, "future_count")
+  local future_i = terralib.newsymbol(&int32, "future_i")
+
+  -- Generate code to unpack a future.
+  local future = terralib.newsymbol(c.legion_future_t, "future")
+  local future_type = std.future(param_type)
+  local future_result = codegen.expr(
+    cx,
+    ast.typed.expr.FutureGetResult {
+      value = ast.typed.expr.Internal {
+        value = values.value(
+          node,
+          expr.just(quote end, `([future_type]{ __result = [future] })),
+          future_type),
+        expr_type = future_type,
+        annotations = node.annotations,
+        span = node.span,
+      },
+      expr_type = param_type,
+      annotations = node.annotations,
+      span = node.span,
+  }):read(cx)
+
+  -- Generate code to unpack a non-future.
+  local deser_actions, deser_value = std.deserialize(
+    param_type, fixed_ptr, data_ptr)
+
+  local terra helper([c_task], [params_map], [param], [fixed_ptr], [data_ptr],
+                     [future_count], [future_i])
+    if ([params_map][ [math.floor((i-1)/64)] ] and [2ULL ^ math.fmod(i-1, 64)]) == 0 then
+      [deser_actions]
+      @[param] = [deser_value]
+    else
+      std.assert(@[future_i] < [future_count], "missing future in task param")
+      var [future] = c.legion_task_get_future([c_task], @[future_i])
+      [future_result.actions]
+      @[param] = [future_result.value]
+      @[future_i] = @[future_i] + 1
+    end
+  end
+  helper:setinlined(false)
+  return helper
+end
+
 function codegen.top_task(cx, node)
   local task = node.prototype
   -- we temporaily turn off generating two task versions for cuda tasks
@@ -7843,41 +7924,14 @@ function codegen.top_task(cx, node)
       local param_type = node.params[i].param_type
       local param_symbol = param:getsymbol()
 
-      local future = terralib.newsymbol(c.legion_future_t, "future")
-      local future_type = std.future(param_type)
-      local future_result = codegen.expr(
-        cx,
-        ast.typed.expr.FutureGetResult {
-          value = ast.typed.expr.Internal {
-            value = values.value(
-              node,
-              expr.just(quote end, `([future_type]{ __result = [future] })),
-              future_type),
-            expr_type = future_type,
-            annotations = node.annotations,
-            span = node.span,
-          },
-          expr_type = param_type,
-          annotations = node.annotations,
-          span = node.span,
-      }):read(cx)
+      local helper = unpack_param_helper(cx, node, param_type, params_map_type, i)
 
-      local deser_actions, deser_value = std.deserialize(
-        param_type,
-        `(&args.[param:getlabel()]),
-        `(&[data_ptr]))
       local actions = quote
         var [param_symbol]
-        if ([params_map_symbol][ [math.floor((i-1)/64)] ] and [2ULL ^ math.fmod(i-1, 64)]) == 0 then
-          [deser_actions]
-          [param_symbol] = [deser_value]
-        else
-          std.assert([future_i] < [future_count], "missing future in task param")
-          var [future] = c.legion_task_get_future([c_task], [future_i])
-          [future_result.actions]
-          [param_symbol] = [future_result.value]
-          [future_i] = [future_i] + 1
-        end
+        [helper](
+          [c_task], [params_map_symbol], &[param_symbol],
+          &args.[param:getlabel()], &[data_ptr],
+          [future_count], &[future_i])
       end
       if std.is_ispace(param_type) and not cx:has_ispace(param_type) then
         local bounds

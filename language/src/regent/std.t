@@ -1569,10 +1569,12 @@ end
 local compute_serialized_size_helper = terralib.memoize(function(value_type)
   local value = terralib.newsymbol(value_type, "value")
   local actions, result = compute_serialized_size_inner(value_type, value)
-  return terra([value]) : c.size_t
+  local terra compute_serialized_size([value]) : c.size_t
     [actions];
     return [result]
   end
+  compute_serialized_size:setinlined(false)
+  return compute_serialized_size
 end)
 
 function std.compute_serialized_size(value_type, value)
@@ -1620,9 +1622,11 @@ local serialize_helper = terralib.memoize(function(value_type)
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
   local actions = serialize_inner(value_type, value, fixed_ptr, data_ptr)
-  return terra([value], [fixed_ptr], [data_ptr])
+  local terra serialize([value], [fixed_ptr], [data_ptr])
     [actions]
   end
+  serialize:setinlined(false)
+  return serialize
 end)
 
 function std.serialize(value_type, value, fixed_ptr, data_ptr)
@@ -1671,10 +1675,12 @@ local deserialize_helper = terralib.memoize(function(value_type)
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
   local actions, result = deserialize_inner(value_type, fixed_ptr, data_ptr)
-  return terra([fixed_ptr], [data_ptr])
+  local terra deserialize([fixed_ptr], [data_ptr])
     [actions];
     return [result]
   end
+  deserialize:setinlined(false)
+  return deserialize
 end)
 
 function std.deserialize(value_type, fixed_ptr, data_ptr)
