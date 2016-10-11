@@ -107,10 +107,7 @@ namespace Legion {
     void Operation::deactivate_operation(void)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock o_lock(op_lock);
-        gen++;
-      }
+      // Generation is bumped when we committed
       incoming.clear();
       outgoing.clear();
       unverified_regions.clear();
@@ -390,6 +387,8 @@ namespace Legion {
         {
           trigger_commit_invoked = true;
           need_trigger = true;
+          // Bump the generation
+          gen++;
         }
       }
       if (need_trigger)
@@ -708,6 +707,7 @@ namespace Legion {
         {
           trigger_commit_invoked = true;
           need_trigger = true;
+          gen++;
         }
         else if (outstanding_mapping_references == 0)
         {
@@ -717,7 +717,10 @@ namespace Legion {
           CommitDependenceTracker *tracker = dependence_tracker.commit;
           need_trigger = tracker->issue_commit_trigger(this, runtime);
           if (need_trigger)
+          {
             trigger_commit_invoked = true;
+            gen++;
+          }
         }
       }
       if (need_completion_trigger)
@@ -793,6 +796,7 @@ namespace Legion {
         {
           trigger_commit_invoked = true;
           need_trigger = true;
+          gen++;
         }
       }
       if (need_trigger)
@@ -1084,7 +1088,10 @@ namespace Legion {
             CommitDependenceTracker *tracker = dependence_tracker.commit;
             need_trigger = tracker->issue_commit_trigger(this, runtime);
             if (need_trigger)
+            {
               trigger_commit_invoked = true;
+              gen++;
+            }
           }
         }
         // otherwise we were already recycled and are no longer valid
@@ -1137,6 +1144,7 @@ namespace Legion {
           {
             need_trigger = true;
             trigger_commit_invoked = true;
+            gen++;
           }
         }
       }
