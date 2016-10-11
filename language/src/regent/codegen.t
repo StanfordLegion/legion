@@ -7890,6 +7890,14 @@ function codegen.top_task(cx, node)
 
   -- Unpack the by-value parameters to the task.
   local task_setup = terralib.newlist()
+  -- FIXME: This is an obnoxious hack to avoid inline mappings in shard tasks.
+  --        Will be fixed with a proper handling of list of regions in
+  --        the inline mapping optimizer.
+  if string.sub(tostring(node.name), 0, 6) == "<shard" then
+    task_setup:insert(quote
+      c.legion_runtime_unmap_all_regions([c_runtime], [c_context])
+    end)
+  end
   local args = terralib.newsymbol(&params_struct_type, "args")
   local arglen = terralib.newsymbol(c.size_t, "arglen")
   local data_ptr = terralib.newsymbol(&uint8, "data_ptr")
