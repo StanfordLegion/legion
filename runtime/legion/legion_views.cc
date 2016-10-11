@@ -3046,8 +3046,6 @@ namespace Legion {
         // If we are reading we need to check to see if we are at
         // the right version number and whether we have done the read
         // request yet for our given version number
-        // No need to advance split version numbers since we would 
-        // not be interfering with anything in the new versions yet
         FieldVersions field_versions;
         versions->get_field_versions(logical_node, check_mask, field_versions);
         need_valid_update = check_mask;
@@ -3075,21 +3073,6 @@ namespace Legion {
               {
                 need_valid_update -= valid_fields;
                 current_remote_read_requests |= version_overlap;
-              }
-            }
-          }
-          finder = current_versions.find(it->first+1);
-          if (finder != current_versions.end())
-          {
-            FieldMask version_overlap = overlap & finder->second;
-            if (!!version_overlap)
-            {
-              FieldMask valid_fields = 
-                version_overlap & previous_remote_read_requests;
-              if (!!valid_fields)
-              {
-                need_valid_update -= valid_fields;
-                previous_remote_read_requests |= version_overlap;
               }
             }
           }
@@ -4003,25 +3986,6 @@ namespace Legion {
       }
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    void CompositeBase::filter_invalid_fields(PhysicalManager *manager,
-                                              FieldMask &already_valid)
-    //--------------------------------------------------------------------------
-    {
-      // Have to make sure that we have all our meta-data first
-      perform_ready_check(already_valid);
-      // If there are any reductions we can immediately invalidate those fields
-      if (!!reduction_mask)
-      {
-        already_valid -= reduction_mask;
-        if (!already_valid)
-          return;
-      }
-      // Otherwise check to see if it is in the set of valid views
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void CompositeBase::perform_local_analysis(MaterializedView *dst,
         RegionTreeNode *logical_node,
@@ -4163,28 +4127,7 @@ namespace Legion {
              current_valid_views.begin(); it != current_valid_views.end(); it++)
         {
           if (it->first->is_deferred_view())
-          {
-#if 0
-            // If this is a composite view see if it is already valid
-            // for this particular target instance, if not we can just
-            // keep going
-            if (it->first->is_composite_view())
-            {
-              FieldMask already_valid = it->second;
-              CompositeView *current = it->first->as_composite_view();
-              current->filter_invalid_fields(dst->manager, already_valid);
-              if (!!already_valid)
-              {
-                // Can remove these fields as being needed
-                top_need_copy -= already_valid;
-                it->second -= already_valid;
-                if (!it->second)
-                  to_delete.push_back(it->first);
-              }
-            }
-#endif
             continue;
-          }
 #ifdef DEBUG_LEGION
           assert(it->first->is_materialized_view());
 #endif

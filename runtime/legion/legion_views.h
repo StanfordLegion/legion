@@ -936,8 +936,6 @@ namespace Legion {
                     LegionMap<ApEvent,FieldMask>::aligned &postreductions,
                     CopyAcrossHelper *helper, FieldMask dominate_mask, 
                     bool check_overwrite, bool check_ready = true);
-      //void filter_invalid_fields(PhysicalManager *manager, 
-      //                           FieldMask &already_valid);
     public:
       virtual SingleTask* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
