@@ -4780,9 +4780,6 @@ namespace Legion {
                         Operation *creator, int req_idx)
     //--------------------------------------------------------------------------
     {
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_open_operation(creator->get_parent()->get_unique_id(),
-                                      unique_op_id);
       initialize_internal(creator, req_idx, trace_info);
 #ifdef DEBUG_LEGION
       assert(start_node == NULL);
@@ -4792,6 +4789,8 @@ namespace Legion {
       open_mask = mask;
       if (Runtime::legion_spy_enabled)
       {
+        LegionSpy::log_open_operation(creator->get_parent()->get_unique_id(),
+                                      unique_op_id);
         unsigned parent_index = find_parent_index(0);
         IndexSpace parent_space = 
           parent_ctx->find_logical_region(parent_index).get_index_space();
@@ -4925,9 +4924,6 @@ namespace Legion {
                                int req_idx, bool is_upper)
     //--------------------------------------------------------------------------
     {
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_advance_operation(creator->get_parent()->get_unique_id(),
-                                         unique_op_id);
       initialize_internal(creator, req_idx, trace_info);
 #ifdef DEBUG_LEGION
       assert(parent_node == NULL);
@@ -4937,6 +4933,8 @@ namespace Legion {
       parent_is_upper_bound = is_upper;
       if (Runtime::legion_spy_enabled)
       {
+        LegionSpy::log_advance_operation(creator->get_parent()->get_unique_id(),
+                                         unique_op_id);
         unsigned parent_index = find_parent_index(0);
         IndexSpace parent_space = 
           parent_ctx->find_logical_region(parent_index).get_index_space();
