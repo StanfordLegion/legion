@@ -7502,7 +7502,6 @@ namespace Legion {
           if (it->impl->is_mapped())
             unmap_regions.push_back(*it);
         }
-        return;
       }
       // Perform the unmappings after we've released the lock
       for (std::vector<PhysicalRegion>::const_iterator it = 
