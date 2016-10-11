@@ -8899,8 +8899,8 @@ namespace Legion {
       // task as being mapped
       if (is_locally_mapped() && is_leaf())
         complete_mapping();
-      // If we're remote, we've already resolved speculation for now
-      resolve_speculation();
+      // Have to do this before resolving speculation in case
+      // we get cleaned up after the resolve speculation call
       if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_point_point(remote_unique_id, get_unique_id());
@@ -8909,6 +8909,8 @@ namespace Legion {
                                         remote_completion_event);
 #endif
       }
+      // If we're remote, we've already resolved speculation for now
+      resolve_speculation();
       // Return true to add ourselves to the ready queue
       return true;
     }
