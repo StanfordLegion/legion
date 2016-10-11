@@ -4821,7 +4821,8 @@ class Operation(object):
                  'disjoint_close_fields', 'partition_kind', 
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
                  'need_logical_replay', 'reachable_cache', 
-                 'transitive_warning_issued', 'arrival_barriers', 'wait_barriers']
+                 'transitive_warning_issued', 'arrival_barriers', 'wait_barriers',
+                 'created_futures', 'used_futures']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -4872,6 +4873,9 @@ class Operation(object):
         # Phase barrier information
         self.arrival_barriers = None
         self.wait_barriers = None
+        # Future information
+        self.created_futures = None
+        self.used_futures = None
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND or \
@@ -4954,6 +4958,12 @@ class Operation(object):
 
     def set_predicate(self, pred):
         self.predicate = pred
+        if self.logical_incoming is None:
+            self.logical_incoming = set()
+        self.logical_incoming.add(pred)
+        if not pred.logical_outgoing is None:
+            pred.logical_outgoing = set()
+        pred.logical_outgoing.add(self)
 
     def get_index_launch_rect(self):
         assert self.launch_rect
@@ -5151,6 +5161,16 @@ class Operation(object):
             self.disjoint_close_fields = list()
         self.disjoint_close_fields.append(fid)
 
+    def add_created_future(self, future):
+        if not self.created_futures:
+            self.created_futures = set()
+        self.created_futures.add(future)
+
+    def add_used_future(self, future):
+        if not self.used_futures:
+            self.used_futures = set()
+        self.used_futures.add(future)
+
     def find_temporary_instance(self, index, fid):
         if not self.temporaries:
             return None
@@ -5159,6 +5179,11 @@ class Operation(object):
         if fid not in self.temporaries[index]:
             return None
         return self.temporaries[index][fid]
+
+    def get_point_task(self, point):
+        assert self.kind == INDEX_TASK_KIND
+        assert point in self.points
+        return self.points[point]
 
     def get_logical_reachable(self, reachable, forward):
         if self in reachable:
@@ -6847,16 +6872,23 @@ class Task(object):
             replay_file.write(struct.pack('I',0))
 
 class Future(object):
-    __slots__ = ['state', 'iid', 'creator', 'point', 'user_ids']
+    __slots__ = ['state', 'iid', 'creator_uid', 'logical_creator', 
+                 'physical_creator', 'point', 'user_ids',
+                 'logical_users', 'physical_users']
     def __init__(self, state, iid):
         self.state = state
         self.iid = iid
-        self.creator = None
+        self.creator_uid = None
+        # These can be different for index space operations
+        self.logical_creator = None
+        self.physical_creator = None
         self.point = None
         self.user_ids = None
+        self.logical_users = None
+        self.physical_users = None
 
-    def set_creator(self, op):
-        self.creator = op
+    def set_creator(self, uid):
+        self.creator_uid = uid
 
     def set_point(self, point):
         self.point = point
@@ -6865,6 +6897,56 @@ class Future(object):
         if not self.user_ids:
             self.user_ids = set()
         self.user_ids.add(uid)
+
+    def update_creator_and_users(self):
+        # The creator uid is always for the logical operation   
+        if self.creator_uid:
+            self.logical_creator = self.state.get_operation(self.creator_uid)
+            assert self.logical_creator
+            self.logical_creator.add_created_future(self)
+            # If this is an index space operation and has a point, 
+            # then get the physical creator
+            if self.logical_creator.kind == INDEX_TASK_KIND and self.point.dim > 0:
+                self.physical_creator = self.logical_creator.get_point_task(self.point).op
+            else:
+                self.physical_creator = self.logical_creator 
+            self.physical_creator.add_created_future(self)
+        if self.user_ids:
+            # Future use is always for the physical operations   
+            self.physical_users = set()
+            for uid in self.user_ids:
+                user = self.state.get_operation(uid)
+                self.physical_users.add(user)
+                user.add_used_future(self)
+            self.user_ids = None
+            # Now convert back to logical users
+            self.logical_users = set()
+            for user in self.physical_users:
+                # If this was part of an index space launch then
+                # the logical user is the index owner
+                if user.index_owner:
+                    self.logical_users.add(user.index_owner)
+                    user.index_owner.add_used_future(self)
+                else:
+                    self.logical_users.add(user)
+                    user.add_used_future(self)
+        # Hook up the dependences between operations
+        if self.logical_creator and self.logical_users:
+            for user in self.logical_users:
+                if not user.logical_incoming:
+                    user.logical_incoming = set()
+                user.logical_incoming.add(self.logical_creator)
+                if not self.logical_creator.logical_outgoing:
+                    self.logical_creator.logical_outgoing= set()
+                self.logical_creator.logical_outgoing.add(user)
+        if self.physical_creator and self.physical_users:
+            for user in self.physical_users:
+                if not user.physical_incoming:
+                    user.physical_incoming = set()
+                user.physical_incoming.add(self.physical_creator)
+                if not self.physical_creator.physical_outgoing:
+                    self.physical_creator.physical_outgoing = set()
+                self.physical_creator.physical_outgoing.add(user)
 
 class PointUser(object):
     __slots__ = ['op', 'index', 'logical_op', 'priv', 'coher', 'redop']
@@ -8562,8 +8644,7 @@ def parse_legion_spy_line(line, state):
     m = future_create_pat.match(line)
     if m is not None:
         future = state.get_future(int(m.group('iid'),16))
-        op = state.get_operation(int(m.group('uid')))
-        future.set_creator(op)
+        future.set_creator(int(m.group('uid')))
         point = Point(int(m.group('dim')))
         if point.dim > 0:
             point.vals[0] = int(m.group('p1'))
@@ -9304,6 +9385,9 @@ class State(object):
             op.update_instance_uses() 
         for task in self.tasks.itervalues():
             task.update_instance_uses()
+        # Update the futures
+        for future in self.futures.itervalues():
+            future.update_creator_and_users()     
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
         self.slice_index = None
