@@ -6158,8 +6158,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionState::merge_physical_state(const PhysicalState *state,
                                             const FieldMask &merge_mask,
-                                          std::set<RtEvent> &applied_conditions,
-                                            bool need_lock /* = true*/)
+                                          std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime,
@@ -6168,13 +6167,7 @@ namespace Legion {
       assert(currently_valid);
 #endif
       WrapperReferenceMutator mutator(applied_conditions);
-      if (need_lock)
-      {
-        // We're writing so we need the lock in exclusive mode
-        RtEvent acquire_event = 
-          Runtime::acquire_rt_reservation(state_lock, true/*exclusive*/);
-        acquire_event.wait();
-      }
+      AutoLock s_lock(state_lock);
       if (!!state->dirty_mask)
         dirty_mask |= (state->dirty_mask & merge_mask);
       FieldMask reduction_merge = state->reduction_mask & merge_mask;
@@ -6224,8 +6217,6 @@ namespace Legion {
         }
       }
       valid_fields |= merge_mask;
-      if (need_lock)
-        state_lock.release();
     }
 
     //--------------------------------------------------------------------------
@@ -6289,6 +6280,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Views have their valid references added when they are inserted 
+#ifdef DEBUG_LEGION
+      assert(currently_valid); // should be monotonic
+#endif
     }
 
     //--------------------------------------------------------------------------

@@ -1109,8 +1109,7 @@ namespace Legion {
     public: // methods for applying state information
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
-                                std::set<RtEvent> &applied_conditions,
-                                bool need_lock = true);
+                                std::set<RtEvent> &applied_conditions);
       void reduce_open_children(const ColorPoint &child_color,
                                 const FieldMask &update_mask,
                                 VersioningSet<> &new_states,
