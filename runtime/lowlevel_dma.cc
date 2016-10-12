@@ -4368,13 +4368,28 @@ namespace Realm {
                        Event wait_on /*= Event::NO_EVENT*/) const
     {
       std::set<Event> finish_events; 
+      // when 'dsts' contains multiple fields, the 'fill_value' should look
+      // like a packed struct with a fill value for each field in order -
+      // track the offset and complain if we run out of data
+      size_t fill_ofs = 0;
       for (std::vector<CopySrcDstField>::const_iterator it = dsts.begin();
             it != dsts.end(); it++)
       {
         Event ev = GenEventImpl::create_genevent()->current_event();
-        FillRequest *r = new FillRequest(*this, *it, fill_value,
-                                         fill_value_size, wait_on,
+	if((fill_ofs + it->size) > fill_value_size) {
+	  log_dma.fatal() << "insufficient data for fill - need at least "
+			  << (fill_ofs + it->size) << " bytes, but have only " << fill_value_size;
+	  assert(0);
+	}
+        FillRequest *r = new FillRequest(*this, *it,
+					 ((const char *)fill_value) + fill_ofs,
+					 it->size, wait_on,
                                          ev, 0/*priority*/, requests);
+	// special case: if a field uses all of the fill value, the next
+	//  field (if any) is allowed to use the same value
+	if((fill_ofs > 0) || (it->size != fill_value_size))
+	  fill_ofs += it->size;
+
         Memory mem = it->inst.get_location();
         unsigned node = ID(mem).memory.owner_node;
 	if(node > ID::MAX_NODE_ID) {
