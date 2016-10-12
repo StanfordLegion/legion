@@ -7754,7 +7754,6 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
   -- Inputs/outputs:
   local c_task = terralib.newsymbol(c.legion_task_t, "task")
   local params_map = terralib.newsymbol(params_map_type, "params_map_type")
-  local param = terralib.newsymbol(&param_type, "param")
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
   local future_count = terralib.newsymbol(int32, "future_count")
@@ -7784,17 +7783,17 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
   local deser_actions, deser_value = std.deserialize(
     param_type, fixed_ptr, data_ptr)
 
-  local terra helper([c_task], [params_map], [param], [fixed_ptr], [data_ptr],
+  local terra helper([c_task], [params_map], [fixed_ptr], [data_ptr],
                      [future_count], [future_i])
     if ([params_map][ [math.floor((i-1)/64)] ] and [2ULL ^ math.fmod(i-1, 64)]) == 0 then
       [deser_actions]
-      @[param] = [deser_value]
+      return [deser_value]
     else
       std.assert(@[future_i] < [future_count], "missing future in task param")
       var [future] = c.legion_task_get_future([c_task], @[future_i])
-      [future_result.actions]
-      @[param] = [future_result.value]
       @[future_i] = @[future_i] + 1
+      [future_result.actions]
+      return [future_result.value]
     end
   end
   helper:setinlined(false)
@@ -7891,6 +7890,14 @@ function codegen.top_task(cx, node)
 
   -- Unpack the by-value parameters to the task.
   local task_setup = terralib.newlist()
+  -- FIXME: This is an obnoxious hack to avoid inline mappings in shard tasks.
+  --        Will be fixed with a proper handling of list of regions in
+  --        the inline mapping optimizer.
+  if string.sub(tostring(node.name), 0, 6) == "<shard" then
+    task_setup:insert(quote
+      c.legion_runtime_unmap_all_regions([c_runtime], [c_context])
+    end)
+  end
   local args = terralib.newsymbol(&params_struct_type, "args")
   local arglen = terralib.newsymbol(c.size_t, "arglen")
   local data_ptr = terralib.newsymbol(&uint8, "data_ptr")
@@ -7927,10 +7934,8 @@ function codegen.top_task(cx, node)
       local helper = unpack_param_helper(cx, node, param_type, params_map_type, i)
 
       local actions = quote
-        var [param_symbol]
-        [helper](
-          [c_task], [params_map_symbol], &[param_symbol],
-          &args.[param:getlabel()], &[data_ptr],
+        var [param_symbol] = [helper](
+          [c_task], [params_map_symbol], &args.[param:getlabel()], &[data_ptr],
           [future_count], &[future_i])
       end
       if std.is_ispace(param_type) and not cx:has_ispace(param_type) then
