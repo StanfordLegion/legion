@@ -5981,6 +5981,11 @@ namespace Legion {
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         LogicalView *new_view = corresponding[idx];
+#ifdef DEBUG_LEGION
+        if (new_view->is_materialized_view())
+          assert(!new_view->as_materialized_view()->
+              manager->is_virtual_instance());
+#endif
         const FieldMask &view_mask = targets[idx].get_valid_fields();
         if (new_view->is_instance_view())
         {
@@ -6177,6 +6182,11 @@ namespace Legion {
             track_aligned::const_iterator it = state->valid_views.begin();
             it != state->valid_views.end(); it++)
       {
+#ifdef DEBUG_LEGION
+        if (it->first->is_materialized_view())
+          assert(!it->first->as_materialized_view()->
+              manager->is_virtual_instance());
+#endif
         FieldMask overlap = it->second & merge_mask;
         if (!overlap)
           continue;
@@ -7469,6 +7479,9 @@ namespace Legion {
                                  SingleTask *context, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!manager->is_virtual_manager());
+#endif
       InstanceView *view = logical_node->convert_manager(manager, context);
       AutoLock s_lock(state_lock);
       LegionMap<PhysicalManager*,
