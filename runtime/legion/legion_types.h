@@ -615,6 +615,7 @@ namespace Legion {
       SEND_VERSION_STATE_RESPONSE,
       SEND_VERSION_STATE_UPDATE_REQUEST,
       SEND_VERSION_STATE_UPDATE_RESPONSE,
+      SEND_VERSION_STATE_VALID_NOTIFICATION,
       SEND_VERSION_MANAGER_ADVANCE,
       SEND_VERSION_MANAGER_INVALIDATE,
       SEND_VERSION_MANAGER_REQUEST,
@@ -731,6 +732,7 @@ namespace Legion {
         "Send Version State Response",                                \
         "Send Version State Update Request",                          \
         "Send Version State Update Response",                         \
+        "Send Version State Valid Notification",                      \
         "Send Version Manager Advance",                               \
         "Send Version Manager Invalidate",                            \
         "Send Version Manager Request",                               \

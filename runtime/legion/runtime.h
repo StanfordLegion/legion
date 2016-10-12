@@ -2074,6 +2074,8 @@ namespace Legion {
                                              Serializer &rez);
       void send_version_state_update_response(AddressSpaceID target, 
                                               Serializer &rez);
+      void send_version_state_valid_notification(AddressSpaceID target,
+                                                 Serializer &rez);
       void send_version_manager_advance(AddressSpaceID target, Serializer &rez);
       void send_version_manager_invalidate(AddressSpaceID target,
                                            Serializer &rez);
@@ -2231,6 +2233,8 @@ namespace Legion {
                                          AddressSpaceID source);
       void handle_version_state_update_request(Deserializer &derez);
       void handle_version_state_update_response(Deserializer &derez);
+      void handle_version_state_valid_notification(Deserializer &derez,
+                                                   AddressSpaceID source);
       void handle_version_manager_advance(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_version_manager_invalidate(Deserializer &derez);

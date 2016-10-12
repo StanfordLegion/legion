@@ -5439,6 +5439,12 @@ namespace Legion {
               runtime->handle_version_state_update_response(derez);
               break;
             }
+          case SEND_VERSION_STATE_VALID_NOTIFICATION:
+            {
+              runtime->handle_version_state_valid_notification(derez,
+                                                 remote_address_space);
+              break;
+            }
           case SEND_VERSION_MANAGER_ADVANCE:
             {
               runtime->handle_version_manager_advance(derez,
@@ -15413,6 +15419,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_version_state_valid_notification(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+                                SEND_VERSION_STATE_VALID_NOTIFICATION,
+                                ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_version_manager_advance(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16343,6 +16359,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VersionState::process_version_state_update_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_state_valid_notification(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionState::process_version_state_valid_notification(derez,this,source);
     }
 
     //--------------------------------------------------------------------------

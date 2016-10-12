@@ -1113,8 +1113,13 @@ namespace Legion {
       void reduce_open_children(const ColorPoint &child_color,
                                 const FieldMask &update_mask,
                                 VersioningSet<> &new_states,
-                                ReferenceMutator *mutator,
-                                bool need_lock = true);
+                                std::set<RtEvent> &applied_conditions,
+                                bool need_lock, bool local_update);
+    public:
+      void send_valid_notification(std::set<RtEvent> &applied_events) const;
+      void handle_version_state_valid_notification(AddressSpaceID source);
+      static void process_version_state_valid_notification(Deserializer &derez,
+                                      Runtime *runtime, AddressSpaceID source);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -1217,12 +1222,20 @@ namespace Legion {
       bool currently_valid;
 #endif
     protected:
-      // The fields for which we have seen updates
-      FieldMask valid_fields;
+      // Fields which we have applied updates to
+      FieldMask update_fields;
+      // Fields which we have initial data for
+      FieldMask initial_fields;
       // Track when we have valid data for initial and final fields
       LegionMap<RtEvent,FieldMask>::aligned child_events;
       LegionMap<RtEvent,FieldMask>::aligned initial_events;
       LegionMap<RtEvent,FieldMask>::aligned final_events;
+    protected:
+      // Track which nodes we have remote data, note that this only 
+      // tracks nodes which have either done a 'merge_physical_state'
+      // or 'reduce_open_children' and not nodes that have final 
+      // states but haven't contributed any data
+      NodeSet remote_valid_instances;
     protected:
       LegionMap<PhysicalManager*,
                 std::pair<RtEvent,FieldMask> >::aligned pending_instances;
