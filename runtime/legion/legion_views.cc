@@ -1847,22 +1847,18 @@ namespace Legion {
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
             target_versions.begin(); it != target_versions.end(); it++)
       {
+#ifdef DEBUG_LEGION
+        assert(it->first > 0);
+#endif
         FieldMask overlap = it->second & user_mask;
         if (!overlap)
           continue;
-        // Special case for the zero version number
-        if (it->first == 0)
-        {
-          filter_mask |= overlap;
-          update_versions[1] = overlap;
-          continue;
-        }
         // We are always trying to advance the version numbers here
         // since these are writing users and are therefore going from
         // the current version number to the next one. We'll check for
         // the most common cases here, and only filter if we don't find them.
-        const VersionID previous_number = it->first; 
-        const VersionID next_number = it->first + 1; 
+        const VersionID previous_number = it->first - 1; 
+        const VersionID next_number = it->first; 
         LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
           current_versions.find(previous_number);
         if (finder != current_versions.end())
