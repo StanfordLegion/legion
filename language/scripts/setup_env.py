@@ -17,6 +17,7 @@
 
 from __future__ import print_function
 import hashlib, multiprocessing, os, platform, subprocess, sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import install # from ./install.py
 
 def check_sha1(file_path, sha1):
@@ -94,14 +95,14 @@ if __name__ == '__main__':
     thread_count = multiprocessing.cpu_count()
 
     conduit = discover_conduit()
-    gasnet_dir = os.path.join(root_dir, 'gasnet')
-    gasnet_release_dir = os.path.join(root_dir, 'gasnet', 'release')
+    gasnet_dir = os.path.realpath(os.path.join(root_dir, 'gasnet'))
+    gasnet_release_dir = os.path.join(gasnet_dir, 'release')
     if not os.path.exists(gasnet_dir):
         git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
         build_gasnet(gasnet_dir, conduit)
     assert os.path.exists(gasnet_release_dir)
 
-    llvm_dir = os.path.join(root_dir, 'llvm')
+    llvm_dir = os.path.realpath(os.path.join(root_dir, 'llvm'))
     llvm_install_dir = os.path.join(llvm_dir, 'install')
     if not os.path.exists(llvm_dir):
         os.mkdir(llvm_dir)
