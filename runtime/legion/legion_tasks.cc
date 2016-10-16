@@ -7381,7 +7381,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (mapper == NULL)
-        mapper = mapper = runtime->find_mapper(current_proc, map_id); 
+        mapper = runtime->find_mapper(current_proc, map_id); 
       Mapping::Mapper::TaskProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
       if (response.has_measurement<
