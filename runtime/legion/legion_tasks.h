@@ -406,10 +406,6 @@ namespace Legion {
       public:
         SingleTask *task;
       };
-      struct MapperProfilingInfo {
-        SingleTask *task;
-        RtUserEvent profiling_done;
-      };
       struct ReclaimLocalFieldArgs : public LgTaskArgs<ReclaimLocalFieldArgs> {
       public:
         static const LgTaskID TASK_ID = LG_RECLAIM_LOCAL_FIELD_ID;
@@ -641,6 +637,11 @@ namespace Legion {
       void post_end_task(const void *res, size_t res_size, bool owned);
       void unmap_all_regions(void);
     public:
+      inline void begin_runtime_call(void);
+      inline void end_runtime_call(void);
+      inline void begin_task_wait(bool from_runtime);
+      inline void end_task_wait(void);
+    public:
       VariantImpl* select_inline_variant(TaskOp *child, 
                                          InlineTask *inline_task);
       void inline_child_task(TaskOp *child);
@@ -648,8 +649,10 @@ namespace Legion {
       void restart_task(void);
       const std::vector<PhysicalRegion>& get_physical_regions(void) const;
     public:
-      void notify_profiling_results(Realm::ProfilingResponse &results);
-      static void process_mapper_profiling(const void *args, size_t arglen);
+      virtual void add_copy_profiling_request(
+                                      Realm::ProfilingRequestSet &requests);
+      virtual void report_profiling_response(
+                                const Realm::ProfilingResponse &respone);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -757,7 +760,6 @@ namespace Legion {
       RtEvent pending_done;
       RtEvent last_registration;
       RtEvent dependence_precondition;
-      RtEvent profiling_done; 
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
@@ -780,6 +782,14 @@ namespace Legion {
 #ifdef LEGION_SPY
       UniqueID current_fence_uid;
 #endif
+    protected:
+      // Profiling information
+      std::vector<ProfilingMeasurementID> task_profiling_requests;
+      std::vector<ProfilingMeasurementID> copy_profiling_requests;
+      int                          outstanding_profiling_requests;
+      RtUserEvent                              profiling_reported;
+      Mapping::ProfilingMeasurements::RuntimeOverhead *overhead_tracker;
+      long long                                previous_profiling_time;
     protected:
       // Resources that can build up over a task's lifetime
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
@@ -1623,6 +1633,57 @@ namespace Legion {
       size_t arglen;
       bool own_arg;
     };
+
+    //--------------------------------------------------------------------------
+    inline void SingleTask::begin_runtime_call(void)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      overhead_tracker->application_time += diff;
+      previous_profiling_time = current;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void SingleTask::end_runtime_call(void)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      overhead_tracker->runtime_time += diff;
+      previous_profiling_time = current;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void SingleTask::begin_task_wait(bool from_runtime)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      if (from_runtime)
+        overhead_tracker->runtime_time += diff;
+      else
+        overhead_tracker->application_time += diff;
+      previous_profiling_time = current;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void SingleTask::end_task_wait(void)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      overhead_tracker->wait_time += diff;
+      previous_profiling_time = current;
+    }
 
   }; // namespace Internal 
 }; // namespace Legion

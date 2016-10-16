@@ -2307,6 +2307,8 @@ namespace Legion {
       void activate_context(SingleTask *context);
       void deactivate_context(SingleTask *context);
     public:
+      void remap_unmapped_regions(Processor proc, Context ctx,
+            const std::vector<PhysicalRegion> &unmapped_regions);
       void execute_task_launch(Context ctx, TaskOp *task_op);
       void add_to_dependence_queue(Processor p, Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 

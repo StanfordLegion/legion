@@ -474,6 +474,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation:: add_copy_profiling_request(
+                                           Realm::ProfilingRequestSet &requests)
+    //--------------------------------------------------------------------------
+    {
+      // Do nothing
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called for inherited types
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::filter_copy_request_kinds(MapperManager *mapper,
+        const std::set<ProfilingMeasurementID> &requests,
+        std::vector<ProfilingMeasurementID> &results, bool warn_if_not_copy)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<ProfilingMeasurementID>::const_iterator it = 
+            requests.begin(); it != requests.end(); it++)
+      {
+        switch ((Realm::ProfilingMeasurementID)*it)
+        {
+          case Realm::PMID_OP_STATUS:
+          case Realm::PMID_OP_BACKTRACE:
+          case Realm::PMID_OP_TIMELINE:
+          case Realm::PMID_OP_MEM_USAGE:
+            {
+              results.push_back(*it);
+              break;
+            }
+          default:
+            {
+              if (warn_if_not_copy)
+                log_run.error("WARNING: Mapper %s requested a profiling "
+                    "measurement of type %d which is not applicable to "
+                    "operation %s (UID %lld) and will be ignored.", 
+                    mapper->get_mapper_name(), *it, get_logging_name(), 
+                    get_unique_op_id());
+            }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     MaterializedView* Operation::create_temporary_instance(PhysicalManager *dst,
                                  unsigned index, const FieldMask &needed_fields)
     //--------------------------------------------------------------------------
@@ -1901,6 +1950,7 @@ namespace Legion {
       remap_region = false;
       mapper = NULL;
       layout_constraint_id = 0;
+      outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
@@ -1921,7 +1971,7 @@ namespace Legion {
       atomic_locks.clear();
       map_applied_conditions.clear();
       restrict_postconditions.clear();
-      profiling_results = Mapper::InlineProfilingInfo();
+      profiling_requests.clear();
       // Now return this operation to the queue
       runtime->free_map_op(this);
     } 
@@ -2106,6 +2156,10 @@ namespace Legion {
           Runtime::release_reservation(it->first, termination_event);
         }
       }
+      // Remove profiling our guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
       // Now we can trigger the mapping event and indicate
       // to all our mapping dependences that we are mapped.
       if (!map_applied_conditions.empty())
@@ -2481,6 +2535,10 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_map_inline(this, &input, &output);
+      if (!output.profiling_requests.empty())
+        filter_copy_request_kinds(mapper,
+            output.profiling_requests.requested_measurements,
+            profiling_requests, true/*warn*/);
       // Now we have to validate the output
       // Go through the instances and make sure we got one for every field
       // Also check to make sure that none of them are composite instances
@@ -2714,20 +2772,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::report_profiling_results(void)
+    void MapOp::add_copy_profiling_request(Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      mapper->invoke_inline_report_profiling(this, &profiling_results);
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      Operation *proxy_this = this;
+      Realm::ProfilingRequest &request = requests.add_request( 
+          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
+          &proxy_this, sizeof(proxy_this));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
+      if ((previous == 1) && !profiling_reported.exists())
+        profiling_reported = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
+      assert(mapper != NULL);
+#endif
+      Mapping::Mapper::InlineProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      mapper->invoke_inline_report_profiling(this, &info);
+#ifdef DEBUG_LEGION
+      assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      // Trigger the event indicating we are done reporting profiling
-      Runtime::trigger_event(profiling_reported);
+      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      // If this was the last one, we can trigger our events
+      if (remaining == 0)
+        Runtime::trigger_event(profiling_reported);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2970,6 +3051,7 @@ namespace Legion {
     {
       activate_speculative();
       mapper = NULL;
+      outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
@@ -2999,7 +3081,7 @@ namespace Legion {
       atomic_locks.clear();
       map_applied_conditions.clear();
       restrict_postconditions.clear();
-      profiling_results = Mapper::CopyProfilingInfo();
+      profiling_requests.clear();
       // Return this operation to the runtime
       runtime->free_copy_op(this);
     }
@@ -3249,6 +3331,10 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_map_copy(this, &input, &output);
+      if (!output.profiling_requests.empty())
+        filter_copy_request_kinds(mapper,
+            output.profiling_requests.requested_measurements,
+            profiling_requests, true/*warn*/);
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
       ApEvent sync_precondition = ApEvent::NO_AP_EVENT;
@@ -3430,6 +3516,10 @@ namespace Legion {
                                         completion_event);    
         }
       }
+      // Remove our profiling guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
       // Mark that we completed mapping
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -4025,19 +4115,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::report_profiling_results(void)
+    void CopyOp::add_copy_profiling_request(
+                                           Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      mapper->invoke_copy_report_profiling(this, &profiling_results);
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      Operation *proxy_this = this;
+      Realm::ProfilingRequest &request = requests.add_request( 
+          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
+          &proxy_this, sizeof(proxy_this));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
+      if ((previous == 1) && !profiling_reported.exists())
+        profiling_reported = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
+      assert(mapper != NULL);
+#endif
+      Mapping::Mapper::CopyProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      mapper->invoke_copy_report_profiling(this, &info);
+#ifdef DEBUG_LEGION
+      assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      Runtime::trigger_event(profiling_reported);
+      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      // If we're the last one then we trigger the result
+      if (remaining == 0)
+        Runtime::trigger_event(profiling_reported);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5435,6 +5550,7 @@ namespace Legion {
       activate_close();  
       closed_tree = NULL;
       mapper = NULL;
+      outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
@@ -5458,7 +5574,7 @@ namespace Legion {
       disjoint_close_mask.clear();
       projection_info.clear();
       children_to_close.clear();
-      profiling_results = Mapper::CloseProfilingInfo();
+      profiling_requests.clear();
       runtime->free_inter_close_op(this);
     }
 
@@ -5614,6 +5730,10 @@ namespace Legion {
                                               chosen_instances);
       }
       version_info.apply_mapping(map_applied_conditions);
+      // Remove profiling our guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -5745,6 +5865,10 @@ namespace Legion {
       }
       else // This is the common case
         mapper->invoke_map_close(this, &input, &output);
+      if (!output.profiling_requests.empty())
+        filter_copy_request_kinds(mapper,
+            output.profiling_requests.requested_measurements,
+            profiling_requests, true/*warn*/);
       // Now we have to validate the output
       // Make sure we have at least one instance for every field
       RegionTreeID bad_tree = 0;
@@ -5850,19 +5974,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InterCloseOp::report_profiling_results(void)
+    void InterCloseOp::add_copy_profiling_request(
+                                           Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      mapper->invoke_close_report_profiling(this, &profiling_results);
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      Operation *proxy_this = this;
+      Realm::ProfilingRequest &request = requests.add_request( 
+          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
+          &proxy_this, sizeof(proxy_this));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
+      if ((previous == 1) && !profiling_reported.exists())
+        profiling_reported = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapper != NULL);
+#endif
+      Mapping::Mapper::CloseProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      mapper->invoke_close_report_profiling(this, &info);
 #ifdef DEBUG_LEGION
       assert(profiling_reported.exists());
+      assert(outstanding_profiling_requests > 0);
 #endif
-      Runtime::trigger_event(profiling_reported);
+      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      if (remaining == 0)
+        Runtime::trigger_event(profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -6056,6 +6204,7 @@ namespace Legion {
     {
       activate_close();
       mapper = NULL;
+      outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
@@ -6069,7 +6218,7 @@ namespace Legion {
 #endif
       acquired_instances.clear();
       map_applied_conditions.clear();
-      profiling_results = Mapper::CloseProfilingInfo();
+      profiling_requests.clear();
       runtime->free_post_close_op(this);
     }
 
@@ -6157,6 +6306,10 @@ namespace Legion {
                                         completion_event);
 #endif
       }
+      // Remove profiling our guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
       // No need to apply our mapping because we are done!
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -6260,19 +6413,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::report_profiling_results(void)
+    void PostCloseOp::add_copy_profiling_request(
+                                           Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      mapper->invoke_close_report_profiling(this, &profiling_results);
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      Operation *proxy_this = this;
+      Realm::ProfilingRequest &request = requests.add_request( 
+          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
+          &proxy_this, sizeof(proxy_this));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
+      if ((previous == 1) && !profiling_reported.exists())
+        profiling_reported = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
+      assert(mapper != NULL);
+#endif
+      Mapping::Mapper::CloseProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      mapper->invoke_close_report_profiling(this, &info);
+#ifdef DEBUG_LEGION
+      assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      Runtime::trigger_event(profiling_reported);
+      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      if (remaining == 0)
+        Runtime::trigger_event(profiling_reported);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6483,6 +6660,7 @@ namespace Legion {
     {
       activate_speculative();
       mapper = NULL;
+      outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
@@ -6503,7 +6681,7 @@ namespace Legion {
 #endif
       acquired_instances.clear();
       map_applied_conditions.clear();
-      profiling_results = Mapper::AcquireProfilingInfo();
+      profiling_requests.clear();
       // Return this operation to the runtime
       runtime->free_acquire_op(this);
     }
@@ -6699,6 +6877,10 @@ namespace Legion {
                                         completion_event);
         }
       }
+      // Remove profiling our guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
       // Mark that we completed mapping
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -6915,22 +7097,50 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_map_acquire(this, &input, &output);
+      if (!output.profiling_requests.empty())
+        filter_copy_request_kinds(mapper,
+            output.profiling_requests.requested_measurements,
+            profiling_requests, true/*warn*/);
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::report_profiling_results(void)
+    void AcquireOp::add_copy_profiling_request(
+                                           Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      mapper->invoke_acquire_report_profiling(this, &profiling_results);
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      Operation *proxy_this = this;
+      Realm::ProfilingRequest &request = requests.add_request( 
+          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
+          &proxy_this, sizeof(proxy_this));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
+      if ((previous == 1) && !profiling_reported.exists())
+        profiling_reported = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
+      assert(mapper != NULL);
+#endif
+      Mapping::Mapper::AcquireProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      mapper->invoke_acquire_report_profiling(this, &info);
+#ifdef DEBUG_LEGION
+      assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      Runtime::trigger_event(profiling_reported);
+      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      if (remaining == 0)
+        Runtime::trigger_event(profiling_reported);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7027,6 +7237,7 @@ namespace Legion {
     {
       activate_speculative(); 
       mapper = NULL;
+      outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
@@ -7047,7 +7258,7 @@ namespace Legion {
 #endif
       acquired_instances.clear();
       map_applied_conditions.clear();
-      profiling_results = Mapper::ReleaseProfilingInfo();
+      profiling_requests.clear();
       // Return this operation to the runtime
       runtime->free_release_op(this);
     }
@@ -7241,6 +7452,10 @@ namespace Legion {
                                         completion_event);
         }
       }
+      // Remove profiling our guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
       // Mark that we completed mapping
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -7516,22 +7731,50 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_map_release(this, &input, &output);
+      if (!output.profiling_requests.empty())
+        filter_copy_request_kinds(mapper,
+            output.profiling_requests.requested_measurements,
+            profiling_requests, true/*warn*/);
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::report_profiling_results(void)
+    void ReleaseOp::add_copy_profiling_request(
+                                           Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      mapper->invoke_release_report_profiling(this, &profiling_results);
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      Operation *proxy_this = this;
+      Realm::ProfilingRequest &request = requests.add_request( 
+          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
+          &proxy_this, sizeof(proxy_this));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
+      if ((previous == 1) && !profiling_reported.exists())
+        profiling_reported = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
+      assert(mapper != NULL);
+#endif
+      Mapping::Mapper::ReleaseProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      mapper->invoke_release_report_profiling(this, &info);
+#ifdef DEBUG_LEGION
+      assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      Runtime::trigger_event(profiling_reported);
+      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      if (remaining == 0)
+        Runtime::trigger_event(profiling_reported);
     }
 
     /////////////////////////////////////////////////////////////
