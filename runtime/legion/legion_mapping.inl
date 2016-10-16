@@ -44,9 +44,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline bool ProfilingRequest::empty(void) const
+    //--------------------------------------------------------------------------
+    {
+      return requested_measurements.empty();
+    }
+
+    //--------------------------------------------------------------------------
     inline ProfilingResponse::ProfilingResponse(void)
     //--------------------------------------------------------------------------
-      : realm_resp(0)
+      : realm_resp(NULL), overhead(NULL) 
     {
     }
 
@@ -61,18 +68,20 @@ namespace Legion {
     inline bool ProfilingResponse::has_measurement(void) const
     //--------------------------------------------------------------------------
     {
-      if ((int)(T::ID) <= (int)(Realm::PMID_REALM_LAST))
-      {
-	if (realm_resp)
-	  return realm_resp->template has_measurement<T>();
-	else
-	  return false;
-      }
+      // Realm measurements, all Legion measurements are specialized templates 
+      if (realm_resp)
+        return realm_resp->template has_measurement<T>();
       else
-      {
-	// Legion-specific measurements handled here
-	return false;
-      }
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    inline bool ProfilingResponse::has_measurement<
+                             ProfilingMeasurements::RuntimeOverhead>(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (overhead != NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -80,20 +89,31 @@ namespace Legion {
     inline T *ProfilingResponse::get_measurement(void) const
     //--------------------------------------------------------------------------
     {
-      if ((int)(T::ID) <= (int)(Realm::PMID_REALM_LAST))
-      {
-	if (realm_resp)
-	  return realm_resp->template get_measurement<T>();
-	else
-	  return 0;
-      }
+      // Realm measurements, all Legion measurements are specialized templates
+      if (realm_resp)
+        return realm_resp->template get_measurement<T>();
       else
-      {
-	// Legion-specific measurements handled here
-	return 0;
-      }
+        return 0;
     }
 
+    //--------------------------------------------------------------------------
+    template<>
+    inline ProfilingMeasurements::RuntimeOverhead* 
+            ProfilingResponse::get_measurement<
+                             ProfilingMeasurements::RuntimeOverhead>(void) const 
+    //--------------------------------------------------------------------------
+    {
+      return overhead;
+    }
+
+    namespace ProfilingMeasurements {
+      //------------------------------------------------------------------------
+      inline RuntimeOverhead::RuntimeOverhead(void)
+        : application_time(0), runtime_time(0), wait_time(0)
+      //------------------------------------------------------------------------
+      {
+      }
+    };
   };
 };
 

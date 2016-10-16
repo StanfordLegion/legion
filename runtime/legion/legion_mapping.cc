@@ -249,7 +249,21 @@ namespace Legion {
 					const Realm::ProfilingResponse& resp)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(realm_resp == NULL);
+#endif
       realm_resp = &resp;
+    }
+    
+    //--------------------------------------------------------------------------
+    void ProfilingResponse::attach_overhead(
+                                   ProfilingMeasurements::RuntimeOverhead *over)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(overhead == NULL);
+#endif
+      overhead = over; 
     }
 
     /////////////////////////////////////////////////////////////

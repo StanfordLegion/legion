@@ -126,20 +126,13 @@ namespace Legion {
       unsigned mapper_event_id;
     };
 
-    // The following types are effectively overlaid on the Realm versions
-    // to allow for Legion-specific profiling measurements
-    enum ProfilingMeasurementID {
-      PMID_LEGION_FIRST = Realm::PMID_REALM_LAST,
-      PMID_RUNTIME_OVERHEAD,
-    };
-
     namespace ProfilingMeasurements {
       // import all the Realm measurements into this namespace too
       using namespace Realm::ProfilingMeasurements;
 
       struct RuntimeOverhead {
 	static const ProfilingMeasurementID ID = PMID_RUNTIME_OVERHEAD;
-
+        RuntimeOverhead(void);
 	// application, runtime, wait times all reported in nanoseconds
 	long long application_time;  // time spent in application code
 	long long runtime_time;      // time spent in runtime code
@@ -159,12 +152,12 @@ namespace Legion {
       ~ProfilingRequest(void);
 
       template <typename T>
-      ProfilingRequest &add_measurement(void);
+      inline ProfilingRequest &add_measurement(void);
 
-      bool empty(void) const;
+      inline bool empty(void) const;
 
     protected:
-      friend class Internal::Runtime;
+      FRIEND_ALL_RUNTIME_CLASSES
       void populate_realm_profiling_request(Realm::ProfilingRequest& req);
 
       std::set<ProfilingMeasurementID> requested_measurements;
@@ -185,18 +178,22 @@ namespace Legion {
       // even if a measurement was requested, it may not have been performed -
       //  use this to check
       template <typename T>
-      bool has_measurement(void) const;
+      inline bool has_measurement(void) const;
 
       // extracts a measurement (if available), returning a dynamically
       //  allocated result - caller should delete it when done
       template <typename T>
-      T *get_measurement(void) const;
+      inline T *get_measurement(void) const;
 
     protected:
-      friend class Internal::Runtime;
-      void attach_realm_profiling_response(const Realm::ProfilingResponse& resp);
+      FRIEND_ALL_RUNTIME_CLASSES
+      void attach_realm_profiling_response(
+          const Realm::ProfilingResponse& resp);
+      void attach_overhead(
+          ProfilingMeasurements::RuntimeOverhead *overhead);
 
       const Realm::ProfilingResponse *realm_resp;
+      ProfilingMeasurements::RuntimeOverhead *overhead;
     };
 
     /**
@@ -454,11 +451,10 @@ namespace Legion {
        * The mapper can also request profiling information about this
        * task as part of its execution. The mapper can specify a task
        * profiling request set in 'task_prof_requests' for profiling
-       * statistics about the execution of the task. Additionally,
-       * the mapper can request profiling information about any of the
-       * copy operations for necessary for mapping a physical instance
-       * by specifying a profiling request set for the appropritate
-       * region requirement in 'region_prof_requests'.
+       * statistics about the execution of the task. The mapper can
+       * also ask for profiling information for the copies generated
+       * as part of the mapping of the task through the 
+       * 'copy_prof_requests' field.
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> >     valid_instances;
@@ -469,7 +465,7 @@ namespace Legion {
         std::vector<Processor>                          target_procs;
         VariantID                                       chosen_variant; // = 0 
         ProfilingRequest                                task_prof_requests;
-        std::vector<ProfilingRequest>                   region_prof_requests;
+        ProfilingRequest                                copy_prof_requests;
         TaskPriority                                    task_priority;  // = 0
         bool                                            postmap_task; // = false
       };
@@ -631,9 +627,13 @@ namespace Legion {
        * This mapper call will report the profiling information
        * requested either for the task execution and/or any copy
        * operations that were issued on behalf of mapping the task.
+       * If the 'task_response' field is set to true this is the
+       * profiling callback for the task itself, otherwise it is a
+       * callback for one of the copies for the task'.
        */
       struct TaskProfilingInfo {
 	ProfilingResponse                       profiling_responses;
+        bool                                    task_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext      ctx,

@@ -190,6 +190,13 @@ namespace Legion {
     class TestMapper;
     class DebugMapper;
     class ReplayMapper;
+
+    // The following types are effectively overlaid on the Realm versions
+    // to allow for Legion-specific profiling measurements
+    enum ProfilingMeasurementID {
+      PMID_LEGION_FIRST = Realm::PMID_REALM_LAST,
+      PMID_RUNTIME_OVERHEAD,
+    };
   };
   
   namespace Internal {
@@ -1215,6 +1222,7 @@ namespace Legion {
     class SerializingManager;
     class ConcurrentManager;
     typedef Mapping::MapperEvent MapperEvent;
+    typedef Mapping::ProfilingMeasurementID ProfilingMeasurementID;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \

@@ -14859,6 +14859,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
       Realm::ProfilingRequestSet requests;
+      op->add_copy_profiling_request(requests);
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_copy_request(requests, op);
       ApEvent result;
@@ -14955,6 +14956,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
       Realm::ProfilingRequestSet requests;
+      op->add_copy_profiling_request(requests);
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_fill_request(requests, op);
       ApEvent result;

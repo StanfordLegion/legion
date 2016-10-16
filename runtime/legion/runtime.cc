@@ -1030,14 +1030,26 @@ namespace Legion {
       if (valid)
         return;
       if (!ready_event.has_triggered())
+      {
+        if (context != NULL)
+          context->begin_task_wait(false/*from runtime*/);
         ready_event.wait();
+        if (context != NULL)
+          context->end_task_wait();
+      }
       // Now wait for the reference to be ready
       
       std::set<ApEvent> wait_on;
       references.update_wait_on_events(wait_on);
       ApEvent ref_ready = Runtime::merge_events(wait_on);
       if (!ref_ready.has_triggered())
+      {
+        if (context != NULL)
+          context->begin_task_wait(false/*from runtime*/);
         ref_ready.wait();
+        if (context != NULL)
+          context->end_task_wait();
+      }
       valid = true;
     }
 
@@ -1205,7 +1217,13 @@ namespace Legion {
       // coherence on the region and we have to issue copies back to 
       // the restricted instances before we are officially unmapped
       if (wait_for_unmap.exists() && !wait_for_unmap.has_triggered())
+      {
+        if (context != NULL)
+          context->begin_task_wait(false/*from runtime*/);
         wait_for_unmap.wait();
+        if (context != NULL)
+          context->end_task_wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8216,7 +8234,6 @@ namespace Legion {
     IndexSpace Runtime::create_index_space(Context ctx, size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
-      IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8224,6 +8241,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index space %x in task %s "
                             "(ID %lld) with %zd maximum elements", handle.id, 
                             ctx->get_task_name(), ctx->get_unique_id(), 
@@ -8245,6 +8266,7 @@ namespace Legion {
       forest->create_index_space(handle, Domain(space), 
                                  UNSTRUCTURED_KIND, MUTABLE);
       ctx->register_index_space_creation(handle);
+      ctx->end_runtime_call();
       return handle;
     }
 
@@ -8253,16 +8275,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(domain.exists());
-#endif
-      IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
-#ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
         log_run.error("Illegal dummy context create index space!");
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+      assert(domain.exists());
+#endif
+      ctx->begin_runtime_call();
+      IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating dummy index space %x in task %s "
                             "(ID %lld) for domain", 
                             handle.id, ctx->get_task_name(),
@@ -8281,6 +8304,7 @@ namespace Legion {
 
       forest->create_index_space(handle, domain, DENSE_ARRAY_KIND, NO_MEMORY);
       ctx->register_index_space_creation(handle);
+      ctx->end_runtime_call();
       return handle;
     }
 
@@ -8289,9 +8313,6 @@ namespace Legion {
                                            const std::set<Domain> &domains)
     //--------------------------------------------------------------------------
     {
-      IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
-      // First compute the convex hull of all the domains
-      Domain hull = *(domains.begin());
 #ifdef DEBUG_LEGION
       assert(!domains.empty());
       if (ctx == DUMMY_CONTEXT)
@@ -8300,6 +8321,12 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexSpace handle(get_unique_index_space_id(),get_unique_index_tree_id());
+      // First compute the convex hull of all the domains
+      Domain hull = *(domains.begin());
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal index space creation performed in "
@@ -8385,6 +8412,7 @@ namespace Legion {
       forest->create_index_space(handle, hull, domains,
                                  DENSE_ARRAY_KIND, NO_MEMORY);
       ctx->register_index_space_creation(handle);
+      ctx->end_runtime_call();
       return handle;
     }
 
@@ -8401,6 +8429,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_index.debug("Destroying index space %x in task %s "
                              "(ID %lld)", 
                       handle.id, ctx->get_task_name(), 
@@ -8418,6 +8449,7 @@ namespace Legion {
       DeletionOp *op = get_available_deletion_op(true);
       op->initialize_index_space_deletion(ctx, handle);
       add_to_dependence_queue(proc, op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -8436,7 +8468,6 @@ namespace Legion {
                                           int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8444,6 +8475,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -8497,6 +8532,7 @@ namespace Legion {
                                      new_index_spaces, color_space, part_kind, 
                                      allocable ? MUTABLE : NO_MEMORY);
       ctx->register_index_partition_creation(pid);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -8508,7 +8544,6 @@ namespace Legion {
                                           int part_color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8516,6 +8551,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -8642,6 +8681,7 @@ namespace Legion {
                                      disjoint ? DISJOINT_KIND : ALIASED_KIND,
                                      MUTABLE);
       ctx->register_index_partition_creation(pid);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -8653,7 +8693,6 @@ namespace Legion {
                                           PartitionKind part_kind, int color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8661,6 +8700,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -8683,6 +8726,7 @@ namespace Legion {
                                      coloring, color_space, 
                                      part_kind, NO_MEMORY);
       ctx->register_index_partition_creation(pid);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -8695,7 +8739,6 @@ namespace Legion {
                                           int part_color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8703,6 +8746,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -8746,6 +8793,7 @@ namespace Legion {
                                      disjoint ? DISJOINT_KIND : ALIASED_KIND,
                                      NO_MEMORY);
       ctx->register_index_partition_creation(pid);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -8757,7 +8805,6 @@ namespace Legion {
                                           PartitionKind part_kind, int color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8765,6 +8812,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -8797,6 +8848,7 @@ namespace Legion {
                                      convex_hulls, coloring,
                                      color_space, part_kind, NO_MEMORY);
       ctx->register_index_partition_creation(pid);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -8809,7 +8861,6 @@ namespace Legion {
                                           int part_color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8817,6 +8868,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -8866,6 +8921,7 @@ namespace Legion {
                                      disjoint ? DISJOINT_KIND : ALIASED_KIND,
                                      NO_MEMORY);
       ctx->register_index_partition_creation(pid);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -8877,7 +8933,6 @@ namespace Legion {
                                           int part_color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -8885,6 +8940,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -8984,6 +9043,7 @@ namespace Legion {
                                      new_index_spaces, color_space,
                                      DISJOINT_KIND, MUTABLE);
       ctx->register_index_partition_creation(pid);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -8999,6 +9059,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_index.debug("Destroying index partition %x in task %s "
                              "(ID %lld)", 
                     handle.id, ctx->get_task_name(), ctx->get_unique_id());
@@ -9015,6 +9078,7 @@ namespace Legion {
       DeletionOp *op = get_available_deletion_op(true);
       op->initialize_index_part_deletion(ctx, handle);
       add_to_dependence_queue(proc, op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -9304,7 +9368,6 @@ namespace Legion {
                                                    int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9312,6 +9375,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating equal partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -9339,6 +9406,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
       return pid; 
     }
 
@@ -9351,7 +9419,6 @@ namespace Legion {
                                                       int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9359,6 +9426,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating weighted partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -9386,6 +9457,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -9398,7 +9470,6 @@ namespace Legion {
                                                       int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9406,6 +9477,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating union partition %d with parent index "
                             "space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -9454,6 +9529,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -9466,7 +9542,6 @@ namespace Legion {
                                                       int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9475,6 +9550,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating intersection partition %d with parent "
                             "index space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -9523,6 +9602,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -9535,7 +9615,6 @@ namespace Legion {
                                                       int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9544,6 +9623,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating difference partition %d with parent "
                             "index space %x in task %s (ID %lld)", 
                             pid.id, parent.id,
@@ -9592,6 +9675,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -9612,6 +9696,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_index.debug("Creating cross product partitions "
                             "in task %s (ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
@@ -9648,6 +9735,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -9659,9 +9747,6 @@ namespace Legion {
                                                       int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      IndexSpace parent = handle.get_index_space();
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9669,6 +9754,12 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexSpace parent = handle.get_index_space();
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating partition by field "
                             "in task %s (ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
@@ -9709,20 +9800,8 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -9737,7 +9816,6 @@ namespace Legion {
                                                     int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), handle.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9745,6 +9823,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), handle.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating partition by image "
                             "in task %s (ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
@@ -9785,20 +9867,8 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -9812,9 +9882,7 @@ namespace Legion {
                                                     PartitionKind part_kind,
                                                     int color, bool allocable)
     //--------------------------------------------------------------------------
-    {
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         handle.get_index_space().get_tree_id());
+    { 
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9822,6 +9890,11 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         handle.get_index_space().get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage "
                             "in task %s (ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
@@ -9862,20 +9935,8 @@ namespace Legion {
       add_to_dependence_queue(proc, part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -9887,7 +9948,6 @@ namespace Legion {
                                                      int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -9895,6 +9955,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexPartition pid(get_unique_index_partition_id(), parent.get_tree_id());
+#ifdef DEBUG_LEGION
       log_index.debug("Creating pending partition in task %s (ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -9913,6 +9977,7 @@ namespace Legion {
                                        part_kind, allocable, 
                                        ApEvent::NO_AP_EVENT,
                                        ApEvent::NO_AP_EVENT, true/*separate*/);
+      ctx->end_runtime_call();
       return pid;
     }
 
@@ -9930,6 +9995,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index space union in task %s (ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -9952,6 +10020,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -9969,6 +10038,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index space union in task %s (ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -9991,6 +10063,8 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
       return result;
     }
 
@@ -10009,6 +10083,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index space intersection in task %s "
                             "(ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
@@ -10032,6 +10109,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -10050,6 +10128,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index space intersection in task %s "
                             "(ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
@@ -10073,6 +10154,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -10092,6 +10174,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_index.debug("Creating index space difference in task %s "
                             "(ID %lld)", 
                             ctx->get_task_name(), ctx->get_unique_id());
@@ -10115,6 +10200,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, part_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -10123,8 +10209,12 @@ namespace Legion {
                                                 IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
-      return get_index_partition(parent, color);
-      
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      IndexPartition result = get_index_partition(parent, color);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10150,7 +10240,12 @@ namespace Legion {
                                     IndexSpace parent, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      return get_index_partition(parent, color);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      IndexPartition result = get_index_partition(parent, color);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10192,7 +10287,12 @@ namespace Legion {
                                       const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      return has_index_partition(parent, color);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = has_index_partition(parent, color);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10210,7 +10310,12 @@ namespace Legion {
                                                   IndexPartition p, Color color)
     //--------------------------------------------------------------------------
     {
-      return get_index_subspace(p, color); 
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      IndexSpace result = get_index_subspace(p, color); 
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10234,7 +10339,12 @@ namespace Legion {
                                            const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      return get_index_subspace(p, color); 
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      IndexSpace result = get_index_subspace(p, color); 
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10276,7 +10386,12 @@ namespace Legion {
                                      const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      return has_index_subspace(p, color); 
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = has_index_subspace(p, color); 
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10291,7 +10406,12 @@ namespace Legion {
     bool Runtime::has_multiple_domains(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return forest->has_multiple_domains(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = forest->has_multiple_domains(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10305,7 +10425,12 @@ namespace Legion {
     Domain Runtime::get_index_space_domain(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return get_index_space_domain(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      Domain result = get_index_space_domain(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10331,7 +10456,11 @@ namespace Legion {
                                           std::vector<Domain> &domains)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       forest->get_index_space_domains(handle, domains);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -10347,7 +10476,12 @@ namespace Legion {
                                                              IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return get_index_partition_color_space(p); 
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      Domain result = get_index_partition_color_space(p); 
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10372,7 +10506,11 @@ namespace Legion {
                                                    std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
-      return get_index_space_partition_colors(sp, colors);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      get_index_space_partition_colors(sp, colors);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -10394,7 +10532,11 @@ namespace Legion {
                                                   std::set<DomainPoint> &colors)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       get_index_space_partition_colors(sp, colors);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -10415,7 +10557,12 @@ namespace Legion {
     bool Runtime::is_index_partition_disjoint(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return forest->is_index_partition_disjoint(p);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = forest->is_index_partition_disjoint(p);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10429,7 +10576,12 @@ namespace Legion {
     bool Runtime::is_index_partition_complete(Context ctx, IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      return forest->is_index_partition_complete(p);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = forest->is_index_partition_complete(p);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10443,7 +10595,12 @@ namespace Legion {
     Color Runtime::get_index_space_color(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_space_color(handle).get_index();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      Color result = forest->get_index_space_color(handle).get_index();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10458,7 +10615,12 @@ namespace Legion {
                                                      IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_space_color(handle).get_point();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      DomainPoint result = forest->get_index_space_color(handle).get_point();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10473,7 +10635,12 @@ namespace Legion {
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_partition_color(handle).get_index();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      Color result = forest->get_index_partition_color(handle).get_index();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10488,7 +10655,13 @@ namespace Legion {
                                                          IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_partition_color(handle).get_point();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      DomainPoint result = 
+        forest->get_index_partition_color(handle).get_point();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10503,7 +10676,12 @@ namespace Legion {
                                                IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_parent_index_space(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      IndexSpace result = forest->get_parent_index_space(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10517,7 +10695,12 @@ namespace Legion {
     bool Runtime::has_parent_index_partition(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return forest->has_parent_index_partition(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = forest->has_parent_index_partition(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10532,7 +10715,12 @@ namespace Legion {
                                                        IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_parent_index_partition(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      IndexPartition result = forest->get_parent_index_partition(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10546,7 +10734,12 @@ namespace Legion {
     unsigned Runtime::get_index_space_depth(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_space_depth(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      unsigned result = forest->get_index_space_depth(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10561,7 +10754,12 @@ namespace Legion {
                                                 IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_partition_depth(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      unsigned result = forest->get_index_partition_depth(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10578,7 +10776,12 @@ namespace Legion {
     {
       if (pointer.is_null())
         return pointer;
-      return ctx->perform_safe_cast(region.get_index_space(), pointer);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      ptr_t result = ctx->perform_safe_cast(region.get_index_space(), pointer);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10588,14 +10791,19 @@ namespace Legion {
     {
       if (point.is_null())
         return point;
-      return ctx->perform_safe_cast(region.get_index_space(), point);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      DomainPoint result = 
+        ctx->perform_safe_cast(region.get_index_space(), point);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
     FieldSpace Runtime::create_field_space(Context ctx)
     //--------------------------------------------------------------------------
     {
-      FieldSpace space(get_unique_field_space_id());
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -10603,6 +10811,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      FieldSpace space(get_unique_field_space_id());
+#ifdef DEBUG_LEGION
       log_field.debug("Creating field space %x in task %s (ID %lld)", 
                       space.id, ctx->get_task_name(),ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -10619,6 +10831,7 @@ namespace Legion {
 
       forest->create_field_space(space);
       ctx->register_field_space_creation(space);
+      ctx->end_runtime_call();
       return space;
     }
 
@@ -10633,6 +10846,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_field.debug("Destroying field space %x in task %s (ID %lld)", 
                     handle.id, ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -10648,13 +10864,19 @@ namespace Legion {
       DeletionOp *op = get_available_deletion_op(true);
       op->initialize_field_space_deletion(ctx, handle);
       add_to_dependence_queue(proc, op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
     size_t Runtime::get_field_size(Context ctx, FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
-      return forest->get_field_size(handle, fid);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      size_t result = forest->get_field_size(handle, fid);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10669,7 +10891,11 @@ namespace Legion {
                                          std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       forest->get_field_space_fields(handle, fields);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -10708,8 +10934,6 @@ namespace Legion {
                                 IndexSpace index_space, FieldSpace field_space)
     //--------------------------------------------------------------------------
     {
-      RegionTreeID tid = get_unique_region_tree_id();
-      LogicalRegion region(tid, index_space, field_space);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -10717,6 +10941,11 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      RegionTreeID tid = get_unique_region_tree_id();
+      LogicalRegion region(tid, index_space, field_space);
+#ifdef DEBUG_LEGION
       log_region.debug("Creating logical region in task %s (ID %lld) "
                               "with index space %x and field space %x "
                               "in new tree %d",
@@ -10737,6 +10966,7 @@ namespace Legion {
       forest->create_logical_region(region);
       // Register the creation of a top-level region with the context
       ctx->register_region_creation(region);
+      ctx->end_runtime_call();
       return region;
     }
 
@@ -10752,6 +10982,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_region.debug("Deleting logical region (%x,%x) in "
                               "task %s (ID %lld)",
                               handle.index_space.id, handle.field_space.id, 
@@ -10769,6 +11002,7 @@ namespace Legion {
       DeletionOp *op = get_available_deletion_op(true);
       op->initialize_logical_region_deletion(ctx, handle);
       add_to_dependence_queue(proc, op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -10783,6 +11017,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_region.debug("Deleting logical partition (%x,%x) in task %s "
                               "(ID %lld)",
                               handle.index_partition.id, handle.field_space.id,
@@ -10800,6 +11037,7 @@ namespace Legion {
       DeletionOp *op = get_available_deletion_op(true);
       op->initialize_logical_partition_deletion(ctx, handle);
       add_to_dependence_queue(proc, op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -10822,7 +11060,12 @@ namespace Legion {
                                     LogicalRegion parent, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition(parent, handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalPartition result = forest->get_logical_partition(parent, handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10838,7 +11081,13 @@ namespace Legion {
                                     Context ctx, LogicalRegion parent, Color c)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition_by_color(parent, ColorPoint(c));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalPartition result = 
+        forest->get_logical_partition_by_color(parent, ColorPoint(c));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10846,7 +11095,13 @@ namespace Legion {
                         Context ctx, LogicalRegion parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition_by_color(parent, ColorPoint(c));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalPartition result = 
+        forest->get_logical_partition_by_color(parent, ColorPoint(c));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10870,7 +11125,13 @@ namespace Legion {
                                  LogicalRegion parent, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      return forest->has_logical_partition_by_color(parent, ColorPoint(color));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = 
+        forest->has_logical_partition_by_color(parent, ColorPoint(color));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10887,7 +11148,13 @@ namespace Legion {
                                             FieldSpace fspace, RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition_by_tree(handle, fspace, tid);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalPartition result = 
+        forest->get_logical_partition_by_tree(handle, fspace, tid);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10905,7 +11172,12 @@ namespace Legion {
                                     LogicalPartition parent, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_subregion(parent, handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalRegion result = forest->get_logical_subregion(parent, handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10921,7 +11193,13 @@ namespace Legion {
                                              LogicalPartition parent, Color c)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_subregion_by_color(parent, ColorPoint(c));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalRegion result = 
+        forest->get_logical_subregion_by_color(parent, ColorPoint(c));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10929,7 +11207,13 @@ namespace Legion {
                                   LogicalPartition parent, const DomainPoint &c)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_subregion_by_color(parent, ColorPoint(c));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalRegion result = 
+        forest->get_logical_subregion_by_color(parent, ColorPoint(c));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10953,7 +11237,13 @@ namespace Legion {
                               LogicalPartition parent, const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      return forest->has_logical_subregion_by_color(parent, ColorPoint(color));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = 
+        forest->has_logical_subregion_by_color(parent, ColorPoint(color));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10969,7 +11259,13 @@ namespace Legion {
                         IndexSpace handle, FieldSpace fspace, RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_subregion_by_tree(handle, fspace, tid);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalRegion result = 
+        forest->get_logical_subregion_by_tree(handle, fspace, tid);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -10986,7 +11282,12 @@ namespace Legion {
                                                   LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_region_color(handle).get_index();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      Color result = forest->get_logical_region_color(handle).get_index();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11001,7 +11302,12 @@ namespace Legion {
                                                         LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_region_color(handle).get_point();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      DomainPoint result = forest->get_logical_region_color(handle).get_point();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11016,7 +11322,12 @@ namespace Legion {
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition_color(handle).get_index();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      Color result = forest->get_logical_partition_color(handle).get_index();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11031,7 +11342,13 @@ namespace Legion {
                                                         LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition_color(handle).get_point();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      DomainPoint result = 
+        forest->get_logical_partition_color(handle).get_point();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11047,7 +11364,12 @@ namespace Legion {
                                                      LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_parent_logical_region(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalRegion result = forest->get_parent_logical_region(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11062,7 +11384,12 @@ namespace Legion {
                                                LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return forest->has_parent_logical_partition(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = forest->has_parent_logical_partition(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11077,7 +11404,12 @@ namespace Legion {
                                                            LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_parent_logical_partition(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      LogicalPartition result = forest->get_parent_logical_partition(handle);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11100,6 +11432,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create index allocation requested in "
@@ -11109,7 +11444,9 @@ namespace Legion {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      return IndexAllocator(handle, forest->get_index_space_allocator(handle));
+      IndexAllocator result(handle, forest->get_index_space_allocator(handle));
+      ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11124,6 +11461,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal create field allocation requested in "
@@ -11133,18 +11473,24 @@ namespace Legion {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      return FieldAllocator(handle, ctx, external);
+      FieldAllocator result(handle, ctx, external);
+      ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
     ArgumentMap Runtime::create_argument_map(Context ctx)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       ArgumentMapImpl *impl = legion_new<ArgumentMapImpl>(
                                     legion_new<ArgumentMapStore>());
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
       return ArgumentMap(impl);
     }
 
@@ -11160,6 +11506,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      ctx->begin_runtime_call();
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
@@ -11167,6 +11514,7 @@ namespace Legion {
         {
           if (program_order_execution)
             launcher.predicate_false_future.get_void_result();
+          ctx->end_runtime_call();
           return launcher.predicate_false_future;
         }
         // Otherwise check to see if we have a value
@@ -11201,6 +11549,7 @@ namespace Legion {
         }
         // Now we can fix the future result
         result->complete_future();
+        ctx->end_runtime_call();
         return Future(result);
       }
       IndividualTask *task = get_available_individual_task(true);
@@ -11225,6 +11574,7 @@ namespace Legion {
                                             false/*check privileges*/);
 #endif
       execute_task_launch(ctx, task);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -11241,12 +11591,15 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      ctx->begin_runtime_call();
       if (launcher.must_parallelism)
       {
         // Turn around and use a must epoch launcher
         MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
         epoch_launcher.add_index_task(launcher);
-        return execute_must_epoch(ctx, epoch_launcher);
+        FutureMap result = execute_must_epoch(ctx, epoch_launcher);
+        ctx->end_runtime_call();
+        return result;
       }
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
@@ -11291,6 +11644,7 @@ namespace Legion {
                                     HLR_LATENCY_PRIORITY, NULL, 
                                     Runtime::protect_event(ready_event));
           }
+          ctx->end_runtime_call();
           return FutureMap(result);
         }
         if (launcher.predicate_false_result.get_size() == 0)
@@ -11332,6 +11686,7 @@ namespace Legion {
           }
         }
         result->complete_all_futures();
+        ctx->end_runtime_call();
         return FutureMap(result);
       }
       IndexTask *task = get_available_index_task(true);
@@ -11355,6 +11710,7 @@ namespace Legion {
                                           false/*check privileges*/);
 #endif
       execute_task_launch(ctx, task);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -11371,11 +11727,15 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      ctx->begin_runtime_call();
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
         if (launcher.predicate_false_future.impl != NULL)
+        {
+          ctx->end_runtime_call();
           return launcher.predicate_false_future;
+        }
         // Otherwise check to see if we have a value
         FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/, 
           get_available_distributed_id(true), address_space, address_space);
@@ -11408,6 +11768,7 @@ namespace Legion {
         }
         // Now we can fix the future result
         result->complete_future();
+        ctx->end_runtime_call();
         return Future(result);
       }
       IndexTask *task = get_available_index_task(true);
@@ -11432,6 +11793,7 @@ namespace Legion {
                                   false/*check privileges*/);
 #endif
       execute_task_launch(ctx, task);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -11451,7 +11813,6 @@ namespace Legion {
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<FutureImpl>(this, true/*register*/,
           get_available_distributed_id(true), address_space, address_space));
-      IndividualTask *task = get_available_individual_task(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -11459,6 +11820,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndividualTask *task = get_available_individual_task(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal execute task call performed in "
@@ -11479,6 +11844,7 @@ namespace Legion {
                 regions, arg, predicate, id, tag, false/*check privileges*/);
 #endif
       execute_task_launch(ctx, task);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -11500,7 +11866,7 @@ namespace Legion {
       // Quick out for predicate false
       if (predicate == Predicate::FALSE_PRED)
         return FutureMap(legion_new<FutureMapImpl>(ctx,this));
-      IndexTask *task = get_available_index_task(true);
+        
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -11508,6 +11874,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexTask *task = get_available_index_task(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal execute index space call performed in "
@@ -11530,6 +11900,7 @@ namespace Legion {
                           must_parallelism, id, tag, false/*check privileges*/);
 #endif
       execute_task_launch(ctx, task);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -11555,7 +11926,6 @@ namespace Legion {
       if (predicate == Predicate::FALSE_PRED)
         return Future(legion_new<FutureImpl>(this, true/*register*/,
           get_available_distributed_id(true), address_space, address_space));
-      IndexTask *task = get_available_index_task(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -11563,6 +11933,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      IndexTask *task = get_available_index_task(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal execute index space call performed in "
@@ -11587,6 +11961,7 @@ namespace Legion {
                             id, tag, false/*check privileges*/);
 #endif
       execute_task_launch(ctx, task);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -11595,6 +11970,8 @@ namespace Legion {
                                                 const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       MapOp *map_op = get_available_map_op(true);
 #ifdef DEBUG_LEGION
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
@@ -11653,6 +12030,8 @@ namespace Legion {
       }
       ctx->register_inline_mapped_region(result);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
       return result;
     }
 
@@ -11661,6 +12040,8 @@ namespace Legion {
                     const RegionRequirement &req, MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       MapOp *map_op = get_available_map_op(true);
 #ifdef DEBUG_LEGION
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
@@ -11720,6 +12101,8 @@ namespace Legion {
       }
       ctx->register_inline_mapped_region(result);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
       return result;
     }
 
@@ -11728,10 +12111,14 @@ namespace Legion {
                                                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       PhysicalRegion result = ctx->get_physical_region(idx);
       // Check to see if we are already mapped, if not, then remap it
       if (!result.impl->is_mapped())
         remap_region(ctx, result);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
       return result;
     }
 
@@ -11750,6 +12137,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal remap operation performed in "
@@ -11763,6 +12153,7 @@ namespace Legion {
       map_op->initialize(ctx, region);
       ctx->register_inline_mapped_region(region);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -11776,6 +12167,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal unmap operation performed in "
@@ -11788,13 +12182,18 @@ namespace Legion {
       ctx->unregister_inline_mapped_region(region);
       if (region.impl->is_mapped())
         region.impl->unmap_region();
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::unmap_all_regions(Context ctx)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       ctx->unmap_all_mapped_regions();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -11804,7 +12203,6 @@ namespace Legion {
                              const Predicate &pred)
     //--------------------------------------------------------------------------
     {
-      FillOp *fill_op = get_available_fill_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -11812,6 +12210,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      FillOp *fill_op = get_available_fill_op(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal fill operation call performed in "
@@ -11847,20 +12249,8 @@ namespace Legion {
       add_to_dependence_queue(proc, fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -11869,7 +12259,6 @@ namespace Legion {
                              Future f, const Predicate &pred)
     //--------------------------------------------------------------------------
     {
-      FillOp *fill_op = get_available_fill_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -11877,6 +12266,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      FillOp *fill_op = get_available_fill_op(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal fill operation call performed in "
@@ -11912,20 +12305,8 @@ namespace Legion {
       add_to_dependence_queue(proc, fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -11936,7 +12317,6 @@ namespace Legion {
                               const Predicate &pred)
     //--------------------------------------------------------------------------
     {
-      FillOp *fill_op = get_available_fill_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -11944,6 +12324,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      FillOp *fill_op = get_available_fill_op(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal fill operation call performed in "
@@ -11979,20 +12363,8 @@ namespace Legion {
       add_to_dependence_queue(proc, fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12002,7 +12374,6 @@ namespace Legion {
                               Future f, const Predicate &pred)
     //--------------------------------------------------------------------------
     {
-      FillOp *fill_op = get_available_fill_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -12010,6 +12381,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      FillOp *fill_op = get_available_fill_op(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal fill operation call performed in "
@@ -12045,27 +12420,14 @@ namespace Legion {
       add_to_dependence_queue(proc, fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::fill_fields(Context ctx, const FillLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      FillOp *fill_op = get_available_fill_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -12073,6 +12435,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      FillOp *fill_op = get_available_fill_op(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal fill operation call performed in "
@@ -12105,20 +12471,8 @@ namespace Legion {
       add_to_dependence_queue(proc, fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12129,7 +12483,6 @@ namespace Legion {
                                         LegionFileMode mode)
     //--------------------------------------------------------------------------
     {
-      AttachOp *attach_op = get_available_attach_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -12137,6 +12490,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      AttachOp *attach_op = get_available_attach_op(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal attach hdf5 file operation performed in "
@@ -12190,6 +12547,7 @@ namespace Legion {
         exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
       }
       add_to_dependence_queue(ctx->get_executing_processor(), attach_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12204,6 +12562,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal detach hdf5 file operation performed in "
@@ -12213,7 +12574,6 @@ namespace Legion {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-      
       // Then issue the detach operation
       Processor proc = ctx->get_executing_processor();
       DetachOp *detach_op = get_available_detach_op(true);
@@ -12225,6 +12585,7 @@ namespace Legion {
         ctx->unregister_inline_mapped_region(region);
         region.impl->unmap_region();
       }
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12236,7 +12597,6 @@ namespace Legion {
                                         LegionFileMode mode)
     //--------------------------------------------------------------------------
     {
-      AttachOp *attach_op = get_available_attach_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -12244,6 +12604,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      AttachOp *attach_op = get_available_attach_op(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal attach normal file operation performed in "
@@ -12297,6 +12661,7 @@ namespace Legion {
         exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
       }
       add_to_dependence_queue(ctx->get_executing_processor(), attach_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12311,6 +12676,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal detach normal file operation performed in "
@@ -12320,7 +12688,6 @@ namespace Legion {
         exit(ERROR_LEAF_TASK_VIOLATION);
       }
 #endif
-
       // Then issue the detach operation
       Processor proc = ctx->get_executing_processor();
       DetachOp *detach_op = get_available_detach_op(true);
@@ -12334,6 +12701,7 @@ namespace Legion {
 	// blocking the application task
 	//   region.impl->unmap_region();
       }
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12341,7 +12709,6 @@ namespace Legion {
                                        const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      CopyOp *copy_op = get_available_copy_op(true);  
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -12349,6 +12716,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      CopyOp *copy_op = get_available_copy_op(true);
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal copy operation call performed in "
@@ -12382,20 +12753,8 @@ namespace Legion {
       add_to_dependence_queue(proc, copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12410,6 +12769,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      ctx->begin_runtime_call();
       if (f.impl == NULL)
       {
         log_run.error("Illegal predicate creation performed on "
@@ -12438,6 +12798,7 @@ namespace Legion {
       Predicate result(pred_op);
       pred_op->initialize(ctx, f);
       add_to_dependence_queue(proc, pred_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12453,6 +12814,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      ctx->begin_runtime_call();
       // Find the mapper for this predicate
       Processor proc = ctx->get_executing_processor();
 #ifdef DEBUG_LEGION
@@ -12471,6 +12833,7 @@ namespace Legion {
       Predicate result(pred_op);
       pred_op->initialize(ctx, p);
       add_to_dependence_queue(proc, pred_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12487,6 +12850,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      ctx->begin_runtime_call();
       // Find the mapper for this predicate
       Processor proc = ctx->get_executing_processor();
 #ifdef DEBUG_LEGION
@@ -12505,6 +12869,7 @@ namespace Legion {
       Predicate result(pred_op);
       pred_op->initialize(ctx, p1, p2);
       add_to_dependence_queue(proc, pred_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12521,6 +12886,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      ctx->begin_runtime_call();
       // Find the mapper for this predicate
       Processor proc = ctx->get_executing_processor();
 #ifdef DEBUG_LEGION
@@ -12539,6 +12905,7 @@ namespace Legion {
       Predicate result(pred_op);
       pred_op->initialize(ctx, p1, p2);
       add_to_dependence_queue(proc, pred_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12546,14 +12913,23 @@ namespace Legion {
     Lock Runtime::create_lock(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return Lock(Reservation::create_reservation());
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      Lock result(Reservation::create_reservation());
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
     void Runtime::destroy_lock(Context ctx, Lock l)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       ctx->destroy_user_lock(l.reservation_lock);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12561,6 +12937,8 @@ namespace Legion {
                                  const std::vector<LockRequest> &requests)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       // Kind of annoying, but we need to unpack and repack the
       // Lock type here to build new requests because the C++
       // type system is dumb with nested classes.
@@ -12573,14 +12951,21 @@ namespace Legion {
                                         requests[idx].mode,
                                         requests[idx].exclusive);
       }
-      return Grant(legion_new<GrantImpl>(unpack_requests));
+      Grant result(legion_new<GrantImpl>(unpack_requests));
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
     void Runtime::release_grant(Context ctx, Grant grant)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       grant.impl->release_grant();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12597,10 +12982,12 @@ namespace Legion {
       log_run.debug("Creating phase barrier in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
       ApBarrier result(Realm::Barrier::create_barrier(arrivals));
 #ifdef LEGION_SPY
       LegionSpy::log_phase_barrier(result);
 #endif
+      ctx->end_runtime_call();
       return PhaseBarrier(result);
     }
 
@@ -12618,7 +13005,9 @@ namespace Legion {
       log_run.debug("Destroying phase barrier in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
       ctx->destroy_user_barrier(pb.phase_barrier);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12635,11 +13024,13 @@ namespace Legion {
       log_run.debug("Advancing phase barrier in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
       PhaseBarrier result = pb;
       Runtime::advance_barrier(result);
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependence(pb.phase_barrier, result.phase_barrier);
 #endif
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12661,11 +13052,13 @@ namespace Legion {
       log_run.debug("Creating dynamic collective in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
       ApBarrier result(Realm::Barrier::create_barrier(arrivals, redop, 
                                                init_value, init_size));
 #ifdef LEGION_SPY
       LegionSpy::log_phase_barrier(result);
 #endif
+      ctx->end_runtime_call();
       return DynamicCollective(result, redop);
     }
 
@@ -12684,7 +13077,9 @@ namespace Legion {
       log_run.debug("Destroying dynamic collective in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
       ctx->destroy_user_barrier(dc.phase_barrier);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12703,8 +13098,10 @@ namespace Legion {
       log_run.debug("Arrive dynamic collective in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
       Runtime::phase_barrier_arrive(dc, count, ApEvent::NO_AP_EVENT, 
                                     buffer, size);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12725,7 +13122,9 @@ namespace Legion {
                           "task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
       f.impl->contribute_to_collective(dc, count);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12744,11 +13143,13 @@ namespace Legion {
       log_run.debug("Get dynamic collective result in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
       DynamicCollectiveOp *collective = 
         get_available_dynamic_collective_op(true);
       Future result = collective->initialize(ctx, dc);
       Processor proc = ctx->get_executing_processor();
       add_to_dependence_queue(proc, collective);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12768,11 +13169,13 @@ namespace Legion {
       log_run.debug("Advancing dynamic collective in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
       DynamicCollective result = dc;
       Runtime::advance_barrier(result);
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependence(dc.phase_barrier, result.phase_barrier);
 #endif
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12780,7 +13183,6 @@ namespace Legion {
     void Runtime::issue_acquire(Context ctx, const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      AcquireOp *acquire_op = get_available_acquire_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -12788,6 +13190,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      AcquireOp *acquire_op = get_available_acquire_op(true);
+#ifdef DEBUG_LEGION
       log_run.debug("Issuing an acquire operation in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -12819,27 +13225,14 @@ namespace Legion {
       add_to_dependence_queue(ctx->get_executing_processor(), acquire_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::issue_release(Context ctx, const ReleaseLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      ReleaseOp *release_op = get_available_release_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -12847,6 +13240,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      ReleaseOp *release_op = get_available_release_op(true);
+#ifdef DEBUG_LEGION
       log_run.debug("Issuing a release operation in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -12878,27 +13275,14 @@ namespace Legion {
       add_to_dependence_queue(ctx->get_executing_processor(), release_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::issue_mapping_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
-      FenceOp *fence_op = get_available_fence_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -12906,6 +13290,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      FenceOp *fence_op = get_available_fence_op(true);
+#ifdef DEBUG_LEGION
       log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -12919,13 +13307,13 @@ namespace Legion {
 #endif
       fence_op->initialize(ctx, FenceOp::MAPPING_FENCE);
       add_to_dependence_queue(ctx->get_executing_processor(), fence_op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::issue_execution_fence(Context ctx)
     //--------------------------------------------------------------------------
     {
-      FenceOp *fence_op = get_available_fence_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -12933,6 +13321,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      FenceOp *fence_op = get_available_fence_op(true);
+#ifdef DEBUG_LEGION
       log_run.debug("Issuing an execution fence in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -12946,6 +13338,7 @@ namespace Legion {
 #endif
       fence_op->initialize(ctx, FenceOp::EXECUTION_FENCE);
       add_to_dependence_queue(ctx->get_executing_processor(), fence_op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12959,6 +13352,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_run.debug("Beginning a trace in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -12972,6 +13368,7 @@ namespace Legion {
 #endif
       // Mark that we are starting a trace
       ctx->begin_trace(tid);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -12985,6 +13382,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       log_run.debug("Ending a trace in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -12998,13 +13398,13 @@ namespace Legion {
 #endif
       // Mark that we are done with the trace
       ctx->end_trace(tid); 
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
-      FrameOp *frame_op = get_available_frame_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -13012,6 +13412,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      FrameOp *frame_op = get_available_frame_op(true);
+#ifdef DEBUG_LEGION
       log_run.debug("Issuing a frame in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -13025,6 +13429,7 @@ namespace Legion {
 #endif
       frame_op->initialize(ctx);
       add_to_dependence_queue(ctx->get_executing_processor(), frame_op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -13032,7 +13437,6 @@ namespace Legion {
                                           const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      MustEpochOp *epoch_op = get_available_epoch_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -13040,6 +13444,10 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+      MustEpochOp *epoch_op = get_available_epoch_op(true);
+#ifdef DEBUG_LEGION
       log_run.debug("Executing a must epoch in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
       if (ctx->is_leaf())
@@ -13076,20 +13484,8 @@ namespace Legion {
       add_to_dependence_queue(proc, epoch_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
-          MapOp *op = get_available_map_op(true);
-          op->initialize(ctx, unmapped_regions[idx]);
-          mapped_events.insert(op->get_completion_event());
-          add_to_dependence_queue(proc, op);
-        }
-        // Wait for all the re-mapping operations to complete
-        ApEvent mapped_event = Runtime::merge_events(mapped_events);
-        if (!mapped_event.has_triggered())
-          mapped_event.wait();
-      }
+        remap_unmapped_regions(proc, ctx, unmapped_regions);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -13098,6 +13494,8 @@ namespace Legion {
                                          MapperID mid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
 #ifdef DEBUG_LEGION
       log_run.debug("Getting a value for tunable variable %d in "
                     "task %s (ID %lld)", tid, ctx->get_task_name(),
@@ -13121,6 +13519,8 @@ namespace Legion {
       issue_runtime_meta_task(&args, sizeof(args),
                               HLR_SELECT_TUNABLE_TASK_ID, 
                               HLR_LATENCY_PRIORITY, ctx);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
       return result_future;
     }
 
@@ -13129,6 +13529,8 @@ namespace Legion {
                                    MapperID mid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       Future f = select_tunable_value(ctx, tid, mid, tag);
       int result = f.get_result<int>();
       if (legion_spy_enabled)
@@ -13137,6 +13539,8 @@ namespace Legion {
         LegionSpy::log_tunable_value(ctx->get_unique_op_id(), index,
                                      &result, sizeof(result));
       }
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
       return result;
     }
 
@@ -13167,7 +13571,6 @@ namespace Legion {
     Future Runtime::get_current_time(Context ctx, const Future &precondition)
     //--------------------------------------------------------------------------
     {
-      TimingOp *timing_op = get_available_timing_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -13178,8 +13581,11 @@ namespace Legion {
       log_run.debug("Getting current time in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
+      TimingOp *timing_op = get_available_timing_op(true);
       Future result = timing_op->initialize(ctx, precondition);
       add_to_dependence_queue(ctx->get_executing_processor(), timing_op);
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -13188,7 +13594,6 @@ namespace Legion {
                                                       const Future &pre)
     //--------------------------------------------------------------------------
     {
-      TimingOp *timing_op = get_available_timing_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -13200,8 +13605,12 @@ namespace Legion {
       log_run.debug("Getting current time in microseconds in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
+      TimingOp *timing_op = get_available_timing_op(true);
       Future result = timing_op->initialize_microseconds(ctx, pre);
       add_to_dependence_queue(ctx->get_executing_processor(), timing_op);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
       return result;
     }
 
@@ -13210,7 +13619,6 @@ namespace Legion {
                                                      const Future &pre)
     //--------------------------------------------------------------------------
     {
-      TimingOp *timing_op = get_available_timing_op(true);
 #ifdef DEBUG_LEGION
       if (ctx == DUMMY_CONTEXT)
       {
@@ -13221,8 +13629,12 @@ namespace Legion {
       log_run.debug("Getting current time in nanoseconds in task %s (ID %lld)",
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
+      ctx->begin_runtime_call();
+      TimingOp *timing_op = get_available_timing_op(true);
       Future result = timing_op->initialize_nanoseconds(ctx, pre);
       add_to_dependence_queue(ctx->get_executing_processor(), timing_op);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
       return result;
     }
 
@@ -13230,12 +13642,16 @@ namespace Legion {
     Mapper* Runtime::get_mapper(Context ctx, MapperID id, Processor target)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       if (!target.exists())
       {
         Processor proc = ctx->get_executing_processor();
 #ifdef DEBUG_LEGION
         assert(proc_managers.find(proc) != proc_managers.end());
 #endif
+        if (ctx != DUMMY_CONTEXT)
+          ctx->end_runtime_call();
         return proc_managers[proc]->find_mapper(id)->mapper;
       }
       else
@@ -13251,6 +13667,8 @@ namespace Legion {
 #endif
           exit(ERROR_INVALID_PROCESSOR_NAME);
         }
+        if (ctx != DUMMY_CONTEXT)
+          ctx->end_runtime_call();
         return finder->second->find_mapper(id)->mapper;
       }
     }
@@ -13259,7 +13677,12 @@ namespace Legion {
     Processor Runtime::get_executing_processor(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return ctx->get_executing_processor();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      Processor result = ctx->get_executing_processor();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -13267,8 +13690,12 @@ namespace Legion {
                                          PhysicalRegion region, bool nuclear)
     //--------------------------------------------------------------------------
     {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
       // TODO: implement this
       assert(false);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -13721,6 +14148,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf() && !local)
       {
         log_task.error("Illegal non-local field allocation performed "
@@ -13743,6 +14173,7 @@ namespace Legion {
         forest->allocate_field(space, field_size, fid, serdez_id);
         ctx->register_field_creation(space, fid);
       }
+      ctx->end_runtime_call();
       return fid;
     }
 
@@ -13757,6 +14188,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal field destruction performed in "
@@ -13770,6 +14204,7 @@ namespace Legion {
       DeletionOp *op = get_available_deletion_op(true);
       op->initialize_field_deletion(ctx, space, fid);
       add_to_dependence_queue(proc, op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -13786,6 +14221,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf() && !local)
       {
         log_task.error("Illegal non-local field allocation performed "
@@ -13812,6 +14250,7 @@ namespace Legion {
         forest->allocate_fields(space, sizes, resulting_fields, serdez_id); 
         ctx->register_field_creations(space, resulting_fields);
       }
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -13826,6 +14265,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
+#endif
+      ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
       if (ctx->is_leaf())
       {
         log_task.error("Illegal field destruction performed in "
@@ -13839,6 +14281,7 @@ namespace Legion {
       DeletionOp *op = get_available_deletion_op(true);
       op->initialize_field_deletions(ctx, space, to_free);
       add_to_dependence_queue(proc, op);
+      ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
@@ -16341,6 +16784,46 @@ namespace Legion {
         it->second->deactivate_context(context);
       }
     }
+
+    //--------------------------------------------------------------------------
+    void Runtime::remap_unmapped_regions(Processor proc, Context ctx,
+                            const std::vector<PhysicalRegion> &unmapped_regions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!unmapped_regions.empty());
+#endif
+      if (unmapped_regions.size() == 1)
+      {
+        MapOp *op = get_available_map_op(true);
+        op->initialize(ctx, unmapped_regions[0]);
+        ApEvent mapped_event = op->get_completion_event();
+        add_to_dependence_queue(proc, op);
+        if (mapped_event.has_triggered())
+          return;
+        ctx->begin_task_wait(true/*from runtime*/);
+        mapped_event.wait();
+        ctx->end_task_wait();
+      }
+      else
+      {
+        std::set<ApEvent> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = get_available_map_op(true);
+          op->initialize(ctx, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          add_to_dependence_queue(proc, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        ApEvent mapped_event = Runtime::merge_events(mapped_events);
+        if (mapped_event.has_triggered())
+          return;
+        ctx->begin_task_wait(true/*from runtime*/);
+        mapped_event.wait();
+        ctx->end_task_wait();
+      }
+    }
  
     //--------------------------------------------------------------------------
     void Runtime::execute_task_launch(Context ctx, TaskOp *task)
@@ -16379,20 +16862,7 @@ namespace Legion {
         add_to_dependence_queue(proc, task);
         // Remap any unmapped regions
         if (!unmapped_regions.empty())
-        {
-          std::set<ApEvent> mapped_events;
-          for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-          {
-            MapOp *op = get_available_map_op(true);
-            op->initialize(ctx, unmapped_regions[idx]);
-            mapped_events.insert(op->get_completion_event());
-            add_to_dependence_queue(proc, op);
-          }
-          // Wait for all the re-mapping operations to complete
-          ApEvent mapped_event = Runtime::merge_events(mapped_events);
-          if (!mapped_event.has_triggered())
-            mapped_event.wait();
-        }
+          remap_unmapped_regions(proc, ctx, unmapped_regions);
       }
     }
 
@@ -16408,7 +16878,9 @@ namespace Legion {
       {
         ApEvent term_event = op->get_completion_event();
         parent->add_to_dependence_queue(op, false/*has_lock*/);
+        parent->begin_task_wait(true/*from runtime*/);
         term_event.wait();
+        parent->end_task_wait();
       }
       else
         parent->add_to_dependence_queue(op, false/*has lock*/);
@@ -20935,7 +21407,12 @@ namespace Legion {
 				   Processor p)
     //--------------------------------------------------------------------------
     {
-      SingleTask::process_mapper_profiling(args, arglen);
+      Realm::ProfilingResponse response(args, arglen);
+#ifdef DEBUG_LEGION
+      assert(response.user_data_size() == sizeof(Operation*));
+#endif
+      Operation *op = *((Operation**)response.user_data());
+      op->report_profiling_response(response);
     }
 
     //--------------------------------------------------------------------------
