@@ -11088,13 +11088,19 @@ namespace Legion {
                                       LogicalRegion region)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context safe cast!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+#endif
       if (pointer.is_null())
         return pointer;
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
+      ctx->begin_runtime_call();
       ptr_t result = ctx->perform_safe_cast(region.get_index_space(), pointer);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -11103,14 +11109,20 @@ namespace Legion {
                                             LogicalRegion region)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context safe cast!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+#endif
       if (point.is_null())
         return point;
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
+      ctx->begin_runtime_call();
       DomainPoint result = 
         ctx->perform_safe_cast(region.get_index_space(), point);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12277,8 +12289,15 @@ namespace Legion {
                                                 const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context map region!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+#endif
+      ctx->begin_runtime_call();
       MapOp *map_op = get_available_map_op(true);
 #ifdef DEBUG_LEGION
       PhysicalRegion result = map_op->initialize(ctx, launcher, 
@@ -12337,8 +12356,7 @@ namespace Legion {
       }
       ctx->register_inline_mapped_region(result);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12347,8 +12365,15 @@ namespace Legion {
                     const RegionRequirement &req, MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context map region!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+#endif
+      ctx->begin_runtime_call();
       MapOp *map_op = get_available_map_op(true);
 #ifdef DEBUG_LEGION
       PhysicalRegion result = map_op->initialize(ctx, req, id, tag, 
@@ -12408,8 +12433,7 @@ namespace Legion {
       }
       ctx->register_inline_mapped_region(result);
       add_to_dependence_queue(ctx->get_executing_processor(), map_op);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
+      ctx->end_runtime_call();
       return result;
     }
 
@@ -12418,14 +12442,20 @@ namespace Legion {
                                                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
+#ifdef DEBUG_LEGION
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context map region!");
+        assert(false);
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+#endif
+      ctx->begin_runtime_call();
       PhysicalRegion result = ctx->get_physical_region(idx);
       // Check to see if we are already mapped, if not, then remap it
       if (!result.impl->is_mapped())
         remap_region(ctx, result);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
+      ctx->end_runtime_call();
       return result;
     }
 
