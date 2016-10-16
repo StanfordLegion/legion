@@ -733,7 +733,6 @@ namespace Legion {
       VariantID                             selected_variant;
       TaskPriority                          task_priority;
       bool                                  perform_postmap;
-      Mapper::TaskProfilingInfo             profiling_info;
     protected:
       // Events that must be triggered before we are done mapping
       std::set<RtEvent> map_applied_conditions;
