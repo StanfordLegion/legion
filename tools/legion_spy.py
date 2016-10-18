@@ -155,10 +155,15 @@ def compute_dependence_type(req1, req2):
         assert False
         return NO_DEPENDENCE
 
-def check_preconditions(preconditions, op):
+def check_preconditions(preconditions, op, check_reorder):
     assert op.reachable_cache is not None
     for pre in preconditions:
         if pre not in op.reachable_cache:
+            # Special case for handling when read-only operations
+            # are mapped out of order, check to see if the anti-dependence
+            # was serialized in the other order
+            if pre in op.physical_outgoing:
+                continue
             return pre
     return None
 
@@ -4500,7 +4505,7 @@ class VerificationState(object):
         preconditions = inst.find_verification_use_dependences(self.depth, 
                                           self.field, self.point, op, req)
         if perform_checks:
-            bad = check_preconditions(preconditions, op)
+            bad = check_preconditions(preconditions, op, req.is_read_only())
             if bad is not None:
                 print("ERROR: Missing use precondition for field "+str(self.field)+
                       " of region requirement "+str(req.index)+" of "+str(op)+
@@ -6873,7 +6878,7 @@ class Task(object):
 
 class Future(object):
     __slots__ = ['state', 'iid', 'creator_uid', 'logical_creator', 
-                 'physical_creator', 'point', 'user_ids',
+                 'physical_creators', 'point', 'user_ids',
                  'logical_users', 'physical_users']
     def __init__(self, state, iid):
         self.state = state
@@ -6881,7 +6886,8 @@ class Future(object):
         self.creator_uid = None
         # These can be different for index space operations
         self.logical_creator = None
-        self.physical_creator = None
+        # Can be multiple creators for index space launches with reductions
+        self.physical_creators = None
         self.point = None
         self.user_ids = None
         self.logical_users = None
@@ -6906,11 +6912,18 @@ class Future(object):
             self.logical_creator.add_created_future(self)
             # If this is an index space operation and has a point, 
             # then get the physical creator
-            if self.logical_creator.kind == INDEX_TASK_KIND and self.point.dim > 0:
-                self.physical_creator = self.logical_creator.get_point_task(self.point).op
+            self.physical_creators = set()
+            if self.logical_creator.kind == INDEX_TASK_KIND:
+                if self.point.dim > 0:
+                    self.physical_creators.add(
+                            self.logical_creator.get_point_task(self.point).op)
+                else:
+                    for point in self.logical_creator.points.itervalues():
+                        self.physical_creators.add(point.op)
             else:
-                self.physical_creator = self.logical_creator 
-            self.physical_creator.add_created_future(self)
+                self.physical_creators.add(self.logical_creator) 
+            for creator in self.physical_creators:
+                creator.add_created_future(self)
         if self.user_ids:
             # Future use is always for the physical operations   
             self.physical_users = set()
@@ -6939,14 +6952,15 @@ class Future(object):
                 if not self.logical_creator.logical_outgoing:
                     self.logical_creator.logical_outgoing= set()
                 self.logical_creator.logical_outgoing.add(user)
-        if self.physical_creator and self.physical_users:
+        if self.physical_creators and self.physical_users:
             for user in self.physical_users:
                 if not user.physical_incoming:
                     user.physical_incoming = set()
-                user.physical_incoming.add(self.physical_creator)
-                if not self.physical_creator.physical_outgoing:
-                    self.physical_creator.physical_outgoing = set()
-                self.physical_creator.physical_outgoing.add(user)
+                for creator in self.physical_creators:
+                    user.physical_incoming.add(creator)
+                    if not creator.physical_outgoing:
+                        creator.physical_outgoing = set()
+                    creator.physical_outgoing.add(user)
 
 class PointUser(object):
     __slots__ = ['op', 'index', 'logical_op', 'priv', 'coher', 'redop']
