@@ -812,14 +812,6 @@ namespace Realm {
 	  mma.latency = 400;  // ~twice the latency as zcmem
 	  r->add_mem_mem_affinity(mma);
 	}
-	// <NEW_DMA> add mem mem affinity between GPU FB and ZC
-	Machine::MemoryMemoryAffinity mma;
-	mma.m1 = fbmem->me;
-	mma.m2 = (*it)->fbmem->me;
-	mma.bandwidth = 200;  // "big"
-	mma.latency = 5;      // "ok"
-	r->add_mem_mem_affinity(mma);
-	// </NEW_DMA>
       }
     }
 
