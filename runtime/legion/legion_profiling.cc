@@ -89,13 +89,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::register_task_kind(TaskID task_id,
-                                                const char *name)
+                                                const char *name,bool overwrite)
     //--------------------------------------------------------------------------
     {
       task_kinds.push_back(TaskKind());
       TaskKind &kind = task_kinds.back();
       kind.task_id = task_id;
       kind.task_name = strdup(name);
+      kind.overwrite = overwrite;
     }
 
     //--------------------------------------------------------------------------
@@ -354,7 +355,8 @@ namespace Legion {
       for (std::deque<TaskKind>::const_iterator it = task_kinds.begin();
             it != task_kinds.end(); it++)
       {
-        log_prof.print("Prof Task Kind %u %s", it->task_id, it->task_name);
+        log_prof.print("Prof Task Kind %u %s %d", it->task_id, it->task_name, 
+                        (it->overwrite ? 1 : 0));
         free(const_cast<char*>(it->task_name));
       }
       for (std::deque<TaskVariant>::const_iterator it = task_variants.begin();
@@ -550,12 +552,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::register_task_kind(TaskID task_id,
-                                            const char *task_name)
+                                          const char *task_name, bool overwrite)
     //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->register_task_kind(task_id, task_name);
+      thread_local_profiling_instance->register_task_kind(task_id, task_name,
+                                                          overwrite);
     }
 
     //--------------------------------------------------------------------------

@@ -55,6 +55,7 @@ namespace Legion {
       public:
         TaskID task_id;
         const char *task_name;
+        bool overwrite;
       };
       struct TaskVariant {
       public:
@@ -163,7 +164,7 @@ namespace Legion {
     public:
       LegionProfInstance& operator=(const LegionProfInstance &rhs);
     public:
-      void register_task_kind(TaskID task_id, const char *name);
+      void register_task_kind(TaskID task_id, const char *name, bool overwrite);
       void register_task_variant(TaskID task_id,
                                  VariantID variant_id, 
                                  const char *variant_name);
@@ -266,7 +267,8 @@ namespace Legion {
     public:
       // Dynamically created things must be registered at runtime
       // Tasks
-      void register_task_kind(TaskID task_id, const char *task_name);
+      void register_task_kind(TaskID task_id, const char *task_name, 
+                              bool overwrite);
       void register_task_variant(TaskID task_id,
                                  VariantID var_id,
                                  const char *variant_name);
