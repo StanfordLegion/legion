@@ -2110,7 +2110,26 @@ function stencil_analysis.stencils_compatible(s1, s2)
 end
 
 function stencil_analysis.top(cx)
-  for _, access_info in pairs(cx.field_accesses) do
+  local sorted_accesses = terralib.newlist()
+  for access, _ in pairs(cx.field_accesses) do
+    sorted_accesses:insert(access)
+  end
+  sorted_accesses:sort(function(a1, a2)
+    if a1.span.start.line < a2.span.start.line then
+      return true
+    elseif a1.span.start.line > a2.span.start.line then
+      return false
+    elseif a1.span.start.offset < a2.span.start.offset then
+      return true
+    elseif a1.span.start.offset > a2.span.start.offset then
+      return false
+    else
+      return render(a1) < render(a2)
+    end
+  end)
+
+  for idx = 1, #sorted_accesses do
+    local access_info = cx.field_accesses[sorted_accesses[idx]]
     local stencil = access_info.stencil
     access_info.exploded_stencils:insertall(
       stencil_analysis.explode_expr(cx, stencil:index()):map(function(expr)
