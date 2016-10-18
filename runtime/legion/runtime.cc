@@ -6194,7 +6194,7 @@ namespace Legion {
       {
         const SemanticInfo &info = semantic_infos[NAME_SEMANTIC_TAG]; 
         const char *name = (const char*)info.buffer;
-        runtime->profiler->register_task_kind(task_id, name);
+        runtime->profiler->register_task_kind(task_id, name, false);
       }
     }
 
@@ -6412,7 +6412,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((tag == NAME_SEMANTIC_TAG) && (runtime->profiler != NULL))
-        runtime->profiler->register_task_kind(task_id, (const char*)buffer);
+        runtime->profiler->register_task_kind(task_id,(const char*)buffer,true);
 
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
