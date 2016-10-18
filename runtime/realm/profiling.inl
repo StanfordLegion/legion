@@ -27,6 +27,11 @@ TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationProcessorUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceTimeline);
+template <Realm::ProfilingMeasurementID _ID>
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::CachePerfCounters<_ID>);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::IPCPerfCounters);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::TLBPerfCounters);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::BranchPredictionPerfCounters);
 
 #include "timers.h"
 
@@ -157,6 +162,19 @@ namespace Realm {
   {
     // SJT: the typecast here is a NOP, but somehow it avoids weird linker errors
     requested_measurements.insert((ProfilingMeasurementID)T::ID);
+    return *this;
+  }
+
+  inline ProfilingRequest &ProfilingRequest::add_measurement(ProfilingMeasurementID measurement_id)
+  {
+    requested_measurements.insert(measurement_id);
+    return *this;
+  }
+
+  inline ProfilingRequest &ProfilingRequest::add_measurements(const std::set<ProfilingMeasurementID>& measurement_ids)
+  {
+    requested_measurements.insert(measurement_ids.begin(),
+				  measurement_ids.end());
     return *this;
   }
 

@@ -151,6 +151,12 @@
 #define LEGION_INIT_SEED                  0x221B
 #endif
 
+// The radix for the runtime to use when 
+// performing collective operations internally
+#ifndef LEGION_COLLECTIVE_RADIX
+#define LEGION_COLLECTIVE_RADIX           8
+#endif
+
 // The radix for the broadcast tree
 // when attempting to shutdown the runtime
 #ifndef LEGION_SHUTDOWN_RADIX
@@ -179,8 +185,8 @@
 #define LEGION_STRINGIFY(x) #x
 #define LEGION_MACRO_TO_STRING(x) LEGION_STRINGIFY(x)
 
-#define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFUL
-#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFUL)
+#define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFULL
+#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFULL)
 #define LEGION_DISTRIBUTED_HELP_DECODE(x)   ((x) >> 56)
 #define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | ((y) << 56))
 
@@ -348,6 +354,7 @@ typedef enum legion_error_t {
   ERROR_UNRESTRICTED_ACQUIRE = 156,
   ERROR_UNACQUIRED_RELEASE = 157,
   ERROR_UNATTACHED_DETACH = 158,
+  ERROR_ILLEGAL_IMPLICIT_MAPPING = 159,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -557,7 +564,7 @@ typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
 typedef unsigned int legion_generator_id_t;
-typedef unsigned long legion_distributed_id_t;
+typedef unsigned long long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
 typedef unsigned long legion_variant_id_t;
 typedef unsigned long legion_semantic_tag_t;

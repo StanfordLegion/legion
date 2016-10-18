@@ -13,6 +13,9 @@
 -- limitations under the License.
 
 -- runs-with:
+-- [[]]
+
+-- FIXME: Something is wrong with SPMD
 -- [["-ll:cpu", "4", "-fflow-spmd", "4", "-fflow-spmd-shardsize", "4"]]
 
 -- Inspired by https://github.com/ParRes/Kernels/tree/master/LEGION/Stencil
@@ -57,6 +60,42 @@ if USE_FOREIGN then
                               "-DDTYPE=" .. tostring(DTYPE),
                               "-DRESTRICT=__restrict__",
                               "-DRADIUS=" .. tostring(RADIUS)})
+end
+
+do
+  local root_dir = arg[0]:match(".*/") or "./"
+  local runtime_dir = root_dir .. "../../runtime/"
+  local legion_dir = runtime_dir .. "legion/"
+  local mapper_dir = runtime_dir .. "mappers/"
+  local realm_dir = runtime_dir .. "realm/"
+  local mapper_cc = root_dir .. "stencil_mapper.cc"
+  if os.getenv('SAVEOBJ') == '1' then
+    mapper_so = root_dir .. "libstencil_mapper.so"
+  else
+    mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
+  end
+  local cxx = os.getenv('CXX') or 'c++'
+
+  local cxx_flags = "-O2 -Wall -Werror"
+  if os.execute('test "$(uname)" = Darwin') == 0 then
+    cxx_flags =
+      (cxx_flags ..
+         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
+  else
+    cxx_flags = cxx_flags .. " -shared -fPIC"
+  end
+
+  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
+                 " -I " .. realm_dir .. " " .. mapper_cc .. " -o " .. mapper_so)
+  if os.execute(cmd) ~= 0 then
+    print("Error: failed to compile " .. mapper_cc)
+    assert(false)
+  end
+  terralib.linklibrary(mapper_so)
+  cmapper = terralib.includec("stencil_mapper.h", {"-I", root_dir, "-I", runtime_dir,
+                                                   "-I", mapper_dir, "-I", legion_dir,
+                                                   "-I", realm_dir})
 end
 
 local min = regentlib.fmin
@@ -414,6 +453,13 @@ where reads(private.{input, output}) do
   c.printf("check completed successfully\n")
 end
 
+task fill_(r : region(ispace(int2d), point), v : DTYPE)
+where reads writes(r.{input, output}) do
+  -- fill(r.{input, output}, v)
+  for x in r do x.input = v end
+  for x in r do x.output = v end
+end
+
 task main()
   var conf = common.read_config()
 
@@ -457,8 +503,28 @@ task main()
   var tprune : int64 = conf.tprune
   regentlib.assert(tsteps > 2*tprune, "too few time steps")
 
+  -- __demand(__spmd)
+  -- do
+  --   for i = 0, nt2 do
+  --     fill_(pxm_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pxp_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pym_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pyp_out[i], init)
+  --   end
+  -- end
+
   __demand(__spmd)
   do
+    -- for i = 0, nt2 do
+    --   fill_(private[i], init)
+    -- end
+
     for t = 0, tsteps do
       -- __demand(__parallel)
       for i = 0, nt2 do
@@ -475,4 +541,10 @@ task main()
     end
   end
 end
-regentlib.start(main)
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local link_flags = {"-L" .. root_dir, "-lstencil", "-lstencil_mapper"}
+  regentlib.saveobj(main, "stencil", "executable", cmapper.register_mappers, link_flags)
+else
+  regentlib.start(main, cmapper.register_mappers)
+end

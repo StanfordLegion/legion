@@ -16,14 +16,14 @@
 #
 
 from __future__ import print_function
-import argparse, codecs, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, tempfile, traceback
+import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, re, shutil, subprocess, sys, tempfile, traceback
 from collections import OrderedDict
 import regent
 
 _version = sys.version_info.major
 
 if _version == 2: # Python 2.x:
-    def glob(path):
+    def _glob(path):
         def visit(result, dirname, filenames):
             for filename in filenames:
                 result.append(os.path.join(dirname, filename))
@@ -31,7 +31,7 @@ if _version == 2: # Python 2.x:
         os.path.walk(path, visit, result)
         return result
 elif _version == 3: # Python 3.x:
-    def glob(path):
+    def _glob(path):
         return [os.path.join(dirname, filename)
                 for dirname, _, filenames in os.walk(path)
                 for filename in filenames]
@@ -60,7 +60,7 @@ def run(filename, debug, verbose, flags, env):
     if retcode != 0:
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
 
-def run_spy(logfile, verbose):
+def run_spy(logfiles, verbose):
     cmd = ['pypy', os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
            '--logical',
            '--physical',
@@ -69,8 +69,7 @@ def run_spy(logfile, verbose):
            '--leaks',
            # '--geometry', # FIXME: This is *very* slow.
            '--assert-error',
-           '--assert-warning',
-           logfile]
+           '--assert-warning'] + logfiles
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
@@ -119,7 +118,7 @@ def test_compile_fail(filename, debug, verbose, flags, env):
         expected_lines = expected_failure.split('\n')
         for expected_line in expected_lines:
             if expected_line not in lines:
-                raise Exception('Expected failure:\n%s\n\nInstead got:\n%s' % (expected_failure, failure))
+                raise Exception('Command failed:\n%s\n\nExpected failure:\n%s\n\nInstead got:\n%s' % (e.command, expected_failure, failure))
     else:
         raise Exception('Expected failure, but test passed')
 
@@ -132,19 +131,21 @@ def test_run_pass(filename, debug, verbose, flags, env):
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
 def test_spy(filename, debug, verbose, flags, env):
-    spy_fd, spy_log = tempfile.mkstemp()
-    os.close(spy_fd)
+    spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
+    spy_log = os.path.join(spy_dir, 'spy_%.log')
     spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
 
     runs_with = find_labeled_flags(filename, 'runs-with')
     try:
         for params in runs_with:
             run(filename, debug, verbose, flags + params + spy_flags, env)
-            run_spy(spy_log, verbose)
+            spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
+            assert len(spy_logs) > 0
+            run_spy(spy_logs, verbose)
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
     finally:
-        os.remove(spy_log)
+        shutil.rmtree(spy_dir)
 
 red = "\033[1;31m"
 green = "\033[1;32m"
@@ -227,7 +228,7 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
                 test_paths.append(test_dir)
             else:
                 test_paths.extend(
-                    path for path in sorted(glob(test_dir))
+                    path for path in sorted(_glob(test_dir))
                     if os.path.isfile(path) and os.path.splitext(path)[1] in ('.rg', '.md'))
 
         for test_path in test_paths:
@@ -235,7 +236,7 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
                 continue
             if skip_patterns and any(re.search(p,test_path) for p in skip_patterns):
                 continue
-            results.append(thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path)))
+            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path))))
 
     thread_pool.close()
 
@@ -246,8 +247,15 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
 
     all_saved_temps = []
     try:
-        for result in results:
-            test_name, filename, saved_temps, outcome, output = result.get()
+        for test_name, filename, result in results:
+            while True:
+                try:
+                    _test_name, _filename, saved_temps, outcome, output = result.get(timeout=60)
+                    assert _test_name == test_name and _filename == filename
+                except multiprocessing.TimeoutError:
+                    print('Potential Hang: (%s) %s' % (test_name, filename))
+                else:
+                    break
             if len(saved_temps) > 0:
                 all_saved_temps.append((test_name, filename, saved_temps))
             if outcome == PASS:
@@ -291,11 +299,11 @@ def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
         for test_name, test_counter in test_counters.items():
             test_total = test_counter.passed + test_counter.failed
             if test_total > 0:
-                print('%24s: Passed %3d of %3d tests (%5.1f%%)' % (
+                print('%24s: Passed %4d of %4d tests (%5.1f%%)' % (
                     '%s' % test_name, test_counter.passed, test_total,
                     float(100*test_counter.passed)/test_total))
         print('    ' + '~'*54)
-        print('%24s: Passed %3d of %3d tests (%5.1f%%)' % (
+        print('%24s: Passed %4d of %4d tests (%5.1f%%)' % (
             'total', global_counter.passed, global_total,
             (float(100*global_counter.passed)/global_total)))
 

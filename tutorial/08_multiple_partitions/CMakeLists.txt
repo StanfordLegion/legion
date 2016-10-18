@@ -22,5 +22,5 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(08_multiple_partitions multiple_partitions.cc)
-target_link_libraries(08_multiple_partitions Legion::Legion)
+add_executable(multiple_partitions multiple_partitions.cc)
+target_link_libraries(multiple_partitions Legion::Legion)

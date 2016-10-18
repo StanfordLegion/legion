@@ -838,6 +838,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void TaskLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void TaskLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
     inline void TaskLauncher::set_predicate_false_future(Future f)
     //--------------------------------------------------------------------------
     {
@@ -905,6 +920,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
@@ -984,6 +1014,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void CopyLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void CopyLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
     inline void AcquireLauncher::add_field(FieldID f)
     //--------------------------------------------------------------------------
     {
@@ -1012,6 +1057,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void AcquireLauncher::add_wait_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AcquireLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
     inline void ReleaseLauncher::add_field(FieldID f)
     //--------------------------------------------------------------------------
     {
@@ -1037,6 +1098,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ReleaseLauncher::add_wait_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ReleaseLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
@@ -1079,6 +1156,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       arrive_barriers.push_back(pb);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void FillLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void FillLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
@@ -1344,13 +1436,6 @@ namespace Legion {
         dp.point_data[idx] = point[idx];
       Future f = get_future(dp);
       return f.get_void_result();
-    }
-
-    //--------------------------------------------------------------------------
-    inline bool PhysicalRegion::is_mapped(void) const
-    //--------------------------------------------------------------------------
-    {
-      return (impl != NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -2201,10 +2286,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const LogicalPartition& lp)
+    //--------------------------------------------------------------------------
+    {
+      os << "LogicalPartition(" << lp.tree_id << "," 
+         << lp.index_partition << "," << lp.field_space << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
     inline std::ostream& operator<<(std::ostream& os, const IndexSpace& is)
     //--------------------------------------------------------------------------
     {
       os << "IndexSpace(" << is.id << "," << is.tid << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const IndexPartition& ip)
+    //--------------------------------------------------------------------------
+    {
+      os << "IndexPartition(" << ip.id << "," << ip.tid << ")";
       return os;
     }
 

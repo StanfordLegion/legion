@@ -2442,20 +2442,24 @@ namespace Legion {
         }
 #endif
         const EventUsers &event_users = pit->second;
-        const FieldMask overlap = user_mask & event_users.user_mask;
+        FieldMask overlap = user_mask & event_users.user_mask;
         if (!overlap)
           continue;
+        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+          preconditions.find(pit->first);
 #ifndef LEGION_SPY
-        if (preconditions.find(pit->first) != preconditions.end())
-          continue;
+        if (finder != preconditions.end())
+        {
+          overlap -= finder->second;
+          if (!overlap)
+            continue;
+        }
 #endif
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
                                      child_color, op_id, index))
           {
-            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-              preconditions.find(pit->first);
             if (finder == preconditions.end())
               preconditions[pit->first] = overlap;
             else
@@ -2468,16 +2472,18 @@ namespace Legion {
                 it = event_users.users.multi_users->begin(); it !=
                 event_users.users.multi_users->end(); it++)
           {
-            const FieldMask user_overlap = user_mask & it->second;
+            const FieldMask user_overlap = overlap & it->second;
             if (!user_overlap)
               continue;
             if (has_local_precondition(it->first, usage,
                                        child_color, op_id, index))
             {
-              LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-                preconditions.find(pit->first);
               if (finder == preconditions.end())
+              {
                 preconditions[pit->first] = user_overlap;
+                // Needed for when we go around the loop again
+                finder = preconditions.find(pit->first);
+              }
               else
                 finder->second |= user_overlap;
             }
@@ -3438,11 +3444,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DeferredView::issue_deferred_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
-                                              const FieldMask &copy_mask)
+                                              const FieldMask &copy_mask,
+                                              const RestrictInfo &restrict_info,
+                                              bool restrict_out)
     //--------------------------------------------------------------------------
     {
       // Find the destination preconditions first 
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
+      if (restrict_info.has_restrictions())
+      {
+        FieldMask restrict_mask;
+        restrict_info.populate_restrict_fields(restrict_mask);
+        restrict_mask &= copy_mask;
+        if (!!restrict_mask)
+        {
+          ApEvent restrict_pre = info.op->get_restrict_precondition();
+          preconditions[restrict_pre] = restrict_mask;
+        }
+      }
       // First check to make sure that it is sound that we can issue
       // copies directly to this instance, if not we're going to need
       // to make a temporary instance to target
@@ -3500,7 +3519,8 @@ namespace Legion {
         // Now issue the update copies to the original instance
         LegionMap<LogicalView*,FieldMask>::aligned temp_valid;
         temp_valid[temporary_dst] = copy_mask;
-        dst->logical_node->issue_update_copies(info, dst, copy_mask,temp_valid);
+        dst->logical_node->issue_update_copies(info, dst, copy_mask,
+                          temp_valid, restrict_info, restrict_out);
       }
       else if (!already_valid)
       {
@@ -3520,6 +3540,18 @@ namespace Legion {
                              info.op->get_unique_op_id(), info.index,
                              it->second, false/*reading*/, local_space, 
                              info.map_applied_events);
+        }
+        if (restrict_out && restrict_info.has_restrictions())
+        {
+          FieldMask restrict_mask;
+          restrict_info.populate_restrict_fields(restrict_mask);
+          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
+                postconditions.begin(); it != postconditions.end(); it++)
+          {
+            if (it->second * restrict_mask)
+              continue;
+            info.op->record_restrict_postcondition(it->first);
+          }
         }
       }
     }
@@ -5363,7 +5395,8 @@ namespace Legion {
                                           const FieldMask &reduce_mask,
                                           const VersionInfo &version_info,
                                           Operation *op, unsigned index,
-                                          std::set<RtEvent> &map_applied_events)
+                                          std::set<RtEvent> &map_applied_events,
+                                          bool restrict_out)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,REDUCTION_VIEW_PERFORM_REDUCTION_CALL);
@@ -5396,6 +5429,8 @@ namespace Legion {
       this->add_copy_user(manager->redop, reduce_post, version_info,
                          op->get_unique_op_id(), index, reduce_mask, 
                          true/*reading*/, local_space, map_applied_events);
+      if (restrict_out)
+        op->record_restrict_postcondition(reduce_post);
     } 
 
     //--------------------------------------------------------------------------

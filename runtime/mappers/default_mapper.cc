@@ -55,10 +55,12 @@ namespace Legion {
       : Mapper(rt), local_proc(local), local_kind(local.kind()), 
         node_id(local.address_space()), machine(m),
         mapper_name((name == NULL) ? create_default_name(local) : strdup(name)),
-        next_local_io(0), next_local_cpu(0), next_local_gpu(0), next_local_procset(0),
-        next_global_io(Processor::NO_PROC), next_global_cpu(Processor::NO_PROC),
-        next_global_gpu(Processor::NO_PROC), next_global_procset(Processor::NO_PROC), 
-        global_io_query(NULL), global_cpu_query(NULL), global_gpu_query(NULL), global_procset_query(NULL),
+        next_local_io(0), next_local_cpu(0), next_local_gpu(0), 
+        next_local_procset(0), next_global_io(Processor::NO_PROC), 
+        next_global_cpu(Processor::NO_PROC),next_global_gpu(Processor::NO_PROC),
+        next_global_procset(Processor::NO_PROC), global_io_query(NULL), 
+        global_cpu_query(NULL), global_gpu_query(NULL), 
+        global_procset_query(NULL),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         breadth_first_traversal(STATIC_BREADTH_FIRST),
@@ -301,7 +303,7 @@ namespace Legion {
                                             MapperContext ctx, const Task &task)
     //--------------------------------------------------------------------------
     {
-      if (have_procset_variant(ctx, task.task_id)) {
+      if (have_proc_kind_variant(ctx, task.task_id, Processor::PROC_SET)) {
         return default_get_next_global_procset();
       }
  
@@ -309,23 +311,73 @@ namespace Legion {
         default_find_preferred_variant(task, ctx, false/*needs tight*/);
       // If we are the right kind and this is an index space task launch
       // then we return ourselves
-      if (task.is_index_space && (info.proc_kind == local_kind))
-        return local_proc;
-      
-      // Otherwise we round-robin onto the other processors in the machine
-      // TODO: Fix this when we implement a good stealing algorithm
-      // to instead encourage locality
-      switch (info.proc_kind)
+      if (task.is_index_space)
       {
-        case Processor::LOC_PROC:
-          return default_get_next_global_cpu();
-        case Processor::TOC_PROC:
-          return default_get_next_global_gpu();
-        case Processor::IO_PROC: // Don't distribute I/O
-          return default_get_next_local_io();
-        default:
-          assert(false);
+        if (info.proc_kind == local_kind)
+          return local_proc;
+        // Otherwise round robin onto our local queue of the right kind
+        switch (info.proc_kind)
+        {
+          case Processor::LOC_PROC:
+            return default_get_next_local_cpu();
+          case Processor::TOC_PROC:
+            return default_get_next_local_gpu();
+          case Processor::IO_PROC:
+            return default_get_next_local_io();
+          default: // make warnings go away
+            break;
+        }
+        // should never get here
+        assert(false);
+        return Processor::NO_PROC;
       }
+      // Do different things depending on our depth in the task tree
+      const int depth = task.get_depth();
+      switch (depth)
+      {
+        case 0:
+          {
+            // Top-level task, we should just stay here      
+            assert(info.proc_kind == local_kind);
+            return local_proc;
+          }
+        case 1:
+          {
+            // First-level tasks: assume we should distribute these
+            // evenly around the machine
+            // TODO: Fix this when we implement a good stealing algorithm
+            // to instead encourage locality
+            switch (info.proc_kind)
+            {
+              case Processor::LOC_PROC:
+                return default_get_next_global_cpu();
+              case Processor::TOC_PROC:
+                return default_get_next_global_gpu();
+              case Processor::IO_PROC: // Don't distribute I/O
+                return default_get_next_local_io();
+              default: // make warnings go away
+                break;
+            }
+          }
+        default:
+          {
+            // N-level tasks: assume we keep these local to our
+            // current node as the distribution was done at level 1
+            switch (info.proc_kind)
+            {
+              case Processor::LOC_PROC:
+                return default_get_next_local_cpu();
+              case Processor::TOC_PROC:
+                return default_get_next_local_gpu();
+              case Processor::IO_PROC:
+                return default_get_next_local_io();
+              default: // make warnings go away
+                break;
+            }
+          }
+      }
+      // should never get here
+      assert(false);
       return Processor::NO_PROC;
     }
 
@@ -487,9 +539,10 @@ namespace Legion {
 
 
       /* if we have a procset variant use it */
-      if (have_procset_variant(ctx, task.task_id)) {
+      if (have_proc_kind_variant(ctx, task.task_id, Processor::PROC_SET)) {
         std::vector<VariantID> variants;
-        runtime->find_valid_variants(ctx, task.task_id, variants, Processor::PROC_SET);
+        runtime->find_valid_variants(ctx, task.task_id, 
+                                     variants, Processor::PROC_SET);
         if (variants.size() > 0) {
           VariantInfo result;
           result.proc_kind = Processor::PROC_SET;
@@ -681,13 +734,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Default mapper is ignorant about task IDs so just do whatever
-      ranking.resize(3);
-      // Prefer GPUs over everything else, teehee! :)
+      ranking.resize(4);
+      // GPU > procset > IO > cpu
+      // It is up to the caller to filter out processor kinds that aren't
+      // suitable for a given task
       ranking[0] = Processor::TOC_PROC;
-      // I/O processors are specialized so prefer them next
-      ranking[1] = Processor::IO_PROC;
-      // CPUs go last (suck it Intel)
-      ranking[2] = Processor::LOC_PROC;
+      ranking[1] = Processor::PROC_SET;
+      ranking[2] = Processor::IO_PROC;
+      ranking[3] = Processor::LOC_PROC;
     }
 
     //--------------------------------------------------------------------------
@@ -1154,7 +1208,8 @@ namespace Legion {
                                          std::vector<TaskSlice> &slices)
     //--------------------------------------------------------------------------
     {
-      Point<DIM> num_points = point_rect.hi - point_rect.lo + Point<DIM>::ONES();
+      Point<DIM> num_points = 
+        point_rect.hi - point_rect.lo + Point<DIM>::ONES();
       Rect<DIM> blocks(Point<DIM>::ZEROES(), num_blocks - Point<DIM>::ONES());
       size_t next_index = 0;
       slices.reserve(blocks.volume());
@@ -1432,6 +1487,13 @@ namespace Legion {
           }
           continue;
         }
+	// Did the application request a virtual mapping for this requirement?
+	if ((task.regions[idx].tag & DefaultMapper::VIRTUAL_MAP) != 0)
+	{
+	  PhysicalInstance virt_inst = PhysicalInstance::get_virtual_instance();
+	  output.chosen_instances[idx].push_back(virt_inst);
+	  continue;
+	}
         // Otherwise make normal instances for the given region
         if (!default_create_custom_instances(ctx, task.target_proc,
                 target_memory, task.regions[idx], idx, missing_fields[idx],
@@ -1939,6 +2001,12 @@ namespace Legion {
       LogicalRegion result = req.region; 
       if (!meets_constraints || (req.privilege == REDUCE))
         return result;
+
+      // If the application requested that we use the exact region requested,
+      // honor that
+      if ((req.tag & DefaultMapper::EXACT_REGION) != 0)
+	return result;
+
       // Simple heuristic here, if we are on a single node, we go all the
       // way to the root since the first-level partition is likely just
       // across processors in the node, however, if we are on multiple nodes
@@ -1985,10 +2053,10 @@ namespace Legion {
       // as long as possible, delete reduction instances
       // as soon as possible, otherwise we are ambivalent
       // Only have higher priority for things we cache
-      if (meets_fill_constraints && (kind == TASK_MAPPING))
-        return GC_NEVER_PRIORITY;
       if (reduction)
         return GC_FIRST_PRIORITY;
+      if (meets_fill_constraints && (kind == TASK_MAPPING))
+        return GC_NEVER_PRIORITY;
       return GC_DEFAULT_PRIORITY;
     }
 
@@ -2000,14 +2068,14 @@ namespace Legion {
     {
       log_mapper.error("Default mapper failed allocation for region "
                        "requirement %d of task %s (UID %lld) in memory " IDFMT
-                       "for processor " IDFMT ". This means the working set "
+                       " for processor " IDFMT ". This means the working set "
                        "of your application is too big for the allotted "
                        "capacity of the given memory under the default "
                        "mapper's mapping scheme. You have three choices: "
                        "ask Realm to allocate more memory, write a custom "
                        "mapper to better manage working sets, or find a bigger "
                        "machine. Good luck!", index, task.get_task_name(),
-                       task.get_unique_id(), target_proc.id, target_mem.id);
+                       task.get_unique_id(), target_mem.id, target_proc.id);
       assert(false);
     }
 
@@ -2107,7 +2175,7 @@ namespace Legion {
                                         const MapperContext       ctx,
                                         const Task&               task,
                                         const CreateTaskTemporaryInput& input,
-                                              CreateTaskTemporaryOutput& output)    
+                                              CreateTaskTemporaryOutput& output)
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Default create_task_temporary_instance in %s", 
@@ -2272,8 +2340,8 @@ namespace Legion {
                          "a bigger machine. Good luck!", 
                          inline_op.parent_task->get_task_name(),
                          inline_op.parent_task->get_unique_id(),
-                         inline_op.parent_task->current_proc.id, 
-                         target_memory.id);
+                         target_memory.id,
+                         inline_op.parent_task->current_proc.id);
         assert(false);
       }
     }
@@ -2370,7 +2438,7 @@ namespace Legion {
     template<bool IS_SRC>
     void DefaultMapper::default_create_copy_instance(MapperContext ctx,
                          const Copy &copy, const RegionRequirement &req, 
-                         unsigned idx, std::vector<PhysicalInstance> &instances) 
+                         unsigned idx, std::vector<PhysicalInstance> &instances)
     //--------------------------------------------------------------------------
     {
       // See if we have all the fields covered
@@ -2420,8 +2488,8 @@ namespace Legion {
                        IS_SRC ? "source" : "destination", idx, 
                        copy.parent_task->get_task_name(),
                        copy.parent_task->get_unique_id(),
-                       copy.parent_task->current_proc.id, 
-                       target_memory.id);
+		       target_memory.id,
+		       copy.parent_task->current_proc.id);
         assert(false);
       }
     }
@@ -2746,23 +2814,202 @@ namespace Legion {
       }
     }
 
-   //--------------------------------------------------------------------------
-   bool DefaultMapper::have_procset_variant(const MapperContext ctx, TaskID id)
-   //--------------------------------------------------------------------------
-   {
-     std::vector<VariantID> variants;
-     runtime->find_valid_variants(ctx, id, variants);
+    //--------------------------------------------------------------------------
+    bool DefaultMapper::have_proc_kind_variant(const MapperContext ctx,
+					       TaskID id, Processor::Kind kind)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<VariantID> variants;
+      runtime->find_valid_variants(ctx, id, variants);
 
-     for(unsigned i = 0; i < variants.size(); i++)
-     {
-       const ExecutionConstraintSet exset =
-         runtime->find_execution_constraints(ctx, id, variants[i]);
-       if(exset.processor_constraint.kind == Processor::PROC_SET)
-               return true;
-     }
-     return false; 
-   }
+      for(unsigned i = 0; i < variants.size(); i++)
+      {
+	const ExecutionConstraintSet exset =
+	  runtime->find_execution_constraints(ctx, id, variants[i]);
+	if(exset.processor_constraint.kind == kind)
+	  return true;
+      }
+      return false; 
+    }
 
+    //--------------------------------------------------------------------------
+    bool DefaultMapper::default_policy_select_must_epoch_processors(
+                              MapperContext ctx,
+                              const std::vector<std::set<const Task *> > &tasks,
+                              Processor::Kind proc_kind,
+                              std::map<const Task *, Processor> &target_procs)
+    //--------------------------------------------------------------------------
+    {
+      // our default policy will be to try to spread must epoch tasks across all
+      // address spaces as evenly as possible - tasks in the same subvector need
+      // to go in the same address space because they have instances they both
+      // want to access
+      std::map<AddressSpaceID, std::deque<Processor> > as2proc;
+      size_t n_procs = 0;
+      {
+	Machine::ProcessorQuery pq = Machine::ProcessorQuery(machine)
+	  .only_kind(proc_kind);
+	for(Machine::ProcessorQuery::iterator it = pq.begin();
+	    it != pq.end();
+	    ++it) {
+	  as2proc[it->address_space()].push_back(*it);
+	  n_procs++;
+	}
+      }
+
+      // if we don't have enough processors, we can't satisfy this request
+      size_t total_tasks = 0;
+      for(std::vector<std::set<const Task *> >::const_iterator it = 
+            tasks.begin(); it != tasks.end(); ++it)
+	total_tasks += it->size();
+      if(n_procs < total_tasks) {
+	log_mapper.error() << "Default mapper error. Not enough procs of kind "
+			   << proc_kind << " for must epoch launch with "
+			   << total_tasks << " tasks.";
+	return false;
+      }
+
+      // round-robin across the address spaces until we satisfy everyone - favor
+      //  groups with larger sizes to maximize chance of satisfying things (we
+      //  won't handle all cases - i.e. the bin packing problem)
+      size_t n_left = total_tasks;
+      size_t last_group_size = total_tasks + 1; // larger than any group
+      while(n_left) {
+	// first find the largest remaining group
+	size_t group_size = 0;
+	for(std::vector<std::set<const Task *> >::const_iterator it = 
+              tasks.begin(); it != tasks.end(); ++it)
+	  if((it->size() > group_size) && (it->size() < last_group_size))
+	    group_size = it->size();
+	last_group_size = group_size; // remember for next time around
+
+	// now iterate over groups of the current-max-size and assign them 
+        // round-robin to address spaces
+	assert(group_size > 0);
+	std::map<AddressSpaceID, std::deque<Processor> >::iterator 
+          prev_as = as2proc.end();
+	for(std::vector<std::set<const Task *> >::const_iterator it = 
+              tasks.begin(); it != tasks.end(); ++it) {
+	  if(it->size() != group_size) continue;
+
+	  // first choice is the space after the one we used last time
+	  std::map<AddressSpaceID, std::deque<Processor> >::iterator 
+            curr_as = prev_as;
+	  if(curr_as != as2proc.end())
+	    ++curr_as;
+	  if(curr_as == as2proc.end())
+	    curr_as = as2proc.begin();
+	  
+	  // skip address spaces that are too small
+	  if(curr_as->second.size() < group_size) {
+	    std::map<AddressSpaceID, std::deque<Processor> >::iterator 
+	      next_as = curr_as;
+	    do {
+	      if(next_as != as2proc.end())
+		++next_as;
+	      if(next_as == as2proc.end())
+		next_as = as2proc.begin();
+	      // if we wrap around, nothing is large enough and we're toast
+	      if(next_as == curr_as) {
+	      }
+	      log_mapper.fatal() << "must_epoch: no address space has enough processors to fit a group of " << group_size << " tasks!";
+	      assert(false);
+	    } while(next_as->second.size() < group_size);
+	    curr_as = next_as;
+	  }
+	  prev_as = curr_as;
+	  
+	  log_mapper.info() << "must_epoch: assigning " << group_size 
+                            << " tasks to AS " << curr_as->first;
+
+	  // assign tasks in this group to processors in this space
+	  for(std::set<const Task *>::const_iterator it2 = it->begin();
+	      it2 != it->end();
+	      ++it2) {
+	    target_procs[*it2] = curr_as->second.front();
+	    curr_as->second.pop_front();
+	    n_left--;
+	  }
+	}
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    Memory DefaultMapper::
+      default_policy_select_constrained_instance_constraints(
+                                  MapperContext ctx,
+                                  const std::vector</*const*/ Task *> &tasks,
+                                  const std::vector<unsigned> &req_indexes,
+                                  const std::vector<Processor> &target_procs,
+                                  const std::set<LogicalRegion> &needed_regions,
+                                  const std::set<FieldID> &needed_fields,
+                                  LayoutConstraintSet &constraints)
+    //--------------------------------------------------------------------------
+    {
+      // go through the requirements of the various tasks and hope for exactly
+      // one requirement that doesn't have NO_ACCESS
+      std::vector<unsigned> accessing_task_idxs;
+      for(unsigned i = 0; i < tasks.size(); i++) {
+	if(tasks[i]->regions[req_indexes[i]].is_no_access())
+	  continue;
+
+	accessing_task_idxs.push_back(i);
+      }
+
+      // check for case of no tasks that want access
+      if(accessing_task_idxs.empty()) {
+	log_mapper.fatal() << "Must epoch has no tasks that require direct "
+                           << "access to an instance - DefaultMapper doesn't "
+                           << "know how to pick one.";
+	assert(false);
+      }
+
+      // pick the first (or only) task as the "home task" - it'll be the one we
+      //  ask for layout choices
+      unsigned home_task_idx = accessing_task_idxs[0];
+      Processor target_proc = target_procs[home_task_idx];
+      Memory target_memory = default_policy_select_target_memory(ctx, 
+								 target_proc);
+      // if we have more than one task, double-check that this memory is kosher 
+      // with the other ones too
+      if(accessing_task_idxs.size() > 1) {
+	for(size_t i = 1; i < accessing_task_idxs.size(); i++) {
+	  Processor p2 = target_procs[accessing_task_idxs[i]];
+	  if(!machine.has_affinity(p2, target_memory)) {
+	    log_mapper.fatal() << "Default Mapper Error.  Memory chosen for "
+                               << "constrained instance was " << target_memory
+			       << ", but is not visible to task on processor " 
+                               << p2;
+	    assert(false);
+	  }
+	}
+      }
+
+      // all layout constraints must be satisified for all accessing tasks
+      for(std::vector<unsigned>::iterator it = accessing_task_idxs.begin(); 
+	  it != accessing_task_idxs.end();
+	  ++it) {
+	VariantInfo info = default_find_preferred_variant(*(tasks[*it]), ctx, 
+           true/*needs tight bound*/, true/*cache*/, target_procs[*it].kind());
+        const TaskLayoutConstraintSet &tlc = 
+          runtime->find_task_layout_constraints(ctx, tasks[*it]->task_id, 
+                                                info.variant);
+	std::multimap<unsigned,LayoutConstraintID>::const_iterator it2 = 
+          tlc.layouts.lower_bound(req_indexes[*it]);
+	while((it2 != tlc.layouts.end()) && (it2->first == req_indexes[*it])) {
+	  const LayoutConstraintSet &req_cons = 
+            runtime->find_layout_constraints(ctx, it2->second);
+	  if(constraints.conflicts(req_cons)) {
+	    log_mapper.fatal() << "Default mapper error.  Layout constraint "
+                               << "violation in must_epoch instance creation.";
+	    assert(false);
+	  }
+	  ++it2;
+	}
+      }
+      return target_memory;
+    }
 
     //--------------------------------------------------------------------------
     void DefaultMapper::map_must_epoch(const MapperContext           ctx,
@@ -2771,67 +3018,112 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Default map_must_epoch in %s", get_mapper_name());
-      // Figure out how to assign tasks to CPUs first. We know we can't
-      // do must epochs for anthing but CPUs at the moment.
+
+      // First get a set of distinct processors to target - first we need to go
+      // through the tasks in the must epoch and split them by which kind of
+      // processor they want
+      std::map<Processor::Kind, std::vector<const Task *> > tasks_by_kind;
+      for(unsigned i = 0; i < input.tasks.size(); i++) {
+	// see which processor kinds are preferred, but filter by which ones 
+        // have available variants
+	std::vector<Processor::Kind> ranking;
+	default_policy_rank_processor_kinds(ctx, *(input.tasks[i]), ranking);
+	std::vector<Processor::Kind>::iterator it = ranking.begin();
+	while(true) {
+	  assert(it != ranking.end());
+	  if(have_proc_kind_variant(ctx, input.tasks[i]->task_id, *it)) {
+	    tasks_by_kind[*it].push_back(input.tasks[i]);
+	    break;
+	  }
+	  ++it;
+	}
+      }
+      // now try to satisfy each kind
       std::map<const Task*,Processor> proc_map;
-      if (total_nodes > 1)
-      {
-        Machine::ProcessorQuery all_procs(machine);
-        Machine::ProcessorQuery all_procsets(machine);
-        all_procs.only_kind(Processor::LOC_PROC);
-        all_procsets.only_kind(Processor::PROC_SET);
-        Machine::ProcessorQuery::iterator proc_finder = all_procs.begin();
-        Machine::ProcessorQuery::iterator procset_finder = all_procsets.begin();
-        for (unsigned idx = 0; idx < input.tasks.size(); idx++)
-        {
-          const Task *task = input.tasks[idx];
-          /* if we have a procset variant use it */
-          if (have_procset_variant(ctx, task->task_id)) 
-          {
-            if (procset_finder == all_procsets.end())
-            {
-              log_mapper.error("Default mapper error. Not enough procsets for must "
-                             "epoch launch of task %s with %ld tasks", 
-                             input.tasks[0]->get_task_name(),
-                             input.tasks.size());
-              assert(false);
-            }
-            output.task_processors[idx] = *procset_finder;
-            proc_map[input.tasks[idx]] = *procset_finder;
-            procset_finder++;
-          } 
-          else 
-          {  
-            if (proc_finder == all_procs.end())
-            {
-              log_mapper.error("Default mapper error. Not enough CPUs for must "
-                             "epoch launch of task %s with %ld tasks", 
-                             input.tasks[0]->get_task_name(),
-                             input.tasks.size());
-              assert(false);
-            }
-            output.task_processors[idx] = *proc_finder;
-            proc_map[input.tasks[idx]] = *proc_finder;
-            proc_finder++;
-          }
-        }
+      for(std::map<Processor::Kind,
+               std::vector<const Task *> >::iterator it = tasks_by_kind.begin();
+	  it != tasks_by_kind.end();
+	  ++it) {
+	// yuck - have to build "equivalence classes" of tasks based on whether 
+        // they have any common region requirements that they both want access 
+        // to the "best" algorithm would be a union-find approach on the task
+	//  "common access" graph, but we'll go with a slightly less optimal
+	//  insertion-sort-style algorithm
+	std::vector<std::set<const Task *> > task_groups;
+	for(std::vector<const Task *>::const_iterator it2 = it->second.begin();
+	    it2 != it->second.end();
+	    ++it2) {
+	  const Task *t = *it2;
+	  std::set<unsigned> merges;
+
+	  for(std::vector<MappingConstraint>::const_iterator it3 = 
+              input.constraints.begin(); it3 != input.constraints.end();++it3) {
+	    const MappingConstraint &c = *it3;
+	    std::set<unsigned> poss_merges;
+	    bool need_merge = false;
+	    for(unsigned idx = 0; idx < c.constrained_tasks.size(); idx++) {
+	      const Task *t2 = c.constrained_tasks[idx];
+	      // ignore any region requirement that is no_access
+	      if(t2->regions[c.requirement_indexes[idx]].is_no_access())
+		continue;
+	      if(t == t2) {
+		// we're one of the tasks, so we'll need to merge with anybody
+		//  else that wants access
+		need_merge = true;
+	      } else {
+		// see if this task is in one of the existing groups
+		for(unsigned j = 0; j < task_groups.size(); j++)
+		  if(task_groups[j].count(t2) > 0) {
+		    poss_merges.insert(j);
+		    break;
+		  }
+	      }
+	    }
+	    // add in the possible merges if we need them
+	    if(need_merge && !poss_merges.empty())
+	      merges.insert(poss_merges.begin(), poss_merges.end());
+	  }
+
+	  // three cases to deal with
+	  if(merges.empty()) {
+	    // case 1: no merges needed - start a new group
+	    std::set<const Task *> ng;
+	    ng.insert(t);
+	    task_groups.push_back(ng);
+	  } else if(merges.size() == 1) {
+	    // case 2: merge needed with exactly one group 
+            // - just add to that group
+	    task_groups[*(merges.begin())].insert(t);
+	  } else {
+	    // case 3: need to merge multiple groups, so add ourselves to the 
+            // first one and then combine all the rest into the first as well, 
+            // working backwards so we can do vector::erase() calls
+	    unsigned first = *(merges.begin());
+	    task_groups[first].insert(t);
+	    std::set<unsigned>::reverse_iterator it3 = merges.rbegin();
+	    while(*it3 != first) {
+	      task_groups[first].insert(task_groups[*it3].begin(),
+					task_groups[*it3].end());
+	      task_groups.erase(task_groups.begin() + *it3);
+	    }
+	  }
+	}
+
+#ifndef NDEBUG
+	bool ok =
+#endif
+                  default_policy_select_must_epoch_processors(ctx,
+							      task_groups,
+							      it->first,
+							      proc_map);
+	assert(ok);
       }
-      else
-      {
-        if (input.tasks.size() > local_cpus.size())
-        {
-          log_mapper.error("Default mapper error. Not enough CPUs for must "
-                           "epoch launch of task %s with %ld tasks", 
-                           input.tasks[0]->get_task_name(),
-                           input.tasks.size());
-          assert(false);
-        }
-        for (unsigned idx = 0; idx < input.tasks.size(); idx++)
-        {
-          output.task_processors[idx] = local_cpus[idx];
-          proc_map[input.tasks[idx]] = local_cpus[idx];
-        }
+      // everything's assigned, so copy the answers into the output
+      for(unsigned i = 0; i < input.tasks.size(); i++) {
+	assert(proc_map.count(input.tasks[i]) != 0);
+	output.task_processors[i] = proc_map[input.tasks[i]];
       }
+
       // Now let's map the constraints, find one requirement to use for
       // mapping each of the constraints, but get the set of fields we
       // care about and the set of logical regions for all the requirements
@@ -2840,77 +3132,58 @@ namespace Legion {
         const MappingConstraint &constraint = input.constraints[cid];
         std::vector<PhysicalInstance> &constraint_mapping = 
                                               output.constraint_mappings[cid];
-        // Figure out which task and region requirement to use as the 
-        // basis for doing the mapping
-        Task *base_task = NULL;
-        unsigned base_index = 0;
-        Processor base_proc = Processor::NO_PROC;
         std::set<LogicalRegion> needed_regions;
         std::set<FieldID> needed_fields;
         for (unsigned idx = 0; idx < constraint.constrained_tasks.size(); idx++)
         {
           Task *task = constraint.constrained_tasks[idx];
           unsigned req_idx = constraint.requirement_indexes[idx];
-          if ((base_task == NULL) && (!task->regions[req_idx].is_no_access()))
-          {
-            base_task = task;
-            base_index = req_idx;
-            base_proc = proc_map[task];
-          }
           needed_regions.insert(task->regions[req_idx].region);
           needed_fields.insert(task->regions[req_idx].privilege_fields.begin(),
                                task->regions[req_idx].privilege_fields.end());
         }
-        // If there wasn't a region requirement that wasn't no access just 
-        // pick the first one since this case doesn't make much sense anyway
-        if (base_task == NULL)
+
+	// Now delegate to a policy routine to decide on a memory and layout
+	// constraints for this constrained instance
+	std::vector<Processor> target_procs;
+	for(std::vector<Task *>::const_iterator it = 
+            constraint.constrained_tasks.begin();
+	    it != constraint.constrained_tasks.end();
+	    ++it)
+	  target_procs.push_back(proc_map[*it]);
+	LayoutConstraintSet layout_constraints;
+	layout_constraints.add_constraint(FieldConstraint(needed_fields,
+                                                false /*!contiguous*/));
+	Memory mem = default_policy_select_constrained_instance_constraints(
+				     ctx,
+				     constraint.constrained_tasks,
+				     constraint.requirement_indexes,
+				     target_procs,
+				     needed_regions,
+				     needed_fields,
+				     layout_constraints);
+
+	LogicalRegion to_create = ((needed_regions.size() == 1) ?
+  				     *(needed_regions.begin()) :
+                       default_find_common_ancestor(ctx, needed_regions));
+	PhysicalInstance inst;
+	bool created;
+	bool ok = runtime->find_or_create_physical_instance(ctx, mem,
+            layout_constraints, std::vector<LogicalRegion>(1,to_create),
+							    inst, created,
+							    true /*acquire*/);
+	assert(ok);
+	if(!ok)
         {
-          base_task = constraint.constrained_tasks[0];
-          base_index = constraint.requirement_indexes[0];
-          base_proc = proc_map[base_task];
-        }
-        Memory target_memory = default_policy_select_target_memory(ctx, 
-                                                                   base_proc);
-        VariantInfo info = default_find_preferred_variant(*base_task, ctx, 
-               true/*needs tight bound*/, true/*cache*/, Processor::LOC_PROC);
-        const TaskLayoutConstraintSet &layout_constraints = 
-          runtime->find_task_layout_constraints(ctx, base_task->task_id, 
-                                                info.variant);
-        if (needed_regions.size() == 1)
-        {
-          // If there was just one region we can use the base region requirement
-          if (!default_create_custom_instances(ctx, base_proc, target_memory,
-                base_task->regions[base_index], base_index, needed_fields,
-                layout_constraints, true/*needs check*/, constraint_mapping))
-          {
-            log_mapper.error("Default mapper error. Unable to make instance(s) "
-                             "in memory " IDFMT " for index %d of constrained "
-                             "task %s (ID %lld) in must epoch launch.",
-                             target_memory.id, base_index,
-                             base_task->get_task_name(), 
-                             base_task->get_unique_id());
+	  log_mapper.fatal("Default mapper error. Unable to make instance(s) "
+			   "in memory " IDFMT " for index %d of constrained "
+			   "task %s (ID %lld) in must epoch launch.",
+			   mem.id, constraint.requirement_indexes[0],
+			   constraint.constrained_tasks[0]->get_task_name(), 
+			   constraint.constrained_tasks[0]->get_unique_id());
             assert(false);
-          }
-        }
-        else
-        {
-          // Otherwise we need to find a common region that will satisfy all
-          // the needed regions
-          RegionRequirement copy_req = base_task->regions[base_index];
-          copy_req.region = default_find_common_ancestor(ctx, needed_regions);
-          if (!default_create_custom_instances(ctx, base_proc, target_memory,
-                copy_req, base_index, needed_fields, layout_constraints,
-                true/*needs check*/, constraint_mapping))
-          {
-            log_mapper.error("Default mapper error. Unable to make instance(s) "
-                             "in memory " IDFMT " for index %d of constrained "
-                             "task %s (ID %lld) in must epoch launch.",
-                             target_memory.id, base_index,
-                             base_task->get_task_name(), 
-                             base_task->get_unique_id());
-            assert(false);
-          }
-        }
+	}
+	constraint_mapping.push_back(inst);
       }
     }
 

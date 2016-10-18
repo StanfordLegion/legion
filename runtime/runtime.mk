@@ -132,6 +132,19 @@ ifeq ($(strip $(USE_HWLOC)),1)
   LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
 endif
 
+ifeq ($(strip $(USE_PAPI)),1)
+  ifndef PAPI_ROOT
+    ifdef PAPI
+      PAPI_ROOT = $(PAPI)
+    else
+      $(error USE_PAPI set, but neither PAPI nor PAPI_ROOT is defined, aborting build)
+    endif
+  endif
+  CC_FLAGS        += -DREALM_USE_PAPI
+  INC_FLAGS   += -I$(PAPI_ROOT)/include
+  LEGION_LD_FLAGS += -L$(PAPI_ROOT)/lib -lpapi
+endif
+
 USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
 ifneq ($(shell uname -s),Darwin)
@@ -265,9 +278,10 @@ endif
 
 # general low-level doesn't use HDF by default
 USE_HDF ?= 0
+HDF_LIBNAME ?= hdf5
 ifeq ($(strip $(USE_HDF)), 1)
-  CC_FLAGS      += -DUSE_HDF
-  LEGION_LD_FLAGS      += -lhdf5
+  CC_FLAGS      += -DUSE_HDF -I/usr/include/hdf5/serial
+  LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
 endif
 
 SKIP_MACHINES= titan% daint%
@@ -301,6 +315,9 @@ CC_FLAGS        += -Wall -Wno-strict-overflow
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 endif
+
+# fix for some systems that need this for printf formatting macros
+CC_FLAGS	+= -D__STDC_FORMAT_MACROS
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
@@ -342,6 +359,10 @@ ifeq ($(strip $(USE_LLVM)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/llvmjit/llvmjit_module.cc \
                    $(LG_RT_DIR)/realm/llvmjit/llvmjit_internal.cc
 endif
+ifeq ($(strip $(USE_HDF)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
+		   $(LG_RT_DIR)/realm/hdf5/hdf5_internal.cc
+endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
@@ -361,7 +382,8 @@ MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/shim_mapper.cc \
 		   $(LG_RT_DIR)/mappers/test_mapper.cc \
 		   $(LG_RT_DIR)/mappers/replay_mapper.cc \
-		   $(LG_RT_DIR)/mappers/debug_mapper.cc
+		   $(LG_RT_DIR)/mappers/debug_mapper.cc \
+		   $(LG_RT_DIR)/mappers/wrapper_mapper.cc
 
 ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc

@@ -281,7 +281,7 @@ namespace Legion {
     public:
       PhysicalRegionImpl(const RegionRequirement &req, ApEvent ready_event,
                          bool mapped, SingleTask *ctx, MapperID mid,
-                         MappingTagID tag, bool leaf, Runtime *rt);
+                         MappingTagID tag, bool leaf, bool virt, Runtime *rt);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
       ~PhysicalRegionImpl(void);
     public:
@@ -302,8 +302,8 @@ namespace Legion {
       void remap_region(ApEvent new_ready_event);
       const RegionRequirement& get_requirement(void) const;
       void set_reference(const InstanceRef &references);
-      void reset_references(const InstanceSet &instances,
-                            ApUserEvent term_event);
+      void reset_references(const InstanceSet &instances,ApUserEvent term_event,
+                            ApEvent wait_for = ApEvent::NO_AP_EVENT);
       ApEvent get_ready_event(void) const;
       bool has_references(void) const;
       void get_references(InstanceSet &instances) const;
@@ -324,6 +324,7 @@ namespace Legion {
       const MapperID map_id;
       const MappingTagID tag;
       const bool leaf_region;
+      const bool virtual_mapped;
     private:
       // Event for when the instance ref is ready
       ApEvent ready_event;
@@ -336,6 +337,7 @@ namespace Legion {
       // upon unmap
       bool trigger_on_unmap;
       ApUserEvent termination_event;
+      ApEvent wait_for_unmap;
 #ifdef BOUNDS_CHECKS
     private:
       Domain bounds;
@@ -396,31 +398,58 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = MPI_HANDSHAKE_ALLOC;
     public:
-      enum ControlState {
-        IN_MPI,
-        IN_LEGION,
-      };
-    public:
-      MPILegionHandshakeImpl(bool in_mpi, int mpi_participants, 
+      MPILegionHandshakeImpl(bool init_in_MPI, int mpi_participants, 
                              int legion_participants);
       MPILegionHandshakeImpl(const MPILegionHandshakeImpl &rhs);
       ~MPILegionHandshakeImpl(void);
     public:
       MPILegionHandshakeImpl& operator=(const MPILegionHandshakeImpl &rhs);
     public:
+      void initialize(void);
+    public:
       void mpi_handoff_to_legion(void);
       void mpi_wait_on_legion(void);
     public:
       void legion_handoff_to_mpi(void);
       void legion_wait_on_mpi(void);
+    public:
+      PhaseBarrier get_legion_wait_phase_barrier(void);
+      PhaseBarrier get_legion_arrive_phase_barrier(void);
+      void advance_legion_handshake(void);
     private:
+      const bool init_in_MPI;
       const int mpi_participants;
       const int legion_participants;
-      ControlState state;
     private:
-      int mpi_count, legion_count;
-    private:
-      ApUserEvent mpi_ready, legion_ready;
+      PhaseBarrier mpi_wait_barrier;
+      PhaseBarrier mpi_arrive_barrier;
+      PhaseBarrier legion_wait_barrier; // copy of mpi_arrive_barrier
+      PhaseBarrier legion_arrive_barrier; // copy of mpi_wait_barrier
+    };
+
+    class MPIRankTable {
+    public:
+      MPIRankTable(Runtime *runtime);
+      MPIRankTable(const MPIRankTable &rhs);
+      ~MPIRankTable(void);
+    public:
+      MPIRankTable& operator=(const MPIRankTable &rhs);
+    public:
+      void perform_rank_exchange(void);
+      void handle_mpi_rank_exchange(Deserializer &derez);
+    protected:
+      void send_stage(int stage) const;
+      bool unpack_exchange(int stage, Deserializer &derez);
+    public:
+      Runtime *const runtime;
+      const bool participating;
+    public:
+      std::map<int,AddressSpace> forward_mapping;
+      std::map<AddressSpace,int> reverse_mapping;
+    protected:
+      Reservation reservation;
+      RtUserEvent done_event;
+      std::vector<int> stage_notifications;
     };
 
     /**
@@ -666,6 +695,9 @@ namespace Legion {
                                     GCPriority priority);
       RtEvent acquire_instances(const std::set<PhysicalManager*> &managers,
                                     std::vector<bool> &results);
+      void record_created_instance( PhysicalManager *manager, bool acquire,
+                                    MapperID mapper_id, Processor proc,
+                                    GCPriority priority, bool remote);
     public:
       void process_instance_request(Deserializer &derez, AddressSpaceID source);
       void process_instance_response(Deserializer &derez,AddressSpaceID source);
@@ -719,9 +751,6 @@ namespace Legion {
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
                                     bool tight_region_bounds, bool remote);
-      void record_created_instance( PhysicalManager *manager, bool acquire,
-                                    MapperID mapper_id, Processor proc,
-                                    GCPriority priority, bool remote);
       void record_deleted_instance(PhysicalManager *manager); 
       void find_instances_by_state(size_t needed_size, InstanceState state, 
                      std::set<CollectableInfo<true> > &smaller_instances,
@@ -1242,11 +1271,6 @@ namespace Legion {
         TaskOp *task;
         bool prev_fail;
       };
-      struct MPIRankArgs {
-        HLRTaskID hlr_id;
-        int mpi_rank;
-        AddressSpace source_space;
-      };
       struct CollectiveFutureArgs {
         HLRTaskID hlr_id;
         ReductionOpID redop;
@@ -1297,7 +1321,6 @@ namespace Legion {
       void register_static_projections(void);
       void initialize_legion_prof(void);
       void initialize_mappers(void);
-      void construct_mpi_rank_tables(Processor proc, int rank);
       void launch_top_level_task(Processor target);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
@@ -1973,6 +1996,7 @@ namespace Legion {
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
       void send_constraint_removal(AddressSpaceID target, Serializer &rez);
+      void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2126,6 +2150,7 @@ namespace Legion {
       void handle_constraint_removal(Deserializer &derez);
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
+      void handle_mpi_rank_exchange(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -2177,6 +2202,8 @@ namespace Legion {
       void activate_context(SingleTask *context);
       void deactivate_context(SingleTask *context);
     public:
+      void remap_unmapped_regions(Processor proc, Context ctx,
+            const std::vector<PhysicalRegion> &unmapped_regions);
       void execute_task_launch(Context ctx, TaskOp *task_op);
       void add_to_dependence_queue(Processor p, Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
@@ -2412,6 +2439,11 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
+      static void init_mpi_interop(const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
+    protected:
+      static void configure_collective_settings(int total_spaces);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
@@ -2505,10 +2537,6 @@ namespace Legion {
       Reservation projection_lock;
       std::map<ProjectionID,
         std::pair<ProjectionFunctor*,Reservation> > projection_functors;
-    protected:
-      // For MPI Inter-operability
-      std::map<int,AddressSpace> forward_mpi_mapping;
-      std::map<AddressSpace,int> reverse_mpi_mapping; 
     protected:
       Reservation group_lock;
       LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
@@ -2671,6 +2699,7 @@ namespace Legion {
       static void wait_for_shutdown(void);
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
+      static void register_handshake(MPILegionHandshake &handshake);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
       static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
@@ -2732,10 +2761,15 @@ namespace Legion {
       static bool enable_test_mapper;
       static bool legion_ldb_enabled;
       static const char* replay_file;
+      // Collective settings
+      static int legion_collective_radix;
+      static int legion_collective_log_radix;
+      static int legion_collective_stages;
+      static int legion_collective_participating_spaces;
+      // MPI Interoperability
       static int mpi_rank;
-      static unsigned mpi_rank_table[MAX_NUM_NODES];
-      static unsigned remaining_mpi_notifications;
-      static RtUserEvent mpi_rank_event;
+      static MPIRankTable *mpi_rank_table;
+      static std::vector<MPILegionHandshake> *pending_handshakes;
 #ifdef DEBUG_LEGION
       static bool logging_region_tree_state;
       static bool verbose_logging;

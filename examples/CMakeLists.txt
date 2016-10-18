@@ -20,31 +20,13 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(00_hello_world)
-add_subdirectory(01_tasks_and_futures)
-add_subdirectory(02_index_tasks)
-add_subdirectory(03_global_vars)
-add_subdirectory(04_logical_regions)
-add_subdirectory(05_physical_regions)
-add_subdirectory(06_privileges)
-add_subdirectory(07_partitioning)
-add_subdirectory(08_multiple_partitions)
-add_subdirectory(09_custom_mapper)
-
-if(Legion_USE_HDF)
-  add_subdirectory(attach-file)
-endif()
-
-# Currently broken with master
-#add_subdirectory(dependent_circuit)
-
+add_subdirectory(attach_file)
+add_subdirectory(circuit)
 add_subdirectory(dynamic_registration)
-add_subdirectory(full_circuit)
-add_subdirectory(full_ghost)
+add_subdirectory(ghost)
+add_subdirectory(ghost_pull)
 add_subdirectory(realm_saxpy)
-
-# Currently broken with master
-#add_subdirectory(spmd_cgsolver)
+add_subdirectory(spmd_cgsolver)
 
 if(Legion_USE_CUDA)
   add_subdirectory(thrust_interop)

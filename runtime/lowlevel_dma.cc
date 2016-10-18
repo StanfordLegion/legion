@@ -1320,7 +1320,8 @@ namespace LegionRuntime {
 	  src_acc.read_untyped(ptr_t(src_index + i), buffer, bytes, src_offset);
           if(0 && i == 0) {
             printf("remote write: (%zd:%zd->%zd:%zd) %d bytes:",
-                   src_index + i, src_offset, dst_index + i, dst_offset, bytes);
+                   (ssize_t)(src_index + i), (ssize_t)src_offset,
+                   (ssize_t)(dst_index + i), (ssize_t)dst_offset, bytes);
             for(unsigned j = 0; j < bytes; j++)
               printf(" %02x", (unsigned char)(buffer[j]));
             printf("\n");
@@ -2983,6 +2984,10 @@ namespace LegionRuntime {
 
 	InstPairCopier *ipc = mpc->inst_pair(src_inst, dst_inst, oasvec);
 
+	// does the copier want to iterate the domain itself?
+	if(ipc->copy_all_fields(domain))
+	  continue;
+
 	// index space instances use 1D linearizations for translation
 	Arrays::Mapping<1, 1> *src_linearization = get_runtime()->get_instance_impl(src_inst)->metadata.linearization.get_mapping<1>();
 	Arrays::Mapping<1, 1> *dst_linearization = get_runtime()->get_instance_impl(dst_inst)->metadata.linearization.get_mapping<1>();
@@ -3719,6 +3724,10 @@ namespace LegionRuntime {
 	OASVec& oasvec = it->second;
 
 	InstPairCopier *ipc = mpc->inst_pair(src_inst, dst_inst, oasvec);
+
+	// does the copier want to iterate the domain itself?
+	if(ipc->copy_all_fields(domain))
+	  continue;
 
 	RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(src_inst);
 	RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst_inst);
@@ -4863,6 +4872,15 @@ namespace LegionRuntime {
 
       // better have consumed exactly the right amount of data
       //assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
+      size_t request_size = *reinterpret_cast<const size_t*>(idata);
+      idata += sizeof(size_t) / sizeof(IDType);
+      FixedBufferDeserializer deserializer(idata, request_size);
+      deserializer >> requests;
+      Realm::Operation::reconstruct_measurements();
+
+      log_dma.info() << "dma request " << (void *)this << " deserialized - is="
+		     << domain << " fill dst=" << dst.inst << "[" << dst.offset << "+" << dst.size << "] size="
+		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
     }
 
     FillRequest::FillRequest(const Domain &d, 
@@ -4905,6 +4923,9 @@ namespace LegionRuntime {
       result += ((elmts+1) * sizeof(IDType)); // +1 for fill size in bytes
       // TODO: unbreak once the serialization stuff is repaired
       //result += requests.compute_size();
+      ByteCountSerializer counter;
+      counter << requests;
+      result += sizeof(size_t) + counter.bytes_used();
       return result;
     }
 
@@ -4922,6 +4943,12 @@ namespace LegionRuntime {
       //requests.serialize(msgptr);
       // We sent this message remotely, so we need to clear the profiling
       // so it doesn't get sent accidentally
+      ByteCountSerializer counter;
+      counter << requests;
+      *reinterpret_cast<size_t*>(msgptr) = counter.bytes_used();
+      msgptr += sizeof(size_t) / sizeof(IDType);
+      FixedBufferSerializer serializer(msgptr, counter.bytes_used());
+      serializer << requests;
       clear_profiling();
     }
 
@@ -5309,13 +5336,28 @@ namespace Realm {
                        Event wait_on /*= Event::NO_EVENT*/) const
     {
       std::set<Event> finish_events; 
+      // when 'dsts' contains multiple fields, the 'fill_value' should look
+      // like a packed struct with a fill value for each field in order -
+      // track the offset and complain if we run out of data
+      size_t fill_ofs = 0;
       for (std::vector<CopySrcDstField>::const_iterator it = dsts.begin();
             it != dsts.end(); it++)
       {
         Event ev = GenEventImpl::create_genevent()->current_event();
-        FillRequest *r = new FillRequest(*this, *it, fill_value,
-                                         fill_value_size, wait_on,
+	if((fill_ofs + it->size) > fill_value_size) {
+	  log_dma.fatal() << "insufficient data for fill - need at least "
+			  << (fill_ofs + it->size) << " bytes, but have only " << fill_value_size;
+	  assert(0);
+	}
+        FillRequest *r = new FillRequest(*this, *it,
+					 ((const char *)fill_value) + fill_ofs,
+					 it->size, wait_on,
                                          ev, 0/*priority*/, requests);
+	// special case: if a field uses all of the fill value, the next
+	//  field (if any) is allowed to use the same value
+	if((fill_ofs > 0) || (it->size != fill_value_size))
+	  fill_ofs += it->size;
+
         Memory mem = it->inst.get_location();
         unsigned node = ID(mem).memory.owner_node;
 	if(node > ID::MAX_NODE_ID) {

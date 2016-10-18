@@ -22,5 +22,5 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(01_tasks_and_futures tasks_and_futures.cc)
-target_link_libraries(01_tasks_and_futures Legion::Legion)
+add_executable(tasks_and_futures tasks_and_futures.cc)
+target_link_libraries(tasks_and_futures Legion::Legion)

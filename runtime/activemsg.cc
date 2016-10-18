@@ -63,7 +63,7 @@ gasnet_seginfo_t *segment_info = 0;
 
 static bool is_registered(void *ptr)
 {
-  off_t offset = ((char *)ptr) - ((char *)(segment_info[gasnet_mynode()].addr));
+  ssize_t offset = ((char *)ptr) - ((char *)(segment_info[gasnet_mynode()].addr));
   if((offset >= 0) && ((size_t)offset < segment_info[gasnet_mynode()].size))
     return true;
   return false;
@@ -239,7 +239,7 @@ protected:
   std::queue<OutgoingMessage *> pending_allocations;
   // debug
   std::map<char *, size_t> in_use;
-  std::map<void *, off_t> alloc_counts;
+  std::map<void *, ssize_t> alloc_counts;
 };
 
 static SrcDataPool *srcdatapool = 0;
@@ -262,7 +262,7 @@ SrcDataPool::~SrcDataPool(void)
 {
   size_t total = 0;
   size_t nonzero = 0;
-  for(std::map<void *, off_t>::const_iterator it = alloc_counts.begin(); it != alloc_counts.end(); it++) {
+  for(std::map<void *, ssize_t>::const_iterator it = alloc_counts.begin(); it != alloc_counts.end(); it++) {
     total++;
     if(it->second != 0) {
       printf("HELP!  srcptr %p on node %d has final count of %zd\n", it->first, gasnet_mynode(), it->second);
@@ -2411,7 +2411,7 @@ void handle_long_msgptr(gasnet_node_t source, const void *ptr)
 						    gasnet_handlerarg_t arg0,
 						    gasnet_handlerarg_t arg1)
 {
-  uintptr_t srcptr = (((uintptr_t)(unsigned)arg1) << 32) | ((uintptr_t)(unsigned)arg0);
+  uintptr_t srcptr = (((uint64_t)(uint32_t)arg1) << 32) | ((uint32_t)arg0);
   // We may get pointers which are zero because we had to send a reply
   // Just ignore them
   if (srcptr != 0)
@@ -2461,7 +2461,7 @@ SpanPayload::SpanPayload(const SpanList&_spans, size_t _size, int _mode)
 void SpanPayload::copy_data(void *dest)
 {
   char *dst_c = (char *)dest;
-  off_t bytes_left = size;
+  size_t bytes_left = size;
   for(SpanList::const_iterator it = spans.begin(); it != spans.end(); it++) {
     assert(it->second <= (size_t)bytes_left);
     memcpy(dst_c, it->first, it->second);

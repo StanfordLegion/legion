@@ -19,6 +19,7 @@
 #include "legion_types.h"
 #include "legion_constraint.h"
 #include "legion.h"
+#include "realm/profiling.h"
 
 #include <iostream>
 
@@ -125,11 +126,74 @@ namespace Legion {
       unsigned mapper_event_id;
     };
 
-    // Set of profiling requests for task launches
-    // This struct will be filled out by the new faults
-    // branch so it's just here as a place holder for now
-    class ProfilingRequestSet {
-      // TODO fill this in with the kinds of profiling requests
+    namespace ProfilingMeasurements {
+      // import all the Realm measurements into this namespace too
+      using namespace Realm::ProfilingMeasurements;
+
+      struct RuntimeOverhead {
+	static const ProfilingMeasurementID ID = PMID_RUNTIME_OVERHEAD;
+        RuntimeOverhead(void);
+	// application, runtime, wait times all reported in nanoseconds
+	long long application_time;  // time spent in application code
+	long long runtime_time;      // time spent in runtime code
+	long long wait_time;         // time spent waiting
+      };
+    };
+
+    /**
+     * \class ProfilingRequest
+     * This definition shadows the Realm version, since it's the job of the
+     * Legion runtime to handle the actual callback part (and to divert any
+     * measurement requests not known to Realm)
+     */
+    class ProfilingRequest {
+    public:
+      ProfilingRequest(void);
+      ~ProfilingRequest(void);
+
+      template <typename T>
+      inline ProfilingRequest &add_measurement(void);
+
+      inline bool empty(void) const;
+
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      void populate_realm_profiling_request(Realm::ProfilingRequest& req);
+
+      std::set<ProfilingMeasurementID> requested_measurements;
+    };
+
+    /**
+     * \class ProfilingResponse
+     * Similarly, the profiling response wraps around the Realm version so
+     * that it can handle non-Realm measurements
+     */
+    class ProfilingResponse {
+    public:
+      // default constructor used because this appears in the
+      //  {...}ProfilingInfo structs below
+      ProfilingResponse(void);
+      ~ProfilingResponse(void);
+
+      // even if a measurement was requested, it may not have been performed -
+      //  use this to check
+      template <typename T>
+      inline bool has_measurement(void) const;
+
+      // extracts a measurement (if available), returning a dynamically
+      //  allocated result - caller should delete it when done
+      template <typename T>
+      inline T *get_measurement(void) const;
+
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      void attach_realm_profiling_response(
+          const Realm::ProfilingResponse& resp);
+      void attach_overhead(
+          ProfilingMeasurements::RuntimeOverhead *overhead);
+
+      const Realm::ProfilingResponse *realm_resp;
+      ProfilingMeasurements::RuntimeOverhead *overhead;
     };
 
     /**
@@ -387,11 +451,10 @@ namespace Legion {
        * The mapper can also request profiling information about this
        * task as part of its execution. The mapper can specify a task
        * profiling request set in 'task_prof_requests' for profiling
-       * statistics about the execution of the task. Additionally,
-       * the mapper can request profiling information about any of the
-       * copy operations for necessary for mapping a physical instance
-       * by specifying a profiling request set for the appropritate
-       * region requirement in 'region_prof_requests'.
+       * statistics about the execution of the task. The mapper can
+       * also ask for profiling information for the copies generated
+       * as part of the mapping of the task through the 
+       * 'copy_prof_requests' field.
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> >     valid_instances;
@@ -401,8 +464,8 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
         std::vector<Processor>                          target_procs;
         VariantID                                       chosen_variant; // = 0 
-        ProfilingRequestSet                             task_prof_requests;
-        std::vector<ProfilingRequestSet>                region_prof_requests;
+        ProfilingRequest                                task_prof_requests;
+        ProfilingRequest                                copy_prof_requests;
         TaskPriority                                    task_priority;  // = 0
         bool                                            postmap_task; // = false
       };
@@ -564,9 +627,13 @@ namespace Legion {
        * This mapper call will report the profiling information
        * requested either for the task execution and/or any copy
        * operations that were issued on behalf of mapping the task.
+       * If the 'task_response' field is set to true this is the
+       * profiling callback for the task itself, otherwise it is a
+       * callback for one of the copies for the task'.
        */
       struct TaskProfilingInfo {
-        // TODO: fill this in based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
+        bool                                    task_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext      ctx,
@@ -595,7 +662,7 @@ namespace Legion {
       };
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;
-        ProfilingRequestSet                     profiling_requests;
+        ProfilingRequest                        profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_inline(const MapperContext        ctx,
@@ -672,7 +739,7 @@ namespace Legion {
        * call will be invoked to inform the mapper of the result.
        */
       struct InlineProfilingInfo {
-        // TODO: fill this in based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext         ctx,
@@ -701,7 +768,7 @@ namespace Legion {
       struct MapCopyOutput {
         std::vector<std::vector<PhysicalInstance> >       src_instances;
         std::vector<std::vector<PhysicalInstance> >       dst_instances;
-        ProfilingRequestSet                               profiling_requests;
+        ProfilingRequest                                  profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_copy(const MapperContext      ctx,
@@ -801,7 +868,7 @@ namespace Legion {
        * copy operation then this call will return the profiling information.
        */
       struct CopyProfilingInfo {
-        // TODO: fill this in based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext      ctx,
@@ -837,7 +904,7 @@ namespace Legion {
       };
       struct MapCloseOutput {
         std::vector<PhysicalInstance>               chosen_instances;
-        ProfilingRequestSet                         profiling_requests;
+        ProfilingRequest                            profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_close(const MapperContext       ctx,
@@ -912,7 +979,7 @@ namespace Legion {
        * for all the copy operations issued by the close operation.
        */
       struct CloseProfilingInfo {
-        // TODO: fill this in based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext       ctx,
@@ -933,7 +1000,7 @@ namespace Legion {
         // Nothing
       };
       struct MapAcquireOutput {
-        ProfilingRequestSet                         profiling_requests;
+        ProfilingRequest                            profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_acquire(const MapperContext         ctx,
@@ -966,7 +1033,7 @@ namespace Legion {
        * profiling data.
        */
       struct AcquireProfilingInfo {
-        // TODO: fill thisin based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext         ctx,
@@ -988,7 +1055,7 @@ namespace Legion {
         // Nothing
       };
       struct MapReleaseOutput {
-        ProfilingRequestSet                         profiling_requests;
+        ProfilingRequest                            profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_release(const MapperContext         ctx,
@@ -1078,7 +1145,7 @@ namespace Legion {
        * back to the mapper.
        */
       struct ReleaseProfilingInfo {
-        // TODO: fill this in based on the low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext         ctx,
@@ -1625,6 +1692,9 @@ namespace Legion {
       Color get_logical_region_color(MapperContext ctx, 
                                      LogicalRegion handle) const;
 
+      DomainPoint get_logical_region_color_point(MapperContext ctx,
+                                                 LogicalRegion handle) const;
+
       Color get_logical_partition_color(MapperContext ctx,
                                                 LogicalPartition handle) const;
 
@@ -1704,6 +1774,8 @@ namespace Legion {
 
   }; // namespace Mapping
 }; // namespace Legion
+
+#include "legion_mapping.inl"
 
 #endif // __LEGION_MAPPING_H__
 

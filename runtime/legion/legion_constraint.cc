@@ -498,8 +498,8 @@ namespace Legion {
     {
       if (redop == 0)
       {
-        if ((kind != NO_SPECIALIZE) && (kind != NORMAL_SPECIALIZE) && 
-            (kind != VIRTUAL_SPECIALIZE))
+        if ((kind == REDUCTION_FOLD_SPECIALIZE) ||
+            (kind == REDUCTION_LIST_SPECIALIZE))
         {
           fprintf(stderr,"Illegal specialize constraint with reduction op %d."
                          "Only reduction specialized constraints are "

@@ -85,6 +85,13 @@ namespace Realm {
 
   Logger log_thread("threads");
 
+#ifdef REALM_USE_PAPI
+  Logger log_papi("papi");
+  namespace PAPI {
+    bool papi_available = false;
+  };
+#endif
+
   namespace ThreadLocal {
     /*extern*/ __thread Thread *current_thread = 0;
   };
@@ -544,7 +551,10 @@ namespace Realm {
     act.sa_sigaction = &signal_handler;
     act.sa_flags = SA_SIGINFO;
 
-    int ret = sigaction(handler_signal, &act, 0);
+#ifndef NDEBUG
+    int ret =
+#endif
+              sigaction(handler_signal, &act, 0);
     assert(ret == 0);
   }
 
@@ -1506,6 +1516,286 @@ namespace Realm {
     os << "}";
     return os;
   }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PAPICounters
+
+
+#ifdef REALM_USE_PAPI
+  PAPICounters::PAPICounters(void)
+    : papi_event_set(PAPI_NULL)
+  {}
+
+  PAPICounters::~PAPICounters(void)
+  {
+    if(papi_event_set != PAPI_NULL) {
+      int ret = PAPI_cleanup_eventset(papi_event_set);
+      assert(ret == PAPI_OK);
+      int orig_event_set = papi_event_set;
+      ret = PAPI_destroy_eventset(&papi_event_set);
+      log_papi.debug() << "destroy_eventset: " << orig_event_set << " (" << ret << ")";
+      assert(ret == PAPI_OK);
+      assert(papi_event_set == PAPI_NULL);
+    }
+  }
+
+  /*static*/ PAPICounters *PAPICounters::setup_counters(const ProfilingMeasurementCollection& pmc)
+  {
+    // if we didn't successfully initialize PAPI, don't try to use it...
+    if(!PAPI::papi_available)
+      return 0;
+
+    // first, check for all the things we know how to translate into PAPI events
+    std::vector<int> desired_events;
+
+    if(pmc.wants_measurement<ProfilingMeasurements::IPCPerfCounters>()) {
+      desired_events.push_back(PAPI_TOT_INS);
+      desired_events.push_back(PAPI_TOT_CYC);
+      desired_events.push_back(PAPI_FP_INS);
+      desired_events.push_back(PAPI_LD_INS);
+      desired_events.push_back(PAPI_SR_INS);
+      desired_events.push_back(PAPI_BR_INS);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::L1ICachePerfCounters>()) {
+      desired_events.push_back(PAPI_L1_ICA);
+      desired_events.push_back(PAPI_L1_ICM);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::L1DCachePerfCounters>()) {
+      desired_events.push_back(PAPI_L1_DCA);
+      desired_events.push_back(PAPI_L1_DCM);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::L2CachePerfCounters>()) {
+      desired_events.push_back(PAPI_L2_TCA);
+      desired_events.push_back(PAPI_L2_TCM);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::L3CachePerfCounters>()) {
+      desired_events.push_back(PAPI_L3_TCA);
+      desired_events.push_back(PAPI_L3_TCM);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::TLBPerfCounters>()) {
+      desired_events.push_back(PAPI_TLB_IM);
+      desired_events.push_back(PAPI_TLB_DM);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::BranchPredictionPerfCounters>()) {
+      desired_events.push_back(PAPI_BR_CN);
+      desired_events.push_back(PAPI_BR_TKN);
+      desired_events.push_back(PAPI_BR_MSP);
+    }
+
+    // exit early if none present
+    if(desired_events.empty()) return 0;
+
+    // otherwise create an event set and add as many of them as we can
+    PAPICounters *ctrs = new PAPICounters;
+
+    {
+      int ret = PAPI_create_eventset(&(ctrs->papi_event_set));
+      log_papi.debug() << "create_eventset: " << ctrs->papi_event_set << " (" << ret << ")";
+      assert(ret == PAPI_OK);
+    }
+
+    size_t count = 0;
+    for(std::vector<int>::const_iterator it = desired_events.begin();
+	it != desired_events.end();
+	++it) {
+      // event might already have been added?
+      if(ctrs->event_codes.count(*it) > 0)
+	continue;
+
+      int ret = PAPI_add_event(ctrs->papi_event_set, *it);
+      if(ret == PAPI_OK) {
+	ctrs->event_codes[*it] = count;
+	ctrs->event_counts.push_back(0);
+	count++;
+	continue;
+      }
+      // two kinds of tolerable error
+      if(ret == PAPI_ENOEVNT) {
+	log_papi.debug() << "event " << *it << " not available on hardware - skipping";
+	continue;
+      }
+      if(ret == PAPI_ECNFLCT) {
+	log_papi.debug() << "event " << *it << " conflicts with previously added events - skipping";
+	continue;
+      }
+      // anything else is a real problem
+      log_papi.fatal() << "add event: " << PAPI_strerror(ret) << " (" << ret << ")";
+      assert(false);
+    }
+
+    return ctrs;
+  }
+
+  void PAPICounters::cleanup(void)
+  {
+    // TODO: try to reuse these things?
+    delete this;
+  }
+
+  void PAPICounters::start(void)
+  {
+    int ret = PAPI_start(papi_event_set);
+    log_papi.debug() << "start counters: " << papi_event_set << " (" << ret << ")";
+    assert(ret == PAPI_OK);
+  }
+
+  void PAPICounters::stop(void)
+  {
+    int ret = PAPI_accum(papi_event_set, &event_counts[0]);
+    assert(ret == PAPI_OK);
+    ret = PAPI_stop(papi_event_set, 0 /* don't read values again */);
+    log_papi.debug() << "stop counters: " << papi_event_set << " (" << ret << ")";
+    assert(ret == PAPI_OK);
+  }
+
+  void PAPICounters::resume(void)
+  {
+    // same as start for now
+    start();
+  }
+
+  void PAPICounters::suspend(void)
+  {
+    // same as stop for now
+    stop();
+  }
+
+  // little helper to get a counter if present, or -1 if not
+  static inline long long get_counter_val(int code,
+					  const std::map<int, size_t>& event_codes,
+					  const std::vector<long long>& event_counts,
+					  int& found_count)
+  {
+    std::map<int, size_t>::const_iterator it = event_codes.find(code);
+    if(it != event_codes.end()) {
+      found_count++;
+      return event_counts[it->second];
+    } else
+      return -1;
+  }
+
+  void PAPICounters::record(ProfilingMeasurementCollection& pmc)
+  {
+    if(pmc.wants_measurement<ProfilingMeasurements::IPCPerfCounters>()) {
+      ProfilingMeasurements::IPCPerfCounters ctrs;
+      int found_count = 0;
+      ctrs.total_insts  = get_counter_val(PAPI_TOT_INS, event_codes, event_counts, found_count);
+      ctrs.total_cycles = get_counter_val(PAPI_TOT_CYC, event_codes, event_counts, found_count);
+      ctrs.fp_insts     = get_counter_val(PAPI_FP_INS , event_codes, event_counts, found_count);
+      ctrs.ld_insts     = get_counter_val(PAPI_LD_INS , event_codes, event_counts, found_count);
+      ctrs.st_insts     = get_counter_val(PAPI_SR_INS , event_codes, event_counts, found_count);
+      ctrs.br_insts     = get_counter_val(PAPI_BR_INS , event_codes, event_counts, found_count);
+      if(found_count > 0)
+	pmc.add_measurement(ctrs);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::L1ICachePerfCounters>()) {
+      ProfilingMeasurements::L1ICachePerfCounters ctrs;
+      int found_count = 0;
+      ctrs.accesses = get_counter_val(PAPI_L1_ICA, event_codes, event_counts, found_count);
+      ctrs.misses   = get_counter_val(PAPI_L1_ICM, event_codes, event_counts, found_count);
+      if(found_count > 0)
+	pmc.add_measurement(ctrs);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::L1DCachePerfCounters>()) {
+      ProfilingMeasurements::L1DCachePerfCounters ctrs;
+      int found_count = 0;
+      ctrs.accesses = get_counter_val(PAPI_L1_DCA, event_codes, event_counts, found_count);
+      ctrs.misses   = get_counter_val(PAPI_L1_DCM, event_codes, event_counts, found_count);
+      if(found_count > 0)
+	pmc.add_measurement(ctrs);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::L2CachePerfCounters>()) {
+      ProfilingMeasurements::L2CachePerfCounters ctrs;
+      int found_count = 0;
+      ctrs.accesses = get_counter_val(PAPI_L2_TCA, event_codes, event_counts, found_count);
+      ctrs.misses   = get_counter_val(PAPI_L2_TCM, event_codes, event_counts, found_count);
+      if(found_count > 0)
+	pmc.add_measurement(ctrs);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::L3CachePerfCounters>()) {
+      ProfilingMeasurements::L3CachePerfCounters ctrs;
+      int found_count = 0;
+      ctrs.accesses = get_counter_val(PAPI_L3_TCA, event_codes, event_counts, found_count);
+      ctrs.misses   = get_counter_val(PAPI_L3_TCM, event_codes, event_counts, found_count);
+      if(found_count > 0)
+	pmc.add_measurement(ctrs);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::TLBPerfCounters>()) {
+      ProfilingMeasurements::TLBPerfCounters ctrs;
+      int found_count = 0;
+      ctrs.inst_misses = get_counter_val(PAPI_TLB_IM, event_codes, event_counts, found_count);
+      ctrs.data_misses = get_counter_val(PAPI_TLB_DM, event_codes, event_counts, found_count);
+      if(found_count > 0)
+	pmc.add_measurement(ctrs);
+    }
+    if(pmc.wants_measurement<ProfilingMeasurements::BranchPredictionPerfCounters>()) {
+      ProfilingMeasurements::BranchPredictionPerfCounters ctrs;
+      int found_count = 0;
+      ctrs.total_branches = get_counter_val(PAPI_BR_CN , event_codes, event_counts, found_count);
+      ctrs.taken_branches = get_counter_val(PAPI_BR_TKN, event_codes, event_counts, found_count);
+      ctrs.mispredictions = get_counter_val(PAPI_BR_MSP, event_codes, event_counts, found_count);
+      if(found_count > 0)
+	pmc.add_measurement(ctrs);
+    }
+
+#ifdef REALM_PAPI_DEBUG
+    for(std::map<int, size_t>::const_iterator it = event_codes.begin();
+	it != event_codes.end();
+	++it) {
+      log_papi.error() << "counter[" << (it->first & 0x7fffffff) << "] = " << event_counts[it->second];
+    }
+#endif
+  }
+#endif
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // initialize/cleanup
+
+  namespace Threading {
+
+    bool initialize(void)
+    {
+#ifdef REALM_USE_PAPI
+      {
+	int ret = PAPI_library_init(PAPI_VER_CURRENT);
+	if(ret == PAPI_VER_CURRENT) {
+	  // initialized - now tell it we have threads
+	  ret = PAPI_thread_init(pthread_self);
+	  if(ret == PAPI_OK) {
+	    PAPI::papi_available = true;
+	    int numctrs = PAPI_get_opt(PAPI_MAX_HWCTRS, 0);
+	    log_papi.debug() << "initalized successfully - " << numctrs << " counters";
+	  } else {
+	    log_papi.warning() << "thread init error: " << PAPI_strerror(ret) << " (" << ret << ")";
+	  }
+	} else {
+	  // failure could be due to a version mismatch or some other error
+	  if(ret > 0) {
+	    log_papi.warning() << "version mismatch - wanted: " << PAPI_VER_CURRENT << ", got: " << ret;
+	  } else {
+	    log_papi.warning() << "initialization error: " << PAPI_strerror(ret) << " (" << ret << ")";
+	  }
+	}
+      }
+#endif
+      return true;
+    }
+
+    bool cleanup(void)
+    {
+#ifdef REALM_USE_PAPI
+      if(PAPI::papi_available) {
+	PAPI_shutdown();
+      }
+#endif
+      return true;
+    }
+
+  };
 
 
 }; // namespace Realm

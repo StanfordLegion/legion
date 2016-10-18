@@ -226,3 +226,33 @@ int CGMapper::get_tunable_value(const Task *task,
   assert(false);
   return 0;
 }
+
+// override DefaultMapper's policy for choosing locations for
+// instances constrained by a must epoch launch
+Memory CGMapper::default_policy_select_constrained_instance_constraints(
+				    MapperContext ctx,
+				    const std::vector</*const*/ Legion::Task *> &tasks,
+				    const std::vector<unsigned> &req_indexes,
+				    const std::vector<Processor> &target_procs,
+				    const std::set<LogicalRegion> &needed_regions,
+				    const std::set<FieldID> &needed_fields,
+                                    LayoutConstraintSet &constraints)
+{
+  assert(!tasks.empty());
+
+  // get the mapping tag from the first task's requirement
+  MappingTagID tag = tasks[0]->regions[req_indexes[0]].tag;
+#define PARANOID
+#ifdef PARANOID
+  // expect all constrained requirements to be identically tagged
+  for(size_t i = 1; i < tasks.size(); i++)
+    assert(tasks[i]->regions[req_indexes[i]].tag == tag);
+#endif
+
+  // map tag to shard
+  assert(tag >= TAG_SHARD_BASE);
+  int shard = tag - TAG_SHARD_BASE;
+  assert(shard < (int)(procs.size()));
+
+  return sysmems[shard];
+}

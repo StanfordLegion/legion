@@ -1544,14 +1544,14 @@ end
 -- ## Serialization Helpers
 -- #################
 
-function std.compute_serialized_size(value_type, value)
+local function compute_serialized_size_inner(value_type, value)
   if std.is_list(value_type) then
     local result = terralib.newsymbol(c.size_t, "result")
     local element_type = value_type.element_type
     local element = terralib.newsymbol(&element_type)
 
-    local size_actions, size_value = std.compute_serialized_size(
-      element_type, element)
+    local size_actions, size_value = compute_serialized_size_inner(
+      element_type, `(@element))
     local actions = quote
       var [result] = 0
       for i = 0, [value].__size do
@@ -1566,7 +1566,27 @@ function std.compute_serialized_size(value_type, value)
   end
 end
 
-function std.serialize(value_type, value, fixed_ptr, data_ptr)
+local compute_serialized_size_helper = terralib.memoize(function(value_type)
+  local value = terralib.newsymbol(value_type, "value")
+  local actions, result = compute_serialized_size_inner(value_type, value)
+  local terra compute_serialized_size([value]) : c.size_t
+    [actions];
+    return [result]
+  end
+  compute_serialized_size:setinlined(false)
+  return compute_serialized_size
+end)
+
+function std.compute_serialized_size(value_type, value)
+  local helper = compute_serialized_size_helper(value_type)
+  local result = terralib.newsymbol(c.size_t, "result")
+  local actions = quote
+    var [result] = helper([value])
+  end
+  return actions, result
+end
+
+local function serialize_inner(value_type, value, fixed_ptr, data_ptr)
   -- Force unaligned access because malloc does not provide
   -- blocks aligned for all purposes (e.g. SSE vectors).
   local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
@@ -1597,7 +1617,27 @@ function std.serialize(value_type, value, fixed_ptr, data_ptr)
   return actions
 end
 
-function std.deserialize(value_type, fixed_ptr, data_ptr)
+local serialize_helper = terralib.memoize(function(value_type)
+  local value = terralib.newsymbol(value_type, "value")
+  local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
+  local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
+  local actions = serialize_inner(value_type, value, fixed_ptr, data_ptr)
+  local terra serialize([value], [fixed_ptr], [data_ptr])
+    [actions]
+  end
+  serialize:setinlined(false)
+  return serialize
+end)
+
+function std.serialize(value_type, value, fixed_ptr, data_ptr)
+  local helper = serialize_helper(value_type)
+  local actions = quote
+    helper([value], [fixed_ptr], [data_ptr])
+  end
+  return actions
+end
+
+local function deserialize_inner(value_type, fixed_ptr, data_ptr)
   -- Force unaligned access because malloc does not provide
   -- blocks aligned for all purposes (e.g. SSE vectors).
   local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
@@ -1612,7 +1652,7 @@ function std.deserialize(value_type, fixed_ptr, data_ptr)
     local element_type = value_type.element_type
     local element_ptr = terralib.newsymbol(&element_type)
 
-    local deser_actions, deser_value = std.deserialize(
+    local deser_actions, deser_value = deserialize_inner(
       element_type, element_ptr, data_ptr)
     actions = quote
       [actions]
@@ -1628,6 +1668,27 @@ function std.deserialize(value_type, fixed_ptr, data_ptr)
     end
   end
 
+  return actions, result
+end
+
+local deserialize_helper = terralib.memoize(function(value_type)
+  local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
+  local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
+  local actions, result = deserialize_inner(value_type, fixed_ptr, data_ptr)
+  local terra deserialize([fixed_ptr], [data_ptr])
+    [actions];
+    return [result]
+  end
+  deserialize:setinlined(false)
+  return deserialize
+end)
+
+function std.deserialize(value_type, fixed_ptr, data_ptr)
+  local helper = deserialize_helper(value_type)
+  local result = terralib.newsymbol(value_type, "result")
+  local actions = quote
+    var [result] = helper([fixed_ptr], [data_ptr])
+  end
   return actions, result
 end
 
@@ -1978,7 +2039,7 @@ function std.generate_conditional_metamethod(ty, method)
   return macro(function(a, b)
     if a:gettype() == b:gettype() then
       return generate_conditional_metamethod_body(ty, method, a, b)
-    else
+    elseif method == "__le" or method == "__lt" then
       local combinators = conditional_combinators[method]
       local lhs = generate_conditional_metamethod_body(ty, method, `([b].lo), a)
       local rhs = generate_conditional_metamethod_body(ty, method, a, `([b].hi))
@@ -2421,12 +2482,8 @@ function std.index_type(base_type, displayname)
       "__mod", {
         st.metamethods.__mod,
         terra(a : st, b : std.rect_type(st)) : st
-          if a <= b then
-            return a
-          else
-            var sz = b:size()
-            return (a + sz) % sz
-          end
+          var sz = b:size()
+          return (a + sz) % sz
         end
       })
   end
@@ -2897,6 +2954,8 @@ std.sov = terralib.memoize(function(struct_type, width)
     local entry_type = entry[2] or entry.type
     if entry_type:isprimitive() then
       st.entries:insert{entry_field, vector(entry_type, width)}
+    elseif entry_type:isarray() then
+      st.entries:insert{entry_field, vector(entry_type.type, width)[entry_type.N]}
     else
       st.entries:insert{entry_field, std.sov(entry_type, width)}
     end

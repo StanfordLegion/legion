@@ -70,6 +70,12 @@ namespace Realm {
   } \
 } while(0)
 
+namespace LegionRuntime {
+  namespace LowLevel {
+    extern void show_event_waiters(std::ostream& os);
+  };
+};
+
 namespace Realm {
 
   Logger log_runtime("realm");
@@ -98,6 +104,11 @@ namespace Realm {
       while (true)
         sleep(1);
     }
+
+  static void realm_show_events(int signal)
+  {
+    LegionRuntime::LowLevel::show_event_waiters(std::cout);
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -629,6 +640,9 @@ namespace Realm {
       // very first thing - let the logger initialization happen
       Logger::configure_from_cmdline(cmdline);
 
+      // start up the threading subsystem - modules will likely want threads
+      if(!Threading::initialize()) exit(1);
+
       // now load modules
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
@@ -860,6 +874,22 @@ namespace Realm {
         signal(SIGILL,  realm_backtrace);
         signal(SIGBUS,  realm_backtrace);
       }
+
+      // debugging tool to dump realm event graphs after a fixed delay
+      //  (easier than actually detecting a hang)
+      {
+	const char *e = getenv("REALM_SHOW_EVENT_WAITERS");
+	if(e) {
+	  const char *pos;
+	  int delay = strtol(e, (char **)&pos, 10);
+	  assert(delay > 0);
+	  if(*pos == '+')
+	    delay += gasnet_mynode() * atoi(pos + 1);
+	  log_runtime.info() << "setting show_event alarm for " << delay << " seconds";
+	  signal(SIGALRM, realm_show_events);
+	  alarm(delay);
+	}
+      }
       
       start_polling_threads(active_msg_worker_threads);
 
@@ -945,14 +975,6 @@ namespace Realm {
       filemem = new FileMemory(ID::make_memory(gasnet_mynode(),
 					       n->memories.size()).convert<Memory>());
       n->memories.push_back(filemem);
-
-#ifdef USE_HDF
-      // create HDF memory
-      HDFMemory *hdfmem;
-      hdfmem = new HDFMemory(ID::make_memory(gasnet_mynode(),
-					     n->memories.size()).convert<Memory>());
-      n->memories.push_back(hdfmem);
-#endif
 
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
@@ -1252,7 +1274,7 @@ namespace Realm {
       // root node will be whoever owns the target proc
       int root = ID(target_proc).proc.owner_node;
 
-      if(gasnet_mynode() == root) {
+      if((int)gasnet_mynode() == root) {
 	// ROOT NODE
 
 	// step 1: receive wait_on from every node
@@ -1262,7 +1284,7 @@ namespace Realm {
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(int i = 0; i < gasnet_nodes(); i++) {
+	for(int i = 0; i < (int)gasnet_nodes(); i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
@@ -1336,7 +1358,7 @@ namespace Realm {
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(int i = 0; i < gasnet_nodes(); i++) {
+	for(int i = 0; i < (int)gasnet_nodes(); i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
@@ -1396,7 +1418,7 @@ namespace Realm {
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(int i = 0; i < gasnet_nodes(); i++) {
+	for(int i = 0; i < (int)gasnet_nodes(); i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
@@ -1678,6 +1700,8 @@ namespace Realm {
 
 	module_registrar.unload_module_sofiles();
       }
+
+      if(!Threading::cleanup()) exit(1);
 
       // this terminates the process, so control never gets back to caller
       // would be nice to fix this...

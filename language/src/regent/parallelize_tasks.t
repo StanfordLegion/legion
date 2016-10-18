@@ -15,10 +15,10 @@
 -- Regent Auto-parallelizer
 
 local ast = require("regent/ast")
+local ast_util = require("regent/ast_util")
 local data = require("common/data")
 local std = require("regent/std")
 local report = require("common/report")
-local pretty = require("regent/pretty")
 local symbol_table = require("regent/symbol_table")
 local passes = require("regent/passes")
 
@@ -71,39 +71,51 @@ local print_point = {
 }
 
 -- TODO: needs to automatically generate these functions
-local function get_ghost_rect_body(res, sz, r, s, f)
+local function get_ghost_rect_body(res, sz, root, r, s, polarity, f)
   local acc = function(expr) return `([expr].[f]) end
   if f == nil then acc = function(expr) return expr end end
   return quote
-    if [acc(`([s].lo.__ptr))] == [acc(`([r].lo.__ptr))] then
+    if [acc(`([polarity].__ptr))] == 0 then
       [acc(`([res].lo.__ptr))] = [acc(`([r].lo.__ptr))]
       [acc(`([res].hi.__ptr))] = [acc(`([r].hi.__ptr))]
-    else
-      -- wrapped around left, periodic boundary
+    elseif [acc(`([polarity].__ptr))] > 0 then
       if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
-        -- shift left
-        if [acc(`([r].lo.__ptr))] <= [acc(`([s].hi.__ptr))] then
-          [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
-          [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
-        -- shift right
-        elseif [acc(`([s].lo.__ptr))] <= [acc(`([r].hi.__ptr))] then
-          [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
-          [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
-        else
-          std.assert(false,
-            "ambiguous ghost region, primary region should be bigger for this stencil")
-        end
-      else -- [acc(`([s].lo.__ptr))] < [acc(`([r].hi.__ptr))]
-        -- shift left
-        if [acc(`([s].lo.__ptr))] < [acc(`([r].lo.__ptr))] then
-          [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
-          [acc(`([res].hi.__ptr))] = [acc(`([r].lo.__ptr))] - 1
-        -- shift right
-        else -- [acc(`([s].lo.__ptr)) > [acc(`([r].lo.__ptr))
-          [acc(`([res].lo.__ptr))] = [acc(`([r].hi.__ptr))] + 1
-          [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
-        end
+        [acc(`([res].lo.__ptr))] = ([acc(`([r].hi.__ptr))] + 1) % [acc(`([sz].__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+      -- if the stencil access is completely off, then we can just leave it as it is
+      elseif [acc(`([r].hi.__ptr))] < [acc(`([s].lo.__ptr))] or
+             [acc(`([r].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+      else
+        [acc(`([res].lo.__ptr))] = [acc(`([r].hi.__ptr))] + 1
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
       end
+    elseif [acc(`([polarity].__ptr))] < 0 then
+      if [acc(`([s].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = ([acc(`([r].lo.__ptr))] - 1 + [acc(`([sz].__ptr))]) % [acc(`([sz].__ptr))]
+      elseif [acc(`([r].hi.__ptr))] < [acc(`([s].lo.__ptr))] or
+             [acc(`([r].lo.__ptr))] > [acc(`([s].hi.__ptr))] then
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([s].hi.__ptr))]
+      else
+        [acc(`([res].lo.__ptr))] = [acc(`([s].lo.__ptr))]
+        [acc(`([res].hi.__ptr))] = [acc(`([r].lo.__ptr))] - 1
+      end
+    end
+  end
+end
+
+-- If all stencil accesses fall into the private region,
+-- we do not need to calculate the size of the ghost region
+local function clear_unnecessary_polarity(root, r, polarity, f)
+  local acc = function(expr) return `([expr].[f]) end
+  if f == nil then acc = function(expr) return expr end end
+  return quote
+    if [acc(`([root].lo.__ptr))] == [acc(`([r].lo.__ptr))] and
+       [acc(`([root].hi.__ptr))] == [acc(`([r].hi.__ptr))] then
+      [acc(`([polarity].__ptr))] = 0
     end
   end
 end
@@ -121,27 +133,48 @@ local function bounds_checks(res)
 end
 
 local get_ghost_rect = {
-  [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d) : std.rect1d
+  [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d, polarity : std.int1d) : std.rect1d
     var sz = root:size()
     var diff_rect : std.rect1d
-    [get_ghost_rect_body(diff_rect, sz, r, s)]
+    diff_rect.lo = root.lo
+    diff_rect.hi = root.lo
+    [clear_unnecessary_polarity(root, r, polarity)]
+    -- If the ghost region is not necessary at all for this stencil,
+    -- make a dummy region with only one element.
+    if polarity == [std.int1d:zero()] then return diff_rect end
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity)]
     [bounds_checks(diff_rect)]
     return diff_rect
   end,
-  [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d) : std.rect2d
+  [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d, polarity : std.int2d) : std.rect2d
     var sz = root:size()
     var diff_rect : std.rect2d
-    [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
+    diff_rect.lo = root.lo
+    diff_rect.hi = root.lo
+    [clear_unnecessary_polarity(root, r, polarity, "x")]
+    [clear_unnecessary_polarity(root, r, polarity, "y")]
+    -- If the ghost region is not necessary at all for this stencil,
+    -- make a dummy region with only one element.
+    if polarity == [std.int2d:zero()] then return diff_rect end
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "x")]
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "y")]
     [bounds_checks(diff_rect)]
     return diff_rect
   end,
-  [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d) : std.rect3d
+  [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d, polarity : std.int3d) : std.rect3d
     var sz = root:size()
     var diff_rect : std.rect3d
-    [get_ghost_rect_body(diff_rect, sz, r, s, "x")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, "y")]
-    [get_ghost_rect_body(diff_rect, sz, r, s, "z")]
+    diff_rect.lo = root.lo
+    diff_rect.hi = root.lo
+    [clear_unnecessary_polarity(root, r, polarity, "x")]
+    [clear_unnecessary_polarity(root, r, polarity, "y")]
+    [clear_unnecessary_polarity(root, r, polarity, "z")]
+    -- If the ghost region is not necessary at all for this stencil,
+    -- make a dummy region with only one element.
+    if polarity == [std.int3d:zero()] then return diff_rect end
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "x")]
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "y")]
+    [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "z")]
     [bounds_checks(diff_rect)]
     return diff_rect
   end
@@ -187,15 +220,6 @@ local function get_intersection(rect_type)
   end
 end
 
-local function render(expr)
-  if expr == nil then return "nil" end
-  if expr:is(ast.typed.expr) then
-    return pretty.render.entry(nil, pretty.expr(nil, expr))
-  elseif expr:is(ast.typed.stat) then
-    return pretty.render.entry(nil, pretty.stat(nil, expr))
-  end
-end
-
 local function shallow_copy(tbl)
   local new_tbl = {}
   for k, v in pairs(tbl) do
@@ -204,27 +228,13 @@ local function shallow_copy(tbl)
   return new_tbl
 end
 
-local function factorize(number, ways)
-  local factors = terralib.newlist()
-  for k = ways, 2, -1 do
-    local limit = math.ceil(math.pow(number, 1 / k))
-    local factor
-    for idx = 1, limit do
-      if number % idx == 0 then
-        factor = idx
-      end
-    end
-    number = number / factor
-    factors:insert(factor)
-  end
-  factors:insert(number)
-  factors:sort(function(a, b) return a > b end)
-  return factors
-end
-
 -- #####################################
 -- ## Utilities for AST node manipulation
 -- #################
+
+for k, v in pairs(ast_util) do
+  _G[k] = v
+end
 
 local tmp_var_id = 0
 
@@ -232,325 +242,6 @@ local function get_new_tmp_var(ty)
   local sym = std.newsymbol(ty, "__t".. tostring(tmp_var_id))
   tmp_var_id = tmp_var_id + 1
   return sym
-end
-
-local function mk_expr_id(sym, ty)
-  ty = ty or sym:gettype()
-  return ast.typed.expr.ID {
-    value = sym,
-    expr_type = ty,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_index_access(value, index, ty)
-  return ast.typed.expr.IndexAccess {
-    value = value,
-    index = index,
-    expr_type = ty,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_field_access(value, field, ty)
-  return ast.typed.expr.FieldAccess {
-    value = value,
-    field_name = field,
-    expr_type = ty,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_bounds_access(value)
-  if std.is_symbol(value) then
-    value = mk_expr_id(value, std.rawref(&value:gettype()))
-  end
-  local expr_type = std.as_read(value.expr_type)
-  local index_type
-  if std.is_region(expr_type) then
-    index_type = expr_type:ispace().index_type
-  elseif std.is_ispace(expr_type) then
-    index_type = expr_type.index_type
-  else
-    assert(false, "unreachable")
-  end
-  return mk_expr_field_access(value, "bounds", std.rect_type(index_type))
-end
-
-local function mk_expr_colors_access(value)
-  if std.is_symbol(value) then
-    value = mk_expr_id(value, std.rawref(&value:gettype()))
-  end
-  local color_space_type = std.as_read(value.expr_type):colors()
-  return mk_expr_field_access(value, "colors", color_space_type)
-end
-
-local function mk_expr_binary(op, lhs, rhs)
-  local lhs_type = std.as_read(lhs.expr_type)
-  local rhs_type = std.as_read(rhs.expr_type)
-  local function test()
-    local terra query(lhs : lhs_type, rhs : rhs_type)
-      return [ std.quote_binary_op(op, lhs, rhs) ]
-    end
-    return query:gettype().returntype
-  end
-  local valid, result_type = pcall(test)
-  assert(valid)
-  return ast.typed.expr.Binary {
-    op = op,
-    lhs = lhs,
-    rhs = rhs,
-    expr_type = result_type,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_call(fn, args)
-  args = args or terralib.newlist()
-  if not terralib.islist(args) then
-    args = terralib.newlist {args}
-  end
-  local fn_type
-  local expr_type
-  if not std.is_task(fn) then
-    local arg_symbols = args:map(function(arg)
-      return terralib.newsymbol(arg.expr_type)
-    end)
-    local function test()
-      local terra query([arg_symbols])
-        return [fn]([arg_symbols])
-      end
-      return query:gettype()
-    end
-    local valid, query_type = pcall(test)
-    assert(valid)
-    fn_type = query_type
-    expr_type = fn_type.returntype or terralib.types.unit
-  else
-    fn_type = fn:gettype()
-    expr_type = fn_type.returntype or terralib.types.unit
-  end
-
-  return ast.typed.expr.Call {
-    fn = ast.typed.expr.Function {
-      value = fn,
-      expr_type = fn_type,
-      span = ast.trivial_span(),
-      annotations = ast.default_annotations(),
-    },
-    args = args,
-    expr_type = expr_type,
-    conditions = terralib.newlist(),
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_constant(value, ty)
-  return ast.typed.expr.Constant {
-    value = value,
-    expr_type = ty,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_ctor_list_field(expr)
-  return ast.typed.expr.CtorListField {
-    value = expr,
-    expr_type = expr.expr_type,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_ctor_list_field_constant(c, ty)
-  return mk_expr_ctor_list_field(mk_expr_constant(c, ty))
-end
-
-local function mk_expr_ctor(ls)
-  local fields = ls:map(mk_expr_ctor_list_field)
-  local expr_type = std.ctor_tuple(fields:map(
-    function(field) return field.expr_type end))
-  return ast.typed.expr.Ctor {
-    fields = fields,
-    named = false,
-    expr_type = expr_type,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_cast(ty, expr)
-  return ast.typed.expr.Cast {
-    fn = ast.typed.expr.Function {
-      value = ty,
-      expr_type =
-        terralib.types.functype(terralib.newlist({std.untyped}), ty, false),
-      span = ast.trivial_span(),
-      annotations = ast.default_annotations(),
-    },
-    arg = expr,
-    expr_type = ty,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_zeros(index_type)
-  if index_type.dim == 1 then
-    return mk_expr_constant(0, int)
-  else
-    local fields = terralib.newlist()
-    for idx = 1, index_type.dim do
-      fields:insert(mk_expr_constant(0, int))
-    end
-    return mk_expr_cast(index_type, mk_expr_ctor(fields))
-  end
-end
-
-local function mk_expr_partition(partition_type, colors, coloring)
-  return ast.typed.expr.Partition {
-    disjointness = partition_type.disjointness,
-    region = mk_expr_id(partition_type.parent_region_symbol),
-    coloring = coloring,
-    colors = colors,
-    expr_type = partition_type,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_ispace(index_type, extent)
-  assert(not index_type:is_opaque())
-  return ast.typed.expr.Ispace {
-    extent = extent,
-    start = false,
-    index_type = index_type,
-    expr_type = std.ispace(index_type),
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_expr_partition_equal(partition_type, colors)
-  return ast.typed.expr.PartitionEqual {
-    region = mk_expr_id(partition_type.parent_region_symbol),
-    colors = colors,
-    expr_type = partition_type,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_stat_var(sym, ty, value)
-  ty = ty or sym:gettype()
-  return ast.typed.stat.Var {
-    symbols = terralib.newlist {sym},
-    types = terralib.newlist {ty},
-    values = terralib.newlist {value},
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_empty_block()
-  return ast.typed.Block {
-    stats = terralib.newlist(),
-    span = ast.trivial_span(),
-  }
-end
-
-local function mk_stat_expr(expr)
-  return ast.typed.stat.Expr {
-    expr = expr,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_stat_block(block)
-  return ast.typed.stat.Block {
-    block = block,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_block(stats)
-  if terralib.islist(stats) then
-    return ast.typed.Block {
-      stats = stats,
-      span = ast.trivial_span(),
-    }
-  else
-    return ast.typed.Block {
-      stats = terralib.newlist {stats},
-      span = ast.trivial_span(),
-    }
-  end
-end
-
-local function mk_stat_if(cond, stat)
-  return ast.typed.stat.If {
-    cond = cond,
-    then_block = mk_block(stat),
-    elseif_blocks = terralib.newlist(),
-    else_block = mk_empty_block(),
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_stat_elseif(cond, stat)
-  return ast.typed.stat.Elseif {
-    cond = cond,
-    block = mk_block(stat),
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_stat_assignment(lhs, rhs)
-  return ast.typed.stat.Assignment {
-    lhs = terralib.newlist {lhs},
-    rhs = terralib.newlist {rhs},
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_stat_reduce(op, lhs, rhs)
-  return ast.typed.stat.Reduce {
-    op = op,
-    lhs = terralib.newlist {lhs},
-    rhs = terralib.newlist {rhs},
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_stat_for_list(symbol, value, block)
-  return ast.typed.stat.ForList {
-    symbol = symbol,
-    value = value,
-    block = block,
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
-end
-
-local function mk_task_param(symbol)
-  return ast.typed.top.TaskParam {
-    symbol = symbol,
-    param_type = symbol:gettype(),
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
 end
 
 local function copy_region_type(old_type)
@@ -639,6 +330,57 @@ local function rewrite_symbol(node, from, to)
   return rewrite_symbol_pred(node,
     function(node) return node.value == from end,
     to)
+end
+
+local function extract_constant_offsets(n)
+  assert(n:is(ast.typed.expr.Ctor) and
+         data.all(n.fields:map(function(field)
+           return field.expr_type.type == "integer"
+         end)))
+  local num_nonzeros = 0
+  local offsets = terralib.newlist()
+  for idx = 1, #n.fields do
+    if n.fields[idx].value:is(ast.typed.expr.Constant) then
+      offsets:insert(n.fields[idx].value.value)
+    elseif n.fields[idx].value:is(ast.typed.expr.Unary) and
+           n.fields[idx].value.op == "-" and
+           n.fields[idx].value.rhs:is(ast.typed.expr.Constant) then
+      offsets:insert(-n.fields[idx].value.rhs.value)
+    else
+      assert(false)
+    end
+    if offsets[#offsets] ~= 0 then num_nonzeros = num_nonzeros + 1 end
+  end
+  return offsets, num_nonzeros
+end
+
+local function extract_polarity(node)
+  if Lambda.is_lambda(node) then
+    return extract_polarity(node:expr())
+  elseif node:is(ast.typed.expr.Binary) then
+    if node.op == "%" then
+      return extract_polarity(node.lhs)
+    elseif node.op == "+" then
+      return extract_polarity(node.rhs)
+    elseif node.op == "-" then
+      return extract_polarity(node.rhs):map(function(c)
+        return -c
+      end)
+    else
+      assert(false)
+    end
+  elseif node:is(ast.typed.expr.Ctor) then
+    return extract_constant_offsets(node):map(function(c)
+      if c > 0 then return 1
+      elseif c < 0 then return -1
+      else return 0 end
+    end)
+  elseif node:is(ast.typed.expr.Constant) and
+         node.expr_type.type == "integer" then
+    return terralib.newlist { node.value }
+  else
+    assert(false)
+  end
 end
 
 -- #####################################
@@ -817,6 +559,10 @@ do
     return fields
   end
 
+  function stencil:polarity()
+    return self.__polarity
+  end
+
   function stencil:has_field(field)
     return self.__fields[field:hash()] ~= nil
   end
@@ -877,6 +623,7 @@ do
       __index_expr = args.index,
       __range = args.range,
       __fields = args.fields,
+      __polarity = extract_polarity(args.index),
     }, stencil)
   end
 
@@ -1117,6 +864,15 @@ function caller_context:add_parent_region(region, parent_region)
   self.__parent_region[region] = parent_region
 end
 
+function caller_context:has_parent_region(region)
+  return self.__parent_region[region] ~= nil
+end
+
+function caller_context:get_parent_region(region)
+  assert(self.__parent_region[region] ~= nil)
+  return self.__parent_region[region]
+end
+
 function caller_context:add_color_space(param, color)
   assert(self.__color_spaces[param] == nil)
   self.__color_spaces[param] = color
@@ -1185,18 +941,100 @@ end
 -- ## Code generation utilities for partition creation and indexspace launch
 -- #################
 
+local terra factorize(dop : int, factors : &&int, num_factors : &int)
+  @num_factors = 0
+  @factors = [&int](std.c.malloc([sizeof(int)] * dop))
+  while dop > 1 do
+    var factor = 1
+    while factor <= dop do
+      if factor ~= 1 and dop % factor == 0 then
+        (@factors)[@num_factors] = factor
+        @num_factors = @num_factors + 1
+        dop = dop / factor
+        break
+      end
+      factor = factor + 1
+    end
+  end
+
+  for i = 0, @num_factors - 1 do
+    for j = i + 1, @num_factors do
+      if (@factors)[i] < (@factors)[j] then
+        (@factors)[j], (@factors)[i]  = (@factors)[i], (@factors)[j]
+      end
+    end
+  end
+end
+
+local compute_extent = {
+  [std.int2d] = terra(dop : int, rect : std.rect2d) : std.int2d
+    var factors : &int, num_factors : int
+    factorize(dop, &factors, &num_factors)
+    var sz = rect:size()
+    var extent : std.int2d = std.int2d { [std.int2d.impl_type] { 1, 1 } }
+    for idx = 0, num_factors do
+      if sz.__ptr.x <= sz.__ptr.y then
+        extent.__ptr.y = extent.__ptr.y * factors[idx]
+        sz.__ptr.y = (sz.__ptr.y + factors[idx] - 1) / factors[idx]
+      else
+        extent.__ptr.x = extent.__ptr.x * factors[idx]
+        sz.__ptr.x = (sz.__ptr.x + factors[idx] - 1) / factors[idx]
+      end
+    end
+    std.c.free(factors)
+    return extent
+  end,
+  [std.int3d] = terra(dop : int, rect : std.rect3d) : std.int3d
+    var factors : &int, num_factors : int
+    factorize(dop, &factors, &num_factors)
+    var sz = rect:size()
+    var sz_remain : int[3], extent : int[3]
+    sz_remain[0], sz_remain[1], sz_remain[2] = sz.__ptr.x, sz.__ptr.y, sz.__ptr.z
+    for k = 0, 3 do extent[k] = 1 end
+    for idx = 0, num_factors do
+      var next_max = 0
+	    var max_sz = 0
+      for k = 2, -1, -1 do
+        if max_sz < sz_remain[k] then
+          next_max = k
+          max_sz = sz_remain[k]
+        end
+      end
+      extent[next_max] = extent[next_max] * factors[idx]
+      sz_remain[next_max] = (sz_remain[next_max] + factors[idx] - 1) / factors[idx]
+    end
+    std.c.free(factors)
+    return std.int3d { [std.int3d.impl_type] { extent[0], extent[1], extent[2] } }
+  end,
+}
+
 local function create_equal_partition(caller_cx, region_symbol, pparam)
   local region_type = region_symbol:gettype()
   local index_type = region_type:ispace().index_type
   local dim = index_type.dim
-  local factors = factorize(pparam:dop(), dim)
+  local factors = terralib.newlist()
+  local line = pparam:dop()
+  if string.len(line) > 0 then
+    local position = 0
+    while position do
+      local new_position = string.find(line, ",", position+1)
+      factors:insert(tonumber(string.sub(line, position+1, new_position and new_position-1)))
+      position = new_position
+    end
+  end
   local extent_expr
-  if dim > 1 then
+  if dim == 1 then
+    extent_expr = mk_expr_constant(factors[1], int)
+  elseif #factors == 1 then
+    extent_expr = mk_expr_call(
+      compute_extent[index_type], terralib.newlist {
+        mk_expr_constant(factors[1], int),
+        mk_expr_bounds_access(mk_expr_id(region_symbol))
+      })
+  else
     extent_expr = mk_expr_ctor(factors:map(function(f)
       return mk_expr_constant(f, int)
     end))
-  else
-    extent_expr = mk_expr_constant(factors[1], int)
   end
 
   local color_space_expr = mk_expr_ispace(index_type, extent_expr)
@@ -1273,8 +1111,12 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
   local sr_bounds_expr = mk_expr_bounds_access(sr_expr)
   local sr_lo_expr = mk_expr_field_access(sr_bounds_expr, "lo", pr_index_type)
   local sr_hi_expr = mk_expr_field_access(sr_bounds_expr, "hi", pr_index_type)
-  local shift_lo_expr = stencil(sr_lo_expr)
-  local shift_hi_expr = stencil(sr_hi_expr)
+  local shift_lo_expr = stencil:index()(sr_lo_expr)
+  local shift_hi_expr = stencil:index()(sr_hi_expr)
+  local polarity_expr =
+    mk_expr_ctor(stencil:polarity():map(function(c)
+      return mk_expr_constant(c, int)
+    end))
   local tmp_var = get_new_tmp_var(pr_rect_type)
   loop_body:insert(mk_stat_var(tmp_var, nil,
     mk_expr_ctor(terralib.newlist {shift_lo_expr, shift_hi_expr})))
@@ -1282,7 +1124,8 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
     mk_expr_call(get_ghost_rect[pr_rect_type],
                  terralib.newlist { pr_bounds_expr,
                                     sr_bounds_expr,
-                                    mk_expr_id(tmp_var) })
+                                    mk_expr_id(tmp_var),
+                                    polarity_expr })
   --loop_body:insert(mk_stat_block(mk_block(terralib.newlist {
   --  mk_stat_expr(mk_expr_call(print_rect[pr_rect_type],
   --                            pr_bounds_expr)),
@@ -1674,9 +1517,12 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
           local partition_symbol =
             caller_cx:find_primary_partition(pparam, range_symbol)
           assert(partition_symbol)
+          while caller_cx:has_parent_region(range_symbol) do
+            range_symbol = caller_cx:get_parent_region(range_symbol)
+          end
           local partition_symbol, partition_stats =
             create_image_partition(caller_cx, range_symbol, partition_symbol,
-                                   stencil:index(), pparam)
+                                   stencil, pparam)
           ghost_partition_symbols:insert(partition_symbol)
           stats:insertall(partition_stats)
         end
@@ -2050,28 +1896,6 @@ function reduction_analysis.top_task(task_cx, node)
   }
 end
 
-local function extract_constant_offsets(n)
-  assert(n:is(ast.typed.expr.Ctor) and
-         data.all(n.fields:map(function(field)
-           return field.expr_type.type == "integer"
-         end)))
-  local num_nonzeros = 0
-  local offsets = terralib.newlist()
-  for idx = 1, #n.fields do
-    if n.fields[idx].value:is(ast.typed.expr.Constant) then
-      offsets:insert(n.fields[idx].value.value)
-    elseif n.fields[idx].value:is(ast.typed.expr.Unary) and
-           n.fields[idx].value.op == "-" and
-           n.fields[idx].value.rhs:is(ast.typed.expr.Constant) then
-      offsets:insert(-n.fields[idx].value.rhs.value)
-    else
-      assert(false)
-    end
-    if offsets[#offsets] ~= 0 then num_nonzeros = num_nonzeros + 1 end
-  end
-  return offsets, num_nonzeros
-end
-
 -- #####################################
 -- ## Stencil analyzer
 -- #################
@@ -2084,8 +1908,7 @@ function stencil_analysis.explode_expr(cx, expr)
   -- where e is for-list loop symbol and r is a region
   if expr:is(ast.typed.expr.Binary) then
     if expr.op == "%" then
-      assert(expr.rhs:is(ast.typed.expr.ID) and
-             std.is_rect_type(expr.rhs.expr_type))
+      assert(std.is_rect_type(expr.rhs.expr_type))
       return stencil_analysis.explode_expr(cx, expr.lhs):map(function(lhs)
         return expr { lhs = lhs }
       end)
@@ -2287,7 +2110,26 @@ function stencil_analysis.stencils_compatible(s1, s2)
 end
 
 function stencil_analysis.top(cx)
-  for _, access_info in pairs(cx.field_accesses) do
+  local sorted_accesses = terralib.newlist()
+  for access, _ in pairs(cx.field_accesses) do
+    sorted_accesses:insert(access)
+  end
+  sorted_accesses:sort(function(a1, a2)
+    if a1.span.start.line < a2.span.start.line then
+      return true
+    elseif a1.span.start.line > a2.span.start.line then
+      return false
+    elseif a1.span.start.offset < a2.span.start.offset then
+      return true
+    elseif a1.span.start.offset > a2.span.start.offset then
+      return false
+    else
+      return render(a1) < render(a2)
+    end
+  end)
+
+  for idx = 1, #sorted_accesses do
+    local access_info = cx.field_accesses[sorted_accesses[idx]]
     local stencil = access_info.stencil
     access_info.exploded_stencils:insertall(
       stencil_analysis.explode_expr(cx, stencil:index()):map(function(expr)
@@ -2401,11 +2243,13 @@ function parallelize_tasks.stat(task_cx)
       end
       assert(case_split_if)
       if std.config["debug"] then
+        local index_symbol = get_new_tmp_var(std.as_read(index_expr.expr_type))
         case_split_if.else_block.stats:insertall(terralib.newlist {
-          --mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
-          --             terralib.newlist {
-          --               index_expr
-          --             })),
+          mk_stat_var(index_symbol, nil, index_expr),
+          mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
+                       terralib.newlist {
+                         mk_expr_id(index_symbol),
+                       })),
           mk_stat_expr(mk_expr_call(std.assert,
                        terralib.newlist {
                          mk_expr_constant(false, bool),
@@ -2493,6 +2337,7 @@ function parallelize_tasks.top_task(global_cx, node)
   -- Now make a new task AST node
   local task_name = node.name .. data.newtuple("parallelized")
   local prototype = std.newtask(task_name)
+  node.prototype:set_parallel_variant(prototype)
   local params = terralib.newlist()
   -- Existing region-typed parameters will now refer to the subregions
   -- passed by indexspace launch. this will avoid rewriting types in AST nodes

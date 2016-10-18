@@ -750,7 +750,7 @@ namespace Realm {
 		       << " finish=" << finish_event;
 
       ID id(me);
-      gasnet_node_t target;
+      gasnet_node_t target = 0;
       if(id.is_processor())
 	target = id.proc.owner_node;
       else if(id.is_procgroup())

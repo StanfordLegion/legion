@@ -19,20 +19,3 @@ cmake_minimum_required(VERSION 3.1)
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
-
-# Broken
-# add_subdirectory(cgsolver)
-
-if(Legion_USE_CUDA)
-  # Broken
-  # add_subdirectory(circuit)
-endif()
-
-# Broken
-# add_subdirectory(delaunay)
-
-# Broken
-# add_subdirectory(kmeans)
-
-# Broken
-# add_subdirectory(saxpy)

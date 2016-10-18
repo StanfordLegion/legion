@@ -98,6 +98,7 @@ namespace Legion {
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      virtual ApEvent get_restrict_precondition(void) const;
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
       virtual unsigned find_parent_index(unsigned idx);
@@ -358,10 +359,6 @@ namespace Legion {
         HLRTaskID hlr_id;
         SingleTask *task;
       };
-      struct MapperProfilingInfo {
-        SingleTask *task;
-        RtUserEvent profiling_done;
-      };
     public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
@@ -584,6 +581,11 @@ namespace Legion {
       void post_end_task(const void *res, size_t res_size, bool owned);
       void unmap_all_mapped_regions(void);
     public:
+      inline void begin_runtime_call(void);
+      inline void end_runtime_call(void);
+      inline void begin_task_wait(bool from_runtime);
+      inline void end_task_wait(void);
+    public:
       VariantImpl* select_inline_variant(TaskOp *child, 
                                          InlineTask *inline_task);
       void inline_child_task(TaskOp *child);
@@ -591,8 +593,10 @@ namespace Legion {
       void restart_task(void);
       const std::vector<PhysicalRegion>& get_physical_regions(void) const;
     public:
-      void notify_profiling_results(Realm::ProfilingResponse &results);
-      static void process_mapper_profiling(const void *args, size_t arglen);
+      virtual void add_copy_profiling_request(
+                                      Realm::ProfilingRequestSet &requests);
+      virtual void report_profiling_response(
+                                const Realm::ProfilingResponse &respone);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -669,7 +673,6 @@ namespace Legion {
       VariantID                             selected_variant;
       TaskPriority                          task_priority;
       bool                                  perform_postmap;
-      Mapper::TaskProfilingInfo             profiling_info;
     protected:
       // Events that must be triggered before we are done mapping
       std::set<RtEvent> map_applied_conditions;
@@ -696,7 +699,6 @@ namespace Legion {
       RtEvent pending_done;
       RtEvent last_registration;
       RtEvent dependence_precondition;
-      RtEvent profiling_done; 
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
@@ -719,6 +721,14 @@ namespace Legion {
 #ifdef LEGION_SPY
       UniqueID current_fence_uid;
 #endif
+    protected:
+      // Profiling information
+      std::vector<ProfilingMeasurementID> task_profiling_requests;
+      std::vector<ProfilingMeasurementID> copy_profiling_requests;
+      int                          outstanding_profiling_requests;
+      RtUserEvent                              profiling_reported;
+      Mapping::ProfilingMeasurements::RuntimeOverhead *overhead_tracker;
+      long long                                previous_profiling_time;
     protected:
       // Resources that can build up over a task's lifetime
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
@@ -864,6 +874,7 @@ namespace Legion {
       virtual void report_interfering_close_requirement(unsigned idx);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
+      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual void resolve_false(void);
       virtual bool early_map_task(void);
@@ -955,6 +966,7 @@ namespace Legion {
     protected:
       std::map<PhysicalManager*,
         std::pair<unsigned/*ref count*/,bool/*created*/> > acquired_instances;
+      std::set<ApEvent> restrict_postconditions;
     };
 
     /**
@@ -1015,6 +1027,7 @@ namespace Legion {
       virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
+      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
@@ -1027,6 +1040,7 @@ namespace Legion {
       friend class SliceTask;
       SliceTask                   *slice_owner;
       ApUserEvent                 point_termination;
+      std::set<ApEvent>           restrict_postconditions;
     protected:
       bool has_remote_subtasks;
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
@@ -1314,7 +1328,8 @@ namespace Legion {
       void record_locally_mapped_slice(SliceTask *local_slice);
     public:
       void return_slice_mapped(unsigned points, long long denom,
-                               RtEvent applied_condition);
+                               RtEvent applied_condition, 
+                               ApEvent restrict_postcondition);
       void return_slice_complete(unsigned points);
       void return_slice_commit(unsigned points);
     public:
@@ -1351,6 +1366,7 @@ namespace Legion {
       std::deque<SliceTask*> locally_mapped_slices;
     protected:
       std::set<RtEvent> map_applied_conditions;
+      std::set<ApEvent> restrict_postconditions;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
     };
 
@@ -1408,6 +1424,8 @@ namespace Legion {
       void apply_local_version_infos(std::set<RtEvent> &map_conditions);
       std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      get_acquired_instances_ref(void);
+      void check_target_processors(void) const;
+      void update_target_processor(void);
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
@@ -1417,7 +1435,8 @@ namespace Legion {
       void return_privileges(PointTask *point);
       void return_virtual_instance(unsigned index, InstanceSet &refs,
                                    const RegionRequirement &req);
-      void record_child_mapped(RtEvent child_complete);
+      void record_child_mapped(RtEvent child_complete, 
+                               ApEvent restrict_postcondition);
       void record_child_complete(void);
       void record_child_committed(void);
     protected:
@@ -1455,6 +1474,7 @@ namespace Legion {
       LegionDeque<InstanceRef>::aligned temporary_virtual_refs;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
+      std::set<ApEvent> restrict_postconditions;
     };
 
     /**
@@ -1514,6 +1534,57 @@ namespace Legion {
       size_t arglen;
       bool own_arg;
     };
+
+    //--------------------------------------------------------------------------
+    inline void SingleTask::begin_runtime_call(void)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      overhead_tracker->application_time += diff;
+      previous_profiling_time = current;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void SingleTask::end_runtime_call(void)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      overhead_tracker->runtime_time += diff;
+      previous_profiling_time = current;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void SingleTask::begin_task_wait(bool from_runtime)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      if (from_runtime)
+        overhead_tracker->runtime_time += diff;
+      else
+        overhead_tracker->application_time += diff;
+      previous_profiling_time = current;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void SingleTask::end_task_wait(void)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      overhead_tracker->wait_time += diff;
+      previous_profiling_time = current;
+    }
 
   }; // namespace Internal 
 }; // namespace Legion

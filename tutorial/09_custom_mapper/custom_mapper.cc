@@ -97,7 +97,7 @@ enum {
 
 // Mappers are classes that implement the
 // mapping interface declared in legion.h.
-// Legion provides a default impelmentation
+// Legion provides a default implementation
 // of this interface defined by the
 // DefaultMapper class.  Programmers can
 // implement custom mappers either by 
@@ -117,8 +117,8 @@ public:
       Runtime *rt, Processor local);
 public:
   virtual void select_task_options(const MapperContext    ctx,
-                                       const Task&            task,
-                                             TaskOptions&     output);
+				   const Task&            task,
+				         TaskOptions&     output);
   virtual void slice_task(const MapperContext ctx,
                           const Task& task,
                           const SliceTaskInput& input,
@@ -127,6 +127,9 @@ public:
                         const Task& task,
                         const MapTaskInput& input,
                               MapTaskOutput& output);
+  virtual void report_profiling(const MapperContext      ctx,
+				const Task&              task,
+				const TaskProfilingInfo& input);
 };
 
 class PartitioningMapper : public DefaultMapper {
@@ -149,7 +152,7 @@ public:
 // function.  (See below for where we register
 // this callback with the runtime.)  The callback
 // function must have this type, which allows the
-// runtime to pass the necessary paramterers in
+// runtime to pass the necessary parameters in
 // for creating new mappers.
 //
 // In Legion, mappers are identified by a MapperID.
@@ -189,7 +192,7 @@ void mapper_registration(Machine machine, Runtime *rt,
   }
 }
 
-// Here is the constructor for our adversial mapper.
+// Here is the constructor for our adversarial mapper.
 // We'll use the constructor to illustrate how mappers can
 // get access to information regarding the current machine.
 AdversarialMapper::AdversarialMapper(Machine m, 
@@ -218,7 +221,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
   {
     // Print out how many processors there are and each
     // of their kinds.
-    printf("There are %ld processors:\n", all_procs.size());
+    printf("There are %zd processors:\n", all_procs.size());
     for (std::set<Processor>::const_iterator it = all_procs.begin();
           it != all_procs.end(); it++)
     {
@@ -260,7 +263,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
     // on the target architecture and print out their info.
     std::set<Memory> all_mems;
     machine.get_all_memories(all_mems);
-    printf("There are %ld memories:\n", all_mems.size());
+    printf("There are %zd memories:\n", all_mems.size());
     for (std::set<Memory>::const_iterator it = all_mems.begin();
           it != all_mems.end(); it++)
     {
@@ -271,28 +274,28 @@ AdversarialMapper::AdversarialMapper(Machine m,
         // RDMA addressable memory when running with GASNet
         case Memory::GLOBAL_MEM:
           {
-            printf("  GASNet Global Memory ID " IDFMT " has %ld KB\n", 
+            printf("  GASNet Global Memory ID " IDFMT " has %zd KB\n", 
                     it->id, memory_size_in_kb);
             break;
           }
         // DRAM on a single node
         case Memory::SYSTEM_MEM:
           {
-            printf("  System Memory ID " IDFMT " has %ld KB\n",
+            printf("  System Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Pinned memory on a single node
         case Memory::REGDMA_MEM:
           {
-            printf("  Pinned Memory ID " IDFMT " has %ld KB\n",
+            printf("  Pinned Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // A memory associated with a single socket
         case Memory::SOCKET_MEM:
           {
-            printf("  Socket Memory ID " IDFMT " has %ld KB\n",
+            printf("  Socket Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
@@ -300,56 +303,56 @@ AdversarialMapper::AdversarialMapper(Machine m,
         // all GPUs on a single node
         case Memory::Z_COPY_MEM:
           {
-            printf("  Zero-Copy Memory ID " IDFMT " has %ld KB\n",
+            printf("  Zero-Copy Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // GPU framebuffer memory for a single GPU
         case Memory::GPU_FB_MEM:
           {
-            printf("  GPU Frame Buffer Memory ID " IDFMT " has %ld KB\n",
+            printf("  GPU Frame Buffer Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Disk memory on a single node
         case Memory::DISK_MEM:
           {
-            printf("  Disk Memory ID " IDFMT " has %ld KB\n",
+            printf("  Disk Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // HDF framebuffer memory for a single GPU
         case Memory::HDF_MEM:
           {
-            printf("  HDF Memory ID " IDFMT " has %ld KB\n",
+            printf("  HDF Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // File memory on a single node
         case Memory::FILE_MEM:
           {
-            printf("  File Memory ID " IDFMT " has %ld KB\n",
+            printf("  File Memory ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L3 cache
         case Memory::LEVEL3_CACHE:
           {
-            printf("  Level 3 Cache ID " IDFMT " has %ld KB\n",
+            printf("  Level 3 Cache ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L2 cache
         case Memory::LEVEL2_CACHE:
           {
-            printf("  Level 2 Cache ID " IDFMT " has %ld KB\n",
+            printf("  Level 2 Cache ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
         // Block of memory sized for L1 cache
         case Memory::LEVEL1_CACHE:
           {
-            printf("  Level 1 Cache ID " IDFMT " has %ld KB\n",
+            printf("  Level 1 Cache ID " IDFMT " has %zd KB\n",
                     it->id, memory_size_in_kb);
             break;
           }
@@ -372,7 +375,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
     // using the 'get_visible_memories' method on the machine.
     std::set<Memory> vis_mems;
     machine.get_visible_memories(local_proc, vis_mems);
-    printf("There are %ld memories visible from processor " IDFMT "\n",
+    printf("There are %zd memories visible from processor " IDFMT "\n",
             vis_mems.size(), local_proc.id);
     for (std::set<Memory>::const_iterator it = vis_mems.begin();
           it != vis_mems.end(); it++)
@@ -400,7 +403,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
 // select_task_options call.  This mapper call is
 // performed on every task launch immediately after
 // it is made.  The call asks the mapper to select 
-// set properities of the task:
+// set properties of the task:
 //
 //  inline_task - whether the task should be directly
 //    inlined into its parent task, using the parent
@@ -415,7 +418,7 @@ AdversarialMapper::AdversarialMapper(Machine m,
 //    information about the task while it is executing
 //  target_proc - which processor should the task be
 //    sent to once all of its mapping dependences have
-//    been satisifed.
+//    been satisfied.
 //
 //  Note that these properties are all set on the Task
 //  object declared in legion.h.  The Task object is
@@ -443,7 +446,7 @@ void AdversarialMapper::select_task_options(const MapperContext ctx,
 // method. The slice_domain call is used by the runtime
 // to query the mapper about the best way to distribute
 // the points in an index space task launch throughout
-// the machine. The maper is given the task and the domain
+// the machine. The mapper is given the task and the domain
 // to slice and then asked to generate sub-domains to be
 // sent to different processors in the form of DomainSplit
 // objects. DomainSplit objects describe the sub-domain,
@@ -608,6 +611,57 @@ void AdversarialMapper::map_task(const MapperContext         ctx,
   }
   // Give it a random priority
   output.task_priority = default_generate_random_integer();
+
+  // Finally, let's ask for some profiling data to see the impact of our choices
+  {
+    using namespace ProfilingMeasurements;
+    output.task_prof_requests.add_measurement<OperationTimeline>();
+    output.task_prof_requests.add_measurement<RuntimeOverhead>();
+  }
+}
+
+void AdversarialMapper::report_profiling(const MapperContext      ctx,
+					 const Task&              task,
+					 const TaskProfilingInfo& input)
+{
+  // Local import of measurement names saves typing here without polluting
+  // namespace for everybody else
+  using namespace ProfilingMeasurements;
+
+  // You are not guaranteed to get measurements you asked for, so make sure to
+  // check the result of calls to get_measurement (or just call has_measurement
+  // first).  Also, the call returns a copy of the result that you must delete
+  // yourself.
+  OperationTimeline *timeline =
+    input.profiling_responses.get_measurement<OperationTimeline>();
+  if (timeline)
+  {
+    printf("Operation timeline for task %s: ready=%lld start=%lld stop=%lld\n",
+	   task.get_task_name(),
+	   timeline->ready_time,
+	   timeline->start_time,
+	   timeline->end_time);
+    delete timeline;
+  }
+  else
+    printf("No operation timeline for task %s\n", task.get_task_name());
+
+  RuntimeOverhead *overhead =
+    input.profiling_responses.get_measurement<RuntimeOverhead>();
+  if (overhead)
+  {
+    long long total = (overhead->application_time +
+		       overhead->runtime_time +
+		       overhead->wait_time);
+    if (total <= 0) total = 1;
+    printf("Runtime overhead for task %s: runtime=%.1f%% wait=%.1f%%\n",
+	   task.get_task_name(),
+	   (100.0 * overhead->runtime_time / total),
+	   (100.0 * overhead->wait_time / total));
+    delete overhead;
+  }
+  else
+    printf("No runtime overhead data for task %s\n", task.get_task_name());
 }
 
 PartitioningMapper::PartitioningMapper(Machine m,

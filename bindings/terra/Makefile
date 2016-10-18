@@ -25,6 +25,7 @@ USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
+USE_SPY         ?= 0    # Include detailed Legion Spy support
 
 # The following flag controls whether the binding library is allowed
 # to include and link against Terra/Lua itself. This is required for
@@ -72,6 +73,10 @@ ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -Wl,-force_load,liblegion.a
 else
 	LD_FLAGS += -Wl,--whole-archive -llegion -Wl,--no-whole-archive
+endif
+
+ifeq ($(strip $(USE_SPY)),1)
+	CC_FLAGS += -DLEGION_SPY
 endif
 
 ###########################################################################

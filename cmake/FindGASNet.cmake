@@ -23,11 +23,15 @@
 #
 # Valid options for these are dependenent on the specific GASNet installation
 #
-# GASNet_ROOT_DIR  - Prefix to use when searching for GASNet.  If specified
-#                    then this search path will be used exclusively and all
-#                    others ignored.
-# ENV{GASNET_ROOT} - Environment variable used to initialize the value of
-#                    GASNet_ROOT_DIR if not already specified
+# GASNet_PREFERRED_CONDUITS - A list of conduits in order of preference to be
+#                             used by default if found.  The default order of
+#                             preference is mxm, psm, gemini, aries, pami, ibv,
+#                             shmem, portals4, ofi, mpi, udp, and smp.
+# GASNet_ROOT_DIR           - Prefix to use when searching for GASNet.  If
+#                             specified then this search path will be used
+#                             exclusively and all others ignored.
+# ENV{GASNET_ROOT}          - Environment variable used to initialize the
+#                             value of GASNet_ROOT_DIR if not already specified
 #
 
 macro(_GASNet_parse_conduit_and_threading_names
@@ -69,6 +73,7 @@ gasnet-libs:
 	@echo $(GASNET_LIBS) $(GASNETTOOLS_LIBS)"
   )
   find_program(GASNet_MAKE_PROGRAM NAMES gmake make smake)
+  mark_as_advanced(GASNet_MAKE_PROGRAM)
   if(NOT GASNet_MAKE_PROGRAM)
     message(WARNING "Unable to locate compatible make for parsing GASNet makefile options")
   else()
@@ -162,8 +167,22 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
   endif()
 endfunction()
 
+# This function takes an input list in the variable LVAR and a preferences list
+# in PVAR, and sorts the list in LVAR by the items in PVAR
+function(_sort_list_by_preference LVAR PVAR)
+  string(REPLACE ";" "|" L_RE "${${LVAR}}")
+  list(FILTER ${PVAR} INCLUDE REGEX "${L_RE}")
+  string(REPLACE ";" "|" P_RE "${${PVAR}}")
+  list(FILTER ${LVAR} EXCLUDE REGEX "${P_RE}")
+  set(L)
+  list(APPEND L ${${PVAR}})
+  list(APPEND L ${${LVAR}})
+  set(${LVAR} ${L} PARENT_SCOPE)
+endfunction()
+
 if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
   set(GASNet_ROOT_DIR "$ENV{GASNET_ROOT}" CACHE STRING "Root directory for GASNet")
+  mark_as_advanced(GASNet_ROOT_DIR)
   if(GASNet_ROOT_DIR)
     set(_GASNet_FIND_INCLUDE_OPTS PATHS ${GASNet_ROOT_DIR}/include NO_DEFAULT_PATH)
   endif()
@@ -227,6 +246,23 @@ if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
     REQUIRED_VARS GASNet_INCLUDE_DIR GASNet_CONDUITS GASNet_THREADING_OPTS
   )
   if(GASNet_FOUND)
+    # Reorder preferred conduits to place local preferences first
+    set(GASNet_ALL_PREFERRED_CONDUITS
+      "mxm;psm;gemini;aries;pami;ibv;shmem;portals4;ofi;mpi;udp;smp")
+    set(GASNet_PREFERRED_CONDUITS "${GASNet_ALL_PREFERRED_CONDUITS}"
+      CACHE STRING "")
+    mark_as_advanced(GASNet_PREFERRED_CONDUITS)
+    foreach(C IN LISTS GASNet_PREFERRED_CONDUITS)
+      list(REMOVE_ITEM GASNet_ALL_PREFERRED_CONDUITS ${C})
+    endforeach()
+    list(APPEND GASNet_PREFERRED_CONDUITS ${GASNet_ALL_PREFERRED_CONDUITS})
+    set(GASNet_PREFERRED_CONDUITS "${GASNet_PREFERRED_CONDUITS}"
+      CACHE STRING "" FORCE)
+
+    # Filter the conduit list to only contain what was found
+    _sort_list_by_preference(GASNet_CONDUITS GASNet_PREFERRED_CONDUITS)
+
+    # Stick them in the cache
     set(GASNet_CONDUITS ${GASNet_CONDUITS} CACHE INTERNAL "")
     set(GASNet_THREADING_OPTS ${GASNet_THREADING_OPTS} CACHE INTERNAL "")
     message(STATUS "Found GASNet Conduits: ${GASNet_CONDUITS}")
@@ -239,13 +275,18 @@ endif()
 if(GASNet_FOUND AND NOT TARGET GASNet::GASNet)
   if(NOT GASNet_CONDUIT)
     list(GET GASNet_CONDUITS 0 GASNet_CONDUIT)
-    set(GASNet_CONDUIT "${GASNet_CONDUIT}")
   endif()
+  set(GASNet_CONDUIT "${GASNet_CONDUIT}" CACHE STRING "GASNet communication conduit to use")
+  mark_as_advanced(GASNet_CONDUIT)
+  set_property(CACHE GASNet_CONDUIT PROPERTY STRINGS ${GASNet_CONDUITS})
   list(FIND GASNet_CONDUITS "${GASNet_CONDUIT}" _I)
   if(_I EQUAL -1)
     message(FATAL_ERROR "Invalid GASNet_CONDUIT setting.  Valid options are: ${GASNet_CONDUITS}")
   endif()
 
+  set(GASNet_THREADING "${GASNet_THREADING}" CACHE STRING "GASNet Threading model to use")
+  mark_as_advanced(GASNet_THREADING)
+  set_property(CACHE GASNet_THREADING PROPERTY STRINGS ${GASNet_THREADING_OPTS})
   if(NOT GASNet_THREADING)
     list(GET GASNet_THREADING_OPTS 0 GASNet_THREADING)
     set(GASNet_THREADING "${GASNet_THREADING}")

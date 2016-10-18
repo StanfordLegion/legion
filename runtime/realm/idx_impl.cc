@@ -23,6 +23,10 @@
 #include "mem_impl.h"
 #include "runtime_impl.h"
 
+#ifdef USE_HDF
+#include "realm/hdf5/hdf5_module.h"
+#endif
+
 namespace Realm {
 
   Logger log_meta("meta");
@@ -402,21 +406,32 @@ namespace Realm {
 	default: assert(0); return RegionInstance::NO_INST;
 	}
 	num_elements = inst_extent.volume();
+	// always at least one element
+	if(num_elements <= 0) num_elements = 1;
 	//printf("num_elements = %zd\n", num_elements);
       } else {
 	IndexSpaceImpl *r = get_runtime()->get_index_space_impl(get_index_space());
 
 	StaticAccess<IndexSpaceImpl> data(r);
-	assert(data->num_elmts > 0);
 
 #ifdef FULL_SIZE_INSTANCES
-	num_elements = data->last_elmt + 1;
+	if(data->num_elmts > 0)
+	  num_elements = data->last_elmt + 1;
+	else
+	  num_elements = 1; // always have at least one element
 	// linearization is an identity translation
 	Translation<1> inst_offset(0);
 	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
 	dl.serialize(linearization_bits);
 #else
-	num_elements = data->last_elmt - data->first_elmt + 1;
+	coord_t offset;
+	if(data->num_elmts > 0) {
+	  num_elements = data->last_elmt - data->first_elmt + 1;
+	  offset = data->first_elmt;
+	} else {
+	  num_elements = 1; // always have at least one element
+	  offset = 0;
+	}
         // round num_elements up to a multiple of 4 to line things up better with vectors, cache lines, etc.
         if(num_elements & 3) {
           if (block_size == num_elements)
@@ -428,7 +443,7 @@ namespace Realm {
 
 	//printf("CI: %zd %zd %zd\n", data->num_elmts, data->first_elmt, data->last_elmt);
 
-	Translation<1> inst_offset(-(coord_t)(data->first_elmt));
+	Translation<1> inst_offset(-offset);
 	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
 	dl.serialize(linearization_bits);
 #endif
@@ -478,8 +493,12 @@ namespace Realm {
       return RegionInstance::NO_INST;
 #else
       ProfilingRequestSet requests;
-
       assert(field_sizes.size() == field_files.size());
+      return Realm::HDF5::create_hdf5_instance(*this, requests,
+					       file_name, field_sizes, field_files,
+					       read_only);
+
+#if 0
       Memory memory = Memory::NO_MEMORY;
       Machine machine = Machine::get_machine();
       std::set<Memory> mem;
@@ -548,6 +567,7 @@ namespace Realm {
       log_meta.info("instance created: region=" IDFMT " memory=" IDFMT " id=" IDFMT " bytes=%zd",
 	       this->is_id, memory.id, i.id, inst_bytes);
       return i;
+#endif
 #endif
     }
 

@@ -3794,29 +3794,6 @@ class PhysicalState(object):
         if register and not self.perform_physical_registration(op, req, inst, 
                                                                perform_checks):
             return False
-        # If we are restricted and we're not read-only we have to issue
-        # copies back to the restricted instance
-        if restricted and req.priv != READ_ONLY:
-            # We only need to do something if the instances are not the same 
-            if inst is not restricted_inst:
-                error_str = "restricted region requirement "+\
-                        str(req.index)+" of "+str(op)
-                # We need to issue a copy or a reduction back to the 
-                # restricted instance in order to have the proper semantics
-                if inst.redop != 0:
-                    # Have to perform a reduction back
-                    reductions = set()
-                    reductions.add(inst)
-                    if not self.issue_update_reductions(restricted_inst, reductions,
-                                          op, req.index, perform_checks, error_str):
-                        return False
-                else:
-                    # Perform a normal copy back
-                    sources = set()
-                    sources.add(inst)
-                    if not self.issue_update_copies(restricted_inst, sources, op,
-                                           req.index, perform_checks, error_str):
-                        return False
         return True
 
     def perform_physical_registration(self, op, req, inst, perform_checks):
@@ -3838,6 +3815,32 @@ class PhysicalState(object):
                 other.physical_outgoing.add(op)
         # Record ourselves as a users for this instance
         inst.add_user(depth=self.depth, field=self.field, op=op, req=req)
+        # If we are restricted and we're not read-only we have to issue
+        # copies back to the restricted instance, we have to wait until
+        # registration though to make sure we pick up any dependences
+        restricted = True if req.restricted_fields and \
+            self.field in req.restricted_fields else False
+        if restricted and req.priv != READ_ONLY:
+            restricted_inst = req.restricted_fields[self.field]
+            if inst is not restricted_inst:
+                error_str = "restricted region requirement "+\
+                        str(req.index)+" of "+str(op)
+                # We need to issue a copy or a reduction back to the 
+                # restricted instance in order to have the proper semantics
+                if inst.redop != 0:
+                    # Have to perform a reduction back
+                    reductions = set()
+                    reductions.add(inst)
+                    if not self.issue_update_reductions(restricted_inst, reductions,
+                                          op, req.index, perform_checks, error_str):
+                        return False
+                else:
+                    # Perform a normal copy back
+                    sources = set()
+                    sources.add(inst)
+                    if not self.issue_update_copies(restricted_inst, sources, op,
+                                           req.index, perform_checks, error_str):
+                        return False
         return True
 
     def perform_fill_analysis(self, op, req, perform_checks):
@@ -7549,11 +7552,11 @@ class Event(object):
         # This is an untriggered user event, report it
         if self.ap_user_event:
             print("WARNING: "+str(self)+" is an untriggered application user event")
-            if self.node.state.assert_on_warning:
+            if self.state.assert_on_warning:
                 assert False
         else:
             print("WARNING: "+str(self)+" is an untriggered runtime user event")
-            if self.node.state.assert_on_warning:
+            if self.state.assert_on_warning:
                 assert False
         print("  Incoming:")
         if self.incoming:
@@ -9871,7 +9874,7 @@ def main(temp_dir):
         '--assert-warning', dest='assert_on_warning', action='store_true',
         help='assert on warnings (implies -a)')
     parser.add_argument(
-        dest='filenames', action='append',
+        dest='filenames', nargs='+',
         help='input legion spy log filenames')
     args = parser.parse_args()
 

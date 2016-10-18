@@ -20,6 +20,10 @@ project(Legion)
 #------------------------------------------------------------------------------#
 # Some boilerplate to setup nice output directories
 #------------------------------------------------------------------------------#
+
+#for multilib distros
+include(GNUInstallDirs)
+
 list(INSERT CMAKE_MODULE_PATH 0 "${Legion_SOURCE_DIR}/cmake")
 if(NOT CMAKE_ARCHIVE_OUTPUT_DIRECTORY)
   set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${Legion_BINARY_DIR}/lib)
@@ -31,11 +35,21 @@ if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${Legion_BINARY_DIR}/bin)
 endif()
 
+#library api version, bump from time to time
+set(SOVERSION 1)
+
 #------------------------------------------------------------------------------#
 # More boilerplate to deal with build type and lib type
 #------------------------------------------------------------------------------#
 set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build" FORCE)
 set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
+
+#https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
+if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
+endif()
 
 #------------------------------------------------------------------------------#
 # Minimum log level
@@ -50,7 +64,7 @@ option(Legion_USE_HWLOC "Use hwloc for topology awareness" OFF)
 if(Legion_USE_HWLOC)
   find_package(HWLOC REQUIRED)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindHWLOC.cmake
-    DESTINATION lib/cmake/Legion
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 endif()
 
@@ -59,17 +73,14 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
 if(Legion_USE_GASNet)
-  set(GASNet_THREADING "par" CACHE STRING "GASNet Threading model to use")
-  set_property(CACHE GASNet_THREADING PROPERTY STRINGS seq par parsync)
-  mark_as_advanced(GASNet_THREADING)
+  set(GASNet_THREADING par)
+  set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
+  find_package(GASNet REQUIRED)
   if(NOT GASNet_THREADING STREQUAL "par")
     message(FATAL_ERROR "GASNet threading mode \"${GASNet_THREADING}\" is not currently supported by Legion")
   endif()
-  set(GASNet_CONDUIT "" CACHE STRING "GASNet communication conduit to use")
-  mark_as_advanced(GASNet_CONDUIT)
-  find_package(GASNet REQUIRED)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindGASNet.cmake
-    DESTINATION lib/cmake/Legion
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 endif()
 
@@ -81,7 +92,7 @@ if(Legion_USE_LLVM)
   set(Legion_LLVM_COMPONENTS irreader jit mcjit x86)
   find_package(LLVM REQUIRED COMPONENTS ${Legion_LLVM_COMPONENTS})
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindLLVM.cmake
-    DESTINATION lib/cmake/Legion
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 endif()
 
@@ -97,10 +108,10 @@ if(Legion_USE_CUDA)
   endif()
   find_package(CUDA REQUIRED)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
-    DESTINATION lib/cmake/Legion
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
   install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
-    DESTINATION lib/cmake/Legion/newcmake
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
 endif()
 
@@ -128,7 +139,7 @@ export(EXPORT LegionTargets
 install(EXPORT LegionTargets
   NAMESPACE Legion::
   FILE LegionTargets.cmake
-  DESTINATION lib/cmake/Legion
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
 )
 
 configure_file(
@@ -137,7 +148,7 @@ configure_file(
   @ONLY
 )
 install(FILES ${Legion_BINARY_DIR}/LegionConfigCommon.cmake
-  DESTINATION lib/cmake/Legion
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
 )
 
 configure_file(
@@ -147,7 +158,7 @@ configure_file(
 )
 
 install(FILES cmake/LegionConfig-install.cmake
-  DESTINATION lib/cmake/Legion
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   RENAME LegionConfig.cmake
 )
 
@@ -186,6 +197,7 @@ if(Legion_BUILD_EXAMPLES OR Legion_BUILD_EXAMPLE_APPS)
 
   if(Legion_BUILD_EXAMPLES)
     add_subdirectory(examples)
+    add_subdirectory(tutorial)
   endif()
   if(Legion_BUILD_EXAMPLE_APPS)
     add_subdirectory(apps)

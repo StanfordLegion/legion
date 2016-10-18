@@ -18,6 +18,14 @@
 #define __LEGION_RUNTIME_H__
 
 /**
+ * \mainpage Legion Runtime Documentation
+ *
+ * This is the main page of the Legion Runtime documentation.
+ *
+ * @see Legion::Runtime
+ */
+
+/**
  * \file legion.h
  * Legion C++ API
  */
@@ -29,7 +37,7 @@
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
 
 /**
- * \namespace LegionRuntime
+ * \namespace Legion
  * Namespace for all Legion runtime objects
  */
 namespace Legion {
@@ -96,6 +104,7 @@ namespace Legion {
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
     public:
+      friend std::ostream& operator<<(std::ostream& os, const IndexPartition& ip);
       IndexPartitionID id;
       IndexTreeID tid;
     };
@@ -211,6 +220,7 @@ namespace Legion {
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); }
     private:
+      friend std::ostream& operator<<(std::ostream& os, const LogicalPartition& lp);
       // These are private so the user can't just arbitrary change them
       RegionTreeID tree_id;
       IndexPartition index_partition;
@@ -1113,6 +1123,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
@@ -1169,6 +1181,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
@@ -1259,6 +1273,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
@@ -1290,6 +1306,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       LogicalRegion                   handle;
       LogicalRegion                   parent;
@@ -1499,7 +1517,7 @@ namespace Legion {
       /**
        * Check to see if this represents a mapped physical region. 
        */
-      inline bool is_mapped(void) const;
+      bool is_mapped(void) const;
       /**
        * For physical regions returned as the result of an
        * inline mapping, this call will block until the physical
@@ -1610,6 +1628,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
@@ -1644,6 +1664,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
@@ -1717,23 +1739,41 @@ namespace Legion {
        * Non-blocking call to signal to Legion that this participant
        * is ready to pass control to Legion.
        */
-      void mpi_handoff_to_legion(void);
+      void mpi_handoff_to_legion(void) const;
       /**
        * A blocking call that will cause this participant to wait
        * for all Legion participants to hand over control to MPI.
        */
-      void mpi_wait_on_legion(void);
+      void mpi_wait_on_legion(void) const;
     public:
       /**
        * A non-blocking call to signal to MPI that this participant
        * is ready to pass control to MPI.
        */
-      void legion_handoff_to_mpi(void);
+      void legion_handoff_to_mpi(void) const;
       /**
        * A blocking call that will cause this participant to wait
        * for all MPI participants to hand over control to Legion.
        */
-      void legion_wait_on_mpi(void);
+      void legion_wait_on_mpi(void) const;
+    public:
+      /*
+       * For asynchronous Legion execution, you can use these
+       * methods to get a phase barrier associated with the 
+       * handshake object instead of blocking on the legion side
+       */
+      /**
+       * Get the Legion phase barrier associated with waiting on the handshake 
+       */
+      PhaseBarrier get_legion_wait_phase_barrier(void) const;
+      /**
+       * Get the Legion phase barrier associated with arriving on the handshake
+       */
+      PhaseBarrier get_legion_arrive_phase_barrier(void) const;
+      /**
+       * Advance the handshake associated with the Legion side
+       */
+      void advance_legion_handshake(void) const;
     };
 
     //==========================================================================

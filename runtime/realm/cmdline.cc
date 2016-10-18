@@ -74,6 +74,34 @@ namespace Realm {
     return true;
   }
 
+  bool CommandLineParser::parse_command_line(int argc, const char *argv[])
+  {
+    int pos = 0;
+
+    while(pos < argc) {
+      std::string s(argv[pos]);
+      // try each option in turn
+      std::vector<CommandLineOption *>::const_iterator it = options.begin();
+      while((it != options.end()) && !((*it)->match(s)))
+	it++;
+
+      if(it == options.end()) {
+	// not recognized - skip it and move on
+	pos++;
+	continue;
+      }
+
+      // parse the argument (if any)
+      ++pos;
+      bool ok = (*it)->parse_argument(pos, argc, argv);
+      if(!ok)
+	return false;
+    }
+
+    // got all the way through without errors
+    return true;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -161,6 +189,20 @@ namespace Realm {
     return true;
   }
 
+  bool StringCommandLineOption::parse_argument(int& pos, int argc, const char *argv[])
+  {
+    // requires an additional argument
+    if(pos >= argc) return false;
+
+    // parse into a copy to avoid corrupting the value on failure
+    target = argv[pos];
+
+    // always keep
+    ++pos;
+    
+    return true;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -180,5 +222,13 @@ namespace Realm {
     target = true;
     return true;
   }
+
+  bool BooleanCommandLineOption::parse_argument(int& pos, int argc, const char *argv[])
+  {
+    // nothing to parse - all we care about is presence
+    target = true;
+    return true;
+  }
+
 
 }; // namespace Realm

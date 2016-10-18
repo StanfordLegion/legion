@@ -44,7 +44,8 @@
 #ifdef __MACH__
 #define MASK_FMT "%16.16llx"
 #else
-#define MASK_FMT "%16.16lx"
+#include <inttypes.h>
+#define MASK_FMT "%16.16" PRIx64
 #endif
 
 namespace Legion {

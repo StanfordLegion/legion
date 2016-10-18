@@ -107,6 +107,7 @@ namespace Legion {
   class Release;
   class Close;
   class Runtime;
+  class MPILegionHandshake;
   // For backwards compatibility
   typedef Runtime HighLevelRuntime;
   // Helper for saving instantiated template functions
@@ -189,6 +190,13 @@ namespace Legion {
     class TestMapper;
     class DebugMapper;
     class ReplayMapper;
+
+    // The following types are effectively overlaid on the Realm versions
+    // to allow for Legion-specific profiling measurements
+    enum ProfilingMeasurementID {
+      PMID_LEGION_FIRST = Realm::PMID_REALM_LAST,
+      PMID_RUNTIME_OVERHEAD,
+    };
   };
   
   namespace Internal {
@@ -214,7 +222,8 @@ namespace Legion {
       HLR_LEGION_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
       HLR_MAPPER_PROFILING_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
       HLR_LAUNCH_TOP_LEVEL_ID = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
+      HLR_MPI_INTEROP_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
+      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
     };
 
     // Enumeration of high-level runtime tasks
@@ -245,7 +254,6 @@ namespace Legion {
       HLR_DEFERRED_FUTURE_SET_ID,
       HLR_DEFERRED_FUTURE_MAP_SET_ID,
       HLR_RESOLVE_FUTURE_PRED_ID,
-      HLR_MPI_RANK_ID,
       HLR_CONTRIBUTE_COLLECTIVE_ID,
       HLR_STATE_ANALYSIS_ID,
       HLR_MAPPER_TASK_ID,
@@ -313,7 +321,6 @@ namespace Legion {
         "Deferred Future Set",                                    \
         "Deferred Future Map Set",                                \
         "Resolve Future Predicate",                               \
-        "Update MPI Rank Info",                                   \
         "Contribute Collective",                                  \
         "State Analaysis",                                        \
         "Mapper Task",                                            \
@@ -568,6 +575,7 @@ namespace Legion {
       SEND_CONSTRAINT_REMOVAL,
       SEND_TOP_LEVEL_TASK_REQUEST,
       SEND_TOP_LEVEL_TASK_COMPLETE,
+      SEND_MPI_RANK_EXCHANGE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -678,6 +686,7 @@ namespace Legion {
         "Send Constraint Removal",                                    \
         "Top Level Task Request",                                     \
         "Top Level Task Complete",                                    \
+        "Send MPI Rank Exchange",                                     \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1213,6 +1222,7 @@ namespace Legion {
     class SerializingManager;
     class ConcurrentManager;
     typedef Mapping::MapperEvent MapperEvent;
+    typedef Mapping::ProfilingMeasurementID ProfilingMeasurementID;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
@@ -1278,6 +1288,7 @@ namespace Legion {
     friend class Internal::TreeStateLogger;                 \
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \
+    friend class Internal::MPILegionHandshakeImpl;          \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 

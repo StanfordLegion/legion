@@ -292,6 +292,22 @@ namespace Legion {
                                        get_acquired_instances_ref(void);
       // Update the set of atomic locks for this operation
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
+      // Get the restrict precondition for this operation
+      virtual ApEvent get_restrict_precondition(void) const;
+      static ApEvent merge_restrict_preconditions(
+          const std::vector<Grant> &grants,
+          const std::vector<PhaseBarrier> &wait_barriers);
+      // Record the restrict postcondition
+      virtual void record_restrict_postcondition(ApEvent postcondition);
+      virtual void add_copy_profiling_request(
+                                        Realm::ProfilingRequestSet &reqeusts);
+      // Report a profiling resutl for this operation
+      virtual void report_profiling_response(
+                                  const Realm::ProfilingResponse &result);
+    protected:
+      void filter_copy_request_kinds(MapperManager *mapper,
+          const std::set<ProfilingMeasurementID> &requests,
+          std::vector<ProfilingMeasurementID> &results, bool warn_if_not_copy);
     public:
       // Help for creating temporary instances
       MaterializedView* create_temporary_instance(PhysicalManager *dst,
@@ -638,6 +654,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -647,7 +664,10 @@ namespace Legion {
       void compute_parent_index(void);
       void invoke_mapper(const InstanceSet &valid_instances,
                                InstanceSet &mapped_instances);
-      void report_profiling_results(void);
+      virtual void add_copy_profiling_request(
+                            Realm::ProfilingRequestSet &reqeusts);
+      virtual void report_profiling_response(
+                      const Realm::ProfilingResponse &response);
     protected:
       bool remap_region;
       ApUserEvent termination_event;
@@ -659,11 +679,13 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
+      std::set<ApEvent> restrict_postconditions;
     protected:
       MapperManager *mapper;
     protected:
-      Mapper::InlineProfilingInfo profiling_results;
-      RtUserEvent                 profiling_reported;
+      std::vector<ProfilingMeasurementID> profiling_requests;
+      int                     outstanding_profiling_requests;
+      RtUserEvent                         profiling_reported;
     };
 
     /**
@@ -713,6 +735,8 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+      virtual ApEvent get_restrict_precondition(void) const;
+      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -727,7 +751,10 @@ namespace Legion {
                              InstanceSet &targets, bool is_reduce = false);
       inline void set_mapping_state(unsigned idx, bool is_src) 
         { current_index = idx; current_src = is_src; }
-      void report_profiling_results(void);
+      virtual void add_copy_profiling_request(
+                                      Realm::ProfilingRequestSet &reqeusts);
+      virtual void report_profiling_response(
+                                const Realm::ProfilingResponse &response);
     public:
       std::vector<RegionTreePath> src_privilege_paths;
       std::vector<RegionTreePath> dst_privilege_paths;
@@ -745,9 +772,11 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
+      std::set<ApEvent> restrict_postconditions;
     protected:
-      Mapper::CopyProfilingInfo   profiling_results;
-      RtUserEvent                 profiling_reported;
+      std::vector<ProfilingMeasurementID> profiling_requests;
+      int                     outstanding_profiling_requests;
+      RtUserEvent                         profiling_reported;
     };
 
     /**
@@ -1020,7 +1049,10 @@ namespace Legion {
     protected:
       int invoke_mapper(const InstanceSet &valid_instances,
                               InstanceSet &chosen_instances);
-      void report_profiling_results(void);
+      virtual void add_copy_profiling_request(
+                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void report_profiling_response(
+                                    const Realm::ProfilingResponse &response);
     protected:
       unsigned parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
@@ -1028,8 +1060,9 @@ namespace Legion {
     protected:
       MapperManager *mapper;
     protected:
-      Mapper::CloseProfilingInfo  profiling_results;
-      RtUserEvent                 profiling_reported;
+      std::vector<ProfilingMeasurementID> profiling_requests;
+      int                     outstanding_profiling_requests;
+      RtUserEvent                         profiling_reported;
     };
     
     /**
@@ -1101,7 +1134,10 @@ namespace Legion {
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
     protected:
-      void report_profiling_results(void);
+      virtual void add_copy_profiling_request(
+                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void report_profiling_response(
+                                    const Realm::ProfilingResponse &response);
     protected:
       unsigned parent_idx;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
@@ -1109,8 +1145,9 @@ namespace Legion {
     protected:
       MapperManager *mapper;
     protected:
-      Mapper::CloseProfilingInfo  profiling_results;
-      RtUserEvent                 profiling_reported;
+      std::vector<ProfilingMeasurementID> profiling_requests;
+      int                     outstanding_profiling_requests;
+      RtUserEvent                         profiling_reported;
     };
 
     /**
@@ -1181,6 +1218,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual ApEvent get_restrict_precondition(void) const;
     public: 
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -1191,7 +1229,10 @@ namespace Legion {
       void check_acquire_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
-      void report_profiling_results(void);
+      virtual void add_copy_profiling_request(
+                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void report_profiling_response(
+                                    const Realm::ProfilingResponse &response);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
@@ -1203,8 +1244,9 @@ namespace Legion {
     protected:
       MapperManager*    mapper;
     protected:
-      Mapper::AcquireProfilingInfo  profiling_results;
-      RtUserEvent                   profiling_reported;
+      std::vector<ProfilingMeasurementID> profiling_requests;
+      int                     outstanding_profiling_requests;
+      RtUserEvent                         profiling_reported;
     };
 
     /**
@@ -1249,6 +1291,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
       virtual PhysicalManager* select_temporary_instance(PhysicalManager *dst,
                               unsigned index, const FieldMask &needed_fields);
+      virtual ApEvent get_restrict_precondition(void) const;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -1259,7 +1302,10 @@ namespace Legion {
       void check_release_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
-      void report_profiling_results(void);
+      virtual void add_copy_profiling_request(
+                                          Realm::ProfilingRequestSet &reqeusts);
+      virtual void report_profiling_response(
+                                    const Realm::ProfilingResponse &response);
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
@@ -1271,8 +1317,9 @@ namespace Legion {
     protected:
       MapperManager*    mapper;
     protected:
-      Mapper::ReleaseProfilingInfo  profiling_results;
-      RtUserEvent                   profiling_reported;
+      std::vector<ProfilingMeasurementID> profiling_requests;
+      int                     outstanding_profiling_requests;
+      RtUserEvent                         profiling_reported;
     };
 
     /**
@@ -1969,6 +2016,7 @@ namespace Legion {
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
+      virtual ApEvent get_restrict_precondition(void) const;
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);

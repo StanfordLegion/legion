@@ -22,10 +22,6 @@
 #include "memory.h"
 #include "instance.h"
 
-#ifdef USE_HDF
-#include <hdf5.h>
-#endif
-
 #include "lowlevel_config.h"
 #include "arrays.h"
 #include "layouts.h"

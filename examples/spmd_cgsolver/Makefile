@@ -28,14 +28,14 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= cgsolver
+OUTFILE		?= spmd_cgsolver
 # List all the application source files here
 GEN_SRC		?= cgsolver.cc cgmapper.cc cgtasks.cc		# .cc files
 GEN_GPU_SRC	?= 					# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
-CC_FLAGS	?= -ggdb
+CC_FLAGS	?=
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
