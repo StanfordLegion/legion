@@ -4256,7 +4256,9 @@ class VerificationTraverser(object):
                 (not fill.intersect or \
                   not fill.intersect.get_point_set().has_point(self.point)):
                 return True
-            assert self.state.pending_fill
+            # If we don't have a pending fill, then this isn't right
+            if not self.state.pending_fill:
+                return False
             self.found_dataflow_path = True
             fill.analyzed = True
             # Perform the fill analysis
