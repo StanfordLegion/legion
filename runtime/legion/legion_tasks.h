@@ -677,7 +677,7 @@ namespace Legion {
       // Override by RemoteTask
       virtual SingleTask* find_parent_context(void);
     public:
-      // Override by RemoteTask
+      // Override by RemoteTask and TopLevelTask
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
     public:
@@ -1187,6 +1187,9 @@ namespace Legion {
     public:
       virtual SingleTask* find_parent_context(void);
     public:
+      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
+                                               AddressSpaceID source);
+    public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
@@ -1197,6 +1200,7 @@ namespace Legion {
       virtual SingleTask* find_top_context(void);
     protected:
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
+      std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
     };
 
     /**

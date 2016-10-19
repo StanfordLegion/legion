@@ -10142,6 +10142,7 @@ namespace Legion {
         }
         remote_instances.clear();
       }
+      pending_version_owner_requests.clear();
       runtime->free_top_level_task(this);
       // Tell the runtime that another top level task is done
       runtime->decrement_outstanding_top_level_tasks();
@@ -10215,6 +10216,73 @@ namespace Legion {
     {
       assert(false);
       return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID TopLevelTask::get_version_owner(RegionTreeNode *node, 
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // We're the top-level task, so we handle the request on the node
+      // that made the region
+      const AddressSpaceID owner_space = node->get_owner_space();
+      if (owner_space == runtime->address_space)
+        return SingleTask::get_version_owner(node, source);
+#ifdef DEBUG_LEGION
+      assert(source == runtime->address_space); // should always be local
+#endif
+      // See if we already have it, or we already sent a request for it
+      bool send_request = false;
+      RtEvent wait_on;
+      {
+        AutoLock o_lock(op_lock);
+        std::map<RegionTreeNode*,
+                 std::pair<AddressSpaceID,bool> >::const_iterator finder =
+          region_tree_owners.find(node);
+        if (finder != region_tree_owners.end())
+          return finder->second.first;
+        // See if we already have an outstanding request
+        std::map<RegionTreeNode*,RtUserEvent>::const_iterator request_finder =
+          pending_version_owner_requests.find(node);
+        if (request_finder == pending_version_owner_requests.end())
+        {
+          // We haven't sent the request yet, so do that now
+          RtUserEvent request_event = Runtime::create_rt_user_event();
+          pending_version_owner_requests[node] = request_event;
+          wait_on = request_event;
+          send_request = true;
+        }
+        else
+          wait_on = request_finder->second;
+      }
+      if (send_request)
+      {
+        Serializer rez;
+        rez.serialize(unique_op_id);
+        rez.serialize(this);
+        if (node->is_region())
+        {
+          rez.serialize<bool>(true);
+          rez.serialize(node->as_region_node()->handle);
+        }
+        else
+        {
+          rez.serialize<bool>(false);
+          rez.serialize(node->as_partition_node()->handle);
+        }
+        // Send it to the owner space 
+        runtime->send_version_owner_request(owner_space, rez);
+      }
+      wait_on.wait();
+      // Retake the lock in read-only mode and get the answer
+      AutoLock o_lock(op_lock,1,false/*exclusive*/);
+      std::map<RegionTreeNode*,
+               std::pair<AddressSpaceID,bool> >::const_iterator finder = 
+        region_tree_owners.find(node);
+#ifdef DEBUG_LEGION
+      assert(finder != region_tree_owners.end());
+#endif
+      return finder->second.first;
     }
 
     //--------------------------------------------------------------------------
