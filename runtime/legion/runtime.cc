@@ -16790,14 +16790,14 @@ namespace Legion {
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteTask::handle_version_owner_request(derez, this, source);
+      WrapperTask::handle_version_owner_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_version_owner_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RemoteTask::handle_version_owner_response(derez, this);
+      WrapperTask::handle_version_owner_response(derez, this);
     }
 
     //--------------------------------------------------------------------------

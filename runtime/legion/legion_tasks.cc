@@ -10064,6 +10064,99 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_single();
+      pending_version_owner_requests.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void WrapperTask::handle_version_owner_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      SingleTask *local_ctx = runtime->find_context(context_uid);
+      WrapperTask *remote_ctx;
+      derez.deserialize(remote_ctx);
+      bool is_region;
+      derez.deserialize(is_region);
+
+      Serializer rez;
+      rez.serialize(remote_ctx);
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        RegionTreeNode *node = runtime->forest->get_node(handle);
+
+        AddressSpaceID result = local_ctx->get_version_owner(node, source);
+        rez.serialize(result);
+        rez.serialize<bool>(true);
+        rez.serialize(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        RegionTreeNode *node = runtime->forest->get_node(handle);
+
+        AddressSpaceID result = local_ctx->get_version_owner(node, source);
+        rez.serialize(result);
+        rez.serialize<bool>(false);
+        rez.serialize(handle);
+      }
+      runtime->send_version_owner_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void WrapperTask::process_version_owner_response(RegionTreeNode *node,
+                                                     AddressSpaceID result)
+    //--------------------------------------------------------------------------
+    {
+      RtUserEvent to_trigger;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(region_tree_owners.find(node) == region_tree_owners.end());
+#endif
+        region_tree_owners[node] = 
+          std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
+        // Find the event to trigger
+        std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
+          pending_version_owner_requests.find(node);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_version_owner_requests.end());
+#endif
+        to_trigger = finder->second;
+        pending_version_owner_requests.erase(finder);
+      }
+      Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void WrapperTask::handle_version_owner_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      WrapperTask *ctx;
+      derez.deserialize(ctx);
+      AddressSpaceID result;
+      derez.deserialize(result);
+      bool is_region;
+      derez.deserialize(is_region);
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        RegionTreeNode *node = runtime->forest->get_node(handle);
+        ctx->process_version_owner_response(node, result);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        RegionTreeNode *node = runtime->forest->get_node(handle);
+        ctx->process_version_owner_response(node, result);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -10142,7 +10235,6 @@ namespace Legion {
         }
         remote_instances.clear();
       }
-      pending_version_owner_requests.clear();
       runtime->free_top_level_task(this);
       // Tell the runtime that another top level task is done
       runtime->decrement_outstanding_top_level_tasks();
@@ -10259,7 +10351,7 @@ namespace Legion {
       {
         Serializer rez;
         rez.serialize(unique_op_id);
-        rez.serialize(this);
+        rez.serialize<WrapperTask*>(this);
         if (node->is_region())
         {
           rez.serialize<bool>(true);
@@ -10531,7 +10623,7 @@ namespace Legion {
       {
         Serializer rez;
         rez.serialize(remote_owner_uid);
-        rez.serialize(this);
+        rez.serialize<WrapperTask*>(this);
         if (node->is_region())
         {
           rez.serialize<bool>(true);
@@ -10558,99 +10650,7 @@ namespace Legion {
       assert(finder != region_tree_owners.end());
 #endif
       return finder->second.first;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RemoteTask::handle_version_owner_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-      SingleTask *local_ctx = runtime->find_context(context_uid);
-      RemoteTask *remote_ctx;
-      derez.deserialize(remote_ctx);
-      bool is_region;
-      derez.deserialize(is_region);
-
-      Serializer rez;
-      rez.serialize(remote_ctx);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-
-        AddressSpaceID result = local_ctx->get_version_owner(node, source);
-        rez.serialize(result);
-        rez.serialize<bool>(true);
-        rez.serialize(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-
-        AddressSpaceID result = local_ctx->get_version_owner(node, source);
-        rez.serialize(result);
-        rez.serialize<bool>(false);
-        rez.serialize(handle);
-      }
-      runtime->send_version_owner_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::process_version_owner_response(RegionTreeNode *node,
-                                                    AddressSpaceID result)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent to_trigger;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-        assert(region_tree_owners.find(node) == region_tree_owners.end());
-#endif
-        region_tree_owners[node] = 
-          std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
-        // Find the event to trigger
-        std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
-          pending_version_owner_requests.find(node);
-#ifdef DEBUG_LEGION
-        assert(finder != pending_version_owner_requests.end());
-#endif
-        to_trigger = finder->second;
-        pending_version_owner_requests.erase(finder);
-      }
-      Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RemoteTask::handle_version_owner_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      RemoteTask *ctx;
-      derez.deserialize(ctx);
-      AddressSpaceID result;
-      derez.deserialize(result);
-      bool is_region;
-      derez.deserialize(is_region);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-        ctx->process_version_owner_response(node, result);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-        ctx->process_version_owner_response(node, result);
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     ApEvent RemoteTask::get_task_completion(void) const

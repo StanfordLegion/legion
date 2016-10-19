@@ -1154,6 +1154,15 @@ namespace Legion {
     public:
       void activate_wrapper(void);
       void deactivate_wrapper(void);
+    public:
+      static void handle_version_owner_request(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      void process_version_owner_response(RegionTreeNode *node, 
+                                          AddressSpaceID result);
+      static void handle_version_owner_response(Deserializer &derez,
+                                                Runtime *runtime);
+    protected:
+      std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
     };
 
     /**
@@ -1200,7 +1209,6 @@ namespace Legion {
       virtual SingleTask* find_top_context(void);
     protected:
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
-      std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
     };
 
     /**
@@ -1242,14 +1250,7 @@ namespace Legion {
                              RemoteTask *remote_ctx) { assert(false); }
       virtual SingleTask* find_parent_context(void);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
-    public:
-      static void handle_version_owner_request(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
-      void process_version_owner_response(RegionTreeNode *node, 
-                                          AddressSpaceID result);
-      static void handle_version_owner_response(Deserializer &derez,
-                                                Runtime *runtime);
+                                               AddressSpaceID source); 
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -1265,7 +1266,6 @@ namespace Legion {
       int depth;
       ApEvent remote_completion_event;
       std::vector<VersionInfo> version_infos;
-      std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
       bool top_level_context;
     };
 
