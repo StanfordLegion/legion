@@ -7001,7 +7001,7 @@ namespace Legion {
         FieldMask overlap = update_fields & request_mask;
         if (!overlap)
           Runtime::trigger_event(to_trigger);
-        if (request_kind == CHILD_VERSION_REQUEST)
+        else if (request_kind == CHILD_VERSION_REQUEST)
         {
           // See if we have any children we need to send
           bool has_children = false;
