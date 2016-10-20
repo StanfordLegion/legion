@@ -33,7 +33,8 @@ inst_timeline_pat = re.compile(prefix + r'Prof Inst Timeline (?P<opid>[0-9]+) (?
 user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
 task_wait_info_pat = re.compile(prefix + r'Prof Task Wait Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
 meta_wait_info_pat = re.compile(prefix + r'Prof Meta Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
-kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<over>[0-1])')
+kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
+kind_pat_over = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<over>[0-1])')
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
 multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
@@ -1448,10 +1449,14 @@ class State(object):
                                             read_time(m.group('ready')),
                                             read_time(m.group('end')))
                     continue
-                m = kind_pat.match(line)
+                m = kind_pat_over.match(line)
                 if m is not None:
                     self.log_kind(int(m.group('tid')),
                                   m.group('name'), int(m.group('over')))
+                    continue
+                m = kind_pat.match(line)
+                if m is not None:
+                    self.log_kind(int(m.group('tid')), m.group('name'), 0)
                     continue
                 m = variant_pat.match(line)
                 if m is not None:
