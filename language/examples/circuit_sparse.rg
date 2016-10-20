@@ -15,7 +15,7 @@
 -- runs-with:
 -- [
 --   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
 -- ]
 
 import "regent"
@@ -706,6 +706,10 @@ terra create_colorings(conf : Config)
   return coloring
 end
 
+-- Inline this task for now so when we do multi-node runs
+-- we don't get segfaults from colorings not being serialized
+-- and deserialized properly
+__demand(__inline)
 task create_ghost_node_map(conf         : Config,
                            ghost_ranges : region(ghost_range))
 where
