@@ -125,6 +125,15 @@ ifeq ($(strip $(USE_HWLOC)),1)
   LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
 endif
 
+ifeq ($(strip $(USE_LUAJIT)),1)
+  ifndef LUAJIT 
+    $(error LUAJIT variable is not defined, aborting build)
+  endif
+  CC_FLAGS        += -DREALM_USE_LUAJIT
+  INC_FLAGS   += -I$(LUAJIT)/include/luajit-2.0
+  LEGION_LD_FLAGS += -L$(LUAJIT)/lib -lluajit-5.1
+endif
+
 ifeq ($(strip $(USE_PAPI)),1)
   ifndef PAPI_ROOT
     ifdef PAPI
@@ -358,6 +367,9 @@ endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
+ifeq ($(strip $(USE_LUAJIT)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/options.cc
+endif
 GPU_RUNTIME_SRC +=
 else
 CC_FLAGS	+= -DSHARED_LOWLEVEL
@@ -367,7 +379,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/cmdline.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
 	           $(LG_RT_DIR)/realm/codedesc.cc \
-		   $(LG_RT_DIR)/realm/timers.cc
+		   $(LG_RT_DIR)/realm/timers.cc 
 
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/mapping_utilities.cc \

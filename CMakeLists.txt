@@ -69,6 +69,17 @@ if(Legion_USE_HWLOC)
 endif()
 
 #------------------------------------------------------------------------------#
+# LuaJIT configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_LuaJIT "Use LuaJIT for config file" OFF)
+if(Legion_USE_LuaJIT)
+  find_package(LuaJIT REQUIRED)
+  install(FILES ${Legion_SOURCE_DIR}/cmake/FindLuaJIT.cmake
+    DESTINATION lib/cmake/Legion
+  )
+endif()
+
+#------------------------------------------------------------------------------#
 # GASNet configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)

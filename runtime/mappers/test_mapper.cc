@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "realm/options.h"
 #include "test_mapper.h"
 #include <sys/time.h>
 
@@ -50,17 +51,18 @@ namespace Legion {
       {
         int argc = HighLevelRuntime::get_input_args().argc;
         char **argv = HighLevelRuntime::get_input_args().argv;
-        // Parse the input arguments looking for ones for the default mapper
-        for (int i=1; i < argc; i++)
-        {
-#define INT_ARG(argname, varname) do {      \
-          if (!strcmp(argv[i], argname)) {  \
-            varname = atoi(argv[++i]);      \
-            continue;                       \
-          } } while(0);
-          INT_ARG("-tm:seed", seed);
-#undef INT_ARG
+
+        std::vector<std::string> cmdline;
+        if(argc > 1) {
+          cmdline.resize(argc - 1);
+          for(int i = 1; i < argc; i++)
+            cmdline[i - 1] = argv[i];
         }
+        Realm::OptionParser cp(cmdline);
+        // Parse the input arguments looking for ones for the default mapper
+        
+        cp.add_option_int("-tm:seed", seed);
+        cp.parse_command_line(cmdline);
       }
       if (seed == -1)
       {

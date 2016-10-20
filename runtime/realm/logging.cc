@@ -24,7 +24,7 @@
 #include "activemsg.h"
 #endif
 
-#include "cmdline.h"
+#include "options.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -294,7 +294,7 @@ namespace Realm {
   {
     std::string logname;
 
-    bool ok = CommandLineParser()
+    bool ok = OptionParser(cmdline)
       .add_option_string("-cat", cats_enabled)
       .add_option_string("-logfile", logname)
       .add_option_method("-level", this, &LoggerConfig::parse_level_argument)

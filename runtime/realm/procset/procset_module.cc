@@ -16,7 +16,7 @@
 #include "procset_module.h"
 
 #include "logging.h"
-#include "cmdline.h"
+#include "options.h"
 #include "proc_impl.h"
 #include "threads.h"
 #include "runtime_impl.h"
@@ -97,7 +97,7 @@ namespace Realm {
       ProcSetModule *m = new ProcSetModule;
 
       // read command line parameters
-	  CommandLineParser cp;
+      OptionParser cp(cmdline);
 
       cp.add_option_int("-ll:mp_threads", m->cfg_num_mp_threads)
         .add_option_int("-ll:mp_nodes", m->cfg_num_mp_procs)
@@ -108,6 +108,7 @@ namespace Realm {
 	    log_procset.fatal() << "error reading ProcSet command line parameters";
 	    assert(false);
 	  }
+
       return m;
     }
 

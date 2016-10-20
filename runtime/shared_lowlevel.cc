@@ -19,6 +19,7 @@
 #include "realm/profiling.h"
 #include "realm/timers.h"
 #include "realm/custom_serdez.h"
+#include "realm/options.h"
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add
@@ -6853,22 +6854,22 @@ namespace LegionRuntime {
         PTHREAD_SAFE_CALL( pthread_key_create(&local_thread_key, NULL) );
         DetailedTimer::init_timers();
 
-        for (int i=1; i < *argc; i++)
-        {
-#define INT_ARG(argname, varname) do { \
-	  if(!strcmp((*argv)[i], argname)) {		\
-	    varname = atoi((*argv)[++i]);		\
-	    continue;					\
-	  } } while(0)
-          
-          INT_ARG("-ll:csize", cpu_mem_size_in_mb);
-          INT_ARG("-ll:l1size", cpu_l1_size_in_kb);
-          INT_ARG("-ll:cpu", num_cpus);
-          INT_ARG("-ll:util", num_utility_cpus);
-          INT_ARG("-ll:dma", num_dma_threads);
-          INT_ARG("-ll:stack",cpu_stack_size);
-#undef INT_ARG
+        std::vector<std::string> cmdline;
+        if(argc > 1) {
+          cmdline.resize(argc - 1);
+          for(int i = 1; i < argc; i++)
+            cmdline[i - 1] = argv[i];
         }
+        Realm::OptionParser cp(cmdline);
+
+        cp.add_option_int("-ll:csize", cpu_mem_size_in_mb);
+        cp.add_option_int("-ll:l1size", cpu_l1_size_in_kb);
+        cp.add_option_int("-ll:cpu", num_cpus);
+        cp.add_option_int("-ll:util", num_utility_cpus);
+        cp.add_option_int("-ll:dma", num_dma_threads);
+        cp.add_option_int("-ll:stack", cpu_stack_size);
+        cp.parse_command_line(cmdline);
+
         cpu_stack_size = cpu_stack_size * (1 << 20);
 
         if (num_utility_cpus > num_cpus)

@@ -17,7 +17,7 @@
 
 #include "numasysif.h"
 #include "logging.h"
-#include "cmdline.h"
+#include "options.h"
 #include "proc_impl.h"
 #include "threads.h"
 #include "runtime_impl.h"
@@ -105,8 +105,7 @@ namespace Realm {
 
       // first order of business - read command line parameters
       {
-	CommandLineParser cp;
-
+	OptionParser cp(cmdline);
 	cp.add_option_int("-ll:nsize", m->cfg_numa_mem_size_in_mb)
 	  .add_option_int("-ll:ncpu", m->cfg_num_numa_cpus)
 	  .add_option_bool("-numa:pin", m->cfg_pin_memory);

@@ -16,7 +16,7 @@
 // sampling profiler implementation for Realm
 
 #include "sampling_impl.h"
-#include "cmdline.h"
+#include "options.h"
 #include "timers.h"
 
 #include <unistd.h>
@@ -471,7 +471,7 @@ namespace Realm {
 #ifndef NDEBUG
     bool ok =
 #endif
-              CommandLineParser()
+              OptionParser(cmdline)
       .add_option_int("-realm:prof", nodes_profiled)
       .add_option_string("-realm:prof_file", logfile)
       .add_option_int("-realm:prof_buffer_size", cfg_buffer_size)
