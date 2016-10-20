@@ -23,7 +23,7 @@
 
 #include "activemsg.h"
 
-#include "cmdline.h"
+#include "options.h"
 
 #include "codedesc.h"
 
@@ -289,7 +289,7 @@ namespace Realm {
     CoreModule *m = new CoreModule;
 
     // parse command line arguments
-    CommandLineParser cp;
+    OptionParser cp(cmdline);
     cp.add_option_int("-ll:cpu", m->num_cpu_procs)
       .add_option_int("-ll:util", m->num_util_procs)
       .add_option_int("-ll:io", m->num_io_procs)
@@ -657,7 +657,7 @@ namespace Realm {
       // are hyperthreads considered to share a physical core
       bool hyperthread_sharing = true;
 
-      CommandLineParser cp;
+      OptionParser cp(cmdline);
       cp.add_option_int("-ll:gsize", gasnet_mem_size_in_mb)
 	.add_option_int("-ll:rsize", reg_mem_size_in_mb)
 	.add_option_int("-ll:dsize", disk_mem_size_in_mb)

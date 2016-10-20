@@ -17,7 +17,7 @@
 
 #include "realm/tasks.h"
 #include "realm/logging.h"
-#include "realm/cmdline.h"
+#include "realm/options.h"
 
 #include "lowlevel_dma.h"
 
@@ -2172,7 +2172,7 @@ namespace Realm {
 
       // first order of business - read command line parameters
       {
-	CommandLineParser cp;
+	OptionParser cp(cmdline);
 
 	cp.add_option_int("-ll:fsize", m->cfg_fb_mem_size_in_mb)
 	  .add_option_int("-ll:zsize", m->cfg_zc_mem_size_in_mb)

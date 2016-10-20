@@ -76,6 +76,9 @@ else()
   if(Legion_USE_GASNet)
     list(APPEND LOW_RUNTIME_SRC activemsg.h activemsg.cc)
   endif()
+  if(Legion_USE_LuaJIT)
+    list(APPEND LOW_RUNTIME_SRC realm/options.h realm/options.cc)
+  endif()
 endif()
 list(APPEND LOW_RUNTIME_SRC
   accessor.h
@@ -160,6 +163,12 @@ if(Legion_USE_CUDA)
   target_compile_definitions(LowLevelRuntime PUBLIC USE_CUDA)
   target_include_directories(LowLevelRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
   target_link_libraries(LowLevelRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
+endif()
+
+if(Legion_USE_LuaJIT)
+  target_compile_definitions(LowLevelRuntime PUBLIC REALM_USE_LUAJIT)
+  target_include_directories(LowLevelRuntime PRIVATE ${LUA_INCLUDE_DIR})
+  target_link_libraries(LowLevelRuntime PRIVATE ${LUA_LIBRARIES})
 endif()
 
 if(Legion_USE_SHARED_LOWLEVEL)

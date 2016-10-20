@@ -18,7 +18,7 @@
 #include "hdf5_internal.h"
 
 #include "logging.h"
-#include "cmdline.h"
+#include "options.h"
 #include "threads.h"
 #include "runtime_impl.h"
 #include "utils.h"
@@ -60,7 +60,7 @@ namespace Realm {
 
       // first order of business - read command line parameters
       {
-	CommandLineParser cp;
+	OptionParser cp(cmdline);
 
 	cp.add_option_bool("-hdf5:showerrors", m->cfg_showerrors);
 	
