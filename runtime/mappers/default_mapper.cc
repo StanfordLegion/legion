@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "realm/options.h"
 #include "legion.h"
 #include "default_mapper.h"
 
@@ -75,27 +76,21 @@ namespace Legion {
       {
         int argc = HighLevelRuntime::get_input_args().argc;
         char **argv = HighLevelRuntime::get_input_args().argv;
-        // Parse the input arguments looking for ones for the default mapper
-        for (int i=1; i < argc; i++)
-        {
-#define INT_ARG(argname, varname) do {      \
-          if (!strcmp(argv[i], argname)) {  \
-            varname = atoi(argv[++i]);      \
-            continue;                       \
-          } } while(0);
-#define BOOL_ARG(argname, varname) do {       \
-          if (!strcmp(argv[i], argname)) {    \
-            varname = (atoi(argv[++i]) != 0); \
-            continue;                         \
-          } } while(0);
-          INT_ARG("-dm:thefts", max_steals_per_theft);
-          INT_ARG("-dm:count", max_steal_count);
-          BOOL_ARG("-dm:steal", stealing_enabled);
-          BOOL_ARG("-dm:bft", breadth_first_traversal);
-          INT_ARG("-dm:sched", max_schedule_count);
-#undef BOOL_ARG
-#undef INT_ARG
+        std::vector<std::string> cmdline;
+        if(argc > 1) {
+          cmdline.resize(argc - 1);
+          for(int i = 1; i < argc; i++)
+            cmdline[i - 1] = argv[i];
         }
+        Realm::OptionParser cp(cmdline);
+        // Parse the input arguments looking for ones for the default mapper
+        
+        cp.add_option_int("-dm:thefts", max_steals_per_theft);
+        cp.add_option_int("-dm:count", max_steal_count);
+        cp.add_option_bool("-dm:steal", stealing_enabled);
+        cp.add_option_bool("-dm:bft", breadth_first_traversal);
+        cp.add_option_int("-dm:sched", max_schedule_count);
+        cp.parse_command_line(cmdline);
       }
       if (stealing_enabled)
       {

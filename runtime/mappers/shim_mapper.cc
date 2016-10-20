@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "realm/options.h"
 #include "legion.h"
 #include "shim_mapper.h"
 
@@ -415,31 +416,27 @@ namespace Legion {
         int argc = Runtime::get_input_args().argc;
         char **argv = Runtime::get_input_args().argv;
         unsigned num_profiling_samples = STATIC_NUM_PROFILE_SAMPLES;
-        // Parse the input arguments looking for ones for the shim mapper
-        for (int i=1; i < argc; i++)
-        {
-#define INT_ARG(argname, varname) do {      \
-          if (!strcmp(argv[i], argname)) {  \
-            varname = atoi(argv[++i]);      \
-            continue;                       \
-          } } while(0);
-#define BOOL_ARG(argname, varname) do {       \
-          if (!strcmp(argv[i], argname)) {    \
-            varname = (atoi(argv[++i]) != 0); \
-            continue;                         \
-          } } while(0);
-          INT_ARG("-dm:thefts", max_steals_per_theft);
-          INT_ARG("-dm:count", max_steal_count);
-          INT_ARG("-dm:split", splitting_factor);
-          BOOL_ARG("-dm:war", war_enabled);
-          BOOL_ARG("-dm:steal", stealing_enabled);
-          BOOL_ARG("-dm:bft", breadth_first_traversal);
-          INT_ARG("-dm:sched", max_schedule_count);
-          INT_ARG("-dm:prof",num_profiling_samples);
-          INT_ARG("-dm:fail",max_failed_mappings);
-#undef BOOL_ARG
-#undef INT_ARG
+
+        std::vector<std::string> cmdline;
+        if(argc > 1) {
+          cmdline.resize(argc - 1);
+          for(int i = 1; i < argc; i++)
+            cmdline[i - 1] = argv[i];
         }
+        Realm::OptionParser cp(cmdline);
+
+        // Parse the input arguments looking for ones for the shim mapper
+        cp.add_option_int("-dm:thefts", max_steals_per_theft);
+        cp.add_option_int("-dm:count", max_steal_count);
+        cp.add_option_int("-dm:split", splitting_factor);
+        cp.add_option_bool("-dm:war", war_enabled);
+        cp.add_option_bool("-dm:steal", stealing_enabled);
+        cp.add_option_bool("-dm:bft", breadth_first_traversal);
+        cp.add_option_int("-dm:sched", max_schedule_count);
+        cp.add_option_int("-dm:prof", num_profiling_samples);
+        cp.add_option_int("-dm:fail", max_failed_mappings);
+        cp.parse_command_line(cmdline);
+
         profiler.set_needed_profiling_samples(num_profiling_samples);
       }
     }
