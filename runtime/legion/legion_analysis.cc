@@ -3273,13 +3273,29 @@ namespace Legion {
                const std::map<RegionTreeNode*,ClosedNode*> &new_children) const
     //--------------------------------------------------------------------------
     {
+      // In order to remove a field, it has to be dominated in all our children
+      FieldMask dominated_fields = non_dominated_mask;
       // If we have projections instead of explicitly closed children then we 
       // aren't going to directly compare them right now
       // TODO: make this analysis more precise
       if (!projections.empty())
-        return;
-      // In order to remove a field, it has to be dominated in all our children
-      FieldMask dominated_fields = non_dominated_mask;
+      {
+        for (std::map<ProjectionFunction*,
+                      LegionMap<Domain,FieldMask>::aligned>::const_iterator
+              pit = projections.begin(); pit != projections.end(); pit++)
+        {
+          for (LegionMap<Domain,FieldMask>::aligned::const_iterator it = 
+                pit->second.begin(); it != pit->second.end(); it++)
+          {
+            const FieldMask overlap = it->second & dominated_fields;
+            if (!overlap)
+              continue;
+            dominated_fields -= overlap;
+            if (!dominated_fields)
+              return;
+          }
+        }
+      }
       for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
