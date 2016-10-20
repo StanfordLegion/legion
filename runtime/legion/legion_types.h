@@ -1153,14 +1153,16 @@ namespace Legion {
     class MultiTask;
     class IndividualTask;
     class PointTask;
-    class WrapperTask;
-    class TopLevelTask;
-    class RemoteTask;
-    class InlineTask;
     class IndexTask;
     class SliceTask;
     class RemoteTask;
     class MinimalPoint;
+
+    // legion_context.h
+    class TaskContext;
+    class TopLevelContext;
+    class RemoteContext;
+    class InnerContext;
     
     // legion_trace.h
     class LegionTrace;
@@ -1410,7 +1412,7 @@ namespace Legion {
   typedef void (*RealmFnptr)(const void*,size_t,
                              const void*,size_t,Processor);
   // The most magical of typedefs
-  typedef Internal::SingleTask* Context;
+  typedef Internal::TaskContext* Context;
   typedef Internal::GeneratorImpl* GeneratorContext;
   typedef void (*GeneratorFnptr)(GeneratorContext,
                                  const TaskGeneratorArguments&, Runtime*);
