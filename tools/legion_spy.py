@@ -4544,7 +4544,7 @@ class VerificationState(object):
                         return False
                 # Restrictions always overwrite everything when they are done
                 self.reset()
-                self.valid_instances.add(inst)
+                self.valid_instances.add(restricted_inst)
         return True
 
     def perform_copy_across_verification(self, op, redop, perform_checks,
@@ -6483,8 +6483,8 @@ class Task(object):
         # If we have no restrictions, nothing to worry about
         if not self.restrictions: 
             return
-        # Requirements that are read-only or reduce can never be restricted
-        if req.priv == READ_ONLY or req.priv == REDUCE:
+        # Requirements that are read-only can never be restricted
+        if req.priv == READ_ONLY:
             return
         # Otherwise iterate through the restrictions and
         # find any restrictions we have
