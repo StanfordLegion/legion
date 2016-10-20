@@ -257,6 +257,10 @@ target_include_directories(HighLevelRuntime
   PRIVATE legion realm mappers
 )
 
+if(Legion_USE_LuaJIT)
+  target_include_directories(HighLevelRuntime PRIVATE ${LUA_INCLUDE_DIR})
+endif()
+
 install(TARGETS HighLevelRuntime EXPORT LegionTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

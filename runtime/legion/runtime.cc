@@ -32,6 +32,7 @@
 #include "replay_mapper.h"
 #include "debug_mapper.h"
 #include <unistd.h> // sleep for warnings
+#include "realm/options.h"
 
 namespace Legion {
   namespace Internal {
@@ -19812,7 +19813,7 @@ namespace Legion {
 #endif
         realm.init(&argc, &argv);
       assert(ok); 
-      
+   
       {
 	const ReductionOpTable& red_table = get_reduction_table();
 	for(ReductionOpTable::const_iterator it = red_table.begin();
@@ -19828,17 +19829,13 @@ namespace Legion {
       
       // Parse any inputs for the high level runtime
       {
-#define INT_ARG(argname, varname) do { \
-        if(!strcmp((argv)[i], argname)) {		\
-          varname = atoi((argv)[++i]);		\
-          continue;					\
-        } } while(0)
-
-#define BOOL_ARG(argname, varname) do { \
-        if(!strcmp((argv)[i], argname)) {		\
-          varname = true;				\
-          continue;					\
-        } } while(0)
+        std::vector<std::string> cmdline;
+        if(argc > 1) {
+          cmdline.resize(argc - 1);
+          for(int i = 1; i < argc; i++)
+            cmdline[i - 1] = argv[i];
+        }
+        Realm::OptionParser cp(cmdline);
 
         // Set these values here before parsing the input arguments
         // so that we don't need to trust the C runtime to do 
@@ -19889,66 +19886,77 @@ namespace Legion {
         bit_mask_logging = false;
 #endif
         unsigned delay_start = 0;
-        for (int i = 1; i < argc; i++)
-        {
-          BOOL_ARG("-hl:separate",separate_runtime_instances);
-          BOOL_ARG("-hl:registration",record_registration);
-          BOOL_ARG("-hl:nosteal",stealing_disabled);
-          BOOL_ARG("-hl:resilient",resilient_mode);
-          BOOL_ARG("-hl:unsafe_launch",unsafe_launch);
-          BOOL_ARG("-hl:unsafe_mapper",unsafe_mapper);
-          if (!strcmp(argv[i],"-hl:safe_mapper"))
-            unsafe_mapper = false;
-          BOOL_ARG("-hl:inorder",program_order_execution);
-          INT_ARG("-hl:window", initial_task_window_size);
-          INT_ARG("-hl:hysteresis", initial_task_window_hysteresis);
-          INT_ARG("-hl:sched", initial_tasks_to_schedule);
-          INT_ARG("-hl:width", superscalar_width);
-          INT_ARG("-hl:message",max_message_size);
-          INT_ARG("-hl:epoch", gc_epoch_size);
-          if (!strcmp(argv[i],"-hl:no_dyn"))
-            dynamic_independence_tests = false;
-          BOOL_ARG("-hl:spy",legion_spy_enabled);
-          BOOL_ARG("-hl:test",enable_test_mapper);
-          INT_ARG("-hl:delay", delay_start);
-          if (!strcmp(argv[i],"-hl:replay"))
-          {
-            replay_file = argv[++i];
-            continue;
-          }
-          if (!strcmp(argv[i],"-hl:ldb"))
-          {
-            replay_file = argv[++i];
-            legion_ldb_enabled = true;
-            continue;
-          }
+
+        cp.add_option_bool("-hl:separate", separate_runtime_instances);
+        cp.add_option_bool("-hl:registration", record_registration);
+        cp.add_option_bool("-hl:nosteal", stealing_disabled);
+        cp.add_option_bool("-hl:resilient", resilient_mode);
+        cp.add_option_bool("-hl:unsafe_launch", unsafe_launch);
+        cp.add_option_bool("-hl:unsafe_mapper", unsafe_mapper);
+        bool safe_mapper = false;
+        cp.add_option_bool("-hl:safe_mapper", safe_mapper);
+        cp.add_option_bool("-hl:inorder", program_order_execution);
+        cp.add_option_int("-hl:window", initial_task_window_size);
+        cp.add_option_int("-hl:hysteresis", initial_task_window_hysteresis);
+        cp.add_option_int("-hl:sched", initial_tasks_to_schedule);
+        cp.add_option_int("-hl:width", superscalar_width);
+        cp.add_option_int("-hl:message",max_message_size);
+        cp.add_option_int("-hl:epoch", gc_epoch_size);
+        bool nodyn = false;
+        cp.add_option_bool("-hl:no_dyn", nodyn);
+        cp.add_option_bool("-hl:spy", legion_spy_enabled);
+        cp.add_option_bool("-hl:test", enable_test_mapper);
+        cp.add_option_int("-hl:delay", delay_start);
+        std::string replay;
+        cp.add_option_string("-hl:replay", replay);
+        std::string ldb;
+        cp.add_option_string("-hl:ldb", ldb);
 #ifdef DEBUG_LEGION
-          BOOL_ARG("-hl:tree",logging_region_tree_state);
-          BOOL_ARG("-hl:verbose",verbose_logging);
-          BOOL_ARG("-hl:logical_only",logical_logging_only);
-          BOOL_ARG("-hl:physical_only",physical_logging_only);
-          BOOL_ARG("-hl:disjointness",verify_disjointness);
-          BOOL_ARG("-hl:bit_masks",bit_mask_logging);
+        cp.add_option_bool("-hl:tree", logging_region_tree_state);
+        cp.add_option_bool("-hl:verbose", verbose_logging);
+        cp.add_option_bool("-hl:logical_only", logical_logging_only);
+        cp.add_option_bool("-hl:physical_only", physical_logging_only);
+        cp.add_option_bool("-hl:disjointness", verify_disjointness);
+        cp.add_option_bool("-hl:bit_masks", bit_mask_logging);
 #else
-          if (!strcmp(argv[i],"-hl:tree"))
-          {
-            log_run.warning("WARNING: Region tree state logging is "
-                          "disabled.  To enable region tree state logging "
-                                                  "compile in debug mode.");
-          }
-          if (!strcmp(argv[i],"-hl:disjointness"))
-          {
-            log_run.warning("WARNING: Disjointness verification for "
-                      "partition creation is disabled.  To enable dynamic "
-                              "disjointness testing compile in debug mode.");
-          }
+        bool tree = false;
+        cp.add_option_bool("-hl:tree", tree);
+        bool disjoint = false;
+        cp.add_option_bool("-hl:disjointness", disjoint);
 #endif
-          INT_ARG("-hl:prof", num_profiling_nodes);
+        cp.add_option_int("-hl:prof", num_profiling_nodes);
+        cp.parse_command_line(cmdline);      
+
+        if (safe_mapper == true) unsafe_mapper = false;
+
+        if (nodyn == true) dynamic_independence_tests = false;
+
+        if (!replay.empty()) replay_file = replay.c_str();
+
+        if (!ldb.empty()) 
+        {
+          replay_file = ldb.c_str();
+          legion_ldb_enabled = true;
         }
+
+#ifndef DEBUG_LEGION
+        if (tree)
+        {
+          log_run.warning("WARNING: Region tree state logging is "
+                          "disabled.  To enable region tree state logging "
+                          "compile in debug mode.");
+        }
+
+        if (disjoint)
+        {
+          log_run.warning("WARNING: Disjointness verification for "
+                          "partition creation is disabled.  To enable dynamic "
+                          "disjointness testing compile in debug mode.");
+        }
+#endif
+
         if (delay_start > 0)
           sleep(delay_start);
-#undef INT_ARG
-#undef BOOL_ARG
 #ifdef DEBUG_LEGION
         assert(initial_task_window_hysteresis <= 100);
 #endif
@@ -20080,6 +20088,7 @@ namespace Legion {
       // Now we can set out input args
       Runtime::get_input_args().argv = argv;
       Runtime::get_input_args().argc = argc;
+
       // For the moment, we only need to register our runtime tasks
       // We'll register everything else once the Legion runtime starts
       RtEvent tasks_registered = register_runtime_tasks(realm);
