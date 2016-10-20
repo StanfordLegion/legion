@@ -14612,42 +14612,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& Runtime::begin_task(TaskOp *task)
+    const std::vector<PhysicalRegion>& Runtime::begin_task(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      if (!task->is_inline_task())
+      if (!ctx->is_inline_task())
       {
 #ifdef DEBUG_LEGION
-        SingleTask *ctx = dynamic_cast<SingleTask*>(task);
-        assert(ctx != NULL);
+        SingleTask *context = dynamic_cast<SingleTask*>(ctx);
+        assert(context != NULL);
 #else
-        SingleTask *ctx = static_cast<SingleTask*>(task);
+        SingleTask *context = static_cast<SingleTask*>(ctx);
 #endif
-        return ctx->begin_task();
+        return context->begin_task();
       }
       else
-        return task->begin_inline_task();
+        return ctx->begin_inline_task();
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::end_task(TaskOp *task, const void *result, 
-                            size_t result_size, bool owned)
+    void Runtime::end_task(TaskContext *ctx, const void *result, 
+                           size_t result_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      if (!task->is_inline_task())
+      if (!ctx->is_inline_task())
       {
 #ifdef DEBUG_LEGION
-        SingleTask *ctx = dynamic_cast<SingleTask*>(task);
-        assert(ctx != NULL);
-        decrement_total_outstanding_tasks(task->task_id, false/*meta*/);
+        SingleTask *context = dynamic_cast<SingleTask*>(ctx);
+        assert(context != NULL);
+        decrement_total_outstanding_tasks(context->task_id, false/*meta*/);
 #else
-        SingleTask *ctx = static_cast<SingleTask*>(task);
+        SingleTask *context = static_cast<SingleTask*>(ctx);
         decrement_total_outstanding_tasks();
 #endif
-        ctx->end_task(result, result_size, owned);
+        context->end_task(result, result_size, owned);
       }
       else
-        task->end_inline_task(result, result_size, owned);
+        ctx->end_inline_task(result, result_size, owned);
     }
 
     //--------------------------------------------------------------------------

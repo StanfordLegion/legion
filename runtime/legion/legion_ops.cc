@@ -19,6 +19,7 @@
 #include "region_tree.h"
 #include "legion_spy.h"
 #include "legion_trace.h"
+#include "legion_context.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -139,7 +140,7 @@ namespace Legion {
     Mappable* Operation::get_mappable(void)
     //--------------------------------------------------------------------------
     {
-      return parent_ctx;
+      return parent_ctx->get_task();
     }
 
     //--------------------------------------------------------------------------
@@ -253,7 +254,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::initialize_operation(SingleTask *ctx, bool track, 
+    void Operation::initialize_operation(TaskContext *ctx, bool track, 
                                          unsigned regs/*= 0*/)
     //--------------------------------------------------------------------------
     {
@@ -1202,14 +1203,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    SingleTask* Operation::find_logical_context(unsigned index)
+    TaskContext* Operation::find_logical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
       return parent_ctx->find_parent_logical_context(find_parent_index(index));
     }
 
     //--------------------------------------------------------------------------
-    SingleTask* Operation::find_physical_context(unsigned index)
+    TaskContext* Operation::find_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
       return parent_ctx->find_parent_physical_context(find_parent_index(index));
@@ -1523,7 +1524,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::initialize_speculation(SingleTask *ctx, bool track,
+    void SpeculativeOp::initialize_speculation(TaskContext *ctx, bool track,
                                                unsigned regions,
                                                const Predicate &p)
     //--------------------------------------------------------------------------
@@ -1851,12 +1852,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion MapOp::initialize(SingleTask *ctx, 
+    PhysicalRegion MapOp::initialize(TaskContext *ctx, 
                                      const InlineLauncher &launcher,
                                      bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      parent_task = ctx;
+      parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       if (launcher.requirement.privilege_fields.empty())
       {
@@ -1884,14 +1885,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion MapOp::initialize(SingleTask *ctx,
+    PhysicalRegion MapOp::initialize(TaskContext *ctx,
                                      const RegionRequirement &req,
                                      MapperID id, MappingTagID t,
                                      bool check_privileges)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      parent_task = ctx;
+      parent_task = ctx->get_task();
       requirement = req;
       if (requirement.privilege_fields.empty())
       {
@@ -1904,7 +1905,6 @@ namespace Legion {
       requirement = req;
       map_id = id;
       tag = t;
-      parent_task = ctx;
       termination_event = Runtime::create_ap_user_event();
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
@@ -1919,15 +1919,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::initialize(SingleTask *ctx, const PhysicalRegion &reg)
+    void MapOp::initialize(TaskContext *ctx, const PhysicalRegion &reg)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      parent_task = ctx;
+      parent_task = ctx->get_task();
       requirement = reg.impl->get_requirement();
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
-      parent_task = ctx;
       termination_event = Runtime::create_ap_user_event();
       region = reg;
       region.impl->remap_region(completion_event);
@@ -2847,11 +2846,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::initialize(SingleTask *ctx,
+    void CopyOp::initialize(TaskContext *ctx,
                             const CopyLauncher &launcher, bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      parent_task = ctx;
+      parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
@@ -4191,7 +4190,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::initialize(SingleTask *ctx, FenceKind kind)
+    void FenceOp::initialize(TaskContext *ctx, FenceKind kind)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -4351,7 +4350,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FrameOp::initialize(SingleTask *ctx)
+    void FrameOp::initialize(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
       FenceOp::initialize(ctx, MIXED_FENCE);
@@ -4480,7 +4479,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_index_space_deletion(SingleTask *ctx,
+    void DeletionOp::initialize_index_space_deletion(TaskContext *ctx,
                                                      IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -4493,7 +4492,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_index_part_deletion(SingleTask *ctx,
+    void DeletionOp::initialize_index_part_deletion(TaskContext *ctx,
                                                     IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -4506,7 +4505,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_field_space_deletion(SingleTask *ctx,
+    void DeletionOp::initialize_field_space_deletion(TaskContext *ctx,
                                                      FieldSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -4519,7 +4518,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_field_deletion(SingleTask *ctx, 
+    void DeletionOp::initialize_field_deletion(TaskContext *ctx, 
                                                 FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
@@ -4533,7 +4532,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_field_deletions(SingleTask *ctx,
+    void DeletionOp::initialize_field_deletions(TaskContext *ctx,
                             FieldSpace handle, const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
@@ -4547,7 +4546,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_logical_region_deletion(SingleTask *ctx,
+    void DeletionOp::initialize_logical_region_deletion(TaskContext *ctx,
                                                         LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -4560,7 +4559,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_logical_partition_deletion(SingleTask *ctx,
+    void DeletionOp::initialize_logical_partition_deletion(TaskContext *ctx,
                                                        LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -5291,7 +5290,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CloseOp::initialize_close(SingleTask *ctx,
+    void CloseOp::initialize_close(TaskContext *ctx,
                                    const RegionRequirement &req, bool track)
     //--------------------------------------------------------------------------
     {
@@ -5301,7 +5300,7 @@ namespace Legion {
       // Only initialize the operation here, this is not a trace-able op
       initialize_operation(ctx, track);
       // Never track this so don't get the close index
-      parent_task = ctx;
+      parent_task = ctx->get_task();
       requirement = req;
       initialize_privilege_path(privilege_path, requirement);
     } 
@@ -5319,7 +5318,7 @@ namespace Legion {
       initialize_internal(creator, idx, trace_info);
       // We always track this so get the close index
       context_index = parent_ctx->register_new_close_operation(this);
-      parent_task = parent_ctx;
+      parent_task = parent_ctx->get_task();
       requirement = req;
       initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
@@ -5435,7 +5434,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InterCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
+    void InterCloseOp::initialize(TaskContext *ctx,const RegionRequirement &req,
                               ClosedNode *closed_t, const TraceInfo &trace_info,
                               int close_idx, const VersionInfo &clone_info,
                               const FieldMask &close_m, Operation *creator)
@@ -6083,7 +6082,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReadCloseOp::initialize(SingleTask *ctx, const RegionRequirement &req,
+    void ReadCloseOp::initialize(TaskContext *ctx, const RegionRequirement &req,
                                  const TraceInfo &trace_info, int close_idx,
                                  const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
@@ -6181,7 +6180,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::initialize(SingleTask *ctx, unsigned idx) 
+    void PostCloseOp::initialize(TaskContext *ctx, unsigned idx) 
     //--------------------------------------------------------------------------
     {
       initialize_close(ctx, ctx->regions[idx], true/*track*/);
@@ -6193,7 +6192,7 @@ namespace Legion {
                                        false/*inter*/, false/*read only*/);
         perform_logging();
         LegionSpy::log_internal_op_creator(unique_op_id,
-                                           ctx->get_unique_op_id(),
+                                           ctx->get_unique_id(),
                                            parent_idx);
       }
     }
@@ -6488,7 +6487,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VirtualCloseOp::initialize(SingleTask *ctx, unsigned index,
+    void VirtualCloseOp::initialize(TaskContext *ctx, unsigned index,
                                     const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
@@ -6501,7 +6500,7 @@ namespace Legion {
                                        false/*inter*/, false/*read only*/);
         perform_logging();
         LegionSpy::log_internal_op_creator(unique_op_id,
-                                           ctx->get_unique_op_id(),
+                                           ctx->get_unique_id(),
                                            parent_idx);
         for (std::set<FieldID>::const_iterator it = 
               requirement.privilege_fields.begin(); it !=
@@ -6606,7 +6605,7 @@ namespace Legion {
                                bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      parent_task = ctx;
+      parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/,
                              1/*num region requirements*/,
                              launcher.predicate);
@@ -7184,7 +7183,7 @@ namespace Legion {
                                bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      parent_task = ctx;
+      parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 
                              1/*num region requirements*/,
                              launcher.predicate);
@@ -7814,7 +7813,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future DynamicCollectiveOp::initialize(SingleTask *ctx, 
+    Future DynamicCollectiveOp::initialize(TaskContext *ctx, 
                                            const DynamicCollective &dc)
     //--------------------------------------------------------------------------
     {
@@ -7977,7 +7976,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::initialize(SingleTask *ctx, Future f)
+    void FuturePredOp::initialize(TaskContext *ctx, Future f)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8081,7 +8080,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NotPredOp::initialize(SingleTask *ctx, const Predicate &p)
+    void NotPredOp::initialize(TaskContext *ctx, const Predicate &p)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8219,7 +8218,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AndPredOp::initialize(SingleTask *ctx,
+    void AndPredOp::initialize(TaskContext *ctx,
                                const Predicate &p1, 
                                const Predicate &p2)
     //--------------------------------------------------------------------------
@@ -8454,7 +8453,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OrPredOp::initialize(SingleTask *ctx,
+    void OrPredOp::initialize(TaskContext *ctx,
                               const Predicate &p1, 
                               const Predicate &p2)
     //--------------------------------------------------------------------------
@@ -8684,7 +8683,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap MustEpochOp::initialize(SingleTask *ctx,
+    FutureMap MustEpochOp::initialize(TaskContext *ctx,
                                               const MustEpochLauncher &launcher,
                                               bool check_privileges)
     //--------------------------------------------------------------------------
@@ -9775,7 +9774,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_equal_partition(SingleTask *ctx,
+    void PendingPartitionOp::initialize_equal_partition(TaskContext *ctx,
                                                         IndexPartition pid, 
                                                         size_t granularity)
     //--------------------------------------------------------------------------
@@ -9790,7 +9789,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_weighted_partition(SingleTask *ctx, 
+    void PendingPartitionOp::initialize_weighted_partition(TaskContext *ctx, 
                                                            IndexPartition pid, 
                                                            size_t granularity,
                                        const std::map<DomainPoint,int> &weights)
@@ -9806,7 +9805,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_union_partition(SingleTask *ctx,
+    void PendingPartitionOp::initialize_union_partition(TaskContext *ctx,
                                                         IndexPartition pid,
                                                         IndexPartition h1,
                                                         IndexPartition h2)
@@ -9822,7 +9821,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_intersection_partition(SingleTask *ctx,
+    void PendingPartitionOp::initialize_intersection_partition(TaskContext *ctx,
                                                             IndexPartition pid,
                                                             IndexPartition h1,
                                                             IndexPartition h2)
@@ -9838,7 +9837,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_difference_partition(SingleTask *ctx,
+    void PendingPartitionOp::initialize_difference_partition(TaskContext *ctx,
                                                              IndexPartition pid,
                                                              IndexPartition h1,
                                                              IndexPartition h2)
@@ -9854,7 +9853,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_cross_product(SingleTask *ctx,
+    void PendingPartitionOp::initialize_cross_product(TaskContext *ctx,
                                                       IndexPartition base,
                                                       IndexPartition source,
                                   std::map<DomainPoint,IndexPartition> &handles)
@@ -9870,7 +9869,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_index_space_union(SingleTask *ctx,
+    void PendingPartitionOp::initialize_index_space_union(TaskContext *ctx,
                                                           IndexSpace target,
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -9885,7 +9884,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_index_space_union(SingleTask *ctx,
+    void PendingPartitionOp::initialize_index_space_union(TaskContext *ctx,
                                                           IndexSpace target,
                                                           IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -9901,7 +9900,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_index_space_intersection(
-     SingleTask *ctx, IndexSpace target, const std::vector<IndexSpace> &handles)
+    TaskContext *ctx, IndexSpace target, const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -9915,7 +9914,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_index_space_intersection(
-                      SingleTask *ctx, IndexSpace target, IndexPartition handle)
+                      TaskContext *ctx, IndexSpace target, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -9928,7 +9927,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_index_space_difference(SingleTask *ctx,
+    void PendingPartitionOp::initialize_index_space_difference(TaskContext *ctx,
                                          IndexSpace target, IndexSpace initial, 
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -10036,7 +10035,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_field(SingleTask *ctx, 
+    void DependentPartitionOp::initialize_by_field(TaskContext *ctx, 
                                                    IndexPartition pid,
                                     LogicalRegion handle, LogicalRegion parent,
                                     const Domain &space, FieldID fid)
@@ -10059,7 +10058,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_image(SingleTask *ctx, 
+    void DependentPartitionOp::initialize_by_image(TaskContext *ctx, 
                                                    IndexPartition pid,
                                           LogicalPartition projection,
                                           LogicalRegion parent, FieldID fid, 
@@ -10083,7 +10082,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_preimage(SingleTask *ctx,
+    void DependentPartitionOp::initialize_by_preimage(TaskContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
                                     FieldID fid, const Domain &space)
@@ -10430,7 +10429,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
+    void FillOp::initialize(TaskContext *ctx, LogicalRegion handle,
                             LogicalRegion parent, FieldID fid,
                             const void *ptr, size_t size,
                             const Predicate &pred,bool check_privileges)
@@ -10451,7 +10450,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
+    void FillOp::initialize(TaskContext *ctx, LogicalRegion handle,
                             LogicalRegion parent, FieldID fid, 
                             const Future &f,
                             const Predicate &pred,bool check_privileges)
@@ -10470,7 +10469,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
+    void FillOp::initialize(TaskContext *ctx, LogicalRegion handle,
                             LogicalRegion parent,
                             const std::set<FieldID> &fields,
                             const void *ptr, size_t size,
@@ -10492,7 +10491,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::initialize(SingleTask *ctx, LogicalRegion handle,
+    void FillOp::initialize(TaskContext *ctx, LogicalRegion handle,
                             LogicalRegion parent,
                             const std::set<FieldID> &fields, 
                             const Future &f,
@@ -10517,7 +10516,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::initialize(SingleTask *ctx, const FillLauncher &launcher,
+    void FillOp::initialize(TaskContext *ctx, const FillLauncher &launcher,
                             bool check_privileges)
     //--------------------------------------------------------------------------
     {
@@ -11081,7 +11080,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion AttachOp::initialize_hdf5(SingleTask *ctx,
+    PhysicalRegion AttachOp::initialize_hdf5(TaskContext *ctx,
                                              const char *name,
                                              LogicalRegion handle, 
                                              LogicalRegion parent,
@@ -11123,7 +11122,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion AttachOp::initialize_file(SingleTask *ctx,
+    PhysicalRegion AttachOp::initialize_file(TaskContext *ctx,
                                              const char *name,
                                              LogicalRegion handle,
                                              LogicalRegion parent,
@@ -11572,7 +11571,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::initialize_detach(SingleTask *ctx, 
+    void DetachOp::initialize_detach(TaskContext *ctx, 
                                      PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
@@ -11812,7 +11811,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future TimingOp::initialize(SingleTask *ctx, const Future &pre)
+    Future TimingOp::initialize(TaskContext *ctx, const Future &pre)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -11834,7 +11833,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future TimingOp::initialize_microseconds(SingleTask *ctx, const Future &pre)
+    Future TimingOp::initialize_microseconds(TaskContext *ctx,const Future &pre)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -11856,7 +11855,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future TimingOp::initialize_nanoseconds(SingleTask *ctx, const Future &pre)
+    Future TimingOp::initialize_nanoseconds(TaskContext *ctx, const Future &pre)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);

@@ -211,7 +211,7 @@ namespace Legion {
       inline RtEvent get_resolved_event(void) const { return resolved_event; }
       inline ApEvent get_completion_event(void) const {return completion_event;}
       inline RtEvent get_commit_event(void) const { return commit_event; }
-      inline SingleTask* get_parent(void) const { return parent_ctx; }
+      inline TaskContext* get_parent(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
       inline bool is_tracking_parent(void) const { return track_parent; } 
@@ -246,7 +246,7 @@ namespace Legion {
     public:
       // Initialize this operation in a new parent context
       // along with the number of regions this task has
-      void initialize_operation(SingleTask *ctx, bool track,
+      void initialize_operation(TaskContext *ctx, bool track,
                                 unsigned num_regions = 0); 
     public:
       // Inherited from ReferenceMutator
@@ -437,8 +437,8 @@ namespace Legion {
                                    GenerationID gen);
     public:
       // Help for finding the contexts for an operation
-      SingleTask* find_logical_context(unsigned index);
-      SingleTask* find_physical_context(unsigned index);
+      TaskContext* find_logical_context(unsigned index);
+      TaskContext* find_physical_context(unsigned index);
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);
@@ -500,7 +500,7 @@ namespace Legion {
       // Are we tracking this operation in the parent's context
       bool track_parent;
       // The enclosing context for this operation
-      SingleTask *parent_ctx;
+      TaskContext *parent_ctx;
       // The mapped event for this operation
       RtUserEvent mapped_event;
       // The resolved event for this operation
@@ -596,8 +596,8 @@ namespace Legion {
       void activate_speculative(void);
       void deactivate_speculative(void);
     public:
-      void initialize_speculation(SingleTask *ctx, bool track, unsigned regions,
-                                  const Predicate &p);
+      void initialize_speculation(TaskContext *ctx, bool track, 
+                                  unsigned regions, const Predicate &p);
       void register_predicate_dependence(void);
       bool is_predicated(void) const;
       // Wait until the predicate is valid and then return
@@ -652,14 +652,14 @@ namespace Legion {
     public:
       MapOp& operator=(const MapOp &rhs);
     public:
-      PhysicalRegion initialize(SingleTask *ctx,
+      PhysicalRegion initialize(TaskContext *ctx,
                                 const InlineLauncher &launcher,
                                 bool check_privileges);
-      PhysicalRegion initialize(SingleTask *ctx,
+      PhysicalRegion initialize(TaskContext *ctx,
                                 const RegionRequirement &req,
                                 MapperID id, MappingTagID tag,
                                 bool check_privileges);
-      void initialize(SingleTask *ctx, const PhysicalRegion &region);
+      void initialize(TaskContext *ctx, const PhysicalRegion &region);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
     public:
@@ -738,7 +738,7 @@ namespace Legion {
     public:
       CopyOp& operator=(const CopyOp &rhs);
     public:
-      void initialize(SingleTask *ctx,
+      void initialize(TaskContext *ctx,
                       const CopyLauncher &launcher,
                       bool check_privileges);
     public:
@@ -838,7 +838,7 @@ namespace Legion {
     public:
       FenceOp& operator=(const FenceOp &rhs);
     public:
-      void initialize(SingleTask *ctx, FenceKind kind);
+      void initialize(TaskContext *ctx, FenceKind kind);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -870,7 +870,7 @@ namespace Legion {
     public:
       FrameOp& operator=(const FrameOp &rhs);
     public:
-      void initialize(SingleTask *ctx);
+      void initialize(TaskContext *ctx);
       void set_previous(ApEvent previous);
     public:
       virtual void activate(void);
@@ -911,18 +911,18 @@ namespace Legion {
     public:
       DeletionOp& operator=(const DeletionOp &rhs);
     public:
-      void initialize_index_space_deletion(SingleTask *ctx, IndexSpace handle);
-      void initialize_index_part_deletion(SingleTask *ctx,
+      void initialize_index_space_deletion(TaskContext *ctx, IndexSpace handle);
+      void initialize_index_part_deletion(TaskContext *ctx,
                                           IndexPartition handle);
-      void initialize_field_space_deletion(SingleTask *ctx,
+      void initialize_field_space_deletion(TaskContext *ctx,
                                            FieldSpace handle);
-      void initialize_field_deletion(SingleTask *ctx, FieldSpace handle,
+      void initialize_field_deletion(TaskContext *ctx, FieldSpace handle,
                                       FieldID fid);
-      void initialize_field_deletions(SingleTask *ctx, FieldSpace handle,
+      void initialize_field_deletions(TaskContext *ctx, FieldSpace handle,
                                       const std::set<FieldID> &to_free);
-      void initialize_logical_region_deletion(SingleTask *ctx, 
+      void initialize_logical_region_deletion(TaskContext *ctx, 
                                               LogicalRegion handle);
-      void initialize_logical_partition_deletion(SingleTask *ctx, 
+      void initialize_logical_partition_deletion(TaskContext *ctx, 
                                                  LogicalPartition handle);
     public:
       virtual void activate(void);
@@ -1085,7 +1085,7 @@ namespace Legion {
       void activate_close(void);
       void deactivate_close(void);
       // This is for post and virtual close ops
-      void initialize_close(SingleTask *ctx,
+      void initialize_close(TaskContext *ctx,
                             const RegionRequirement &req, bool track);
       // These is for internal close ops
       void initialize_close(Operation *creator, unsigned idx,
@@ -1139,7 +1139,7 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
-      void initialize(SingleTask *ctx, const RegionRequirement &req,
+      void initialize(TaskContext *ctx, const RegionRequirement &req,
                       ClosedNode *closed_tree, const TraceInfo &trace_info,
                       int close_idx, const VersionInfo &version_info,
                       const FieldMask &close_mask, Operation *create_op);
@@ -1219,7 +1219,7 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
-      void initialize(SingleTask *ctx, const RegionRequirement &req,
+      void initialize(TaskContext *ctx, const RegionRequirement &req,
                       const TraceInfo &trace_info, int close_idx,
                       const FieldMask &close_mask, Operation *create_op);
     public:
@@ -1251,7 +1251,7 @@ namespace Legion {
     public:
       PostCloseOp& operator=(const PostCloseOp &rhs);
     public:
-      void initialize(SingleTask *ctx, unsigned index); 
+      void initialize(TaskContext *ctx, unsigned index); 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1303,7 +1303,7 @@ namespace Legion {
     public:
       VirtualCloseOp& operator=(const VirtualCloseOp &rhs);
     public:
-      void initialize(SingleTask *ctx, unsigned index,
+      void initialize(TaskContext *ctx, unsigned index,
                       const RegionRequirement &req);
     public:
       virtual void activate(void);
@@ -1333,7 +1333,7 @@ namespace Legion {
     public:
       AcquireOp& operator=(const AcquireOp &rhs);
     public:
-      void initialize(SingleTask *ctx, const AcquireLauncher &launcher,
+      void initialize(TaskContext *ctx, const AcquireLauncher &launcher,
                       bool check_privileges);
     public:
       virtual void activate(void);
@@ -1402,7 +1402,7 @@ namespace Legion {
     public:
       ReleaseOp& operator=(const ReleaseOp &rhs);
     public:
-      void initialize(SingleTask *ctx, const ReleaseLauncher &launcher,
+      void initialize(TaskContext *ctx, const ReleaseLauncher &launcher,
                       bool check_privileges);
     public:
       virtual void activate(void);
@@ -1477,7 +1477,7 @@ namespace Legion {
     public:
       DynamicCollectiveOp& operator=(const DynamicCollectiveOp &rhs);
     public:
-      Future initialize(SingleTask *ctx, const DynamicCollective &dc);
+      Future initialize(TaskContext *ctx, const DynamicCollective &dc);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1513,7 +1513,7 @@ namespace Legion {
     public:
       FuturePredOp& operator=(const FuturePredOp &rhs);
     public:
-      void initialize(SingleTask *ctx, Future f);
+      void initialize(TaskContext *ctx, Future f);
       void resolve_future_predicate(void);
     public:
       virtual void activate(void);
@@ -1541,7 +1541,7 @@ namespace Legion {
     public:
       NotPredOp& operator=(const NotPredOp &rhs);
     public:
-      void initialize(SingleTask *task, const Predicate &p);
+      void initialize(TaskContext *task, const Predicate &p);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1569,7 +1569,7 @@ namespace Legion {
     public:
       AndPredOp& operator=(const AndPredOp &rhs);
     public:
-      void initialize(SingleTask *task, 
+      void initialize(TaskContext *task, 
                       const Predicate &p1, const Predicate &p2);
     public:
       virtual void activate(void);
@@ -1604,7 +1604,7 @@ namespace Legion {
     public:
       OrPredOp& operator=(const OrPredOp &rhs);
     public:
-      void initialize(SingleTask *task,
+      void initialize(TaskContext *task,
                       const Predicate &p1, const Predicate &p2);
     public:
       virtual void activate(void);
@@ -1653,9 +1653,9 @@ namespace Legion {
     public:
       MustEpochOp& operator=(const MustEpochOp &rhs);
     public:
-      FutureMap initialize(SingleTask *ctx,
-                                   const MustEpochLauncher &launcher,
-                                   bool check_privileges);
+      FutureMap initialize(TaskContext *ctx,
+                           const MustEpochLauncher &launcher,
+                           bool check_privileges);
       void find_conflicted_regions(
           std::vector<PhysicalRegion> &unmapped); 
     public:
@@ -1998,37 +1998,37 @@ namespace Legion {
     public:
       PendingPartitionOp& operator=(const PendingPartitionOp &rhs);
     public:
-      void initialize_equal_partition(SingleTask *ctx,
+      void initialize_equal_partition(TaskContext *ctx,
                                       IndexPartition pid, size_t granularity);
-      void initialize_weighted_partition(SingleTask *ctx,
+      void initialize_weighted_partition(TaskContext *ctx,
                                          IndexPartition pid, size_t granularity,
                                       const std::map<DomainPoint,int> &weights);
-      void initialize_union_partition(SingleTask *ctx,
+      void initialize_union_partition(TaskContext *ctx,
                                       IndexPartition pid, 
                                       IndexPartition handle1,
                                       IndexPartition handle2);
-      void initialize_intersection_partition(SingleTask *ctx,
+      void initialize_intersection_partition(TaskContext *ctx,
                                              IndexPartition pid, 
                                              IndexPartition handle1,
                                              IndexPartition handle2);
-      void initialize_difference_partition(SingleTask *ctx,
+      void initialize_difference_partition(TaskContext *ctx,
                                            IndexPartition pid, 
                                            IndexPartition handle1,
                                            IndexPartition handle2);
-      void initialize_cross_product(SingleTask *ctx,
+      void initialize_cross_product(TaskContext *ctx,
                                     IndexPartition base, IndexPartition source,
                                 std::map<DomainPoint,IndexPartition> &handles);
-      void initialize_index_space_union(SingleTask *ctx, IndexSpace target, 
+      void initialize_index_space_union(TaskContext *ctx, IndexSpace target, 
                                         const std::vector<IndexSpace> &handles);
-      void initialize_index_space_union(SingleTask *ctx, IndexSpace target, 
+      void initialize_index_space_union(TaskContext *ctx, IndexSpace target, 
                                         IndexPartition handle);
-      void initialize_index_space_intersection(SingleTask *ctx, 
+      void initialize_index_space_intersection(TaskContext *ctx, 
                                                IndexSpace target,
                                         const std::vector<IndexSpace> &handles);
-      void initialize_index_space_intersection(SingleTask *ctx,
+      void initialize_index_space_intersection(TaskContext *ctx,
                                               IndexSpace target,
                                               IndexPartition handle);
-      void initialize_index_space_difference(SingleTask *ctx, 
+      void initialize_index_space_difference(TaskContext *ctx, 
                                              IndexSpace target, 
                                              IndexSpace initial,
                                         const std::vector<IndexSpace> &handles);
@@ -2069,14 +2069,14 @@ namespace Legion {
     public:
       DependentPartitionOp& operator=(const DependentPartitionOp &rhs);
     public:
-      void initialize_by_field(SingleTask *ctx, IndexPartition pid,
+      void initialize_by_field(TaskContext *ctx, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
                                const Domain &color_space, FieldID fid); 
-      void initialize_by_image(SingleTask *ctx, IndexPartition pid,
+      void initialize_by_image(TaskContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                const Domain &color_space);
-      void initialize_by_preimage(SingleTask *ctx, IndexPartition pid,
+      void initialize_by_preimage(TaskContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                const Domain &color_space);
@@ -2129,23 +2129,23 @@ namespace Legion {
     public:
       FillOp& operator=(const FillOp &rhs);
     public:
-      void initialize(SingleTask *ctx, LogicalRegion handle,
+      void initialize(TaskContext *ctx, LogicalRegion handle,
                       LogicalRegion parent, FieldID fid,
                       const void *ptr, size_t size,
                       const Predicate &pred, bool check_privileges);
-      void initialize(SingleTask *ctx, LogicalRegion handle,
+      void initialize(TaskContext *ctx, LogicalRegion handle,
                       LogicalRegion parent, FieldID fid,const Future &f,
                       const Predicate &pred, bool check_privileges);
-      void initialize(SingleTask *ctx, LogicalRegion handle,
+      void initialize(TaskContext *ctx, LogicalRegion handle,
                       LogicalRegion parent, 
                       const std::set<FieldID> &fields,
                       const void *ptr, size_t size,
                       const Predicate &pred, bool check_privileges);
-      void initialize(SingleTask *ctx, LogicalRegion handle,
+      void initialize(TaskContext *ctx, LogicalRegion handle,
                       LogicalRegion parent, 
                       const std::set<FieldID> &fields, const Future &f,
                       const Predicate &pred, bool check_privileges);
-      void initialize(SingleTask *ctx, const FillLauncher &launcher,
+      void initialize(TaskContext *ctx, const FillLauncher &launcher,
                       bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
@@ -2207,12 +2207,12 @@ namespace Legion {
       AttachOp& operator=(const AttachOp &rhs);
     public:
       PhysicalRegion initialize_hdf5(
-                                 SingleTask *ctx, const char *file_name,
+                                 TaskContext *ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::map<FieldID,const char*> &field_map,
                                  LegionFileMode mode, bool check_privileges);
       PhysicalRegion initialize_file(
-                                     SingleTask *ctx, const char *file_name,
+                                     TaskContext *ctx, const char *file_name,
                                      LogicalRegion handle, LogicalRegion parent,
                                      const std::vector<FieldID> &field_vec,
                                      LegionFileMode mode, bool check_privileges);
@@ -2268,7 +2268,7 @@ namespace Legion {
     public:
       DetachOp& operator=(const DetachOp &rhs);
     public:
-      void initialize_detach(SingleTask *ctx, PhysicalRegion region);
+      void initialize_detach(TaskContext *ctx, PhysicalRegion region);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2312,9 +2312,9 @@ namespace Legion {
     public:
       TimingOp& operator=(const TimingOp &rhs);
     public:
-      Future initialize(SingleTask *ctx, const Future &pre);
-      Future initialize_microseconds(SingleTask *ctx, const Future &pre);
-      Future initialize_nanoseconds(SingleTask *ctx, const Future &pre);
+      Future initialize(TaskContext *ctx, const Future &pre);
+      Future initialize_microseconds(TaskContext *ctx, const Future &pre);
+      Future initialize_nanoseconds(TaskContext *ctx, const Future &pre);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

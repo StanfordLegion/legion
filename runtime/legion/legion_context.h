@@ -129,12 +129,19 @@ namespace Legion {
         { executing_processor = p; }
       inline unsigned get_tunable_index(void)
         { return total_tunable_count++; }
+      inline UniqueID get_unique_id(void) const 
+        { return get_context_uid(); }
+      inline const char* get_task_name(void) const
+        { return get_task()->get_task_name(); }
     public:
       void assign_context(RegionTreeContext ctx);
       RegionTreeContext release_context(void);
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const; 
       virtual UniqueID get_context_uid(void) const;
+    public:
+      virtual int get_depth(void) const;
+      virtual Task* get_task(void) const;
     public:
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
@@ -305,8 +312,13 @@ namespace Legion {
       void unmap_all_regions(void);
       const std::vector<PhysicalRegion>& get_physical_regions(void) const;
     public:
+      virtual bool is_inline_task(void) const;
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
+    public:
       VariantImpl* select_inline_variant(TaskOp *child, 
-                                         InlineTask *inline_task);
+                                         InlineContext *inline_context);
       void inline_child_task(TaskOp *child);
     public:
       inline void begin_runtime_call(void);
@@ -327,12 +339,14 @@ namespace Legion {
     public:
       Runtime *const runtime;
     protected:
+      SingleTask *owner_task;
+    protected:
       // Keep track of inline mapping regions for this task
       // so we can see when there are conflicts
       LegionList<PhysicalRegion,TASK_INLINE_REGION_ALLOC>::tracked
                                                    inline_regions; 
       // Context for this task
-      RegionTreeContext context; 
+      RegionTreeContext tree_context; 
       // Application tasks can manipulate these next two data
       // structures by creating regions and fields, make sure you are
       // holding the operation lock when you are accessing them
@@ -459,7 +473,7 @@ namespace Legion {
      * A remote copy of a TaskContext for the 
      * execution of sub-tasks on remote notes.
      */
-    class RemoteContext : public TaskContext {
+    class RemoteContext : public TaskContext, public Task {
     public:
       RemoteContext(Runtime *runtime);
       RemoteContext(const RemoteContext &rhs);
@@ -492,17 +506,17 @@ namespace Legion {
     };
 
     /**
-     * \class InnerContext
+     * \class InlineContext
      * A context for performing the inline execution
      * of a task inside of a parent task.
      */
-    class InnerContext : public TaskContext {
+    class InlineContext : public TaskContext {
     public:
-      InnerContext(Runtime *runtime);
-      InnerContext(const InnerContext &rhs);
-      virtual ~InnerContext(void);
+      InlineContext(Runtime *runtime);
+      InlineContext(const InlineContext &rhs);
+      virtual ~InlineContext(void);
     public:
-      InnerContext& operator=(const InnerContext &rhs);
+      InlineContext& operator=(const InlineContext &rhs);
     public:
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
@@ -527,6 +541,57 @@ namespace Legion {
     protected:
       TaskContext *enclosing;
     };
+
+    //--------------------------------------------------------------------------
+    inline void TaskContext::begin_runtime_call(void)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      overhead_tracker->application_time += diff;
+      previous_profiling_time = current;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void TaskContext::end_runtime_call(void)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      overhead_tracker->runtime_time += diff;
+      previous_profiling_time = current;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void TaskContext::begin_task_wait(bool from_runtime)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      if (from_runtime)
+        overhead_tracker->runtime_time += diff;
+      else
+        overhead_tracker->application_time += diff;
+      previous_profiling_time = current;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void TaskContext::end_task_wait(void)
+    //--------------------------------------------------------------------------
+    {
+      if (overhead_tracker == NULL)
+        return;
+      const long long current = Realm::Clock::current_time_in_nanoseconds();
+      const long long diff = current - previous_profiling_time;
+      overhead_tracker->wait_time += diff;
+      previous_profiling_time = current;
+    }
 
   };
 };

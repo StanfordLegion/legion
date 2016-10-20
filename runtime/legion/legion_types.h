@@ -1162,7 +1162,7 @@ namespace Legion {
     class TaskContext;
     class TopLevelContext;
     class RemoteContext;
-    class InnerContext;
+    class InlineContext;
     
     // legion_trace.h
     class LegionTrace;

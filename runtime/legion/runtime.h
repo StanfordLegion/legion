@@ -228,8 +228,8 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
-      FutureMapImpl(SingleTask *ctx, Operation *op, Runtime *rt);
-      FutureMapImpl(SingleTask *ctx, Runtime *rt); // empty map
+      FutureMapImpl(TaskContext *ctx, Operation *op, Runtime *rt);
+      FutureMapImpl(TaskContext *ctx, Runtime *rt); // empty map
       FutureMapImpl(const FutureMapImpl &rhs);
       ~FutureMapImpl(void);
     public:
@@ -246,7 +246,7 @@ namespace Legion {
       void add_valid_point(const DomainPoint &dp);
 #endif
     public:
-      SingleTask *const context;
+      TaskContext *const context;
       // Either an index space task or a must epoch op
       Operation *const op;
       const GenerationID op_gen;
@@ -283,7 +283,7 @@ namespace Legion {
       static const AllocationType alloc_type = PHYSICAL_REGION_ALLOC;
     public:
       PhysicalRegionImpl(const RegionRequirement &req, ApEvent ready_event,
-                         bool mapped, SingleTask *ctx, MapperID mid,
+                         bool mapped, TaskContext *ctx, MapperID mid,
                          MappingTagID tag, bool leaf, bool virt, Runtime *rt);
       PhysicalRegionImpl(const PhysicalRegionImpl &rhs);
       ~PhysicalRegionImpl(void);
@@ -323,7 +323,7 @@ namespace Legion {
 #endif
     public:
       Runtime *const runtime;
-      SingleTask *const context;
+      TaskContext *const context;
       const MapperID map_id;
       const MappingTagID tag;
       const bool leaf_region;
@@ -1361,7 +1361,7 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_TOP_FINISH_TASK_ID;
       public:
-        TopLevelTask *task;
+        TopLevelContext *ctx;
       };
       struct MapperTaskArgs : public LgTaskArgs<MapperTaskArgs> {
       public:
@@ -1371,7 +1371,7 @@ namespace Legion {
         MapperID map_id;
         Processor proc;
         ApEvent event;
-        TopLevelTask *context;
+        TopLevelContext *ctx;
       }; 
       struct SelectTunableArgs : public LgTaskArgs<SelectTunableArgs> {
       public:
@@ -1921,8 +1921,8 @@ namespace Legion {
       void free_fields(Context ctx, FieldSpace space, 
                        const std::set<FieldID> &to_free);
     public:
-      const std::vector<PhysicalRegion>& begin_task(TaskOp *task);
-      void end_task(TaskOp *task, const void *result, size_t result_size,
+      const std::vector<PhysicalRegion>& begin_task(TaskContext *ctx);
+      void end_task(TaskContext *ctx, const void *result, size_t result_size,
                     bool owned);
       TaskID generate_dynamic_task_id(void);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
@@ -2393,11 +2393,11 @@ namespace Legion {
                                                   bool has_lock = false);
       SliceTask*            get_available_slice_task(bool need_cont,
                                                   bool has_lock = false);
-      TopLevelTask*         get_available_top_level_task(bool need_cont,
+      TopLevelContext*      get_available_top_level_ctx(bool need_cont,
                                                   bool has_lock = false);
-      RemoteTask*           get_available_remote_task(bool need_cont,
+      RemoteContext*        get_available_remote_ctx(bool need_cont,
                                                   bool has_lock = false);
-      InlineTask*           get_available_inline_task(bool need_cont,
+      InlineContext*        get_available_inline_ctx(bool need_cont,
                                                   bool has_lock = false);
       MapOp*                get_available_map_op(bool need_cont,
                                                   bool has_lock = false);
@@ -2458,9 +2458,9 @@ namespace Legion {
       void free_point_task(PointTask *task);
       void free_index_task(IndexTask *task);
       void free_slice_task(SliceTask *task);
-      void free_top_level_task(TopLevelTask *task);
-      void free_remote_task(RemoteTask *task);
-      void free_inline_task(InlineTask *task);
+      void free_top_level_ctx(TopLevelContext *task);
+      void free_remote_ctx(RemoteContext *task);
+      void free_inline_ctx(InlineContext *task);
       void free_map_op(MapOp *op);
       void free_copy_op(CopyOp *op);
       void free_fence_op(FenceOp *op);
@@ -2752,9 +2752,9 @@ namespace Legion {
       std::deque<PointTask*>            available_point_tasks;
       std::deque<IndexTask*>            available_index_tasks;
       std::deque<SliceTask*>            available_slice_tasks;
-      std::deque<TopLevelTask*>         available_top_tasks;
-      std::deque<RemoteTask*>           available_remote_tasks;
-      std::deque<InlineTask*>           available_inline_tasks;
+      std::deque<TopLevelContext*>      available_top_contexts;
+      std::deque<RemoteContext*>        available_remote_contexts;
+      std::deque<InlineContext*>        available_inline_contexts;
       std::deque<MapOp*>                available_map_ops;
       std::deque<CopyOp*>               available_copy_ops;
       std::deque<FenceOp*>              available_fence_ops;

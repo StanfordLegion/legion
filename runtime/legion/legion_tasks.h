@@ -94,7 +94,7 @@ namespace Legion {
                                      ReferenceMutator *mutator); 
     public:
       void mark_stolen(void);
-      void initialize_base_task(SingleTask *ctx, bool track, 
+      void initialize_base_task(TaskContext *ctx, bool track, 
                                 const Predicate &p, 
                                 Processor::TaskFuncID tid);
       void check_empty_field_requirements(void);
@@ -143,7 +143,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
+      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant) = 0;
     public:
       virtual bool is_inline_task(void) const;
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
@@ -491,7 +491,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant) = 0;
+      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
@@ -543,11 +543,11 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      Future initialize_task(SingleTask *ctx,
+      Future initialize_task(TaskContext *ctx,
                              const TaskLauncher &launcher, 
                              bool check_privileges,
                              bool track = true);
-      Future initialize_task(SingleTask *ctx,
+      Future initialize_task(TaskContext *ctx,
               Processor::TaskFuncID task_id,
               const std::vector<IndexSpaceRequirement> &indexes,
               const std::vector<RegionRequirement> &regions,
@@ -602,9 +602,6 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void find_enclosing_local_fields(
-          LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
       virtual bool is_inline_task(void) const;
       virtual bool is_top_level_task(void) const { return top_level_task; }
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
@@ -707,9 +704,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void find_enclosing_local_fields(
-          LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
       virtual void record_restrict_postcondition(ApEvent postcondition);
@@ -751,16 +746,16 @@ namespace Legion {
     public:
       IndexTask& operator=(const IndexTask &rhs);
     public:
-      FutureMap initialize_task(SingleTask *ctx,
+      FutureMap initialize_task(TaskContext *ctx,
                                 const IndexLauncher &launcher,
                                 bool check_privileges,
                                 bool track = true);
-      Future initialize_task(SingleTask *ctx,
+      Future initialize_task(TaskContext *ctx,
                              const IndexLauncher &launcher,
                              ReductionOpID redop,
                              bool check_privileges,
                              bool track = true);
-      FutureMap initialize_task(SingleTask *ctx,
+      FutureMap initialize_task(TaskContext *ctx,
             Processor::TaskFuncID task_id,
             const Domain &launch_domain,
             const std::vector<IndexSpaceRequirement> &indexes,
@@ -771,7 +766,7 @@ namespace Legion {
             bool must_parallelism,
             MapperID id, MappingTagID tag,
             bool check_privileges);
-      Future initialize_task(SingleTask *ctx,
+      Future initialize_task(TaskContext *ctx,
             Processor::TaskFuncID task_id,
             const Domain &launch_domain,
             const std::vector<IndexSpaceRequirement> &indexes,
@@ -814,7 +809,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant);
       virtual bool is_inline_task(void) const;
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
@@ -923,7 +918,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(SingleTask *ctx, VariantImpl *variant);
+      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant);
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
@@ -1052,57 +1047,6 @@ namespace Legion {
       size_t arglen;
       bool own_arg;
     };
-
-    //--------------------------------------------------------------------------
-    inline void SingleTask::begin_runtime_call(void)
-    //--------------------------------------------------------------------------
-    {
-      if (overhead_tracker == NULL)
-        return;
-      const long long current = Realm::Clock::current_time_in_nanoseconds();
-      const long long diff = current - previous_profiling_time;
-      overhead_tracker->application_time += diff;
-      previous_profiling_time = current;
-    }
-
-    //--------------------------------------------------------------------------
-    inline void SingleTask::end_runtime_call(void)
-    //--------------------------------------------------------------------------
-    {
-      if (overhead_tracker == NULL)
-        return;
-      const long long current = Realm::Clock::current_time_in_nanoseconds();
-      const long long diff = current - previous_profiling_time;
-      overhead_tracker->runtime_time += diff;
-      previous_profiling_time = current;
-    }
-
-    //--------------------------------------------------------------------------
-    inline void SingleTask::begin_task_wait(bool from_runtime)
-    //--------------------------------------------------------------------------
-    {
-      if (overhead_tracker == NULL)
-        return;
-      const long long current = Realm::Clock::current_time_in_nanoseconds();
-      const long long diff = current - previous_profiling_time;
-      if (from_runtime)
-        overhead_tracker->runtime_time += diff;
-      else
-        overhead_tracker->application_time += diff;
-      previous_profiling_time = current;
-    }
-
-    //--------------------------------------------------------------------------
-    inline void SingleTask::end_task_wait(void)
-    //--------------------------------------------------------------------------
-    {
-      if (overhead_tracker == NULL)
-        return;
-      const long long current = Realm::Clock::current_time_in_nanoseconds();
-      const long long diff = current - previous_profiling_time;
-      overhead_tracker->wait_time += diff;
-      previous_profiling_time = current;
-    }
 
   }; // namespace Internal 
 }; // namespace Legion
