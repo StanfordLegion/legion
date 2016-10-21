@@ -238,8 +238,9 @@ end
 
 local tmp_var_id = 0
 
-local function get_new_tmp_var(ty)
-  local sym = std.newsymbol(ty, "__t".. tostring(tmp_var_id))
+local function get_new_tmp_var(ty, name)
+  assert(type(name) == "string")
+  local sym = std.newsymbol(ty, name .. "__t".. tostring(tmp_var_id))
   tmp_var_id = tmp_var_id + 1
   return sym
 end
@@ -678,7 +679,7 @@ function parallel_task_context.new_task_scope(params)
   cx.region_params = region_params
   cx.region_param_map = region_param_map
   cx.region_param_indices = region_param_indices
-  cx.task_point_symbol = get_new_tmp_var(index_type)
+  cx.task_point_symbol = get_new_tmp_var(index_type, "__point")
   cx.field_accesses = {}
   cx.field_access_stats = {}
   cx.stencils = terralib.newlist()
@@ -1037,10 +1038,12 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
     end))
   end
 
+  local base_name = (region_symbol:hasname() and region_symbol:getname()) or ""
+
   local color_space_expr = mk_expr_ispace(index_type, extent_expr)
   local partition_type =
     std.partition(disjoint, region_symbol, color_space_expr.expr_type)
-  local partition_symbol = get_new_tmp_var(partition_type)
+  local partition_symbol = get_new_tmp_var(partition_type, base_name .. "__equal")
 
   local stats = terralib.newlist { mk_stat_var(
     partition_symbol,
@@ -1052,7 +1055,7 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
 
   local color_space_symbol = caller_cx:find_color_space(pparam)
   if color_space_symbol == nil then
-    color_space_symbol = get_new_tmp_var(partition_type:colors())
+    color_space_symbol = get_new_tmp_var(partition_type:colors(), base_name .. "__colors")
     local colors_expr = mk_expr_colors_access(partition_symbol)
     stats:insert(mk_stat_var(color_space_symbol, nil, colors_expr))
     caller_cx:add_color_space(pparam, color_space_symbol)
@@ -1080,12 +1083,14 @@ end
 --   var ghost_partition = partition(disjoint, primary_region, coloring)
 --
 local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
+  local base_name = (pr:hasname() and pr:getname()) or ""
+
   local color_space_symbol = caller_cx:find_color_space(pparam)
   assert(color_space_symbol)
   local color_space_expr = mk_expr_id(color_space_symbol)
   local color_type =
     color_space_symbol:gettype().index_type(color_space_symbol)
-  local color_symbol = get_new_tmp_var(color_type)
+  local color_symbol = get_new_tmp_var(color_type, base_name .. "__color")
   local color_expr = mk_expr_id(color_symbol)
 
   local pr_type = std.as_read(pr:gettype())
@@ -1094,10 +1099,14 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
 
   -- TODO: disjointness check
   local gp_type = std.partition(std.aliased, pr, color_space_symbol:gettype())
-  local gp_symbol = get_new_tmp_var(gp_type)
+  local gp_symbol = get_new_tmp_var(
+    gp_type,
+    base_name .. "__gp" .. "__" .. stencil:polarity():concat("_"))
   local stats = terralib.newlist()
 
-  local coloring_symbol = get_new_tmp_var(c.legion_domain_point_coloring_t)
+  local coloring_symbol = get_new_tmp_var(
+    c.legion_domain_point_coloring_t,
+    base_name .. "__coloring")
   local coloring_expr = mk_expr_id(coloring_symbol)
   stats:insert(mk_stat_var(coloring_symbol, nil,
                            mk_expr_call(c.legion_domain_point_coloring_create)))
@@ -1117,7 +1126,7 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
     mk_expr_ctor(stencil:polarity():map(function(c)
       return mk_expr_constant(c, int)
     end))
-  local tmp_var = get_new_tmp_var(pr_rect_type)
+  local tmp_var = get_new_tmp_var(pr_rect_type, base_name .. "__rect")
   loop_body:insert(mk_stat_var(tmp_var, nil,
     mk_expr_ctor(terralib.newlist {shift_lo_expr, shift_hi_expr})))
   local ghost_rect_expr =
@@ -1178,12 +1187,14 @@ end
 --   var subset_partition = partition(*, subregion, coloring)
 --
 local function create_subset_partition(caller_cx, sr, pp, pparam)
+  local base_name = (sr:hasname() and sr:getname()) or ""
+
   local color_space_symbol = caller_cx:find_color_space(pparam)
   assert(color_space_symbol)
   local color_space_expr = mk_expr_id(color_space_symbol)
   local color_type =
     color_space_symbol:gettype().index_type(color_space_symbol)
-  local color_symbol = get_new_tmp_var(color_type)
+  local color_symbol = get_new_tmp_var(color_type, "__color")
   local color_expr = mk_expr_id(color_symbol)
 
   local sr_type = std.as_read(sr:gettype())
@@ -1192,10 +1203,10 @@ local function create_subset_partition(caller_cx, sr, pp, pparam)
 
   local sp_type =
     std.partition(pp:gettype().disjointness, sr, color_space_symbol:gettype())
-  local sp_symbol = get_new_tmp_var(sp_type)
+  local sp_symbol = get_new_tmp_var(sp_type, base_name .. "__sp")
   local stats = terralib.newlist()
 
-  local coloring_symbol = get_new_tmp_var(c.legion_domain_point_coloring_t)
+  local coloring_symbol = get_new_tmp_var(c.legion_domain_point_coloring_t, base_name .. "__coloring")
   local coloring_expr = mk_expr_id(coloring_symbol)
   stats:insert(mk_stat_var(coloring_symbol, nil,
                            mk_expr_call(c.legion_domain_point_coloring_create)))
@@ -1260,7 +1271,7 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
   local color_space_expr = mk_expr_id(color_space_symbol)
   local color_type =
     color_space_symbol:gettype().index_type(color_space_symbol)
-  local color_symbol = get_new_tmp_var(color_type)
+  local color_symbol = get_new_tmp_var(color_type, "__color")
   local color_expr = mk_expr_id(color_symbol)
 
   local args = terralib.newlist()
@@ -1330,7 +1341,7 @@ local function normalize_calls(parallelizable, call_stats)
     local stat_vars = terralib.newlist()
     local values = node[field]:map(function(value)
       if parallelizable(value) then
-        local tmp_var = get_new_tmp_var(std.as_read(value.expr_type))
+        local tmp_var = get_new_tmp_var(std.as_read(value.expr_type), "") -- FIXME: need semantic name
         stat_vars:insert(mk_stat_var(tmp_var, nil, value))
         return mk_expr_id(tmp_var)
       else
@@ -1399,8 +1410,10 @@ local function collect_calls(cx, parallelizable)
           if std.is_region(symbol_type) then
             cx:add_region_decl(node.symbols[idx], node)
             -- Reserve symbols for metadata
+            local base_name = (node.symbols[idx]:hasname() and node.symbols[idx]:getname()) or ""
             local bounds_symbol = get_new_tmp_var(
-              std.rect_type(symbol_type:ispace().index_type))
+              std.rect_type(symbol_type:ispace().index_type),
+              base_name .. "__bounds")
             cx:add_bounds_symbol(node.symbols[idx], bounds_symbol)
 
             if node.values[idx]:is(ast.typed.expr.IndexAccess) then
@@ -1767,7 +1780,11 @@ local function lift_all_accesses(task_cx, normalizer_cx, accesses, stat)
       }
       task_cx:add_access(access, stencil)
 
-      local tmp_symbol = get_new_tmp_var(std.as_read(access.expr_type))
+      local base_name = (
+        ((region_symbol:hasname() and region_symbol:getname()) or "")
+          .. "__" .. tostring(field_path))
+
+      local tmp_symbol = get_new_tmp_var(std.as_read(access.expr_type), base_name .. "__access")
       local stat = mk_stat_var(tmp_symbol, nil, access)
       task_cx:record_stat_requires_case_split(stat)
       stats:insert(stat)
@@ -2202,7 +2219,7 @@ function parallelize_tasks.stat(task_cx)
       local index_expr = extract_index_expr(node.values[1])
       -- If index expressions is complex, cache it before the comparisons
       if not index_expr:is(ast.typed.expr.ID) then
-        local index_symbol = get_new_tmp_var(std.as_read(index_expr.expr_type))
+        local index_symbol = get_new_tmp_var(std.as_read(index_expr.expr_type), "__index")
         stats:insert(mk_stat_var(index_symbol, nil, index_expr))
         index_expr =
           mk_expr_id(index_symbol, std.rawref(&index_symbol:gettype()))
@@ -2243,7 +2260,7 @@ function parallelize_tasks.stat(task_cx)
       end
       assert(case_split_if)
       if std.config["debug"] then
-        local index_symbol = get_new_tmp_var(std.as_read(index_expr.expr_type))
+        local index_symbol = get_new_tmp_var(std.as_read(index_expr.expr_type), "__index")
         case_split_if.else_block.stats:insertall(terralib.newlist {
           mk_stat_var(index_symbol, nil, index_expr),
           mk_stat_expr(mk_expr_call(print_point[index_symbol:gettype()],
