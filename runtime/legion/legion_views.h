@@ -885,12 +885,12 @@ namespace Legion {
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
+                                         FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out) = 0;
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
+                                         FieldMask copy_mask,
                                          FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
@@ -944,6 +944,11 @@ namespace Legion {
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
                   CopyAcrossHelper *helper) const;
+      void copy_to_temporary(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions);
     protected:
       void issue_nested_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
@@ -1008,6 +1013,10 @@ namespace Legion {
         { destination_dirty |= dest_dirty; }
       inline void update_reduction_fields(const FieldMask &reduction_mask)
         { reduction_fields |= reduction_mask; }
+      inline const FieldMask& get_already_valid_fields(void) const
+        { return destination_valid; }
+      inline bool has_dirty_destination_fields(void) const
+        { return !!destination_dirty; }
     public:
       RegionTreeNode *const root;
     protected:
@@ -1027,7 +1036,7 @@ namespace Legion {
     public:
       CompositeBase(Reservation &base_lock);
       virtual ~CompositeBase(void);
-    public:
+    protected:
       CompositeCopyNode* construct_copy_tree(MaterializedView *dst,
                                              RegionTreeNode *logical_node,
                                              FieldMask &copy_mask,
@@ -1184,12 +1193,12 @@ namespace Legion {
                  LegionMap<CompositeView*,FieldMask>::aligned &replacements);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
+                                         FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
+                                         FieldMask copy_mask,
                                          FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
@@ -1406,12 +1415,12 @@ namespace Legion {
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
+                                         FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
+                                         FieldMask copy_mask,
                                          FieldMask &written_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
