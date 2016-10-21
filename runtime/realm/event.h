@@ -32,13 +32,13 @@ namespace Realm {
       typedef ::legion_lowlevel_id_t id_t;
 
       id_t id;
-      bool operator<(const Event& rhs) const { return id < rhs.id; }
-      bool operator==(const Event& rhs) const { return id == rhs.id; }
-      bool operator!=(const Event& rhs) const { return id != rhs.id; }
+      bool operator<(const Event& rhs) const;
+      bool operator==(const Event& rhs) const;
+      bool operator!=(const Event& rhs) const;
 
       static const Event NO_EVENT;
 
-      inline bool exists(void) const { return id != 0; }
+      bool exists(void) const;
 
       // test whether an event has triggered without waiting
       bool has_triggered(void) const;
@@ -79,8 +79,6 @@ namespace Realm {
       static void advise_event_ordering(const std::set<Event>& happens_before,
 					Event happens_after, bool all_must_trigger = true);
     };
-
-    inline std::ostream& operator<<(std::ostream& os, Event e) { return os << std::hex << e.id << std::dec; }
 
     // A user level event has all the properties of event, except
     // it can be triggered by the user.  This prevents users from
@@ -125,7 +123,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-//include "event.inl"
+#include "event.inl"
 
 #endif // ifndef REALM_EVENT_H
 
