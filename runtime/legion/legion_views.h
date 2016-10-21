@@ -943,7 +943,33 @@ namespace Legion {
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  CopyAcrossHelper *helper);
+                  CopyAcrossHelper *helper) const;
+    protected:
+      void issue_nested_copies(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  CopyAcrossHelper *helper) const;
+      void issue_local_copies(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, FieldMask copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  CopyAcrossHelper *helper) const;
+      void issue_child_copies(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+                  CopyAcrossHelper *helper) const;
+      void issue_reductions(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+                  CopyAcrossHelper *helper) const;
     public:
       RegionTreeNode *const logical_node;
     protected:
@@ -952,7 +978,7 @@ namespace Legion {
       // Nodes from earlier composite views
       LegionMap<CompositeCopyNode*,FieldMask>::aligned nested_nodes;
       // Instances that we need to issue copies from
-      LegionMap<LogicalView*,FieldMask>::aligned src_views;
+      LegionMap<LogicalView*,FieldMask>::aligned source_views;
       // Reductions that we need to apply
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
     };
@@ -1390,6 +1416,11 @@ namespace Legion {
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL);
+      void issue_across_fill(const TraversalInfo &info,
+                             MaterializedView *dst, const FieldMask &copy_mask,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         CopyAcrossHelper *helper) const;
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
