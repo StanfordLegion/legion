@@ -185,8 +185,10 @@ if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
   mark_as_advanced(GASNet_ROOT_DIR)
   if(GASNet_ROOT_DIR)
     set(_GASNet_FIND_INCLUDE_OPTS PATHS ${GASNet_ROOT_DIR}/include NO_DEFAULT_PATH)
-  else
-    set(_GASNet_FIND_INCLUDE_OPTS HINTS ENV MPI_INCLUDE)
+  else()
+    if(DEFINED ENV{MPI_INCLUDE})
+    	set(_GASNet_FIND_INCLUDE_OPTS HINTS ENV MPI_INCLUDE)
+  	 endif()
   endif()
   find_path(GASNet_INCLUDE_DIR gasnet.h ${_GASNet_FIND_INCLUDE_OPTS})
 
