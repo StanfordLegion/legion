@@ -1587,8 +1587,10 @@ namespace Legion {
     class IndexIterator {
     public:
       IndexIterator(const Domain &dom, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, IndexSpace space, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, LogicalRegion lr, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, 
+                    IndexSpace space, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, 
+                    LogicalRegion lr, ptr_t start = ptr_t());
       IndexIterator(const IndexIterator &rhs);
       ~IndexIterator(void);
     public:

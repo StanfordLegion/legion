@@ -1206,6 +1206,7 @@ namespace Legion {
     class InstanceView;
     class DeferredView;
     class MaterializedView;
+    class CompositeBase;
     class CompositeView;
     class CompositeVersionInfo;
     class CompositeNode;

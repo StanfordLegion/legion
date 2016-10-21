@@ -914,6 +914,75 @@ namespace Legion {
     };
 
     /**
+     * \class CompositeCopyNode
+     * A class for tracking what data has to be copied from a 
+     * given node in a composite view. These tree data strucutres
+     * are used to determine if the instance is already valid and
+     * if not how to perform copies to the target instance.
+     */
+    class CompositeCopyNode {
+    public:
+      CompositeCopyNode(CompositeBase *base);
+      CompositeCopyNode(const CompositeCopyNode &rhs);
+      ~CompositeCopyNode(void);
+    public:
+      CompositeCopyNode& operator=(const CompositeCopyNode &rhs);
+    public:
+      void add_child_node(CompositeCopyNode *child,
+                          const FieldMask &child_mask);
+      void add_nested_node(CompositeCopyNode *nested, 
+                           const FieldMask &nested_mask);
+      void add_source_view(LogicalView *source_view, 
+                           const FieldMask &source_mask);
+      void add_reduction_view(ReductionView *reduction_view,
+                              const FieldMask &reduction_mask);
+    public:
+      CompositeBase *const base;
+    protected:
+      // Child nodes that need to be traversed
+      LegionMap<CompositeCopyNode*,FieldMask>::aligned child_nodes;
+      // Nodes from earlier composite views
+      LegionMap<CompositeCopyNode*,FieldMask>::aligned nested_nodes;
+      // Instances that we need to issue copies from
+      LegionMap<LogicalView*,FieldMask>::aligned src_views;
+      // Reductions that we need to apply
+      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+    };
+
+    /**
+     * \class CompositeCopier
+     * A class for helping to build the composite copy tree and 
+     * track whether the target instance is fully valid or not
+     * and if we have any dirty data in the target instance which
+     * might be overwritten if we have to issue copies.
+     */
+    class CompositeCopier {
+    public:
+      CompositeCopier(const FieldMask &copy_mask);
+      CompositeCopier(const CompositeCopier &rhs);
+      ~CompositeCopier(void);
+    public:
+      CompositeCopier& operator=(const CompositeCopier &rhs);
+    public:
+      void filter_written_fields(RegionTreeNode *node, FieldMask &mask) const;
+      void and_written_fields(RegionTreeNode *node, FieldMask &mask) const;
+      void record_written_fields(RegionTreeNode *node, const FieldMask &mask);
+    public:
+      inline void filter_destination_valid_fields(const FieldMask &other_dirty)
+        { if (!destination_valid) return; destination_valid -= other_dirty; }
+      inline void update_destination_dirty_fields(const FieldMask &dest_dirty)
+        { destination_dirty |= dest_dirty; }
+      inline void update_reduction_fields(const FieldMask &reduction_mask)
+        { reduction_fields |= reduction_mask; }
+    protected:
+      LegionMap<RegionTreeNode*,FieldMask>::aligned written_nodes;
+    protected:
+      FieldMask destination_valid;
+      FieldMask destination_dirty;
+      FieldMask reduction_fields;
+    };
+
+    /**
      * \class CompositeBase
      * A small helper class that provides some base functionality
      * for both the CompositeView and CompositeNode classes
@@ -922,6 +991,22 @@ namespace Legion {
     public:
       CompositeBase(Reservation &base_lock);
       virtual ~CompositeBase(void);
+    public:
+      CompositeCopyNode* construct_copy_tree(MaterializedView *dst,
+                                             RegionTreeNode *logical_node,
+                                             FieldMask &copy_mask,
+                                             FieldMask &locally_complete,
+                                             FieldMask &dominate_capture,
+                                             CompositeCopier &copier);
+      void perform_construction_analysis(MaterializedView *dst,
+                                         RegionTreeNode *logical_node,
+                                         const FieldMask &copy_mask,
+                                         FieldMask &local_capture,
+                                         FieldMask &dominate_capture,
+                                         FieldMask &local_dominate,
+                                         CompositeCopier &copier,
+                                         CompositeCopyNode *result,
+           LegionMap<CompositeNode*,FieldMask>::aligned &children_to_traverse);
     public:
       // precconditions: dst dependences and writes above 
       // postconditions: writes at-level and below
@@ -1235,7 +1320,7 @@ namespace Legion {
       // valid (e.g. on a remote node) then we have to remove our
       // references and possibly add them again
       bool currently_valid;
-    };
+    }; 
 
     /**
      * \class FillView
