@@ -922,7 +922,7 @@ namespace Legion {
      */
     class CompositeCopyNode {
     public:
-      CompositeCopyNode(CompositeBase *base);
+      CompositeCopyNode(RegionTreeNode *node);
       CompositeCopyNode(const CompositeCopyNode &rhs);
       ~CompositeCopyNode(void);
     public:
@@ -937,7 +937,15 @@ namespace Legion {
       void add_reduction_view(ReductionView *reduction_view,
                               const FieldMask &reduction_mask);
     public:
-      CompositeBase *const base;
+      void issue_copies(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+                  CopyAcrossHelper *helper);
+    public:
+      RegionTreeNode *const logical_node;
     protected:
       // Child nodes that need to be traversed
       LegionMap<CompositeCopyNode*,FieldMask>::aligned child_nodes;
@@ -958,7 +966,7 @@ namespace Legion {
      */
     class CompositeCopier {
     public:
-      CompositeCopier(const FieldMask &copy_mask);
+      CompositeCopier(RegionTreeNode *root, const FieldMask &copy_mask);
       CompositeCopier(const CompositeCopier &rhs);
       ~CompositeCopier(void);
     public:
@@ -974,6 +982,8 @@ namespace Legion {
         { destination_dirty |= dest_dirty; }
       inline void update_reduction_fields(const FieldMask &reduction_mask)
         { reduction_fields |= reduction_mask; }
+    public:
+      RegionTreeNode *const root;
     protected:
       LegionMap<RegionTreeNode*,FieldMask>::aligned written_nodes;
     protected:

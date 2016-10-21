@@ -3784,15 +3784,15 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompositeCopyNode::CompositeCopyNode(CompositeBase *b)
-      : base(b)
+    CompositeCopyNode::CompositeCopyNode(RegionTreeNode *node)
+      : logical_node(node)
     //--------------------------------------------------------------------------
     {
     }
     
     //--------------------------------------------------------------------------
     CompositeCopyNode::CompositeCopyNode(const CompositeCopyNode &rhs)
-      : base(NULL)
+      : logical_node(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3868,19 +3868,42 @@ namespace Legion {
       reduction_views[reduction_view] = reduction_mask;
     }
 
+    //--------------------------------------------------------------------------
+    void CompositeCopyNode::issue_copies(const TraversalInfo &traversal_info,
+                              MaterializedView *dst, const FieldMask &copy_mask,
+                              VersionTracker *src_version_tracker,
+                  const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                        LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                        LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+                        CopyAcrossHelper *helper)
+    //--------------------------------------------------------------------------
+    {
+      // We're doing the painter's algorithm
+      // First traverse any nested composite instances and issue
+      // copies from them since they are older than us
+
+      // Next issue copies from any of our src_views
+
+      // Traverse our children and issue any copies to them
+
+      // Finally apply any reductions that we have on the way back up
+    }
+
     /////////////////////////////////////////////////////////////
     // CompositeCopier 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompositeCopier::CompositeCopier(const FieldMask &copy_mask)
-      : destination_valid(copy_mask)
+    CompositeCopier::CompositeCopier(RegionTreeNode *r,
+                                     const FieldMask &copy_mask)
+      : root(r), destination_valid(copy_mask)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CompositeCopier::CompositeCopier(const CompositeCopier &rhs)
+      : root(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3907,10 +3930,23 @@ namespace Legion {
                                                 FieldMask &mask) const
     //--------------------------------------------------------------------------
     {
+      // Traverse up the tree and remove any writen fields 
+      // that have been written at this level or the parent
       LegionMap<RegionTreeNode*,FieldMask>::aligned::const_iterator finder = 
         written_nodes.find(node);
-      if (finder != written_nodes.end())
+      while (finder != written_nodes.end())
+      {
         mask -= finder->second;
+        if (!mask)
+          return;
+        if (node == root)
+          return;
+#ifdef DEBUG_LEGION
+        assert(node->get_depth() > root->get_depth());
+#endif
+        node = node->get_parent();
+        finder = written_nodes.find(node);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3920,10 +3956,19 @@ namespace Legion {
     {
       LegionMap<RegionTreeNode*,FieldMask>::aligned::const_iterator finder = 
         written_nodes.find(node);
-      if (finder != written_nodes.end())
-        mask &= finder->second;
-      else
-        mask.clear();
+      FieldMask written_mask;
+      while (finder != written_nodes.end())
+      {
+        written_mask |= finder->second;
+        if (node == root)
+          break;
+#ifdef DEBUG_LEGION
+        assert(node->get_depth() > root->get_depth());
+#endif
+        node = node->get_parent();
+        finder = written_nodes.find(node);
+      }
+      mask &= written_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -3974,7 +4019,7 @@ namespace Legion {
       if (!copy_mask)
         return NULL;
       // If we get here, we're going to return something
-      CompositeCopyNode *result = new CompositeCopyNode(this);
+      CompositeCopyNode *result = new CompositeCopyNode(logical_node);
       // Do the ready check first
       perform_ready_check(copy_mask);
       // Figure out which children we need to traverse because they intersect
@@ -4020,9 +4065,15 @@ namespace Legion {
         // can filter our local_capture mask and report up the tree that
         // we are complete
         if (!!complete_child)
+        {
           local_capture -= complete_child;
+          copier.record_written_fields(logical_node, complete_child);
+        }
         if (is_complete && !!locally_complete)
+        {
           local_capture -= locally_complete;
+          copier.record_written_fields(logical_node, locally_complete);
+        }
       }
       // If we have to capture any data locally, do that now
       if (!!local_capture)
