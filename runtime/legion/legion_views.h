@@ -885,15 +885,14 @@ namespace Legion {
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
+                                         FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out) = 0;
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
-                                         FieldMask &written_mask,
+                                         FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         std::set<ApEvent> &postconditions,
                                          CopyAcrossHelper *helper = NULL) = 0; 
     };
 
@@ -914,6 +913,125 @@ namespace Legion {
     };
 
     /**
+     * \class CompositeCopyNode
+     * A class for tracking what data has to be copied from a 
+     * given node in a composite view. These tree data strucutres
+     * are used to determine if the instance is already valid and
+     * if not how to perform copies to the target instance.
+     */
+    class CompositeCopyNode {
+    public:
+      CompositeCopyNode(RegionTreeNode *node, CompositeView *view = NULL);
+      CompositeCopyNode(const CompositeCopyNode &rhs);
+      ~CompositeCopyNode(void);
+    public:
+      CompositeCopyNode& operator=(const CompositeCopyNode &rhs);
+    public:
+      void add_child_node(CompositeCopyNode *child,
+                          const FieldMask &child_mask);
+      void add_nested_node(CompositeCopyNode *nested, 
+                           const FieldMask &nested_mask);
+      void add_source_view(LogicalView *source_view, 
+                           const FieldMask &source_mask);
+      void add_reduction_view(ReductionView *reduction_view,
+                              const FieldMask &reduction_mask);
+    public:
+      void issue_copies(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+                  CopyAcrossHelper *helper) const;
+      void copy_to_temporary(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions);
+    protected:
+      void issue_nested_copies(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  CopyAcrossHelper *helper) const;
+      void issue_local_copies(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, FieldMask copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  CopyAcrossHelper *helper) const;
+      void issue_child_copies(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+                  CopyAcrossHelper *helper) const;
+      void issue_reductions(const TraversalInfo &traversal_info,
+                        MaterializedView *dst, const FieldMask &copy_mask,
+                        VersionTracker *src_version_tracker,
+            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                  LegionMap<ApEvent,FieldMask>::aligned &postreductions,
+                  CopyAcrossHelper *helper) const;
+    public:
+      RegionTreeNode *const logical_node;
+      // Only valid at roots of copy trees
+      CompositeView *const view_node;
+    protected:
+      // Child nodes that need to be traversed
+      LegionMap<CompositeCopyNode*,FieldMask>::aligned child_nodes;
+      // Nodes from earlier composite views
+      LegionMap<CompositeCopyNode*,FieldMask>::aligned nested_nodes;
+      // Instances that we need to issue copies from
+      LegionMap<LogicalView*,FieldMask>::aligned source_views;
+      // Reductions that we need to apply
+      LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+    };
+
+    /**
+     * \class CompositeCopier
+     * A class for helping to build the composite copy tree and 
+     * track whether the target instance is fully valid or not
+     * and if we have any dirty data in the target instance which
+     * might be overwritten if we have to issue copies.
+     */
+    class CompositeCopier {
+    public:
+      CompositeCopier(RegionTreeNode *root, const FieldMask &copy_mask);
+      CompositeCopier(const CompositeCopier &rhs);
+      ~CompositeCopier(void);
+    public:
+      CompositeCopier& operator=(const CompositeCopier &rhs);
+    public:
+      void filter_written_fields(RegionTreeNode *node, FieldMask &mask) const;
+      void and_written_fields(RegionTreeNode *node, FieldMask &mask) const;
+      void record_written_fields(RegionTreeNode *node, const FieldMask &mask);
+    public:
+      inline void filter_destination_valid_fields(const FieldMask &other_dirty)
+        { if (!destination_valid) return; destination_valid -= other_dirty; }
+      inline void update_destination_dirty_fields(const FieldMask &dest_dirty)
+        { destination_dirty |= dest_dirty; }
+      inline void update_reduction_fields(const FieldMask &reduction_mask)
+        { reduction_fields |= reduction_mask; }
+      inline const FieldMask& get_already_valid_fields(void) const
+        { return destination_valid; }
+      inline const FieldMask& get_reduction_fields(void) const
+        { return reduction_fields; }
+      // They are only dirty if they are not also valid
+      inline bool has_dirty_destination_fields(void) const
+        { return !!(destination_dirty - destination_valid); }
+    public:
+      RegionTreeNode *const root;
+    protected:
+      LegionMap<RegionTreeNode*,FieldMask>::aligned written_nodes;
+    protected:
+      FieldMask destination_valid;
+      FieldMask destination_dirty;
+      FieldMask reduction_fields;
+    };
+
+    /**
      * \class CompositeBase
      * A small helper class that provides some base functionality
      * for both the CompositeView and CompositeNode classes
@@ -922,20 +1040,23 @@ namespace Legion {
     public:
       CompositeBase(Reservation &base_lock);
       virtual ~CompositeBase(void);
-    public:
-      // precconditions: dst dependences and writes above 
-      // postconditions: writes at-level and below
-      // postreductions: reductions from below in the tree
-      void issue_deferred_copies(const TraversalInfo &info, 
-                                 MaterializedView *dst, FieldMask copy_mask,
-                                 VersionTracker *src_version_tracker,
-                                 RegionTreeNode *logical_node,
-                                 FieldMask &written_mask,
-              const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                    LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                    LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                    CopyAcrossHelper *helper, FieldMask dominate_mask, 
-                    bool check_overwrite, bool check_ready = true);
+    protected:
+      CompositeCopyNode* construct_copy_tree(MaterializedView *dst,
+                                             RegionTreeNode *logical_node,
+                                             FieldMask &copy_mask,
+                                             FieldMask &locally_complete,
+                                             FieldMask &dominate_capture,
+                                             CompositeCopier &copier,
+                                             CompositeView *owner = NULL);
+      void perform_construction_analysis(MaterializedView *dst,
+                                         RegionTreeNode *logical_node,
+                                         const FieldMask &copy_mask,
+                                         FieldMask &local_capture,
+                                         FieldMask &dominate_capture,
+                                         FieldMask &local_dominate,
+                                         CompositeCopier &copier,
+                                         CompositeCopyNode *result,
+           LegionMap<CompositeNode*,FieldMask>::aligned &children_to_traverse);
     public:
       virtual SingleTask* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
@@ -943,49 +1064,6 @@ namespace Legion {
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool needs_lock = true) = 0;
-    protected:
-      void perform_local_analysis(MaterializedView *dst,
-                   RegionTreeNode *logical_node, 
-                   LegionMap<CompositeNode*,FieldMask>::aligned &to_traverse,
-                   bool check_overwrite, const FieldMask &copy_mask,
-                   FieldMask &dominate_mask, FieldMask &local_dominate,
-                   FieldMask &top_need_copy, FieldMask &update_mask,
-                   FieldMask &reduction_update,
-                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views);
-      void perform_overwrite_check(MaterializedView *dst,
-                                   const FieldMask &check_mask,
-                                   const FieldMask &need_copy_above,
-                                   FieldMask &need_temporary,
-                                   FieldMask &already_valid,
-                                   FieldMask &reductions_below);
-      void copy_to_temporary(const TraversalInfo &info, MaterializedView *dst,
-                             const FieldMask &temp_mask, 
-                             RegionTreeNode *logical_node,
-                             VersionTracker *src_version_tracker,
-                             CopyAcrossHelper *across_helper,
-                const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
-                      LegionMap<ApEvent,FieldMask>::aligned &postconditions);
-      void compute_update_masks(const FieldMask &copy_mask,
-                                const FieldMask &dominate_mask,
-                                const FieldMask &local_dominate,
-                                FieldMask &update_mask, 
-                                FieldMask &reduc_update);
-      void issue_update_copies(const TraversalInfo &info, MaterializedView *dst,
-                               FieldMask copy_mask,RegionTreeNode *logical_node,
-                               VersionTracker *src_version_tracker,
-                               FieldMask &written_mask,
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
-                          CopyAcrossHelper *across_helper) const;
-      void issue_update_reductions(const TraversalInfo &info, 
-                                   MaterializedView *dst, 
-                                   const FieldMask &reduce_mask,
-                                   VersionTracker *src_version_tracker,
-                    const LegionMap<ApEvent,FieldMask>::aligned &pre_above,
-                    const LegionMap<ApEvent,FieldMask>::aligned &pre_below,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                          CopyAcrossHelper *helper) const;
     public:
       CompositeNode* find_child_node(RegionTreeNode *child);
     private:
@@ -1063,15 +1141,14 @@ namespace Legion {
                  LegionMap<CompositeView*,FieldMask>::aligned &replacements);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
+                                         FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
-                                         FieldMask &written_mask,
+                                         FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         std::set<ApEvent> &postconditions,
                                          CopyAcrossHelper *helper = NULL);
     public:
       // From VersionTracker
@@ -1200,22 +1277,8 @@ namespace Legion {
                                  VersionState *state, const FieldMask &mask);
       void record_version_state(VersionState *state, const FieldMask &mask);
     public:
-      void find_sound_domination_mask(RegionTreeNode *logical_node,
-                                      const FieldMask &mask,
-                                      FieldMask &dom_fields); 
-      void compute_local_complete(MaterializedView *dst,
-                                  const FieldMask &test_mask,
-                                  FieldMask &local_complete);
       void capture_field_versions(FieldVersions &versions,
                                   const FieldMask &capture_mask) const;
-      void issue_deferred_reductions_only(const TraversalInfo &info, 
-                                 MaterializedView *dst, 
-                                 const FieldMask &reduce_mask,
-                                 VersionTracker *src_version_tracker,
-              const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                    LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                    LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                    CopyAcrossHelper *helper);
     public:
       RegionTreeNode *const logical_node;
       CompositeBase *const parent;
@@ -1235,7 +1298,7 @@ namespace Legion {
       // valid (e.g. on a remote node) then we have to remove our
       // references and possibly add them again
       bool currently_valid;
-    };
+    }; 
 
     /**
      * \class FillView
@@ -1285,16 +1348,20 @@ namespace Legion {
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
+                                         FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
-                                         const FieldMask &copy_mask,
-                                         FieldMask &written_mask,
+                                         FieldMask copy_mask,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                         std::set<ApEvent> &postconditions,
+                                         CopyAcrossHelper *helper = NULL);
+      void issue_fill_across(const TraversalInfo &info,
+                             MaterializedView *dst, const FieldMask &copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                         CopyAcrossHelper *helper = NULL);
+                                         CopyAcrossHelper *helper = NULL) const;
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);

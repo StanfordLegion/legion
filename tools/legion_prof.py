@@ -33,7 +33,8 @@ inst_timeline_pat = re.compile(prefix + r'Prof Inst Timeline (?P<opid>[0-9]+) (?
 user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
 task_wait_info_pat = re.compile(prefix + r'Prof Task Wait Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
 meta_wait_info_pat = re.compile(prefix + r'Prof Meta Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
-kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<over>[0-1])')
+kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
+kind_pat_over = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<over>[0-1])')
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
 multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
@@ -1448,10 +1449,14 @@ class State(object):
                                             read_time(m.group('ready')),
                                             read_time(m.group('end')))
                     continue
-                m = kind_pat.match(line)
+                m = kind_pat_over.match(line)
                 if m is not None:
                     self.log_kind(int(m.group('tid')),
                                   m.group('name'), int(m.group('over')))
+                    continue
+                m = kind_pat.match(line)
+                if m is not None:
+                    self.log_kind(int(m.group('tid')), m.group('name'), 0)
                     continue
                 m = variant_pat.match(line)
                 if m is not None:
@@ -2010,18 +2015,35 @@ class State(object):
                                     repr(tsv_file_name)))
         html_file.close()
 
+    def find_unique_dirname(self, dirname):
+        if (not os.path.exists(dirname)):
+            return dirname
+        # if the dirname exists, loop through dirname.i until wee
+        # find one that doesn't exist
+        i = 1
+        while (True):
+            potential_dir = dirname + "." + str(i)
+            if (not os.path.exists(potential_dir)):
+                return potential_dir
+            i += 1
+
     def emit_interactive_visualization(self, output_prefix, show_procs,
                                        show_channels, show_instances):
         self.assign_colors()
-        template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "legion_prof.html.template")
-        data_tsv_file_name = output_prefix + "_data.tsv"
-        processor_tsv_file_name = output_prefix + "_processor.tsv"
-        html_file_name = output_prefix + ".html"
-        print 'Generating interactive visualization files %s, %s, and %s' % \
-                (data_tsv_file_name,processor_tsv_file_name,html_file_name)
 
-        template_file = open(template_file_name, "r")
+        html_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+                "legion_prof.html.template")
+        js_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+                "timeline.js.template")
+        output_dirname = self.find_unique_dirname(output_prefix)
+        data_tsv_file_name = os.path.join(output_dirname, "legion_prof_data.tsv")
+        processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
+        html_file_name = os.path.join(output_dirname, "index.html")
+        js_file_name = os.path.join(output_dirname, "timeline.js")
+        print 'Generating interactive visualization files in directory ' + output_dirname
+
+        os.mkdir(output_dirname)
+        template_file = open(js_template_file_name, "r")
         template = template_file.read()
         template_file.close()
 
@@ -2065,11 +2087,12 @@ class State(object):
                 processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(memory)))
         processor_tsv_file.close()
 
-        html_file = open(html_file_name, "w")
-        html_file.write(template % (last_time, base_level + 1,
+        js_file = open(js_file_name, "w")
+        js_file.write(template % (last_time, base_level + 1,
                                     repr(os.path.basename(data_tsv_file_name)),
                                     repr(os.path.basename(processor_tsv_file_name))))
-        html_file.close()
+        js_file.close()
+        shutil.copyfile(html_template_file_name, html_file_name)
 
 def usage():
     print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'

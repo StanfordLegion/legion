@@ -911,9 +911,6 @@ namespace Legion {
       COMPOSITE_VIEW_ISSUE_DEFERRED_COPIES_CALL,
       COMPOSITE_NODE_CAPTURE_PHYSICAL_STATE_CALL,
       COMPOSITE_NODE_SIMPLIFY_CALL,
-      COMPOSITE_NODE_ISSUE_DEFERRED_COPIES_CALL,
-      COMPOSITE_NODE_ISSUE_UPDATE_COPIES_CALL,
-      COMPOSITE_NODE_ISSUE_UPDATE_REDUCTIONS_CALL,
       REDUCTION_VIEW_PERFORM_REDUCTION_CALL,
       REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_CALL,
       REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_ACROSS_CALL,
@@ -1071,9 +1068,6 @@ namespace Legion {
       "Composite View Issue Deferred Copies",                         \
       "Composite Node Capture Physical State",                        \
       "Composite Node Simplify",                                      \
-      "Composite Node Issue Deferred Copies",                         \
-      "Composite Node Issue Update Copies",                           \
-      "Composite Node Issue Update Reductions",                       \
       "Reduction View Perform Reduction",                             \
       "Reduction View Perform Deferred Reduction",                    \
       "Reduction View Perform Deferred Reduction Across",             \
@@ -1208,6 +1202,7 @@ namespace Legion {
     class InstanceView;
     class DeferredView;
     class MaterializedView;
+    class CompositeBase;
     class CompositeView;
     class CompositeVersionInfo;
     class CompositeNode;

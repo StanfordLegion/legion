@@ -254,7 +254,7 @@ def driver():
         help='Build Legion with features (also via USE_*).')
     parser.add_argument(
         '--launcher', dest='launcher', action='store',
-        default=os.environ['LAUNCHER'] == '1' if 'LAUNCHER' in os.environ else None,
+        default=os.environ['LAUNCHER'] if 'LAUNCHER' in os.environ else None,
         help='Launcher for Legion tests (also via LAUNCHER).')
 
     parser.add_argument(

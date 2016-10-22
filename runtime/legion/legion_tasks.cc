@@ -2059,15 +2059,18 @@ namespace Legion {
           // Update the region requirement kind 
           regions[idx].handle_type = SINGULAR;
         }
-        // Always check to see if there are any restrictions
-        if (has_restrictions(idx, regions[idx].region))
-          regions[idx].flags |= RESTRICTED_FLAG;
         // Check to see if the region is a NO_REGION,
         // if it is then switch the privilege to NO_ACCESS
         if (regions[idx].region == LogicalRegion::NO_REGION)
+        {
           regions[idx].privilege = NO_ACCESS;
+          continue;
+        }
         else
           all_invalid = false;
+        // Always check to see if there are any restrictions
+        if (has_restrictions(idx, regions[idx].region))
+          regions[idx].flags |= RESTRICTED_FLAG;
       }
       // Log our requirements that we computed
       if (Runtime::legion_spy_enabled)

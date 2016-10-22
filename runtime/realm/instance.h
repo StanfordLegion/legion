@@ -34,13 +34,13 @@ namespace Realm {
     public:
       typedef ::legion_lowlevel_id_t id_t;
       id_t id;
-      bool operator<(const RegionInstance &rhs) const { return id < rhs.id; }
-      bool operator==(const RegionInstance &rhs) const { return id == rhs.id; }
-      bool operator!=(const RegionInstance &rhs) const { return id != rhs.id; }
+      bool operator<(const RegionInstance &rhs) const;
+      bool operator==(const RegionInstance &rhs) const;
+      bool operator!=(const RegionInstance &rhs) const;
 
       static const RegionInstance NO_INST;
 
-      bool exists(void) const { return id != 0; }
+      bool exists(void) const;
 
       Memory get_location(void) const;
 
@@ -48,10 +48,8 @@ namespace Realm {
 
       struct DestroyedField {
       public:
-        DestroyedField(void) 
-          : offset(0), size(0), serdez_id(0) { }
-        DestroyedField(unsigned o, unsigned s, CustomSerdezID sid)
-          : offset(o), size(s), serdez_id(sid) { }
+        DestroyedField(void);
+        DestroyedField(unsigned o, unsigned s, CustomSerdezID sid);
       public:
 	unsigned offset, size;
 	CustomSerdezID serdez_id;
@@ -69,11 +67,9 @@ namespace Realm {
 				 const void *reason_data, size_t reason_size) const;
     };
 
-    inline std::ostream& operator<<(std::ostream& os, RegionInstance r) { return os << std::hex << r.id << std::dec; }
-		
 }; // namespace Realm
 
-//include "instance.inl"
+#include "instance.inl"
 
 #endif // ifndef REALM_INSTANCE_H
 

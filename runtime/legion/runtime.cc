@@ -7585,6 +7585,9 @@ namespace Legion {
         LogicalRegion result, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
+      // NO_REGION is always an acceptable answer
+      if (result == LogicalRegion::NO_REGION)
+        return;
       if (result.get_tree_id() != req.region.get_tree_id())
       {
         log_run.error("Projection functor %d produced an invalid "
@@ -7629,6 +7632,9 @@ namespace Legion {
         LogicalRegion result, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
+      // NO_REGION is always an acceptable answer
+      if (result == LogicalRegion::NO_REGION)
+        return;
       if (result.get_tree_id() != req.partition.get_tree_id())
       {
         log_run.error("Projection functor %d produced an invalid "
