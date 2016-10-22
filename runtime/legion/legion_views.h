@@ -922,7 +922,7 @@ namespace Legion {
      */
     class CompositeCopyNode {
     public:
-      CompositeCopyNode(RegionTreeNode *node);
+      CompositeCopyNode(RegionTreeNode *node, CompositeView *view = NULL);
       CompositeCopyNode(const CompositeCopyNode &rhs);
       ~CompositeCopyNode(void);
     public:
@@ -977,6 +977,8 @@ namespace Legion {
                   CopyAcrossHelper *helper) const;
     public:
       RegionTreeNode *const logical_node;
+      // Only valid at roots of copy trees
+      CompositeView *const view_node;
     protected:
       // Child nodes that need to be traversed
       LegionMap<CompositeCopyNode*,FieldMask>::aligned child_nodes;
@@ -1045,7 +1047,8 @@ namespace Legion {
                                              FieldMask &copy_mask,
                                              FieldMask &locally_complete,
                                              FieldMask &dominate_capture,
-                                             CompositeCopier &copier);
+                                             CompositeCopier &copier,
+                                             CompositeView *owner = NULL);
       void perform_construction_analysis(MaterializedView *dst,
                                          RegionTreeNode *logical_node,
                                          const FieldMask &copy_mask,

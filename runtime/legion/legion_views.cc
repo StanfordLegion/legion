@@ -3784,15 +3784,15 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompositeCopyNode::CompositeCopyNode(RegionTreeNode *node)
-      : logical_node(node)
+    CompositeCopyNode::CompositeCopyNode(RegionTreeNode *node, CompositeView *v)
+      : logical_node(node), view_node(v)
     //--------------------------------------------------------------------------
     {
     }
     
     //--------------------------------------------------------------------------
     CompositeCopyNode::CompositeCopyNode(const CompositeCopyNode &rhs)
-      : logical_node(NULL)
+      : logical_node(NULL), view_node(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3841,6 +3841,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(nested->view_node != NULL);
       assert(nested_nodes.find(nested) == nested_nodes.end());
 #endif
       nested_nodes[nested] = nested_mask;
@@ -4076,8 +4077,11 @@ namespace Legion {
         if (!overlap)
           continue;
         nested_mask |= overlap;
+#ifdef DEBUG_LEGION
+        assert(it->first->view_node != NULL);
+#endif
         it->first->issue_copies(traversal_info, dst, overlap, 
-            src_version_tracker, preconditions, postconditions,
+            it->first->view_node, preconditions, postconditions,
             postreductions, helper);
       }
       // We have to merge everything back together into postconditions here
@@ -4403,7 +4407,8 @@ namespace Legion {
                                                    FieldMask &copy_mask,
                                                    FieldMask &locally_complete,
                                                    FieldMask &dominate_capture,
-                                                   CompositeCopier &copier)
+                                                   CompositeCopier &copier,
+                                                   CompositeView *owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4415,7 +4420,7 @@ namespace Legion {
       if (!copy_mask)
         return NULL;
       // If we get here, we're going to return something
-      CompositeCopyNode *result = new CompositeCopyNode(logical_node);
+      CompositeCopyNode *result = new CompositeCopyNode(logical_node, owner);
       // Do the ready check first
       perform_ready_check(copy_mask);
       // Figure out which children we need to traverse because they intersect
@@ -4537,7 +4542,8 @@ namespace Legion {
             FieldMask dominate = overlap;
             CompositeCopyNode *nested = it->first->construct_copy_tree(dst,
                                     it->first->logical_node, overlap, 
-                                    dummy_complete_below, dominate, copier); 
+                                    dummy_complete_below, dominate, 
+                                    copier, it->first); 
             if (nested != NULL)
               result->add_nested_node(nested, overlap);
             if (!local_capture)
@@ -5914,7 +5920,7 @@ namespace Legion {
       FieldMask dummy_locally_complete;
       FieldMask dominate_capture(copy_mask);
       CompositeCopyNode *copy_tree = construct_copy_tree(dst, logical_node,
-          copy_mask, dummy_locally_complete, dominate_capture, copier);
+          copy_mask, dummy_locally_complete, dominate_capture, copier, this);
 #ifdef DEBUG_LEGION
       assert(copy_tree != NULL);
 #endif
@@ -6031,7 +6037,7 @@ namespace Legion {
       FieldMask dummy_locally_complete;
       FieldMask dominate_capture(copy_mask);
       CompositeCopyNode *copy_tree = construct_copy_tree(dst, logical_node,
-          copy_mask, dummy_locally_complete, dominate_capture, copier);
+          copy_mask, dummy_locally_complete, dominate_capture, copier, this);
 #ifdef DEBUG_LEGION
       assert(copy_tree != NULL);
 #endif
