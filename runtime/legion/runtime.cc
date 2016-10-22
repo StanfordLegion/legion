@@ -432,7 +432,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!ready_event.has_triggered())
-        ready_event.wait();
+      {
+        SingleTask *context = 
+          (producer_op == NULL) ? NULL : producer_op->get_parent();
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          ready_event.wait();
+          context->end_task_wait();
+        }
+        else
+          ready_event.wait();
+      }
       if (empty)
       {
         if (producer_op != NULL)
@@ -451,7 +462,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!ready_event.has_triggered())
-        ready_event.wait();
+      {
+        SingleTask *context = 
+          (producer_op == NULL) ? NULL : producer_op->get_parent();
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          ready_event.wait();
+          context->end_task_wait();
+        }
+        else
+          ready_event.wait();
+      }
       if (empty)
       {
         if (producer_op != NULL)
