@@ -4181,31 +4181,18 @@ namespace Legion {
                                  actual_copy_mask, src_instances, 
                                  src_version_tracker, postconditions, 
                                  across_helper, logical_node);
-        // Filter the copy mask in case we have to issue fills
-        if (!deferred_instances.empty())
-        {
-          copy_mask -= actual_copy_mask;
-          if (!copy_mask)
-            return;
-        }
       }
       if (!deferred_instances.empty())
       {
         for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
               deferred_instances.begin(); it != deferred_instances.end(); it++)
         {
-          const FieldMask overlap = it->second & copy_mask;
-          if (!overlap)
-            continue;
 #ifdef DEBUG_LEGION
           assert(it->first->is_fill_view());
 #endif
           FillView *fill_view = it->first->as_fill_view();
-          fill_view->issue_across_fill(info, dst, overlap, preconditions,
+          fill_view->issue_across_fill(info, dst, it->second, preconditions,
                                        postconditions, across_helper);
-          copy_mask -= overlap;
-          if (!copy_mask)
-            break;
         }
       }
     }
@@ -4686,7 +4673,8 @@ namespace Legion {
         }
       }
       // Any dirty fields that we have here also need to be captured locally
-      local_capture = dirty_mask & copy_mask;
+      // This includes any reduction fields which we are going to be reducing to
+      local_capture = (dirty_mask | reduction_mask) & copy_mask;
       // Always include our local dominate in the local capture
       if (!!local_dominate)
         local_capture |= local_dominate;
