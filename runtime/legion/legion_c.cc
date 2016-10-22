@@ -877,6 +877,68 @@ legion_index_partition_create_equal(legion_runtime_t runtime_,
 // Shim for Legion Dependent Partition API
 
 #if USE_LEGION_PARTAPI_SHIM
+
+// A decorator class to help shim tasks return STL sets
+template <typename T>
+class STLSetSerializer {
+public:
+  STLSetSerializer(void) { }
+  STLSetSerializer(const std::set<T> &s) : set(s) {}
+public:
+  size_t legion_buffer_size(void) const;
+  size_t legion_serialize(void *buffer) const;
+  size_t legion_deserialize(const void *buffer);
+  size_t static deserialize(std::set<T>& set, const void *buffer);
+public:
+  inline std::set<T>& ref(void) { return set; }
+private:
+  std::set<T> set;
+};
+
+template <typename T>
+size_t STLSetSerializer<T>::legion_buffer_size(void) const
+{
+  size_t result = sizeof(size_t); // number of elements
+  result += set.size() * sizeof(T);
+  return result;
+}
+
+template <typename T>
+size_t STLSetSerializer<T>::legion_serialize(void *buffer) const
+{
+  char *target = (char*)buffer;
+  *((size_t*)target) = set.size();
+  target += sizeof(size_t);
+  for (typename std::set<T>::const_iterator it = set.begin();
+       it != set.end(); it++)
+  {
+    *((T*)target) = *it;
+    target += sizeof(T);
+  }
+  return (size_t(target) - size_t(buffer));
+}
+
+template <typename T>
+size_t STLSetSerializer<T>::deserialize(std::set<T>& set, const void *buffer)
+{
+  const char *source = (const char*)buffer;
+  size_t num_elements = *((const size_t*)source);
+  source += sizeof(size_t);
+  for (size_t idx = 0; idx < num_elements; idx++)
+  {
+    set.insert(*((const T*)source));
+    source += sizeof(T);
+  }
+  // Return the number of bytes consumed
+  return (size_t(source) - size_t(buffer));
+}
+
+template <typename T>
+size_t STLSetSerializer<T>::legion_deserialize(const void *buffer)
+{
+  return STLSetSerializer<T>::deserialize(set, buffer);
+}
+
 class PartitionByUnionShim {
 public:
   static TaskID register_task();
@@ -1413,27 +1475,22 @@ public:
                                PartitionKind part_kind = COMPUTE_KIND,
                                int color = AUTO_GENERATE_ID,
                                bool allocable = false);
-  static IndexPartition task(const Task *task,
-                             const std::vector<PhysicalRegion> &regions,
-                             Context ctx, HighLevelRuntime *runtime);
+  static STLSetSerializer<ptr_t> task(const Task *task,
+                                     const std::vector<PhysicalRegion> &regions,
+                                      Context ctx, HighLevelRuntime *runtime);
 private:
   static const TaskID task_id = 590467; // a "unique" number
   struct Args {
-    IndexSpace handle;
     LogicalPartition projection;
-    LogicalRegion parent;
     FieldID fid;
-    Domain color_space;
-    PartitionKind part_kind;
-    int color;
-    bool allocable;
   };
 };
 
 Processor::TaskFuncID
 PartitionByImageShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
+  return
+    HighLevelRuntime::register_legion_task<STLSetSerializer<ptr_t>, task>(
     task_id, Processor::LOC_PROC, true, false,
     AUTO_GENERATE_ID, TaskConfigOptions(),
     "PartitionByImageShim::task");
@@ -1452,24 +1509,31 @@ PartitionByImageShim::launch(HighLevelRuntime *runtime,
                              bool allocable)
 {
   Args args;
-  args.handle = handle;
   args.projection = projection;
-  args.parent = parent;
   args.fid = fid;
-  args.color_space = color_space;
-  args.part_kind = part_kind;
-  args.color = color;
-  args.allocable = allocable;
   TaskArgument targs(&args, sizeof(args));
-  TaskLauncher task(task_id, targs);
+  IndexLauncher task(task_id, color_space, targs, ArgumentMap());
   task.add_region_requirement(
-    RegionRequirement(parent, READ_ONLY, EXCLUSIVE, parent)
+    RegionRequirement(projection, 0, READ_ONLY, EXCLUSIVE, parent)
     .add_field(fid));
-  Future f = runtime->execute_task(ctx, task);
-  return f.get_result<IndexPartition>();
+  PointColoring coloring;
+  FutureMap fmap = runtime->execute_index_space(ctx, task);
+
+  for(Domain::DomainPointIterator c(color_space); c; c++) {
+    Future f = fmap.get_future(c.p);
+    STLSetSerializer<ptr_t>::deserialize(
+      coloring[upgrade_point(c.p)].points, f.get_untyped_pointer());
+  }
+
+  IndexPartition ip =
+    runtime->create_index_partition(
+      ctx, handle, color_space, coloring,
+      part_kind, color, allocable);
+
+  return ip;
 }
 
-IndexPartition
+STLSetSerializer<ptr_t>
 PartitionByImageShim::task(const Task *task,
                            const std::vector<PhysicalRegion> &regions,
                            Context ctx, HighLevelRuntime *runtime)
@@ -1477,26 +1541,22 @@ PartitionByImageShim::task(const Task *task,
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
-  PointColoring coloring;
   LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
     regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
-  for(Domain::DomainPointIterator c(args.color_space); c; c++) {
-    LogicalRegion r =
-      runtime->get_logical_subregion_by_color(ctx, args.projection, c.p);
-    for (IndexIterator it(runtime, ctx, r); it.has_next();) {
-      size_t count = 0;
-      ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-        coloring[upgrade_point(c.p)].points.insert(accessor.read(p));
-      }
+  DomainPoint c = task->index_point;
+  LogicalRegion r =
+    runtime->get_logical_subregion_by_color(ctx, args.projection, c);
+
+  STLSetSerializer<ptr_t> points;
+  for (IndexIterator it(runtime, ctx, r); it.has_next();) {
+    size_t count = 0;
+    ptr_t start = it.next_span(count);
+    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+      points.ref().insert(accessor.read(p));
     }
   }
 
-  IndexPartition ip =
-    runtime->create_index_partition(
-      ctx, args.handle, args.color_space, coloring,
-      args.part_kind, args.color, args.allocable);
-  return ip;
+  return points;
 }
 
 static TaskID __attribute__((unused)) force_PartitionByImageShim_static_initialize =
