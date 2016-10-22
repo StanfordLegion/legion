@@ -5941,7 +5941,6 @@ namespace Legion {
       }
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      LegionMap<ApEvent,FieldMask>::aligned postreductions;
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
                                    false/*single copy*/,
                                    copy_mask, &info.version_info, 
@@ -5970,9 +5969,13 @@ namespace Legion {
       }
       else
       {
+        LegionMap<ApEvent,FieldMask>::aligned postreductions;
         // No temporary instance necessary here
         copy_tree->issue_copies(info, dst, copy_mask, this, 
             preconditions, postconditions, postreductions, NULL);
+        if (!postreductions.empty())
+          postconditions.insert(postreductions.begin(),
+                                postreductions.end());
       }
       delete copy_tree;
 #endif
@@ -6043,7 +6046,6 @@ namespace Legion {
           copy_mask, dummy_locally_complete, dominate_capture, copier);
 #ifdef DEBUG_LEGION
       assert(copy_tree != NULL);
-      assert(across_helper != NULL);
 #endif
       copy_tree->issue_copies(info, dst, copy_mask, this,
           preconditions, postconditions, postreductions, across_helper);
