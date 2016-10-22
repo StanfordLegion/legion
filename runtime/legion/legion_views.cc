@@ -5931,6 +5931,9 @@ namespace Legion {
       assert(copy_tree != NULL);
 #endif
       copy_mask -= copier.get_already_valid_fields();       
+      // If we have any reduction fields though we still need to 
+      copy_mask |= copier.get_reduction_fields();
+      // issue copies for them
       if (!copy_mask)
       {
         delete copy_tree;
