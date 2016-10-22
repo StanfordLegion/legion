@@ -1015,8 +1015,11 @@ namespace Legion {
         { reduction_fields |= reduction_mask; }
       inline const FieldMask& get_already_valid_fields(void) const
         { return destination_valid; }
+      inline const FieldMask& get_reduction_fields(void) const
+        { return reduction_fields; }
+      // They are only dirty if they are not also valid
       inline bool has_dirty_destination_fields(void) const
-        { return !!destination_dirty; }
+        { return !!(destination_dirty - destination_valid); }
     public:
       RegionTreeNode *const root;
     protected:

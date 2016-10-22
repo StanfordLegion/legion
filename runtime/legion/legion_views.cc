@@ -4181,31 +4181,18 @@ namespace Legion {
                                  actual_copy_mask, src_instances, 
                                  src_version_tracker, postconditions, 
                                  across_helper, logical_node);
-        // Filter the copy mask in case we have to issue fills
-        if (!deferred_instances.empty())
-        {
-          copy_mask -= actual_copy_mask;
-          if (!copy_mask)
-            return;
-        }
       }
       if (!deferred_instances.empty())
       {
         for (LegionMap<DeferredView*,FieldMask>::aligned::const_iterator it = 
               deferred_instances.begin(); it != deferred_instances.end(); it++)
         {
-          const FieldMask overlap = it->second & copy_mask;
-          if (!overlap)
-            continue;
 #ifdef DEBUG_LEGION
           assert(it->first->is_fill_view());
 #endif
           FillView *fill_view = it->first->as_fill_view();
-          fill_view->issue_across_fill(info, dst, overlap, preconditions,
+          fill_view->issue_across_fill(info, dst, it->second, preconditions,
                                        postconditions, across_helper);
-          copy_mask -= overlap;
-          if (!copy_mask)
-            break;
         }
       }
     }
@@ -4686,7 +4673,8 @@ namespace Legion {
         }
       }
       // Any dirty fields that we have here also need to be captured locally
-      local_capture = dirty_mask & copy_mask;
+      // This includes any reduction fields which we are going to be reducing to
+      local_capture = (dirty_mask | reduction_mask) & copy_mask;
       // Always include our local dominate in the local capture
       if (!!local_dominate)
         local_capture |= local_dominate;
@@ -5931,6 +5919,9 @@ namespace Legion {
       assert(copy_tree != NULL);
 #endif
       copy_mask -= copier.get_already_valid_fields();       
+      // If we have any reduction fields though we still need to 
+      copy_mask |= copier.get_reduction_fields();
+      // issue copies for them
       if (!copy_mask)
       {
         delete copy_tree;
@@ -5938,7 +5929,6 @@ namespace Legion {
       }
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      LegionMap<ApEvent,FieldMask>::aligned postreductions;
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
                                    false/*single copy*/,
                                    copy_mask, &info.version_info, 
@@ -5967,9 +5957,13 @@ namespace Legion {
       }
       else
       {
+        LegionMap<ApEvent,FieldMask>::aligned postreductions;
         // No temporary instance necessary here
         copy_tree->issue_copies(info, dst, copy_mask, this, 
             preconditions, postconditions, postreductions, NULL);
+        if (!postreductions.empty())
+          postconditions.insert(postreductions.begin(),
+                                postreductions.end());
       }
       delete copy_tree;
 #endif
@@ -6040,7 +6034,6 @@ namespace Legion {
           copy_mask, dummy_locally_complete, dominate_capture, copier);
 #ifdef DEBUG_LEGION
       assert(copy_tree != NULL);
-      assert(across_helper != NULL);
 #endif
       copy_tree->issue_copies(info, dst, copy_mask, this,
           preconditions, postconditions, postreductions, across_helper);
