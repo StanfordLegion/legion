@@ -18,6 +18,7 @@
 #include "legion_tasks.h"
 #include "legion_spy.h"
 #include "legion_trace.h"
+#include "legion_context.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_analysis.h"
@@ -3537,22 +3538,6 @@ namespace Legion {
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    bool SingleTask::has_executing_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      return (executing_children.find(op) != executing_children.end());
-    }
-
-    //--------------------------------------------------------------------------
-    bool SingleTask::has_executed_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      return (executed_children.find(op) != executed_children.end());
     }
 
     //--------------------------------------------------------------------------

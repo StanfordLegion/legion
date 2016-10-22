@@ -4709,29 +4709,29 @@ namespace Legion {
           {
             // Only need to tell our parent if it is a top-level index space
             if (runtime->forest->is_top_level_index_space(index_space))
-              parent_ctx->register_index_space_deletion(index_space);
+              (*parent_ctx)->register_index_space_deletion(index_space);
             break;
           }
         case INDEX_PARTITION_DELETION:
           {
-            parent_ctx->register_index_partition_deletion(index_part);
+            (*parent_ctx)->register_index_partition_deletion(index_part);
             break;
           }
         case FIELD_SPACE_DELETION:
           {
-            parent_ctx->register_field_space_deletion(field_space);
+            (*parent_ctx)->register_field_space_deletion(field_space);
             break;
           }
         case FIELD_DELETION:
           {
-            parent_ctx->register_field_deletions(field_space, free_fields);
+            (*parent_ctx)->register_field_deletions(field_space, free_fields);
             break;
           }
         case LOGICAL_REGION_DELETION:
           {
             // Only need to tell our parent if it is a top-level region
             if (runtime->forest->is_top_level_region(logical_region))
-              parent_ctx->register_region_deletion(logical_region);
+              (*parent_ctx)->register_region_deletion(logical_region);
             break;
           }
         case LOGICAL_PARTITION_DELETION:
@@ -6183,7 +6183,7 @@ namespace Legion {
     void PostCloseOp::initialize(TaskContext *ctx, unsigned idx) 
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, ctx->regions[idx], true/*track*/);
+      initialize_close(ctx, (*ctx)->regions[idx], true/*track*/);
       parent_idx = idx;
       localize_region_requirement(requirement);
       if (Runtime::legion_spy_enabled)

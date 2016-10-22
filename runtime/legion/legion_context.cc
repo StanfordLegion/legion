@@ -27,6 +27,7 @@ namespace Legion {
       : runtime(rt), owner_task(NULL)
     //--------------------------------------------------------------------------
     {
+      context_lock = Reservation::create_reservation();
     }
 
     //--------------------------------------------------------------------------
@@ -42,10 +43,48 @@ namespace Legion {
     TaskContext::~TaskContext(void)
     //--------------------------------------------------------------------------
     {
+      context_lock.destroy_reservation();
+      context_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
     TaskContext& TaskContext::operator=(const TaskContext &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Executable Context 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExecutableContext::ExecutableContext(Runtime *rt)
+      : ExecutableContext(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ExecutableContext::ExecutableContext(const ExecutableContext &rhs)
+      : ExecutableContext(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ExecutableContext::~ExecutableContext(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ExecutableContext& ExecutableContext::operator=(
+                                                   const ExecutableContext &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -59,7 +98,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt)
-      : TaskContext(rt)
+      : ExecutableContext(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -94,7 +133,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(Runtime *rt)
-      : TaskContext(rt)
+      : ExecutableContext(rt)
     //--------------------------------------------------------------------------
     {
     }

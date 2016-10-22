@@ -1154,8 +1154,10 @@ namespace Legion {
 
     // legion_context.h
     class TaskContext;
+    class InnerContext;;
     class TopLevelContext;
     class RemoteContext;
+    class LeafContext;
     class InlineContext;
     
     // legion_trace.h

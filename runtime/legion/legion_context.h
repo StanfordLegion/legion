@@ -47,67 +47,7 @@ namespace Legion {
         size_t         field_size;
         RtEvent        reclaim_event;
         CustomSerdezID serdez_id;
-      };
-      struct DeferredDependenceArgs : 
-        public LgTaskArgs<DeferredDependenceArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_TRIGGER_DEPENDENCE_ID;
-      public:
-        Operation *op;
-      };
-      struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
-      public:
-        TaskContext *proxy_this;
-        PhysicalManager *manager;
-        InstanceView **target;
-        RtUserEvent to_trigger;
-        AddressSpaceID source;
-      };
-      struct PostEndArgs : public LgTaskArgs<PostEndArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_POST_END_ID;
-      public:
-        TaskContext *proxy_this;
-        void *result;
-        size_t result_size;
-      };
-      struct DecrementArgs : public LgTaskArgs<DecrementArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DECREMENT_PENDING_TASK_ID;
-      public:
-        TaskContext *parent_ctx;
-      };
-      struct WindowWaitArgs : public LgTaskArgs<WindowWaitArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_WINDOW_WAIT_TASK_ID;
-      public:
-        TaskContext *parent_ctx;
-      };
-      struct IssueFrameArgs : public LgTaskArgs<IssueFrameArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_ISSUE_FRAME_TASK_ID;
-      public:
-        TaskContext *parent_ctx;
-        FrameOp *frame;
-        ApEvent frame_termination;
-      };
-      struct AddToDepQueueArgs : public LgTaskArgs<AddToDepQueueArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_ADD_TO_DEP_QUEUE_TASK_ID;
-      public:
-        TaskContext *proxy_this;
-        Operation *op;
-        RtEvent op_pre;
-      };
-      struct DeferredPostMappedArgs : 
-        public LgTaskArgs<DeferredPostMappedArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_POST_MAPPED_ID;
-      public:
-        TaskContext *task;
-      };
+      }; 
       struct ReclaimLocalFieldArgs : public LgTaskArgs<ReclaimLocalFieldArgs> {
       public:
         static const LgTaskID TASK_ID = LG_RECLAIM_LOCAL_FIELD_ID;
@@ -122,6 +62,9 @@ namespace Legion {
     public:
       TaskContext& operator=(const TaskContext &rhs);
     public:
+      inline SingleTask* operator->(void)
+        { return owner_task; } 
+    public:
       // This is used enough that we want it inlined
       inline Processor get_executing_processor(void) const
         { return executing_processor; }
@@ -134,58 +77,89 @@ namespace Legion {
       inline const char* get_task_name(void) const
         { return get_task()->get_task_name(); }
     public:
-      void assign_context(RegionTreeContext ctx);
-      RegionTreeContext release_context(void);
-      virtual RegionTreeContext get_context(void) const;
-      virtual ContextID get_context_id(void) const; 
-      virtual UniqueID get_context_uid(void) const;
+      // Interface for task contexts
+      virtual RegionTreeContext get_context(void) const = 0;
+      virtual ContextID get_context_id(void) const = 0;
+      virtual UniqueID get_context_uid(void) const = 0;
+      virtual int get_depth(void) const = 0;
+      virtual Task* get_task(void) const = 0;
     public:
-      virtual int get_depth(void) const;
-      virtual Task* get_task(void) const;
-    public:
-      void destroy_user_lock(Reservation r);
-      void destroy_user_barrier(ApBarrier b);
-    public:
-      PhysicalRegion get_physical_region(unsigned idx);
-      void get_physical_references(unsigned idx, InstanceSet &refs);
+      virtual PhysicalRegion get_physical_region(unsigned idx) = 0;
+      virtual void get_physical_references(unsigned idx, InstanceSet &refs) = 0;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual unsigned register_new_child_operation(Operation *op);
-      virtual unsigned register_new_close_operation(CloseOp *op);
+      virtual unsigned register_new_child_operation(Operation *op) = 0;
+      virtual unsigned register_new_close_operation(CloseOp *op) = 0;
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
-                                           RtEvent op_precondition);
-      virtual void register_child_executed(Operation *op);
-      virtual void register_child_complete(Operation *op);
-      virtual void register_child_commit(Operation *op); 
-      virtual void unregister_child_operation(Operation *op);
-      virtual void register_fence_dependence(Operation *op);
+                                           RtEvent op_precondition) = 0;
+      virtual void register_child_executed(Operation *op) = 0;
+      virtual void register_child_complete(Operation *op) = 0;
+      virtual void register_child_commit(Operation *op) = 0; 
+      virtual void unregister_child_operation(Operation *op) = 0;
+      virtual void register_fence_dependence(Operation *op) = 0;
     public:
-      bool has_executing_operation(Operation *op);
-      bool has_executed_operation(Operation *op);
-      void print_children(void);
-      void perform_window_wait(void);
+      virtual void perform_fence_analysis(FenceOp *op) = 0;
+      virtual void update_current_fence(FenceOp *op) = 0;
     public:
-      void perform_fence_analysis(FenceOp *op);
-      virtual void update_current_fence(FenceOp *op);
+      virtual void begin_trace(TraceID tid) = 0;
+      virtual void end_trace(TraceID tid) = 0;
     public:
-      void begin_trace(TraceID tid);
-      void end_trace(TraceID tid);
+      virtual void issue_frame(FrameOp *frame, ApEvent frame_termination) = 0;
+      virtual void perform_frame_issue(FrameOp *frame, 
+                                       ApEvent frame_termination) = 0;
+      virtual void finish_frame(ApEvent frame_termination) = 0;
     public:
-      void issue_frame(FrameOp *frame, ApEvent frame_termination);
-      void perform_frame_issue(FrameOp *frame, ApEvent frame_termination);
-      void finish_frame(ApEvent frame_termination);
+      virtual void increment_outstanding(void) = 0;
+      virtual void decrement_outstanding(void) = 0;
+      virtual void increment_pending(void) = 0;
+      virtual RtEvent decrement_pending(SingleTask *child) const = 0;
+      virtual void decrement_pending(void) = 0;
+      virtual void increment_frame(void) = 0;
+      virtual void decrement_frame(void) = 0;
+    
     public:
-      void increment_outstanding(void);
-      void decrement_outstanding(void);
-      void increment_pending(void);
-      RtEvent decrement_pending(SingleTask *child) const;
-      void decrement_pending(void);
-      void increment_frame(void);
-      void decrement_frame(void);
+      virtual TaskContext* find_parent_logical_context(unsigned index) = 0;
+      virtual TaskContext* find_parent_physical_context(unsigned index) = 0;
+      virtual void find_parent_version_info(unsigned index, unsigned depth, 
+                  const FieldMask &version_mask, VersionInfo &version_info) = 0;
+      // Override by RemoteTask and TopLevelTask
+      virtual TaskContext* find_outermost_local_context(
+                                                     TaskContext *previous) = 0;
+      virtual TaskContext* find_top_context(void) = 0;
+    public:
+      virtual void initialize_region_tree_contexts(
+          const std::vector<RegionRequirement> &clone_requirements,
+          const std::vector<ApUserEvent> &unmap_events,
+          std::set<ApEvent> &preconditions) = 0;
+      virtual void invalidate_region_tree_contexts(void) = 0;
+    public:
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
+                             AddressSpaceID source, RtEvent *ready = NULL) = 0;
+      static void handle_remote_view_creation(const void *args);
+      virtual void notify_instance_deletion(PhysicalManager *deleted, 
+                                            GenerationID old_gen) = 0;
+      virtual void convert_virtual_instance_top_views(
+          const std::map<AddressSpaceID,RemoteTask*> &remote_instances) = 0;
+      static void handle_create_top_view_request(Deserializer &derez, 
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_create_top_view_response(Deserializer &derez,
+                                                   Runtime *runtime);
+    public:
+      virtual bool is_inline_task(void) const = 0;
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void) = 0;
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned) = 0;
+    public:
+      void add_created_region(LogicalRegion handle);
+      // for logging created region requirements
+      void log_created_requirements(void);
+    public:
+      void destroy_user_lock(Reservation r);
+      void destroy_user_barrier(ApBarrier b);
     public:
       void add_local_field(FieldSpace handle, FieldID fid, 
                            size_t size, CustomSerdezID serdez_id);
@@ -197,18 +171,6 @@ namespace Legion {
     public:
       ptr_t perform_safe_cast(IndexSpace is, ptr_t pointer);
       DomainPoint perform_safe_cast(IndexSpace is, const DomainPoint &point);
-    public:
-      virtual void add_created_region(LogicalRegion handle);
-      // for logging created region requirements
-      void log_created_requirements(void);
-    public:
-      TaskContext* find_parent_logical_context(unsigned index);
-      TaskContext* find_parent_physical_context(unsigned index);
-      void find_parent_version_info(unsigned index, unsigned depth, 
-                   const FieldMask &version_mask, VersionInfo &version_info);
-      // Override by RemoteTask and TopLevelTask
-      virtual TaskContext* find_outermost_local_context(TaskContext *previous);
-      virtual TaskContext* find_top_context(void);
     public:
       void analyze_destroy_index_space(IndexSpace handle, 
                                    std::vector<RegionRequirement> &delete_reqs,
@@ -288,34 +250,11 @@ namespace Legion {
       void perform_restricted_analysis(const RegionRequirement &req, 
                                        RestrictInfo &restrict_info);
     public:
-      void initialize_region_tree_contexts(
-          const std::vector<RegionRequirement> &clone_requirements,
-          const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions);
-      void invalidate_region_tree_contexts(void);
-    public:
-      InstanceView* create_instance_top_view(PhysicalManager *manager,
-                         AddressSpaceID source, RtEvent *ready = NULL); 
-      static void handle_remote_view_creation(const void *args);
-      void notify_instance_deletion(PhysicalManager *deleted, 
-                                    GenerationID old_gen);
-      void convert_virtual_instance_top_views(
-          const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
-      static void handle_create_top_view_request(Deserializer &derez, 
-                            Runtime *runtime, AddressSpaceID source);
-      static void handle_create_top_view_response(Deserializer &derez,
-                                                   Runtime *runtime);
-    public:
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);
       void post_end_task(const void *res, size_t res_size, bool owned);
       void unmap_all_regions(void);
       const std::vector<PhysicalRegion>& get_physical_regions(void) const;
-    public:
-      virtual bool is_inline_task(void) const;
-      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
-      virtual void end_inline_task(const void *result, 
-                                   size_t result_size, bool owned);
     public:
       VariantImpl* select_inline_variant(TaskOp *child, 
                                          InlineContext *inline_context);
@@ -328,18 +267,12 @@ namespace Legion {
     public:
       virtual void find_enclosing_local_fields(
         LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant);
-    public:
-      static void handle_version_owner_request(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
-      void process_version_owner_response(RegionTreeNode *node, 
-                                          AddressSpaceID result);
-      static void handle_version_owner_response(Deserializer &derez,
-                                                Runtime *runtime);
+      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant); 
     public:
       Runtime *const runtime;
     protected:
       SingleTask *owner_task;
+      Reservation context_lock;
     protected:
       // Keep track of inline mapping regions for this task
       // so we can see when there are conflicts
@@ -361,12 +294,190 @@ namespace Legion {
       std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
     protected:
       Processor                             executing_processor;
+      unsigned                              total_tunable_count;
+    protected:
+      Mapping::ProfilingMeasurements::RuntimeOverhead *overhead_tracker;
+      long long                                previous_profiling_time;
+    protected:
+      // Resources that can build up over a task's lifetime
+      LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
+      LegionDeque<ApBarrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
+      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked local_fields;
+    protected:
+      // Some help for performing fast safe casts
+      std::map<IndexSpace,Domain> safe_cast_domains;
+    protected:
+      // For tracking restricted coherence
+      std::list<Restriction*> coherence_restrictions;
+    protected:
+      std::map<RegionTreeNode*,
+        std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
+    };
+
+    class InnerContext : public TaskContext {
+    public:
+      struct DeferredDependenceArgs : 
+        public LgTaskArgs<DeferredDependenceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_TRIGGER_DEPENDENCE_ID;
+      public:
+        Operation *op;
+      };
+      struct PostEndArgs : public LgTaskArgs<PostEndArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_POST_END_ID;
+      public:
+        TaskContext *proxy_this;
+        void *result;
+        size_t result_size;
+      };
+      struct DecrementArgs : public LgTaskArgs<DecrementArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DECREMENT_PENDING_TASK_ID;
+      public:
+        TaskContext *parent_ctx;
+      };
+      struct WindowWaitArgs : public LgTaskArgs<WindowWaitArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_WINDOW_WAIT_TASK_ID;
+      public:
+        TaskContext *parent_ctx;
+      };
+      struct IssueFrameArgs : public LgTaskArgs<IssueFrameArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_ISSUE_FRAME_TASK_ID;
+      public:
+        TaskContext *parent_ctx;
+        FrameOp *frame;
+        ApEvent frame_termination;
+      };
+      struct AddToDepQueueArgs : public LgTaskArgs<AddToDepQueueArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_ADD_TO_DEP_QUEUE_TASK_ID;
+      public:
+        TaskContext *proxy_this;
+        Operation *op;
+        RtEvent op_pre;
+      };
+      struct DeferredPostMappedArgs : 
+        public LgTaskArgs<DeferredPostMappedArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_POST_MAPPED_ID;
+      public:
+        TaskContext *task;
+      };
+      struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
+      public:
+        TaskContext *proxy_this;
+        PhysicalManager *manager;
+        InstanceView **target;
+        RtUserEvent to_trigger;
+        AddressSpaceID source;
+      };
+    public:
+      InnerContext(Runtime *runtime);
+      InnerContext(const InnerContext &rhs);
+      virtual ~InnerContext(void);
+    public:
+      InnerContext& operator=(const InnerContext &rhs);
+    public:
+      void assign_context(RegionTreeContext ctx);
+      RegionTreeContext release_context(void);
+    public:
+      void print_children(void);
+      void perform_window_wait(void);
+    public:
+      // Interface for task contexts
+      virtual RegionTreeContext get_context(void) const;
+      virtual ContextID get_context_id(void) const;
+      virtual UniqueID get_context_uid(void) const;
+      virtual int get_depth(void) const;
+      virtual Task* get_task(void) const;
+    public:
+      virtual PhysicalRegion get_physical_region(unsigned idx);
+      virtual void get_physical_references(unsigned idx, InstanceSet &refs);
+    public:
+      // The following set of operations correspond directly
+      // to the complete_mapping, complete_operation, and
+      // commit_operations performed by an operation.  Every
+      // one of those calls invokes the corresponding one of
+      // these calls to notify the parent context.
+      virtual unsigned register_new_child_operation(Operation *op);
+      virtual unsigned register_new_close_operation(CloseOp *op);
+      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+                                           RtEvent op_precondition);
+      virtual void register_child_executed(Operation *op);
+      virtual void register_child_complete(Operation *op);
+      virtual void register_child_commit(Operation *op); 
+      virtual void unregister_child_operation(Operation *op);
+      virtual void register_fence_dependence(Operation *op);
+    public:
+      virtual void perform_fence_analysis(FenceOp *op);
+      virtual void update_current_fence(FenceOp *op);
+    public:
+      virtual void begin_trace(TraceID tid);
+      virtual void end_trace(TraceID tid);
+    public:
+      virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
+      virtual void perform_frame_issue(FrameOp *frame, 
+                                       ApEvent frame_termination);
+      virtual void finish_frame(ApEvent frame_termination);
+    public:
+      virtual void increment_outstanding(void);
+      virtual void decrement_outstanding(void);
+      virtual void increment_pending(void);
+      virtual RtEvent decrement_pending(SingleTask *child) const;
+      virtual void decrement_pending(void);
+      virtual void increment_frame(void);
+      virtual void decrement_frame(void);
+    
+    public:
+      virtual TaskContext* find_parent_logical_context(unsigned index);
+      virtual TaskContext* find_parent_physical_context(unsigned index);
+      virtual void find_parent_version_info(unsigned index, unsigned depth, 
+                  const FieldMask &version_mask, VersionInfo &version_info);
+      // Override by RemoteTask and TopLevelTask
+      virtual TaskContext* find_outermost_local_context(
+                                                     TaskContext *previous);
+      virtual TaskContext* find_top_context(void);
+    public:
+      virtual void initialize_region_tree_contexts(
+          const std::vector<RegionRequirement> &clone_requirements,
+          const std::vector<ApUserEvent> &unmap_events,
+          std::set<ApEvent> &preconditions);
+      virtual void invalidate_region_tree_contexts(void);
+    public:
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
+                             AddressSpaceID source, RtEvent *ready = NULL);
+      static void handle_remote_view_creation(const void *args);
+      virtual void notify_instance_deletion(PhysicalManager *deleted, 
+                                            GenerationID old_gen);
+      virtual void convert_virtual_instance_top_views(
+          const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
+      static void handle_create_top_view_request(Deserializer &derez, 
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_create_top_view_response(Deserializer &derez,
+                                                   Runtime *runtime);
+    public:
+      virtual bool is_inline_task(void) const;
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
+    public:
+      static void handle_version_owner_request(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      void process_version_owner_response(RegionTreeNode *node, 
+                                          AddressSpaceID result);
+      static void handle_version_owner_response(Deserializer &derez,
+                                                Runtime *runtime);
+    protected:
       Mapper::ContextConfigOutput           context_configuration;
     protected:
       // Track whether this task has finished executing
       unsigned total_children_count; // total number of sub-operations
-      unsigned total_close_count;
-      unsigned total_tunable_count;
+      unsigned total_close_count; 
       unsigned outstanding_children_count;
       bool task_executed;
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
@@ -405,29 +516,10 @@ namespace Legion {
       FenceOp *current_fence;
       GenerationID fence_gen;
 #ifdef LEGION_SPY
-      UniqueID current_fence_uid;
-#endif
-    protected:
-      Mapping::ProfilingMeasurements::RuntimeOverhead *overhead_tracker;
-      long long                                previous_profiling_time;
-    protected:
-      // Resources that can build up over a task's lifetime
-      LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
-      LegionDeque<ApBarrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
-      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked local_fields;
-    protected:
-      // Some help for performing fast safe casts
-      std::map<IndexSpace,Domain> safe_cast_domains;
-    protected:
-      // For tracking restricted coherence
-      std::list<Restriction*> coherence_restrictions;
-    protected:
-      std::map<RegionTreeNode*,
-        std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
-#ifdef LEGION_SPY
     public:
       RtEvent update_previous_mapped_event(RtEvent next);
     protected:
+      UniqueID current_fence_uid;
       RtEvent previous_mapped_event;
 #endif
     protected:
@@ -443,7 +535,7 @@ namespace Legion {
      * create their own tasks for performing
      * computation.
      */
-    class TopLevelContext : public TaskContext {
+    class TopLevelContext : public InnerContext {
     public:
       TopLevelContext(Runtime *runtime);
       TopLevelContext(const TopLevelContext &rhs);
@@ -473,7 +565,7 @@ namespace Legion {
      * A remote copy of a TaskContext for the 
      * execution of sub-tasks on remote notes.
      */
-    class RemoteContext : public TaskContext, public Task {
+    class RemoteContext : public InnerContext {
     public:
       RemoteContext(Runtime *runtime);
       RemoteContext(const RemoteContext &rhs);
@@ -506,6 +598,96 @@ namespace Legion {
     };
 
     /**
+     * \class LeafContext
+     * A context for the execution of a leaf task
+     */
+    class LeafContext : public TaskContext {
+    public:
+      LeafContext(Runtime *runtime);
+      LeafContext(const LeafContext &rhs);
+      virtual ~LeafContext(void);
+    public:
+      LeafContext& operator=(const LeafContext &rhs);
+    public:
+      // Interface for task contexts
+      virtual RegionTreeContext get_context(void) const;
+      virtual ContextID get_context_id(void) const;
+      virtual UniqueID get_context_uid(void) const;
+      virtual int get_depth(void) const;
+      virtual Task* get_task(void) const;
+    public:
+      virtual PhysicalRegion get_physical_region(unsigned idx);
+      virtual void get_physical_references(unsigned idx, InstanceSet &refs);
+    public:
+      // The following set of operations correspond directly
+      // to the complete_mapping, complete_operation, and
+      // commit_operations performed by an operation.  Every
+      // one of those calls invokes the corresponding one of
+      // these calls to notify the parent context.
+      virtual unsigned register_new_child_operation(Operation *op);
+      virtual unsigned register_new_close_operation(CloseOp *op);
+      virtual void add_to_dependence_queue(Operation *op, bool has_lock,
+                                           RtEvent op_precondition);
+      virtual void register_child_executed(Operation *op);
+      virtual void register_child_complete(Operation *op);
+      virtual void register_child_commit(Operation *op); 
+      virtual void unregister_child_operation(Operation *op);
+      virtual void register_fence_dependence(Operation *op);
+    public:
+      virtual void perform_fence_analysis(FenceOp *op);
+      virtual void update_current_fence(FenceOp *op);
+    public:
+      virtual void begin_trace(TraceID tid);
+      virtual void end_trace(TraceID tid);
+    public:
+      virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
+      virtual void perform_frame_issue(FrameOp *frame, 
+                                       ApEvent frame_termination);
+      virtual void finish_frame(ApEvent frame_termination);
+    public:
+      virtual void increment_outstanding(void);
+      virtual void decrement_outstanding(void);
+      virtual void increment_pending(void);
+      virtual RtEvent decrement_pending(SingleTask *child) const;
+      virtual void decrement_pending(void);
+      virtual void increment_frame(void);
+      virtual void decrement_frame(void);
+    
+    public:
+      virtual TaskContext* find_parent_logical_context(unsigned index);
+      virtual TaskContext* find_parent_physical_context(unsigned index);
+      virtual void find_parent_version_info(unsigned index, unsigned depth, 
+                  const FieldMask &version_mask, VersionInfo &version_info);
+      // Override by RemoteTask and TopLevelTask
+      virtual TaskContext* find_outermost_local_context(
+                                                     TaskContext *previous);
+      virtual TaskContext* find_top_context(void);
+    public:
+      virtual void initialize_region_tree_contexts(
+          const std::vector<RegionRequirement> &clone_requirements,
+          const std::vector<ApUserEvent> &unmap_events,
+          std::set<ApEvent> &preconditions);
+      virtual void invalidate_region_tree_contexts(void);
+    public:
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
+                             AddressSpaceID source, RtEvent *ready = NULL);
+      static void handle_remote_view_creation(const void *args);
+      virtual void notify_instance_deletion(PhysicalManager *deleted, 
+                                            GenerationID old_gen);
+      virtual void convert_virtual_instance_top_views(
+          const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
+      static void handle_create_top_view_request(Deserializer &derez, 
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_create_top_view_response(Deserializer &derez,
+                                                   Runtime *runtime);
+    public:
+      virtual bool is_inline_task(void) const;
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
+    };
+
+    /**
      * \class InlineContext
      * A context for performing the inline execution
      * of a task inside of a parent task.
@@ -518,15 +700,21 @@ namespace Legion {
     public:
       InlineContext& operator=(const InlineContext &rhs);
     public:
+      // Interface for task contexts
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
+      virtual UniqueID get_context_uid(void) const;
+      virtual int get_depth(void) const;
+      virtual Task* get_task(void) const;
     public:
-      virtual void send_remote_context(AddressSpaceID target, 
-                                       RemoteTask *dst);
+      virtual PhysicalRegion get_physical_region(unsigned idx);
+      virtual void get_physical_references(unsigned idx, InstanceSet &refs);
     public:
-      virtual void find_enclosing_local_fields(
-          LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
-    public:
+      // The following set of operations correspond directly
+      // to the complete_mapping, complete_operation, and
+      // commit_operations performed by an operation.  Every
+      // one of those calls invokes the corresponding one of
+      // these calls to notify the parent context.
       virtual unsigned register_new_child_operation(Operation *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
@@ -537,7 +725,57 @@ namespace Legion {
       virtual void unregister_child_operation(Operation *op);
       virtual void register_fence_dependence(Operation *op);
     public:
+      virtual void perform_fence_analysis(FenceOp *op);
       virtual void update_current_fence(FenceOp *op);
+    public:
+      virtual void begin_trace(TraceID tid);
+      virtual void end_trace(TraceID tid);
+    public:
+      virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
+      virtual void perform_frame_issue(FrameOp *frame, 
+                                       ApEvent frame_termination);
+      virtual void finish_frame(ApEvent frame_termination);
+    public:
+      virtual void increment_outstanding(void);
+      virtual void decrement_outstanding(void);
+      virtual void increment_pending(void);
+      virtual RtEvent decrement_pending(SingleTask *child) const;
+      virtual void decrement_pending(void);
+      virtual void increment_frame(void);
+      virtual void decrement_frame(void);
+    
+    public:
+      virtual TaskContext* find_parent_logical_context(unsigned index);
+      virtual TaskContext* find_parent_physical_context(unsigned index);
+      virtual void find_parent_version_info(unsigned index, unsigned depth, 
+                  const FieldMask &version_mask, VersionInfo &version_info);
+      // Override by RemoteTask and TopLevelTask
+      virtual TaskContext* find_outermost_local_context(
+                                                     TaskContext *previous);
+      virtual TaskContext* find_top_context(void);
+    public:
+      virtual void initialize_region_tree_contexts(
+          const std::vector<RegionRequirement> &clone_requirements,
+          const std::vector<ApUserEvent> &unmap_events,
+          std::set<ApEvent> &preconditions);
+      virtual void invalidate_region_tree_contexts(void);
+    public:
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
+                             AddressSpaceID source, RtEvent *ready = NULL);
+      static void handle_remote_view_creation(const void *args);
+      virtual void notify_instance_deletion(PhysicalManager *deleted, 
+                                            GenerationID old_gen);
+      virtual void convert_virtual_instance_top_views(
+          const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
+      static void handle_create_top_view_request(Deserializer &derez, 
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_create_top_view_response(Deserializer &derez,
+                                                   Runtime *runtime);
+    public:
+      virtual bool is_inline_task(void) const;
+      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void end_inline_task(const void *result, 
+                                   size_t result_size, bool owned);
     protected:
       TaskContext *enclosing;
     };
