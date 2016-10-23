@@ -326,6 +326,14 @@ namespace Legion {
      */
     class SingleTask : public TaskOp {
     public:
+      struct DeferredPostMappedArgs : 
+        public LgTaskArgs<DeferredPostMappedArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_POST_MAPPED_ID;
+      public:
+        SingleTask *task;
+      };
+    public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
     protected:

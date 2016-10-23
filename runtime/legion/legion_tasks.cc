@@ -5580,14 +5580,7 @@ namespace Legion {
       // Note it is only safe to do this if we were not sent remotely
       bool need_commit = false;
       if (!sent_remotely)
-      {
-        AutoLock o_lock(op_lock);
-        if (complete_children.empty() && !children_commit_invoked)
-        {
-          need_commit = true;
-          children_commit_invoked = true;
-        }
-      }
+        need_commit = execution_context->attempt_children_commit();
       if (must_epoch != NULL)
         must_epoch->notify_subop_complete(this);
       // Mark that this operation is complete
@@ -5664,7 +5657,7 @@ namespace Legion {
         return;
       }
       if (Runtime::legion_spy_enabled)
-        log_created_requirements();
+        execution_context->log_created_requirements();
       // We used to have to apply our virtual state here, but that is now
       // done when the virtual instances are returned in return_virtual_task
       // If we have any virtual instances then we need to apply
@@ -5776,7 +5769,7 @@ namespace Legion {
       // Figure out what our parent context is
       parent_ctx = runtime->find_context(remote_owner_uid);
       // Set our parent task for the user
-      parent_task = parent_ctx;
+      parent_task = parent_ctx->get_task();
       // Check to see if we had no virtual mappings and everything
       // was pre-mapped and we're remote then we can mark this
       // task as being mapped

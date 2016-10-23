@@ -3289,6 +3289,19 @@ namespace Legion {
       return result;
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    void InnerTask::attempt_children_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (complete_children.empty() && !children_commit_invoked)
+      {
+        children_commit_invoked = true;
+        return true;
+      }
+      return false;
+    }
     
     /////////////////////////////////////////////////////////////
     // Top Level Context 

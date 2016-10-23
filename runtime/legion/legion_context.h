@@ -89,6 +89,8 @@ namespace Legion {
       virtual Task* get_task(void) const = 0; 
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target) = 0;
+      virtual bool has_region_tree_context(void) const = 0;
+      virtual bool attempt_children_commit(void) = 0;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -363,13 +365,6 @@ namespace Legion {
         Operation *op;
         RtEvent op_pre;
       };
-      struct DeferredPostMappedArgs : 
-        public LgTaskArgs<DeferredPostMappedArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_POST_MAPPED_ID;
-      public:
-        TaskContext *task;
-      };
       struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
       public:
         static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
@@ -400,6 +395,9 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual Task* get_task(void) const;
       virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
+      virtual bool has_region_tree_context(void) const;
+      virtual bool attempt_children_complete(void);
+      virtual bool attempt_children_commmit(void);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -617,6 +615,8 @@ namespace Legion {
       virtual Task* get_task(void) const;
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target);
+      virtual bool has_region_tree_context(void) const;
+      virtual bool attempt_children_commit(void);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -707,6 +707,8 @@ namespace Legion {
       virtual Task* get_task(void) const;
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target);
+      virtual bool has_region_tree_context(void) const;
+      virtual bool attempt_children_commit(void);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
