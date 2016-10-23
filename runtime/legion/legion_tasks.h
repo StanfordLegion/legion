@@ -274,6 +274,9 @@ namespace Legion {
       mutable bool is_local;
       mutable bool local_cached;
     protected:
+      bool children_complete;
+      bool children_commit;
+    protected:
       AllocManager *arg_manager;
     protected:
       MapperManager *mapper;
@@ -360,9 +363,6 @@ namespace Legion {
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez, 
                               std::set<RtEvent> &ready_events);
-      virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
-      virtual void unpack_remote_context(Deserializer &derez,
-                                         std::set<RtEvent> &preconditions);
       void send_back_created_state(AddressSpaceID target);
     public:
       void restart_task(void);
@@ -431,6 +431,8 @@ namespace Legion {
     protected:
       // Events that must be triggered before we are done mapping
       std::set<RtEvent> map_applied_conditions;
+    protected:
+      TaskContext*                          execution_context;
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;

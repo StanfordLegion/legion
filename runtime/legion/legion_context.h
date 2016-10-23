@@ -64,6 +64,8 @@ namespace Legion {
     public:
       inline SingleTask* operator->(void)
         { return owner_task; } 
+      inline SingleTask* get_owner_task(void) const
+        { return owner_task; }
     public:
       // This is used enough that we want it inlined
       inline Processor get_executing_processor(void) const
@@ -76,16 +78,17 @@ namespace Legion {
         { return get_context_uid(); }
       inline const char* get_task_name(void) const
         { return get_task()->get_task_name(); }
+      inline const std::vector<PhysicalRegion>& get_physical_regions(void) const
+        { return physical_regions; }
     public:
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const = 0;
       virtual ContextID get_context_id(void) const = 0;
       virtual UniqueID get_context_uid(void) const = 0;
       virtual int get_depth(void) const = 0;
-      virtual Task* get_task(void) const = 0;
-    public:
-      virtual PhysicalRegion get_physical_region(unsigned idx) = 0;
-      virtual void get_physical_references(unsigned idx, InstanceSet &refs) = 0;
+      virtual Task* get_task(void) const = 0; 
+      virtual void pack_remote_context(Serializer &rez, 
+                                       AddressSpaceID target) = 0;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -120,7 +123,6 @@ namespace Legion {
       virtual void decrement_pending(void) = 0;
       virtual void increment_frame(void) = 0;
       virtual void decrement_frame(void) = 0;
-    
     public:
       virtual TaskContext* find_parent_logical_context(unsigned index) = 0;
       virtual TaskContext* find_parent_physical_context(unsigned index) = 0;
@@ -153,6 +155,22 @@ namespace Legion {
       virtual const std::vector<PhysicalRegion>& begin_inline_task(void) = 0;
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned) = 0;
+    public:
+      virtual void add_acquisition(AcquireOp *op, 
+                                   const RegionRequirement &req) = 0;
+      virtual void remove_acquisition(ReleaseOp *op, 
+                                      const RegionRequirement &req) = 0;
+      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
+                                   const RegionRequirement &req) = 0;
+      virtual void remove_restriction(DetachOp *op, 
+                                      const RegionRequirement &req) = 0;
+      virtual void release_restrictions(void) = 0;
+      virtual bool has_restrictions(void) const = 0; 
+      virtual void perform_restricted_analysis(const RegionRequirement &req, 
+                                               RestrictInfo &restrict_info) = 0;
+    public:
+      PhysicalRegion get_physical_region(unsigned idx);
+      void get_physical_references(unsigned idx, InstanceSet &refs);
     public:
       void add_created_region(LogicalRegion handle);
       // for logging created region requirements
@@ -237,24 +255,12 @@ namespace Legion {
                                       const RegionRequirement &parent_req,
                                       std::set<FieldID>& privilege_fields,
                                       FieldID &bad_field, 
-                                      bool skip_privileges) const;
-    public:
-      void add_acquisition(AcquireOp *op, const RegionRequirement &req);
-      void remove_acquisition(ReleaseOp *op, const RegionRequirement &req);
-      void add_restriction(AttachOp *op, InstanceManager *instance,
-                           const RegionRequirement &req);
-      void remove_restriction(DetachOp *op, const RegionRequirement &req);
-      void release_restrictions(void);
-      inline bool has_restrictions(void) const 
-        { return !coherence_restrictions.empty(); }
-      void perform_restricted_analysis(const RegionRequirement &req, 
-                                       RestrictInfo &restrict_info);
+                                      bool skip_privileges) const; 
     public:
       const std::vector<PhysicalRegion>& begin_task(void);
       void end_task(const void *res, size_t res_size, bool owned);
       void post_end_task(const void *res, size_t res_size, bool owned);
       void unmap_all_regions(void);
-      const std::vector<PhysicalRegion>& get_physical_regions(void) const;
     public:
       VariantImpl* select_inline_variant(TaskOp *child, 
                                          InlineContext *inline_context);
@@ -271,6 +277,7 @@ namespace Legion {
     public:
       Runtime *const runtime;
     protected:
+      friend class SingleTask;
       SingleTask *owner_task;
       Reservation context_lock;
     protected:
@@ -305,10 +312,7 @@ namespace Legion {
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked local_fields;
     protected:
       // Some help for performing fast safe casts
-      std::map<IndexSpace,Domain> safe_cast_domains;
-    protected:
-      // For tracking restricted coherence
-      std::list<Restriction*> coherence_restrictions;
+      std::map<IndexSpace,Domain> safe_cast_domains; 
     protected:
       std::map<RegionTreeNode*,
         std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
@@ -395,9 +399,7 @@ namespace Legion {
       virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
       virtual Task* get_task(void) const;
-    public:
-      virtual PhysicalRegion get_physical_region(unsigned idx);
-      virtual void get_physical_references(unsigned idx, InstanceSet &refs);
+      virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -483,9 +485,7 @@ namespace Legion {
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
       LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
       LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children;
-    protected:
-      bool children_complete;
-      bool children_commit;
+    protected: 
       bool children_complete_invoked;
       bool children_commit_invoked;
     protected:
@@ -515,6 +515,9 @@ namespace Legion {
     protected:
       FenceOp *current_fence;
       GenerationID fence_gen;
+    protected:
+      // For tracking restricted coherence
+      std::list<Restriction*> coherence_restrictions;
 #ifdef LEGION_SPY
     public:
       RtEvent update_previous_mapped_event(RtEvent next);
@@ -544,8 +547,6 @@ namespace Legion {
       TopLevelContext& operator=(const TopLevelContext &rhs);
     public:
       virtual int get_depth(void) const;
-      virtual void send_remote_context(AddressSpaceID target, 
-                                       RemoteTask *dst);
       virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
     public:
       virtual UniqueID get_context_uid(void) const;
@@ -574,6 +575,7 @@ namespace Legion {
       RemoteContext& operator=(const RemoteContext &rhs);
     public:
       virtual int get_depth(void) const;
+      virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
     public:
       virtual TaskContext* find_outermost_local_context(TaskContext *previous);
       virtual TaskContext* find_top_context(void);
@@ -582,8 +584,6 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
     public:
-      virtual void send_remote_context(AddressSpaceID remote_instance,
-                             RemoteTask *remote_ctx) { assert(false); }
       virtual TaskContext* find_parent_context(void);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
@@ -615,9 +615,8 @@ namespace Legion {
       virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
       virtual Task* get_task(void) const;
-    public:
-      virtual PhysicalRegion get_physical_region(unsigned idx);
-      virtual void get_physical_references(unsigned idx, InstanceSet &refs);
+      virtual void pack_remote_context(Serializer &rez, 
+                                       AddressSpaceID target);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -706,9 +705,8 @@ namespace Legion {
       virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
       virtual Task* get_task(void) const;
-    public:
-      virtual PhysicalRegion get_physical_region(unsigned idx);
-      virtual void get_physical_references(unsigned idx, InstanceSet &refs);
+      virtual void pack_remote_context(Serializer &rez, 
+                                       AddressSpaceID target);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
