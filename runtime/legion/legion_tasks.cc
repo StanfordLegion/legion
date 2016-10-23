@@ -10677,9 +10677,6 @@ namespace Legion {
            LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-#endif
       // No need to go up since we are the uppermost task on this runtime
       AutoLock o_lock(op_lock,1,false/*exclusive*/);
       for (unsigned idx = 0; idx < local_fields.size(); idx++)
