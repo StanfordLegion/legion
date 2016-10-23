@@ -845,59 +845,82 @@ var loaderSvg = d3.select("#loader-icon").append("svg")
   .attr("height", "40px");
 drawLoaderIcon();
 
-d3.tsv(%s,
-  function(d, i) {
-      return {
-        id: i,
-        level: d.level,
-        start: parseFloat(d.start),
-        end: parseFloat(d.end),
-        color: d.color,
-        opacity: d.opacity,
-        title: d.title
-      };
-  },
-  function(data) {
-    var timelineGroup = timelineSvg.append("g")
-        .attr("id", "timeline")
-        .attr("transform", "scale(" + zoom +", 1.0)");
+var operations = {}
 
-    // split profiling items by which level they're on
-    profilingData.items = {};
-    for(var i = 0; i < data.length; i++) {
-      var d = data[i];
-      if (d.level in profilingData.items) {
-        profilingData.items[d.level].push(d);
-      } else {
-        profilingData.items[d.level] = [d];
-      }
-    }
+var timeline_loader = function(operation_data) { 
+  
+  operation_data.forEach(function(d) {
+    operations[parseInt(d.op_id)] = d.operation;      
+  });
 
-    $("#timeline").scrollLeft(0);
-    parseURLParameters();
-
-    filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
-    drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
-
-    var windowCenterY = $(window).height() / 2;
-    $(window).scroll(function() {
-        $("#loader-icon").css("top", $(window).scrollTop() + windowCenterY);
-    });
-
-    var timer = null;
-    $("#timeline").scroll(function() {
-        showLoaderIcon();
-        if (timer !== null) {
-          clearTimeout(timer);
+  d3.tsv(%s,
+    function(d, i) {
+        let start = parseFloat(d.start);
+        let end = parseFloat(d.end);
+        let total = end - start;
+        let initiator = "";
+        if ((d.initiation != undefined) && d.initiation != "") {
+          initiator = " initiated by " + operations[d.initiation];
         }
-        timer = setTimeout(function() {
-          filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
-          drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
-          hideLoaderIcon();
-        }, 100);
-    });
-    turnOnMouseHandlers();
-});
+        return {
+          id: i,
+          level: d.level,
+          start: start,
+          end: end,
+          color: d.color,
+          opacity: d.opacity,
+          title: d.title + initiator + ", total=" + total + "us, start=" + d.start + "us, end=" + d.end+ "us"
+        };
+    },
+    function(data) {
+      var timelineGroup = timelineSvg.append("g")
+          .attr("id", "timeline")
+          .attr("transform", "scale(" + zoom +", 1.0)");
+
+      // split profiling items by which level they're on
+      profilingData.items = {};
+      for(var i = 0; i < data.length; i++) {
+        var d = data[i];
+        if (d.level in profilingData.items) {
+          profilingData.items[d.level].push(d);
+        } else {
+          profilingData.items[d.level] = [d];
+        }
+      }
+
+      $("#timeline").scrollLeft(0);
+      parseURLParameters();
+
+      filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+      drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+
+      var windowCenterY = $(window).height() / 2;
+      $(window).scroll(function() {
+          $("#loader-icon").css("top", $(window).scrollTop() + windowCenterY);
+      });
+
+      var timer = null;
+      $("#timeline").scroll(function() {
+          showLoaderIcon();
+          if (timer !== null) {
+            clearTimeout(timer);
+          }
+          timer = setTimeout(function() {
+            filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+            drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+            hideLoaderIcon();
+          }, 100);
+      });
+      turnOnMouseHandlers();
+  });
+};
+
+d3.tsv("legion_prof_ops.tsv", 
+  function(d) {
+    return d;
+  },
+  timeline_loader // callback once we load in the ops will be to load the timeline
+);
 
 d3.tsv(%s,
     function(d) {
