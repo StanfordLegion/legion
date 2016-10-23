@@ -4187,8 +4187,18 @@ namespace Legion {
           assert(it->first->is_fill_view());
 #endif
           FillView *fill_view = it->first->as_fill_view();
-          fill_view->issue_fill_across(info, dst, it->second, preconditions,
-                                       postconditions, across_helper);
+          // We need to get the preconditions for this fill
+          LegionMap<ApEvent,FieldMask>::aligned fill_preconditions;
+          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator pre_it =
+                preconditions.begin(); pre_it != preconditions.end(); pre_it++)
+          {
+            const FieldMask overlap = pre_it->second & it->second;
+            if (!overlap)
+              continue;
+            fill_preconditions[pre_it->first] = overlap;
+          }
+          fill_view->issue_fill_across(info, dst, it->second, 
+              fill_preconditions, postconditions, across_helper);
         }
       }
     }
