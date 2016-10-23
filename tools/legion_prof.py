@@ -268,9 +268,9 @@ class TaskRange(TimeRange):
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.task)
+        initiation = ''
         if self.task.is_meta:
-            title += (' '+self.task.get_initiation())
-        title += (' '+self.task.get_timing())
+            initiation = str(self.task.op.op_id)
         if not self.task.is_task:
             color = self.task.color or "#555555"
         else:
@@ -279,29 +279,29 @@ class TaskRange(TimeRange):
             start_time = self.start_time
             cur_level = base_level + (max_levels - level)
             for wait_interval in self.task.wait_intervals:
-                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\t%s\n" % \
                         (cur_level,
                          start_time,
-                         wait_interval.start, color, title))
-                tsv_file.write("%d\t%ld\t%ld\t%s\t0.15\t%s\n" % \
+                         wait_interval.start, color, title, initiation))
+                tsv_file.write("%d\t%ld\t%ld\t%s\t0.15\t%s\t%s\n" % \
                         (cur_level,
                          wait_interval.start,
-                         wait_interval.ready, color, title))
-                tsv_file.write("%d\t%ld\t%ld\t%s\t0.45\t%s\n" % \
+                         wait_interval.ready, color, title, initiation))
+                tsv_file.write("%d\t%ld\t%ld\t%s\t0.45\t%s\t%s\n" % \
                         (cur_level,
                          wait_interval.ready,
-                         wait_interval.end, color, title))
+                         wait_interval.end, color, title, initiation))
                 start_time = max(start_time, wait_interval.end)
             if start_time < self.stop_time:
-                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\t%s\n" % \
                         (cur_level,
                          start_time,
-                         self.stop_time, color, title))
+                         self.stop_time, color, title, initiation))
         else:
-            tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+            tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\t%s\n" % \
                     (base_level + (max_levels - level),
                      self.start_time, self.stop_time,
-                     color,title))
+                     color,title,initiation))
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
@@ -367,7 +367,6 @@ class MessageRange(TimeRange):
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.message)
-        title += (' '+self.message.get_timing())
         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
@@ -408,7 +407,6 @@ class MapperCallRange(TimeRange):
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.call)
-        title += (' '+self.call.get_timing())
         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
@@ -449,7 +447,6 @@ class RuntimeCallRange(TimeRange):
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.call)
-        title += (' '+self.call.get_timing())
         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
@@ -1025,10 +1022,7 @@ class Copy(object):
         return self.op.get_color()
 
     def __repr__(self):
-        return 'Copy initiated by="'+repr(self.op)+'" size='+str(self.size)+\
-                ' total='+str(self.stop-self.start)+ \
-                ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
-
+        return 'Copy size='+str(self.size) + '\t' + str(self.op.op_id)
 class Fill(object):
     def __init__(self, dst, op):
         self.dst = dst
@@ -1042,8 +1036,7 @@ class Fill(object):
         return self.op.get_color()
 
     def __repr__(self):
-        return 'Fill initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
-                ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
+        return 'Fill\t' + str(self.op.op_id)
 
 class Instance(object):
     def __init__(self, inst_id, op):
@@ -2040,6 +2033,7 @@ class State(object):
         processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
         html_file_name = os.path.join(output_dirname, "index.html")
         js_file_name = os.path.join(output_dirname, "timeline.js")
+        ops_file_name = os.path.join(output_dirname, "legion_prof_ops.tsv")
         print 'Generating interactive visualization files in directory ' + output_dirname
 
         os.mkdir(output_dirname)
@@ -2053,7 +2047,7 @@ class State(object):
         base_level = 0
         last_time = 0
         data_tsv_file = open(data_tsv_file_name, "w")
-        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\n")
+        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n")
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
                 if len(proc.tasks) > 0:
@@ -2073,6 +2067,12 @@ class State(object):
                     memory_levels[memory] = base_level
                     last_time = max(last_time, memory.last_time)
         data_tsv_file.close()
+
+        ops_file = open(ops_file_name, "w")
+        ops_file.write("op_id\toperation\n")
+        for op_id, operation in self.operations.iteritems():
+            ops_file.write("\t".join(map(str, [op_id, operation])) + "\n")
+        ops_file.close()
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
         processor_tsv_file.write("level\tprocessor\n")
