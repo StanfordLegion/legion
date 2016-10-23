@@ -1048,7 +1048,7 @@ namespace Legion {
                                              FieldMask &dominate_capture,
                                              CompositeCopier &copier,
                                              CompositeView *owner = NULL);
-      void perform_construction_analysis(MaterializedView *dst,
+      bool perform_construction_analysis(MaterializedView *dst,
                                          RegionTreeNode *logical_node,
                                          const FieldMask &copy_mask,
                                          FieldMask &local_capture,

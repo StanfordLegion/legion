@@ -4430,7 +4430,8 @@ namespace Legion {
       LegionMap<CompositeNode*,FieldMask>::aligned children_to_traverse;
       // We have to capture any local dirty data here
       FieldMask local_capture, local_dominate;
-      perform_construction_analysis(dst, logical_node, copy_mask, local_capture,
+      const bool tested_all_children = perform_construction_analysis(dst,
+                                    logical_node, copy_mask, local_capture,
                                     dominate_capture, local_dominate,
                                     copier, result, children_to_traverse);
       // Traverse all the children and see if our children make us
@@ -4443,8 +4444,11 @@ namespace Legion {
         FieldMask complete_child;
         // 2. We are ourselves complete and all our children are written (note
         //      that this also is alright if the children were written earlier)
-        const bool is_complete = logical_node->is_complete() &&
-          (children_to_traverse.size() == logical_node->get_num_children());
+        //      Note we can actually only worry about this for interfering
+        //      children if we know the composite instance contains all the
+        //      interfering children we intersect with for the target region.
+        const bool is_complete = tested_all_children && 
+                                  logical_node->is_complete();
         if (is_complete)
           locally_complete = copy_mask;
         for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it = 
@@ -4557,7 +4561,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeBase::perform_construction_analysis(MaterializedView *dst,
+    bool CompositeBase::perform_construction_analysis(MaterializedView *dst,
                                                   RegionTreeNode *logical_node,
                                                   const FieldMask &copy_mask,
                                                   FieldMask &local_capture,
@@ -4575,7 +4579,9 @@ namespace Legion {
 #endif
       // need this in read only to touch the children data structure
       // and the list of reduction views
+      const size_t all_children = logical_node->get_num_children(); 
       AutoLock b_lock(base_lock,1,false/*exclusive*/);
+      const bool tested_all_children = (children.size() == all_children);
       if (children.empty())
       {
         if (!!dominate_capture)
@@ -4702,6 +4708,7 @@ namespace Legion {
           }
         }
       }
+      return tested_all_children;
     }
 
     //--------------------------------------------------------------------------
@@ -5109,10 +5116,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CompositeCopier copier(logical_node, copy_mask);
-      FieldMask dummy_locally_complete;
+      FieldMask top_locally_complete;
       FieldMask dominate_capture(copy_mask);
       CompositeCopyNode *copy_tree = construct_copy_tree(dst, logical_node,
-          copy_mask, dummy_locally_complete, dominate_capture, copier, this);
+          copy_mask, top_locally_complete, dominate_capture, copier, this);
 #ifdef DEBUG_LEGION
       assert(copy_tree != NULL);
 #endif
