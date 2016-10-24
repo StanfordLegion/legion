@@ -939,6 +939,66 @@ size_t STLSetSerializer<T>::legion_deserialize(const void *buffer)
   return STLSetSerializer<T>::deserialize(set, buffer);
 }
 
+template <typename T>
+class STLVectorSerializer {
+public:
+  STLVectorSerializer(void) { }
+  STLVectorSerializer(const std::vector<T> &v) : vector(v) {}
+public:
+  size_t legion_buffer_size(void) const;
+  size_t legion_serialize(void *buffer) const;
+  size_t legion_deserialize(const void *buffer);
+  size_t static deserialize(std::vector<T>& vector, const void *buffer);
+public:
+  inline std::vector<T>& ref(void) { return vector; }
+private:
+  std::vector<T> vector;
+};
+
+template <typename T>
+size_t STLVectorSerializer<T>::legion_buffer_size(void) const
+{
+  size_t result = sizeof(size_t); // number of elements
+  result += vector.size() * sizeof(T);
+  return result;
+}
+
+template <typename T>
+size_t STLVectorSerializer<T>::legion_serialize(void *buffer) const
+{
+  char *target = (char*)buffer;
+  *((size_t*)target) = vector.size();
+  target += sizeof(size_t);
+  for (typename std::vector<T>::const_iterator it = vector.begin();
+       it != vector.end(); it++)
+  {
+    *((T*)target) = *it;
+    target += sizeof(T);
+  }
+  return (size_t(target) - size_t(buffer));
+}
+
+template <typename T>
+size_t STLVectorSerializer<T>::deserialize(std::vector<T>& vector, const void *buffer)
+{
+  const char *source = (const char*)buffer;
+  size_t num_elements = *((const size_t*)source);
+  source += sizeof(size_t);
+  for (size_t idx = 0; idx < num_elements; idx++)
+  {
+    vector.push_back(*((const T*)source));
+    source += sizeof(T);
+  }
+  // Return the number of bytes consumed
+  return (size_t(source) - size_t(buffer));
+}
+
+template <typename T>
+size_t STLVectorSerializer<T>::legion_deserialize(const void *buffer)
+{
+  return STLVectorSerializer<T>::deserialize(vector, buffer);
+}
+
 class PartitionByUnionShim {
 public:
   static TaskID register_task();
@@ -1079,25 +1139,22 @@ public:
                                PartitionKind part_kind = COMPUTE_KIND,
                                int color = AUTO_GENERATE_ID,
                                bool allocable = false);
-  static IndexPartition task(const Task *task,
-                             const std::vector<PhysicalRegion> &regions,
-                             Context ctx, HighLevelRuntime *runtime);
+  static STLVectorSerializer<ptr_t> task(const Task *task,
+                                     const std::vector<PhysicalRegion> &regions,
+                                        Context ctx, HighLevelRuntime *runtime);
 private:
   static const TaskID task_id = 582347; // a "unique" number
   struct Args {
     IndexSpace parent;
     IndexPartition handle1;
     IndexPartition handle2;
-    PartitionKind part_kind;
-    int color;
-    bool allocable;
   };
 };
 
 Processor::TaskFuncID
 PartitionByIntersectionShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
+  return HighLevelRuntime::register_legion_task<STLVectorSerializer<ptr_t>, task>(
     task_id, Processor::LOC_PROC, true, false,
     AUTO_GENERATE_ID, TaskConfigOptions(),
     "PartitionByIntersectionShim::task");
@@ -1117,16 +1174,45 @@ PartitionByIntersectionShim::launch(HighLevelRuntime *runtime,
   args.parent = parent;
   args.handle1 = handle1;
   args.handle2 = handle2;
-  args.part_kind = part_kind;
-  args.color = color;
-  args.allocable = allocable;
+
+  Domain color_space = runtime->get_index_partition_color_space(ctx, handle1);
   TaskArgument targs(&args, sizeof(args));
-  TaskLauncher task(task_id, targs);
-  Future f = runtime->execute_task(ctx, task);
-  return f.get_result<IndexPartition>();
+  IndexLauncher task(task_id, color_space, targs, ArgumentMap());
+  FutureMap fmap = runtime->execute_index_space(ctx, task);
+
+  PointColoring coloring;
+  for(Domain::DomainPointIterator c(color_space); c; c++) {
+    Future f = fmap.get_future(c.p);
+    const char* buffer = reinterpret_cast<const char*>(f.get_untyped_pointer());
+    size_t size = *reinterpret_cast<const size_t*>(buffer);
+    const ptr_t* points =
+      reinterpret_cast<const ptr_t*>(buffer + sizeof(size_t));
+    for (size_t idx = 0; idx < size;)
+    {
+      ptr_t point = points[idx];
+      if (point.value >= 0) {
+        coloring[upgrade_point(c.p)].ranges.insert(
+          std::pair<ptr_t, ptr_t>(point,
+                                  ptr_t(point.value +
+                                        points[idx + 1].value - 1)));
+        idx += 2;
+      }
+      else {
+        point.value = -point.value - 1;
+        coloring[upgrade_point(c.p)].points.insert(point);
+        idx++;
+      }
+    }
+  }
+
+  IndexPartition ip =
+    runtime->create_index_partition(
+      ctx, parent, color_space, coloring,
+      part_kind, color, allocable);
+  return ip;
 }
 
-IndexPartition
+STLVectorSerializer<ptr_t>
 PartitionByIntersectionShim::task(const Task *task,
                                 const std::vector<PhysicalRegion> &regions,
                                 Context ctx, HighLevelRuntime *runtime)
@@ -1134,37 +1220,42 @@ PartitionByIntersectionShim::task(const Task *task,
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
-  Domain color_space = runtime->get_index_partition_color_space(ctx, args.handle1);
-  PointColoring coloring;
-  for(Domain::DomainPointIterator c(color_space); c; c++) {
-    IndexSpace lhs = runtime->get_index_subspace(ctx, args.handle1, c.p);
-    IndexSpace rhs = runtime->get_index_subspace(ctx, args.handle2, c.p);
+  DomainPoint c = task->index_point;
+  IndexSpace lhs = runtime->get_index_subspace(ctx, args.handle1, c);
+  IndexSpace rhs = runtime->get_index_subspace(ctx, args.handle2, c);
 
-    std::set<ptr_t> rhs_points;
-    for (IndexIterator it(runtime, ctx, rhs); it.has_next();) {
-      size_t count = 0;
-      ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-        rhs_points.insert(p);
-      }
-    }
+  STLVectorSerializer<ptr_t> points;
 
-    for (IndexIterator it(runtime, ctx, lhs); it.has_next();) {
-      size_t count = 0;
-      ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-        if (rhs_points.count(p)) {
-          coloring[c.p].points.insert(p);
-        }
-      }
+  std::set<ptr_t> rhs_points;
+  for (IndexIterator it(runtime, ctx, rhs); it.has_next();) {
+    size_t count = 0;
+    ptr_t start = it.next_span(count);
+    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+      rhs_points.insert(p);
     }
   }
 
-  IndexPartition ip =
-    runtime->create_index_partition(
-      ctx, args.parent, color_space, coloring,
-      args.part_kind, args.color, args.allocable);
-  return ip;
+  for (IndexIterator it(runtime, ctx, lhs); it.has_next();) {
+    size_t count = 0;
+    ptr_t start = it.next_span(count);
+    ptr_t run_size = 0;
+    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+      if (rhs_points.count(p)) {
+        if (run_size.value == 0) points.ref().push_back(p);
+        run_size.value++;
+      }
+      else if (run_size.value != 0) {
+        if (run_size.value == 1)
+          points.ref().back().value = -points.ref().back().value - 1;
+        else
+          points.ref().push_back(run_size);
+        run_size.value = 0;
+      }
+    }
+    if (run_size.value != 0) points.ref().push_back(run_size);
+  }
+
+  return points;
 }
 
 static TaskID __attribute__((unused)) force_PartitionByIntersectionShim_static_initialize =
@@ -1213,25 +1304,22 @@ public:
                                PartitionKind part_kind = COMPUTE_KIND,
                                int color = AUTO_GENERATE_ID,
                                bool allocable = false);
-  static IndexPartition task(const Task *task,
-                             const std::vector<PhysicalRegion> &regions,
-                             Context ctx, HighLevelRuntime *runtime);
+  static STLVectorSerializer<ptr_t> task(const Task *task,
+                                     const std::vector<PhysicalRegion> &regions,
+                                        Context ctx, HighLevelRuntime *runtime);
 private:
   static const TaskID task_id = 577802; // a "unique" number
   struct Args {
     IndexSpace parent;
     IndexPartition handle1;
     IndexPartition handle2;
-    PartitionKind part_kind;
-    int color;
-    bool allocable;
   };
 };
 
 Processor::TaskFuncID
 PartitionByDifferenceShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
+  return HighLevelRuntime::register_legion_task<STLVectorSerializer<ptr_t>, task>(
     task_id, Processor::LOC_PROC, true, false,
     AUTO_GENERATE_ID, TaskConfigOptions(),
     "PartitionByDifferenceShim::task");
@@ -1251,16 +1339,27 @@ PartitionByDifferenceShim::launch(HighLevelRuntime *runtime,
   args.parent = parent;
   args.handle1 = handle1;
   args.handle2 = handle2;
-  args.part_kind = part_kind;
-  args.color = color;
-  args.allocable = allocable;
+
+  Domain color_space = runtime->get_index_partition_color_space(ctx, handle1);
   TaskArgument targs(&args, sizeof(args));
-  TaskLauncher task(task_id, targs);
-  Future f = runtime->execute_task(ctx, task);
-  return f.get_result<IndexPartition>();
+  IndexLauncher task(task_id, color_space, targs, ArgumentMap());
+  FutureMap fmap = runtime->execute_index_space(ctx, task);
+
+  PointColoring coloring;
+  for(Domain::DomainPointIterator c(color_space); c; c++) {
+    Future f = fmap.get_future(c.p);
+    STLSetSerializer<ptr_t>::deserialize(
+      coloring[upgrade_point(c.p)].points, f.get_untyped_pointer());
+  }
+
+  IndexPartition ip =
+    runtime->create_index_partition(
+      ctx, parent, color_space, coloring,
+      part_kind, color, allocable);
+  return ip;
 }
 
-IndexPartition
+STLVectorSerializer<ptr_t>
 PartitionByDifferenceShim::task(const Task *task,
                                 const std::vector<PhysicalRegion> &regions,
                                 Context ctx, HighLevelRuntime *runtime)
@@ -1268,37 +1367,32 @@ PartitionByDifferenceShim::task(const Task *task,
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
-  Domain color_space = runtime->get_index_partition_color_space(ctx, args.handle1);
-  PointColoring coloring;
-  for(Domain::DomainPointIterator c(color_space); c; c++) {
-    IndexSpace lhs = runtime->get_index_subspace(ctx, args.handle1, c.p);
-    IndexSpace rhs = runtime->get_index_subspace(ctx, args.handle2, c.p);
+  DomainPoint c = task->index_point;
+  IndexSpace lhs = runtime->get_index_subspace(ctx, args.handle1, c);
+  IndexSpace rhs = runtime->get_index_subspace(ctx, args.handle2, c);
 
-    std::set<ptr_t> rhs_points;
-    for (IndexIterator it(runtime, ctx, rhs); it.has_next();) {
-      size_t count = 0;
-      ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-        rhs_points.insert(p);
-      }
+  STLVectorSerializer<ptr_t> points;
+
+  std::set<ptr_t> rhs_points;
+  for (IndexIterator it(runtime, ctx, rhs); it.has_next();) {
+    size_t count = 0;
+    ptr_t start = it.next_span(count);
+    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+      rhs_points.insert(p);
     }
+  }
 
-    for (IndexIterator it(runtime, ctx, lhs); it.has_next();) {
-      size_t count = 0;
-      ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-        if (!rhs_points.count(p)) {
-          coloring[c.p].points.insert(p);
-        }
+  for (IndexIterator it(runtime, ctx, lhs); it.has_next();) {
+    size_t count = 0;
+    ptr_t start = it.next_span(count);
+    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+      if (!rhs_points.count(p)) {
+        points.ref().push_back(p);
       }
     }
   }
 
-  IndexPartition ip =
-    runtime->create_index_partition(
-      ctx, args.parent, color_space, coloring,
-      args.part_kind, args.color, args.allocable);
-  return ip;
+  return points;
 }
 
 static TaskID __attribute__((unused)) force_PartitionByDifferenceShim_static_initialize =
@@ -1516,9 +1610,9 @@ PartitionByImageShim::launch(HighLevelRuntime *runtime,
   task.add_region_requirement(
     RegionRequirement(projection, 0, READ_ONLY, EXCLUSIVE, parent)
     .add_field(fid));
-  PointColoring coloring;
   FutureMap fmap = runtime->execute_index_space(ctx, task);
 
+  PointColoring coloring;
   for(Domain::DomainPointIterator c(color_space); c; c++) {
     Future f = fmap.get_future(c.p);
     STLSetSerializer<ptr_t>::deserialize(
@@ -1613,27 +1707,22 @@ public:
                                PartitionKind part_kind = COMPUTE_KIND,
                                int color = AUTO_GENERATE_ID,
                                bool allocable = false);
-  static IndexPartition task(const Task *task,
-                             const std::vector<PhysicalRegion> &regions,
-                             Context ctx, HighLevelRuntime *runtime);
+  static STLVectorSerializer<ptr_t> task(const Task *task,
+                                     const std::vector<PhysicalRegion> &regions,
+                                        Context ctx, HighLevelRuntime *runtime);
 private:
   static const TaskID task_id = 509532; // a "unique" number
   struct Args {
     IndexPartition projection;
     LogicalRegion handle;
-    LogicalRegion parent;
     FieldID fid;
-    Domain color_space;
-    PartitionKind part_kind;
-    int color;
-    bool allocable;
   };
 };
 
 Processor::TaskFuncID
 PartitionByPreimageShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
+  return HighLevelRuntime::register_legion_task<STLVectorSerializer<ptr_t>, task>(
     task_id, Processor::LOC_PROC, true, false,
     AUTO_GENERATE_ID, TaskConfigOptions(),
     "PartitionByPreimageShim::task");
@@ -1654,22 +1743,47 @@ PartitionByPreimageShim::launch(HighLevelRuntime *runtime,
   Args args;
   args.handle = handle;
   args.projection = projection;
-  args.parent = parent;
   args.fid = fid;
-  args.color_space = color_space;
-  args.part_kind = part_kind;
-  args.color = color;
-  args.allocable = allocable;
   TaskArgument targs(&args, sizeof(args));
-  TaskLauncher task(task_id, targs);
+  IndexLauncher task(task_id, color_space, targs, ArgumentMap());
   task.add_region_requirement(
     RegionRequirement(parent, READ_ONLY, EXCLUSIVE, parent)
     .add_field(fid));
-  Future f = runtime->execute_task(ctx, task);
-  return f.get_result<IndexPartition>();
+  FutureMap fmap = runtime->execute_index_space(ctx, task);
+
+  PointColoring coloring;
+  for(Domain::DomainPointIterator c(color_space); c; c++) {
+    Future f = fmap.get_future(c.p);
+    const char* buffer = reinterpret_cast<const char*>(f.get_untyped_pointer());
+    size_t size = *reinterpret_cast<const size_t*>(buffer);
+    const ptr_t* points =
+      reinterpret_cast<const ptr_t*>(buffer + sizeof(size_t));
+    for (size_t idx = 0; idx < size;)
+    {
+      ptr_t point = points[idx];
+      if (point.value >= 0) {
+        coloring[upgrade_point(c.p)].ranges.insert(
+          std::pair<ptr_t, ptr_t>(point,
+                                  ptr_t(point.value +
+                                        points[idx + 1].value - 1)));
+        idx += 2;
+      }
+      else {
+        point.value = -point.value - 1;
+        coloring[upgrade_point(c.p)].points.insert(point);
+        idx++;
+      }
+    }
+  }
+
+  IndexPartition ip =
+    runtime->create_index_partition(
+      ctx, handle.get_index_space(), color_space, coloring,
+      part_kind, color, allocable);
+  return ip;
 }
 
-IndexPartition
+STLVectorSerializer<ptr_t>
 PartitionByPreimageShim::task(const Task *task,
                               const std::vector<PhysicalRegion> &regions,
                               Context ctx, HighLevelRuntime *runtime)
@@ -1677,36 +1791,41 @@ PartitionByPreimageShim::task(const Task *task,
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
-  PointColoring coloring;
   LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
     regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
-  for(Domain::DomainPointIterator c(args.color_space); c; c++) {
-    IndexSpace target = runtime->get_index_subspace(ctx, args.projection, c.p);
-    std::set<ptr_t> points;
-    for (IndexIterator it(runtime, ctx, target); it.has_next();) {
-      size_t count = 0;
-      ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-        points.insert(p);
-      }
-    }
+  DomainPoint c = task->index_point;
+  IndexSpace target = runtime->get_index_subspace(ctx, args.projection, c);
 
-    for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
-      size_t count = 0;
-      ptr_t start = it.next_span(count);
-      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-        if (points.count(accessor.read(p))) {
-          coloring[upgrade_point(c.p)].points.insert(p);
-        }
-      }
+  STLVectorSerializer<ptr_t> result;
+  std::set<ptr_t> points;
+  for (IndexIterator it(runtime, ctx, target); it.has_next();) {
+    size_t count = 0;
+    ptr_t start = it.next_span(count);
+    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+      points.insert(p);
     }
   }
 
-  IndexPartition ip =
-    runtime->create_index_partition(
-      ctx, args.handle.get_index_space(), args.color_space, coloring,
-      args.part_kind, args.color, args.allocable);
-  return ip;
+  for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
+    size_t count = 0;
+    ptr_t start = it.next_span(count);
+    ptr_t run_size = 0;
+    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+      if (points.count(accessor.read(p))) {
+        if (run_size.value == 0) result.ref().push_back(p);
+        run_size.value++;
+      }
+      else if (run_size.value != 0) {
+        if (run_size.value == 1)
+          result.ref().back().value = -result.ref().back().value - 1;
+        else
+          result.ref().push_back(run_size);
+        run_size.value = 0;
+      }
+    }
+    if (run_size.value != 0) result.ref().push_back(run_size);
+  }
+  return result;
 }
 
 static TaskID __attribute__((unused)) force_PartitionByPreimageShim_static_initialize =
