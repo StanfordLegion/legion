@@ -1052,7 +1052,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::pack_version_info(Serializer &rez)
+    void VersionInfo::pack_version_info(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
       pack_version_numbers(rez);
@@ -1124,7 +1124,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::pack_version_numbers(Serializer &rez)
+    void VersionInfo::pack_version_numbers(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1179,7 +1179,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::pack_upper_bound_node(Serializer &rez)
+    void VersionInfo::pack_upper_bound_node(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
       // Pack the upper bound node (if there is one)

@@ -33,12 +33,613 @@ namespace Legion {
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
+    // Resource Tracker 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::ResourceTracker(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::ResourceTracker(const ResourceTracker &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker::~ResourceTracker(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ResourceTracker& ResourceTracker::operator=(const ResourceTracker&rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    } 
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::return_privilege_state(ResourceTracker *target) const
+    //--------------------------------------------------------------------------
+    {
+      if (!created_regions.empty())
+        target->register_region_creations(created_regions);
+      if (!deleted_regions.empty())
+        target->register_region_deletions(deleted_regions);
+      if (!created_fields.empty())
+        target->register_field_creations(created_fields);
+      if (!deleted_fields.empty())
+        target->register_field_deletions(deleted_fields);
+      if (!created_field_spaces.empty())
+        target->register_field_space_creations(created_field_spaces);
+      if (!deleted_field_spaces.empty())
+        target->register_field_space_deletions(deleted_field_spaces);
+      if (!created_index_spaces.empty())
+        target->register_index_space_creations(created_index_spaces);
+      if (!deleted_index_spaces.empty())
+        target->register_index_space_deletions(deleted_index_spaces);
+      if (!created_index_partitions.empty())
+        target->register_index_partition_creations(created_index_partitions);
+      if (!deleted_index_partitions.empty())
+        target->register_index_partition_deletions(deleted_index_partitions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ResourceTracker::pack_privilege_state(Serializer &rez, 
+                                               AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      // Shouldn't need the lock here since we only do this
+      // while there is no one else executing
+      RezCheck z(rez);
+      rez.serialize<size_t>(created_regions.size());
+      if (!created_regions.empty())
+      {
+        for (std::set<LogicalRegion>::const_iterator it =
+              created_regions.begin(); it != created_regions.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      rez.serialize<size_t>(deleted_regions.size());
+      if (!deleted_regions.empty())
+      {
+        for (std::set<LogicalRegion>::const_iterator it =
+              deleted_regions.begin(); it != deleted_regions.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      rez.serialize<size_t>(created_fields.size());
+      if (!created_fields.empty())
+      {
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
+              created_fields.begin(); it != created_fields.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(deleted_fields.size());
+      if (!deleted_fields.empty())
+      {
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+              deleted_fields.begin(); it != deleted_fields.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      rez.serialize<size_t>(created_field_spaces.size());
+      if (!created_field_spaces.empty())
+      {
+        for (std::set<FieldSpace>::const_iterator it = 
+              created_field_spaces.begin(); it != 
+              created_field_spaces.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      rez.serialize<size_t>(deleted_field_spaces.size());
+      if (!deleted_field_spaces.empty())
+      {
+        for (std::set<FieldSpace>::const_iterator it = 
+              deleted_field_spaces.begin(); it !=
+              deleted_field_spaces.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      rez.serialize<size_t>(created_index_spaces.size());
+      if (!created_index_spaces.empty())
+      {
+        for (std::set<IndexSpace>::const_iterator it = 
+              created_index_spaces.begin(); it != 
+              created_index_spaces.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      rez.serialize<size_t>(deleted_index_spaces.size());
+      if (!deleted_index_spaces.empty())
+      {
+        for (std::set<IndexSpace>::const_iterator it = 
+              deleted_index_spaces.begin(); it !=
+              deleted_index_spaces.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      rez.serialize<size_t>(created_index_partitions.size());
+      if (!created_index_partitions.empty())
+      {
+        for (std::set<IndexPartition>::const_iterator it = 
+              created_index_partitions.begin(); it !=
+              created_index_partitions.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+      rez.serialize<size_t>(deleted_index_partitions.size());
+      if (!deleted_index_partitions.empty())
+      {
+        for (std::set<IndexPartition>::const_iterator it = 
+              deleted_index_partitions.begin(); it !=
+              deleted_index_partitions.end(); it++)
+        {
+          rez.serialize(*it);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ResourceTracker::unpack_privilege_state(Deserializer &derez,
+                                                        ResourceTracker *target)
+    //--------------------------------------------------------------------------
+    {
+      // Hold the lock while doing the unpack to avoid conflicting
+      // with anyone else returning state
+      DerezCheck z(derez);
+      size_t num_created_regions;
+      derez.deserialize(num_created_regions);
+      if (num_created_regions > 0)
+      {
+        std::set<LogicalRegion> created_regions;
+        for (unsigned idx = 0; idx < num_created_regions; idx++)
+        {
+          LogicalRegion reg;
+          derez.deserialize(reg);
+          created_regions.insert(reg);
+        }
+        target->register_region_creations(created_regions);
+      }
+      size_t num_deleted_regions;
+      derez.deserialize(num_deleted_regions);
+      if (num_deleted_regions > 0)
+      {
+        std::set<LogicalRegion> deleted_regions;
+        for (unsigned idx = 0; idx < num_deleted_regions; idx++)
+        {
+          LogicalRegion reg;
+          derez.deserialize(reg);
+          deleted_regions.insert(reg);
+        }
+        target->register_region_deletions(deleted_regions);
+      }
+      size_t num_created_fields;
+      derez.deserialize(num_created_fields);
+      if (num_created_fields > 0)
+      {
+        std::set<std::pair<FieldSpace,FieldID> > created_fields;
+        for (unsigned idx = 0; idx < num_created_fields; idx++)
+        {
+          FieldSpace sp;
+          derez.deserialize(sp);
+          FieldID fid;
+          derez.deserialize(fid);
+          created_fields.insert(std::pair<FieldSpace,FieldID>(sp,fid));
+        }
+        target->register_field_creations(created_fields);
+      }
+      size_t num_deleted_fields;
+      derez.deserialize(num_deleted_fields);
+      if (num_deleted_fields > 0)
+      {
+        std::set<std::pair<FieldSpace,FieldID> > deleted_fields;
+        for (unsigned idx = 0; idx < num_deleted_fields; idx++)
+        {
+          FieldSpace sp;
+          derez.deserialize(sp);
+          FieldID fid;
+          derez.deserialize(fid);
+          deleted_fields.insert(std::pair<FieldSpace,FieldID>(sp,fid));
+        }
+        target->register_field_deletions(deleted_fields);
+      }
+      size_t num_created_field_spaces;
+      derez.deserialize(num_created_field_spaces);
+      if (num_created_field_spaces > 0)
+      {
+        std::set<FieldSpace> created_field_spaces;
+        for (unsigned idx = 0; idx < num_created_field_spaces; idx++)
+        {
+          FieldSpace sp;
+          derez.deserialize(sp);
+          created_field_spaces.insert(sp);
+        }
+        target->register_field_space_creations(created_field_spaces);
+      }
+      size_t num_deleted_field_spaces;
+      derez.deserialize(num_deleted_field_spaces);
+      if (num_deleted_field_spaces > 0)
+      {
+        std::set<FieldSpace> deleted_field_spaces;
+        for (unsigned idx = 0; idx < num_deleted_field_spaces; idx++)
+        {
+          FieldSpace sp;
+          derez.deserialize(sp);
+          deleted_field_spaces.insert(sp);
+        }
+        target->register_field_space_deletions(deleted_field_spaces);
+      }
+      size_t num_created_index_spaces;
+      derez.deserialize(num_created_index_spaces);
+      if (num_created_index_spaces > 0)
+      {
+        std::set<IndexSpace> created_index_spaces;
+        for (unsigned idx = 0; idx < num_created_index_spaces; idx++)
+        {
+          IndexSpace sp;
+          derez.deserialize(sp);
+          created_index_spaces.insert(sp);
+        }
+        target->register_index_space_creations(created_index_spaces);
+      }
+      size_t num_deleted_index_spaces;
+      derez.deserialize(num_deleted_index_spaces);
+      if (num_deleted_index_spaces > 0)
+      {
+        std::set<IndexSpace> deleted_index_spaces;
+        for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
+        {
+          IndexSpace sp;
+          derez.deserialize(sp);
+          deleted_index_spaces.insert(sp);
+        }
+        target->register_index_space_deletions(deleted_index_spaces);
+      }
+      size_t num_created_index_partitions;
+      derez.deserialize(num_created_index_partitions);
+      if (num_created_index_partitions > 0)
+      {
+        std::set<IndexPartition> created_index_partitions;
+        for (unsigned idx = 0; idx < num_created_index_partitions; idx++)
+        {
+          IndexPartition ip;
+          derez.deserialize(ip);
+          created_index_partitions.insert(ip);
+        }
+        target->register_index_partition_creations(created_index_partitions);
+      }
+      size_t num_deleted_index_partitions;
+      derez.deserialize(num_deleted_index_partitions);
+      if (num_deleted_index_partitions > 0)
+      {
+        std::set<IndexPartition> deleted_index_partitions;
+        for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
+        {
+          IndexPartition ip;
+          derez.deserialize(ip);
+          deleted_index_partitions.insert(ip);
+        }
+        target->register_index_partition_deletions(deleted_index_partitions);
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // External Task 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalTask::ExternalTask(void)
+      : Task(), arg_manager(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalTask::pack_external_task(Serializer &rez,AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(task_id);
+      rez.serialize(indexes.size());
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+        pack_index_space_requirement(indexes[idx], rez);
+      rez.serialize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        pack_region_requirement(regions[idx], rez);
+      rez.serialize(futures.size());
+      // If we are remote we can just do the normal pack
+      for (unsigned idx = 0; idx < futures.size(); idx++)
+        rez.serialize(futures[idx].impl->did);
+      rez.serialize(grants.size());
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        pack_grant(grants[idx], rez);
+      rez.serialize(wait_barriers.size());
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        pack_phase_barrier(wait_barriers[idx], rez);
+      rez.serialize(arrive_barriers.size());
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        pack_phase_barrier(arrive_barriers[idx], rez);
+      rez.serialize<bool>((arg_manager != NULL));
+      rez.serialize(arglen);
+      rez.serialize(args,arglen);
+      rez.serialize(map_id);
+      rez.serialize(tag);
+      rez.serialize(is_index_space);
+      rez.serialize(must_epoch_task);
+      rez.serialize(index_domain);
+      rez.serialize(index_point);
+      rez.serialize(local_arglen);
+      rez.serialize(local_args,local_arglen);
+      rez.serialize(orig_proc);
+      // No need to pack current proc, it will get set when we unpack
+      rez.serialize(steal_count);
+      // No need to pack remote, it will get set
+      rez.serialize(speculated);
+      rez.serialize<unsigned>(get_context_index());
+    }
+
+     //--------------------------------------------------------------------------
+    void ExternalTask::unpack_external_task(Deserializer &derez,Runtime *runtime,
+                                            ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(task_id);
+      size_t num_indexes;
+      derez.deserialize(num_indexes);
+      indexes.resize(num_indexes);
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+        unpack_index_space_requirement(indexes[idx], derez);
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      regions.resize(num_regions);
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        unpack_region_requirement(regions[idx], derez); 
+      size_t num_futures;
+      derez.deserialize(num_futures);
+      futures.resize(num_futures);
+      for (unsigned idx = 0; idx < futures.size(); idx++)
+      {
+        DistributedID future_did;
+        derez.deserialize(future_did);
+        futures[idx] = Future(
+            runtime->find_or_create_future(future_did, mutator));
+      }
+      size_t num_grants;
+      derez.deserialize(num_grants);
+      grants.resize(num_grants);
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        unpack_grant(grants[idx], derez);
+      size_t num_wait_barriers;
+      derez.deserialize(num_wait_barriers);
+      wait_barriers.resize(num_wait_barriers);
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        unpack_phase_barrier(wait_barriers[idx], derez);
+      size_t num_arrive_barriers;
+      derez.deserialize(num_arrive_barriers);
+      arrive_barriers.resize(num_arrive_barriers);
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        unpack_phase_barrier(arrive_barriers[idx], derez);
+      bool has_arg_manager;
+      derez.deserialize(has_arg_manager);
+      derez.deserialize(arglen);
+      if (arglen > 0)
+      {
+        if (has_arg_manager)
+        {
+#ifdef DEBUG_LEGION
+          assert(arg_manager == NULL);
+#endif
+          arg_manager = legion_new<AllocManager>(arglen);
+          arg_manager->add_reference();
+          args = arg_manager->get_allocation();
+        }
+        else
+          args = legion_malloc(TASK_ARGS_ALLOC, arglen);
+        derez.deserialize(args,arglen);
+      }
+      derez.deserialize(map_id);
+      derez.deserialize(tag);
+      derez.deserialize(is_index_space);
+      derez.deserialize(must_epoch_task);
+      derez.deserialize(index_domain);
+      derez.deserialize(index_point);
+      derez.deserialize(local_arglen);
+      if (local_arglen > 0)
+      {
+        local_args = legion_malloc(LOCAL_ARGS_ALLOC, local_arglen);
+        derez.deserialize(local_args,local_arglen);
+      }
+      derez.deserialize(orig_proc);
+      derez.deserialize(steal_count);
+      derez.deserialize(speculated);
+      unsigned ctx_index;
+      derez.deserialize(ctx_index);
+      set_context_index(ctx_index);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::pack_index_space_requirement(
+                              const IndexSpaceRequirement &req, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(req.handle);
+      rez.serialize(req.privilege);
+      rez.serialize(req.parent);
+      // no need to send verified
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::unpack_index_space_requirement(
+                                IndexSpaceRequirement &req, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(req.handle);
+      derez.deserialize(req.privilege);
+      derez.deserialize(req.parent);
+      req.verified = true;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::pack_region_requirement(
+                                  const RegionRequirement &req, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(req.region);
+      rez.serialize(req.partition);
+      rez.serialize(req.privilege_fields.size());
+      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
+            it != req.privilege_fields.end(); it++)
+      {
+        rez.serialize(*it);
+      }
+      rez.serialize(req.instance_fields.size());
+      for (std::vector<FieldID>::const_iterator it = 
+            req.instance_fields.begin(); it != req.instance_fields.end(); it++)
+      {
+        rez.serialize(*it);
+      }
+      rez.serialize(req.privilege);
+      rez.serialize(req.prop);
+      rez.serialize(req.parent);
+      rez.serialize(req.redop);
+      rez.serialize(req.tag);
+      rez.serialize(req.flags);
+      rez.serialize(req.handle_type);
+      rez.serialize(req.projection);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::unpack_region_requirement(
+                                    RegionRequirement &req, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(req.region);
+      derez.deserialize(req.partition);
+      size_t num_privilege_fields;
+      derez.deserialize(num_privilege_fields);
+      for (unsigned idx = 0; idx < num_privilege_fields; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        req.privilege_fields.insert(fid);
+      }
+      size_t num_instance_fields;
+      derez.deserialize(num_instance_fields);
+      for (unsigned idx = 0; idx < num_instance_fields; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        req.instance_fields.push_back(fid);
+      }
+      derez.deserialize(req.privilege);
+      derez.deserialize(req.prop);
+      derez.deserialize(req.parent);
+      derez.deserialize(req.redop);
+      derez.deserialize(req.tag);
+      derez.deserialize(req.flags);
+      derez.deserialize(req.handle_type);
+      derez.deserialize(req.projection);
+      req.flags |= VERIFIED_FLAG;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::pack_grant(const Grant &grant,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      grant.impl->pack_grant(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::unpack_grant(Grant &grant,Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Create a new grant impl object to perform the unpack
+      grant = Grant(legion_new<GrantImpl>());
+      grant.impl->unpack_grant(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::pack_phase_barrier(
+                                  const PhaseBarrier &barrier, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(barrier.phase_barrier);
+    }  
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::unpack_phase_barrier(
+                                    PhaseBarrier &barrier, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(barrier.phase_barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::pack_point(Serializer &rez, 
+                                             const DomainPoint &p)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(p.dim);
+      if (p.dim == 0)
+        rez.serialize(p.point_data[0]);
+      else
+      {
+        for (int idx = 0; idx < p.dim; idx++)
+          rez.serialize(p.point_data[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalTask::unpack_point(Deserializer &derez, 
+                                               DomainPoint &p)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(p.dim);
+      if (p.dim == 0)
+        derez.deserialize(p.point_data[0]);
+      else
+      {
+        for (int idx = 0; idx < p.dim; idx++)
+          derez.deserialize(p.point_data[idx]);
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // Task Operation 
     /////////////////////////////////////////////////////////////
   
     //--------------------------------------------------------------------------
     TaskOp::TaskOp(Runtime *rt)
-      : Task(), SpeculativeOp(rt)
+      : ExternalTask(), SpeculativeOp(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -61,6 +662,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
     }
 
     //--------------------------------------------------------------------------
@@ -162,17 +770,7 @@ namespace Legion {
         local_arglen = 0;
       }
       early_mapped_regions.clear();
-      atomic_locks.clear();
-      created_regions.clear();
-      created_fields.clear();
-      created_field_spaces.clear();
-      created_index_spaces.clear();
-      created_index_partitions.clear();
-      deleted_regions.clear();
-      deleted_fields.clear();
-      deleted_field_spaces.clear();
-      deleted_index_spaces.clear();
-      deleted_index_partitions.clear();
+      atomic_locks.clear(); 
       parent_req_indexes.clear();
     }
 
@@ -191,8 +789,13 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, PACK_BASE_TASK_CALL);
       // pack all the user facing data first
-      pack_base_external_task(rez, target); 
+      pack_external_task(rez, target); 
       RezCheck z(rez);
+#ifdef DEBUG_LEGION
+      assert(regions.size() == parent_req_indexes.size());
+#endif
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        rez.serialize(parent_req_indexes[idx]);
       rez.serialize(map_locally);
       if (map_locally)
       {
@@ -221,8 +824,11 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, UNPACK_BASE_TASK_CALL);
       // unpack all the user facing data
-      unpack_base_external_task(derez, this); 
+      unpack_external_task(derez, runtime, this); 
       DerezCheck z(derez);
+      parent_req_indexes.resize(regions.size());
+      for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
+        derez.deserialize(parent_req_indexes[idx]);
       derez.deserialize(map_locally);
       if (map_locally)
       {
@@ -244,136 +850,6 @@ namespace Legion {
         early_mapped_regions[index].unpack_references(runtime, this, derez, 
                                                       ready_events);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::pack_base_external_task(Serializer &rez, AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(task_id);
-      rez.serialize(indexes.size());
-      for (unsigned idx = 0; idx < indexes.size(); idx++)
-        pack_index_space_requirement(indexes[idx], rez);
-      rez.serialize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        pack_region_requirement(regions[idx], rez);
-#ifdef DEBUG_LEGION
-      assert(regions.size() == parent_req_indexes.size());
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        rez.serialize(parent_req_indexes[idx]);
-      rez.serialize(futures.size());
-      // If we are remote we can just do the normal pack
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-        rez.serialize(futures[idx].impl->did);
-      rez.serialize(grants.size());
-      for (unsigned idx = 0; idx < grants.size(); idx++)
-        pack_grant(grants[idx], rez);
-      rez.serialize(wait_barriers.size());
-      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
-        pack_phase_barrier(wait_barriers[idx], rez);
-      rez.serialize(arrive_barriers.size());
-      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
-        pack_phase_barrier(arrive_barriers[idx], rez);
-      rez.serialize<bool>((arg_manager != NULL));
-      rez.serialize(arglen);
-      rez.serialize(args,arglen);
-      rez.serialize(map_id);
-      rez.serialize(tag);
-      rez.serialize(is_index_space);
-      rez.serialize(must_epoch_task);
-      rez.serialize(index_domain);
-      rez.serialize(index_point);
-      rez.serialize(local_arglen);
-      rez.serialize(local_args,local_arglen);
-      rez.serialize(orig_proc);
-      // No need to pack current proc, it will get set when we unpack
-      rez.serialize(steal_count);
-      // No need to pack remote, it will get set
-      rez.serialize(speculated);
-      rez.serialize(context_index);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::unpack_base_external_task(Deserializer &derez, 
-                                           ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(task_id);
-      size_t num_indexes;
-      derez.deserialize(num_indexes);
-      indexes.resize(num_indexes);
-      for (unsigned idx = 0; idx < indexes.size(); idx++)
-        unpack_index_space_requirement(indexes[idx], derez);
-      size_t num_regions;
-      derez.deserialize(num_regions);
-      regions.resize(num_regions);
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        unpack_region_requirement(regions[idx], derez);
-      parent_req_indexes.resize(num_regions);
-      for (unsigned idx = 0; idx < parent_req_indexes.size(); idx++)
-        derez.deserialize(parent_req_indexes[idx]);
-      size_t num_futures;
-      derez.deserialize(num_futures);
-      futures.resize(num_futures);
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        DistributedID future_did;
-        derez.deserialize(future_did);
-        futures[idx] = Future(
-            runtime->find_or_create_future(future_did, mutator));
-      }
-      size_t num_grants;
-      derez.deserialize(num_grants);
-      grants.resize(num_grants);
-      for (unsigned idx = 0; idx < grants.size(); idx++)
-        unpack_grant(grants[idx], derez);
-      size_t num_wait_barriers;
-      derez.deserialize(num_wait_barriers);
-      wait_barriers.resize(num_wait_barriers);
-      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
-        unpack_phase_barrier(wait_barriers[idx], derez);
-      size_t num_arrive_barriers;
-      derez.deserialize(num_arrive_barriers);
-      arrive_barriers.resize(num_arrive_barriers);
-      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
-        unpack_phase_barrier(arrive_barriers[idx], derez);
-      bool has_arg_manager;
-      derez.deserialize(has_arg_manager);
-      derez.deserialize(arglen);
-      if (arglen > 0)
-      {
-        if (has_arg_manager)
-        {
-#ifdef DEBUG_LEGION
-          assert(arg_manager == NULL);
-#endif
-          arg_manager = legion_new<AllocManager>(arglen);
-          arg_manager->add_reference();
-          args = arg_manager->get_allocation();
-        }
-        else
-          args = legion_malloc(TASK_ARGS_ALLOC, arglen);
-        derez.deserialize(args,arglen);
-      }
-      derez.deserialize(map_id);
-      derez.deserialize(tag);
-      derez.deserialize(is_index_space);
-      derez.deserialize(must_epoch_task);
-      derez.deserialize(index_domain);
-      derez.deserialize(index_point);
-      derez.deserialize(local_arglen);
-      if (local_arglen > 0)
-      {
-        local_args = legion_malloc(LOCAL_ARGS_ALLOC, local_arglen);
-        derez.deserialize(local_args,local_arglen);
-      }
-      derez.deserialize(orig_proc);
-      derez.deserialize(steal_count);
-      derez.deserialize(speculated);
-      derez.deserialize(context_index);
     }
 
     //--------------------------------------------------------------------------
@@ -422,7 +898,6 @@ namespace Legion {
             break;
           }
         case POINT_TASK_KIND:
-        case REMOTE_TASK_KIND:
         case INDEX_TASK_KIND:
         default:
           assert(false); // no other tasks should be sent anywhere
@@ -735,24 +1210,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::is_inline_task(void) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called except by inherited types
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& TaskOp::begin_inline_task(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *(reinterpret_cast<std::vector<PhysicalRegion>*>(NULL));
-    }
-
-    //--------------------------------------------------------------------------
     void TaskOp::end_inline_task(const void *result, 
                                  size_t result_size, bool owned)
     //--------------------------------------------------------------------------
@@ -955,707 +1412,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_ctx->decrement_outstanding();
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_region_creation(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Create a new logical region 
-      // Hold the operation lock when doing this since children could
-      // be returning values from the utility processor
-      AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(created_regions.find(handle) == created_regions.end());
-#endif
-      created_regions.insert(handle); 
-      add_created_region(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_region_deletion(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      bool finalize = false;
-      // Hold the operation lock when doing this since children could
-      // be returning values from the utility processor
-      {
-        AutoLock o_lock(op_lock);
-        std::set<LogicalRegion>::iterator finder = created_regions.find(handle);
-        // See if we created this region, if so remove it from the list
-        // of created regions, otherwise add it to the list of deleted
-        // regions to flow backwards
-        if (finder != created_regions.end())
-        {
-          created_regions.erase(finder);
-          finalize = true;
-        }
-        else
-          deleted_regions.insert(handle);
-      }
-      if (finalize)
-        runtime->finalize_logical_region_destroy(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_region_creations(const std::set<LogicalRegion> &regs)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
-            it != regs.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(created_regions.find(*it) == created_regions.end());
-#endif
-        created_regions.insert(*it);
-        add_created_region(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_region_deletions(const std::set<LogicalRegion> &regs)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<LogicalRegion> to_finalize;
-      {
-        AutoLock o_lock(op_lock);
-        for (std::set<LogicalRegion>::const_iterator it = regs.begin();
-              it != regs.end(); it++)
-        {
-          std::set<LogicalRegion>::iterator finder = created_regions.find(*it);
-          if (finder != created_regions.end())
-          {
-            created_regions.erase(finder);
-            to_finalize.push_back(*it);
-          }
-          else
-            deleted_regions.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::vector<LogicalRegion>::const_iterator it = 
-              to_finalize.begin(); it != to_finalize.end(); it++)
-          runtime->finalize_logical_region_destroy(*it);
-      }
     } 
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_field_creation(FieldSpace handle, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      std::pair<FieldSpace,FieldID> key(handle,fid);
-#ifdef DEBUG_LEGION
-      assert(created_fields.find(key) == created_fields.end());
-#endif
-      created_fields.insert(key);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_field_creations(FieldSpace handle,
-                                          const std::vector<FieldID> &fields)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (unsigned idx = 0; idx < fields.size(); idx++)
-      {
-        std::pair<FieldSpace,FieldID> key(handle,fields[idx]);
-#ifdef DEBUG_LEGION
-        assert(created_fields.find(key) == created_fields.end());
-#endif
-        created_fields.insert(key);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_field_deletions(FieldSpace handle,
-                                         const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      std::set<FieldID> to_finalize;
-      {
-        AutoLock o_lock(op_lock);
-        for (std::set<FieldID>::const_iterator it = to_free.begin();
-              it != to_free.end(); it++)
-        {
-          std::pair<FieldSpace,FieldID> key(handle,*it);
-          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
-            created_fields.find(key);
-          if (finder != created_fields.end())
-          {
-            created_fields.erase(finder);
-            to_finalize.insert(*it);
-          }
-          else
-            deleted_fields.insert(key);
-        }
-      }
-      if (!to_finalize.empty())
-        runtime->finalize_field_destroy(handle, to_finalize);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_field_creations(
-                        const std::set<std::pair<FieldSpace,FieldID> > &fields)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-            fields.begin(); it != fields.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(created_fields.find(*it) == created_fields.end());
-#endif
-        created_fields.insert(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_field_deletions(
-                        const std::set<std::pair<FieldSpace,FieldID> > &fields)
-    //--------------------------------------------------------------------------
-    {
-      std::map<FieldSpace,std::set<FieldID> > to_finalize;
-      {
-        AutoLock o_lock(op_lock);
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-              fields.begin(); it != fields.end(); it++)
-        {
-          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
-            created_fields.find(*it);
-          if (finder != created_fields.end())
-          {
-            created_fields.erase(finder);
-            to_finalize[it->first].insert(it->second);
-          }
-          else
-            deleted_fields.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
-              to_finalize.begin(); it != to_finalize.end(); it++)
-        {
-          runtime->finalize_field_destroy(it->first, it->second);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_field_space_creation(FieldSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(created_field_spaces.find(space) == created_field_spaces.end());
-#endif
-      created_field_spaces.insert(space);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_field_space_deletion(FieldSpace space)
-    //--------------------------------------------------------------------------
-    {
-      bool finalize = false;
-      {
-        AutoLock o_lock(op_lock);
-        std::deque<FieldID> to_delete;
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-              created_fields.begin(); it != created_fields.end(); it++)
-        {
-          if (it->first == space)
-            to_delete.push_back(it->second);
-        }
-        for (unsigned idx = 0; idx < to_delete.size(); idx++)
-        {
-          std::pair<FieldSpace,FieldID> key(space, to_delete[idx]);
-          created_fields.erase(key);
-        }
-        std::set<FieldSpace>::iterator finder = 
-          created_field_spaces.find(space);
-        if (finder != created_field_spaces.end())
-        {
-          created_field_spaces.erase(finder);
-          finalize = true;
-        }
-        else
-          deleted_field_spaces.insert(space);
-      }
-      if (finalize)
-        runtime->finalize_field_space_destroy(space);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_field_space_creations(
-                                            const std::set<FieldSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::set<FieldSpace>::const_iterator it = spaces.begin();
-            it != spaces.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(created_field_spaces.find(*it) == created_field_spaces.end());
-#endif
-        created_field_spaces.insert(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_field_space_deletions(
-                                            const std::set<FieldSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldSpace> to_finalize;
-      {
-        AutoLock o_lock(op_lock);
-        for (std::set<FieldSpace>::const_iterator it = spaces.begin();
-              it != spaces.end(); it++)
-        {
-          std::deque<FieldID> to_delete;
-          for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator cit = 
-                created_fields.begin(); cit != created_fields.end(); cit++)
-          {
-            if (cit->first == *it)
-              to_delete.push_back(cit->second);
-          }
-          for (unsigned idx = 0; idx < to_delete.size(); idx++)
-          {
-            std::pair<FieldSpace,FieldID> key(*it, to_delete[idx]);
-            created_fields.erase(key);
-          }
-          std::set<FieldSpace>::iterator finder = created_field_spaces.find(*it);
-          if (finder != created_field_spaces.end())
-          {
-            created_field_spaces.erase(finder);
-            to_finalize.push_back(*it);
-          }
-          else
-            deleted_field_spaces.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::vector<FieldSpace>::const_iterator it = to_finalize.begin();
-              it != to_finalize.end(); it++)
-          runtime->finalize_field_space_destroy(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool TaskOp::has_created_index_space(IndexSpace space) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      return (created_index_spaces.find(space) != created_index_spaces.end());
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_index_space_creation(IndexSpace space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(created_index_spaces.find(space) == created_index_spaces.end());
-#endif
-      created_index_spaces.insert(space);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_index_space_deletion(IndexSpace space)
-    //--------------------------------------------------------------------------
-    {
-      bool finalize = false;
-      {
-        AutoLock o_lock(op_lock);
-        std::set<IndexSpace>::iterator finder = 
-          created_index_spaces.find(space);
-        if (finder != created_index_spaces.end())
-        {
-          created_index_spaces.erase(finder);
-          finalize = true;
-        }
-        else
-          deleted_index_spaces.insert(space);
-      }
-      if (finalize)
-        runtime->finalize_index_space_destroy(space);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_index_space_creations(
-                                            const std::set<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::set<IndexSpace>::const_iterator it = spaces.begin();
-            it != spaces.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(created_index_spaces.find(*it) == created_index_spaces.end());
-#endif
-        created_index_spaces.insert(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_index_space_deletions(
-                                            const std::set<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<IndexSpace> to_finalize;
-      {
-        AutoLock o_lock(op_lock);
-        for (std::set<IndexSpace>::const_iterator it = spaces.begin();
-              it != spaces.end(); it++)
-        {
-          std::set<IndexSpace>::iterator finder = 
-            created_index_spaces.find(*it);
-          if (finder != created_index_spaces.end())
-          {
-            created_index_spaces.erase(finder);
-            to_finalize.push_back(*it);
-          }
-          else
-            deleted_index_spaces.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::vector<IndexSpace>::const_iterator it = to_finalize.begin();
-              it != to_finalize.end(); it++)
-          runtime->finalize_index_space_destroy(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_index_partition_creation(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(created_index_partitions.find(handle) == 
-             created_index_partitions.end());
-#endif
-      created_index_partitions.insert(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_index_partition_deletion(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      bool finalize = false;
-      {
-        AutoLock o_lock(op_lock);
-        std::set<IndexPartition>::iterator finder = 
-          created_index_partitions.find(handle);
-        if (finder != created_index_partitions.end())
-        {
-          created_index_partitions.erase(finder);
-          finalize = true;
-        }
-        else
-          deleted_index_partitions.insert(handle);
-      }
-      if (finalize)
-        runtime->finalize_index_partition_destroy(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_index_partition_creations(
-                                          const std::set<IndexPartition> &parts)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::set<IndexPartition>::const_iterator it = parts.begin();
-            it != parts.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(created_index_partitions.find(*it) == 
-               created_index_partitions.end());
-#endif
-        created_index_partitions.insert(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::register_index_partition_deletions(
-                                          const std::set<IndexPartition> &parts)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<IndexPartition> to_finalize;
-      {
-        AutoLock o_lock(op_lock);
-        for (std::set<IndexPartition>::const_iterator it = parts.begin();
-              it != parts.end(); it++)
-        {
-          std::set<IndexPartition>::iterator finder = 
-            created_index_partitions.find(*it);
-          if (finder != created_index_partitions.end())
-          {
-            created_index_partitions.erase(finder);
-            to_finalize.push_back(*it);
-          }
-          else
-            deleted_index_partitions.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::vector<IndexPartition>::const_iterator it = 
-              to_finalize.begin(); it != to_finalize.end(); it++)
-          runtime->finalize_index_partition_destroy(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool TaskOp::was_created_requirement_deleted(
-                                             const RegionRequirement &req) const
-    //--------------------------------------------------------------------------
-    {
-      // Region was created and not deleted
-      if (created_regions.find(req.region) != created_regions.end())
-        return false;
-      // Otherwise see if the field was created and still not deleted
-      // If it is has more than one privilege field then it was not 
-      // a created field
-      if (req.privilege_fields.size() > 1)
-        return true;
-      std::pair<FieldSpace,FieldID> key(req.region.get_field_space(),
-                                    *(req.privilege_fields.begin()));
-      if (created_fields.find(key) != created_fields.end())
-        return false;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::return_privilege_state(TaskOp *target)
-    //--------------------------------------------------------------------------
-    {
-      if (!created_regions.empty())
-        target->register_region_creations(created_regions);
-      if (!deleted_regions.empty())
-        target->register_region_deletions(deleted_regions);
-      if (!created_fields.empty())
-        target->register_field_creations(created_fields);
-      if (!deleted_fields.empty())
-        target->register_field_deletions(deleted_fields);
-      if (!created_field_spaces.empty())
-        target->register_field_space_creations(created_field_spaces);
-      if (!deleted_field_spaces.empty())
-        target->register_field_space_deletions(deleted_field_spaces);
-      if (!created_index_spaces.empty())
-        target->register_index_space_creations(created_index_spaces);
-      if (!deleted_index_spaces.empty())
-        target->register_index_space_deletions(deleted_index_spaces);
-      if (!created_index_partitions.empty())
-        target->register_index_partition_creations(created_index_partitions);
-      if (!deleted_index_partitions.empty())
-        target->register_index_partition_deletions(deleted_index_partitions);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::pack_privilege_state(Serializer &rez, AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      // Shouldn't need the lock here since we only do this
-      // while there is no one else executing
-      RezCheck z(rez);
-      rez.serialize<size_t>(created_regions.size());
-      if (!created_regions.empty())
-      {
-        for (std::set<LogicalRegion>::const_iterator it =
-              created_regions.begin(); it != created_regions.end(); it++)
-        {
-          rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(deleted_regions.size());
-      if (!deleted_regions.empty())
-      {
-        for (std::set<LogicalRegion>::const_iterator it =
-              deleted_regions.begin(); it != deleted_regions.end(); it++)
-        {
-          rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(created_fields.size());
-      if (!created_fields.empty())
-      {
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
-              created_fields.begin(); it != created_fields.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
-      rez.serialize<size_t>(deleted_fields.size());
-      if (!deleted_fields.empty())
-      {
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-              deleted_fields.begin(); it != deleted_fields.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
-      rez.serialize<size_t>(created_field_spaces.size());
-      if (!created_field_spaces.empty())
-      {
-        for (std::set<FieldSpace>::const_iterator it = 
-              created_field_spaces.begin(); it != 
-              created_field_spaces.end(); it++)
-        {
-          rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(deleted_field_spaces.size());
-      if (!deleted_field_spaces.empty())
-      {
-        for (std::set<FieldSpace>::const_iterator it = 
-              deleted_field_spaces.begin(); it !=
-              deleted_field_spaces.end(); it++)
-        {
-          rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(created_index_spaces.size());
-      if (!created_index_spaces.empty())
-      {
-        for (std::set<IndexSpace>::const_iterator it = 
-              created_index_spaces.begin(); it != 
-              created_index_spaces.end(); it++)
-        {
-          rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(deleted_index_spaces.size());
-      if (!deleted_index_spaces.empty())
-      {
-        for (std::set<IndexSpace>::const_iterator it = 
-              deleted_index_spaces.begin(); it !=
-              deleted_index_spaces.end(); it++)
-        {
-          rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(created_index_partitions.size());
-      if (!created_index_partitions.empty())
-      {
-        for (std::set<IndexPartition>::const_iterator it = 
-              created_index_partitions.begin(); it !=
-              created_index_partitions.end(); it++)
-        {
-          rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(deleted_index_partitions.size());
-      if (!deleted_index_partitions.empty())
-      {
-        for (std::set<IndexPartition>::const_iterator it = 
-              deleted_index_partitions.begin(); it !=
-              deleted_index_partitions.end(); it++)
-        {
-          rez.serialize(*it);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::unpack_privilege_state(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Hold the lock while doing the unpack to avoid conflicting
-      // with anyone else returning state
-      DerezCheck z(derez);
-      size_t num_created_regions;
-      derez.deserialize(num_created_regions);
-      for (unsigned idx = 0; idx < num_created_regions; idx++)
-      {
-        LogicalRegion reg;
-        derez.deserialize(reg);
-        created_regions.insert(reg);
-      }
-      size_t num_deleted_regions;
-      derez.deserialize(num_deleted_regions);
-      for (unsigned idx = 0; idx < num_deleted_regions; idx++)
-      {
-        LogicalRegion reg;
-        derez.deserialize(reg);
-        deleted_regions.insert(reg);
-      }
-      size_t num_created_fields;
-      derez.deserialize(num_created_fields);
-      for (unsigned idx = 0; idx < num_created_fields; idx++)
-      {
-        FieldSpace sp;
-        derez.deserialize(sp);
-        FieldID fid;
-        derez.deserialize(fid);
-        created_fields.insert(std::pair<FieldSpace,FieldID>(sp,fid));
-      }
-      size_t num_deleted_fields;
-      derez.deserialize(num_deleted_fields);
-      for (unsigned idx = 0; idx < num_deleted_fields; idx++)
-      {
-        FieldSpace sp;
-        derez.deserialize(sp);
-        FieldID fid;
-        derez.deserialize(fid);
-        deleted_fields.insert(std::pair<FieldSpace,FieldID>(sp,fid));
-      }
-      size_t num_created_field_spaces;
-      derez.deserialize(num_created_field_spaces);
-      for (unsigned idx = 0; idx < num_created_field_spaces; idx++)
-      {
-        FieldSpace sp;
-        derez.deserialize(sp);
-        created_field_spaces.insert(sp);
-      }
-      size_t num_deleted_field_spaces;
-      derez.deserialize(num_deleted_field_spaces);
-      for (unsigned idx = 0; idx < num_deleted_field_spaces; idx++)
-      {
-        FieldSpace sp;
-        derez.deserialize(sp);
-        deleted_field_spaces.insert(sp);
-      }
-      size_t num_created_index_spaces;
-      derez.deserialize(num_created_index_spaces);
-      for (unsigned idx = 0; idx < num_created_index_spaces; idx++)
-      {
-        IndexSpace sp;
-        derez.deserialize(sp);
-        created_index_spaces.insert(sp);
-      }
-      size_t num_deleted_index_spaces;
-      derez.deserialize(num_deleted_index_spaces);
-      for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
-      {
-        IndexSpace sp;
-        derez.deserialize(sp);
-        deleted_index_spaces.insert(sp);
-      }
-      size_t num_created_index_partitions;
-      derez.deserialize(num_created_index_partitions);
-      for (unsigned idx = 0; idx < num_created_index_partitions; idx++)
-      {
-        IndexPartition ip;
-        derez.deserialize(ip);
-        created_index_partitions.insert(ip);
-      }
-      size_t num_deleted_index_partitions;
-      derez.deserialize(num_deleted_index_partitions);
-      for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
-      {
-        IndexPartition ip;
-        derez.deserialize(ip);
-        deleted_index_partitions.insert(ip);
-      }
-    }
 
     //--------------------------------------------------------------------------
     void TaskOp::perform_privilege_checks(void)
@@ -2485,160 +2242,7 @@ namespace Legion {
       }
       if (task_commit)
         trigger_task_commit();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::pack_index_space_requirement(
-                              const IndexSpaceRequirement &req, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(req.handle);
-      rez.serialize(req.privilege);
-      rez.serialize(req.parent);
-      // no need to send verified
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::unpack_index_space_requirement(
-                                IndexSpaceRequirement &req, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(req.handle);
-      derez.deserialize(req.privilege);
-      derez.deserialize(req.parent);
-      req.verified = true;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::pack_region_requirement(
-                                  const RegionRequirement &req, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(req.region);
-      rez.serialize(req.partition);
-      rez.serialize(req.privilege_fields.size());
-      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
-            it != req.privilege_fields.end(); it++)
-      {
-        rez.serialize(*it);
-      }
-      rez.serialize(req.instance_fields.size());
-      for (std::vector<FieldID>::const_iterator it = 
-            req.instance_fields.begin(); it != req.instance_fields.end(); it++)
-      {
-        rez.serialize(*it);
-      }
-      rez.serialize(req.privilege);
-      rez.serialize(req.prop);
-      rez.serialize(req.parent);
-      rez.serialize(req.redop);
-      rez.serialize(req.tag);
-      rez.serialize(req.flags);
-      rez.serialize(req.handle_type);
-      rez.serialize(req.projection);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::unpack_region_requirement(
-                                    RegionRequirement &req, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(req.region);
-      derez.deserialize(req.partition);
-      size_t num_privilege_fields;
-      derez.deserialize(num_privilege_fields);
-      for (unsigned idx = 0; idx < num_privilege_fields; idx++)
-      {
-        FieldID fid;
-        derez.deserialize(fid);
-        req.privilege_fields.insert(fid);
-      }
-      size_t num_instance_fields;
-      derez.deserialize(num_instance_fields);
-      for (unsigned idx = 0; idx < num_instance_fields; idx++)
-      {
-        FieldID fid;
-        derez.deserialize(fid);
-        req.instance_fields.push_back(fid);
-      }
-      derez.deserialize(req.privilege);
-      derez.deserialize(req.prop);
-      derez.deserialize(req.parent);
-      derez.deserialize(req.redop);
-      derez.deserialize(req.tag);
-      derez.deserialize(req.flags);
-      derez.deserialize(req.handle_type);
-      derez.deserialize(req.projection);
-      req.flags |= VERIFIED_FLAG;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::pack_grant(const Grant &grant, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      grant.impl->pack_grant(rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::unpack_grant(Grant &grant, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Create a new grant impl object to perform the unpack
-      grant = Grant(legion_new<GrantImpl>());
-      grant.impl->unpack_grant(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::pack_phase_barrier(
-                                  const PhaseBarrier &barrier, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(barrier.phase_barrier);
-    }  
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::unpack_phase_barrier(
-                                    PhaseBarrier &barrier, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(barrier.phase_barrier);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::pack_point(Serializer &rez, const DomainPoint &p)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(p.dim);
-      if (p.dim == 0)
-        rez.serialize(p.point_data[0]);
-      else
-      {
-        for (int idx = 0; idx < p.dim; idx++)
-          rez.serialize(p.point_data[idx]);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void TaskOp::unpack_point(Deserializer &derez, DomainPoint &p)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(p.dim);
-      if (p.dim == 0)
-        derez.deserialize(p.point_data[0]);
-      else
-      {
-        for (int idx = 0; idx < p.dim; idx++)
-          derez.deserialize(p.point_data[idx]);
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     /*static*/ void TaskOp::log_requirement(UniqueID uid, unsigned idx,
@@ -4402,6 +4006,55 @@ namespace Legion {
         Runtime::trigger_event(profiling_reported);
     }
 
+    //--------------------------------------------------------------------------
+    void SingleTask::perform_inlining(void)
+    //--------------------------------------------------------------------------
+    {
+      // See if there is anything that we need to wait on before running
+      std::set<ApEvent> wait_on_events;
+      for (unsigned idx = 0; idx < futures.size(); idx++)
+      {
+        FutureImpl *impl = futures[idx].impl; 
+        wait_on_events.insert(impl->ready_event);
+      }
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+      {
+        GrantImpl *impl = grants[idx].impl;
+        wait_on_events.insert(impl->acquire_grant());
+      }
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+      {
+        ApEvent e = 
+          Runtime::get_previous_phase(wait_barriers[idx].phase_barrier);
+        wait_on_events.insert(e);
+      }
+      // Merge together all the events for the start condition 
+      ApEvent start_condition = Runtime::merge_events(wait_on_events); 
+      // Get the processor that we will be running on
+      Processor current = parent_ctx->get_executing_processor();
+      // Select the variant to use
+      VariantImpl *variant = parent_ctx->select_inline_variant(this);
+      if (!Runtime::unsafe_mapper)
+      {
+        MapperManager *mapper = runtime->find_mapper(current, map_id);
+        validate_variant_selection(mapper, variant, "select_task_variant");
+      }
+      // Now make an inline context to use for the execution
+      InlineContext *inline_ctx = new InlineContext(runtime, parent_ctx, this);
+      // Save this for when we are done executing
+      TaskContext *enclosing = parent_ctx;
+      // Set the context to be the current inline context
+      parent_ctx = inline_ctx;
+      // See if we need to wait for anything
+      if (start_condition.exists() && !start_condition.has_triggered())
+        start_condition.wait();
+      variant->dispatch_inline(current, inline_ctx); 
+      // Return any created privilege state
+      inline_ctx->return_privilege_state(enclosing);
+      // Then delete the inline context
+      delete inline_ctx;
+    }
+
     /////////////////////////////////////////////////////////////
     // Multi Task 
     /////////////////////////////////////////////////////////////
@@ -4431,6 +4084,8 @@ namespace Legion {
       serdez_redop_fns = NULL;
       reduction_state_size = 0;
       reduction_state = NULL;
+      children_complete_invoked = false;
+      children_commit_invoked = false;
     }
 
     //--------------------------------------------------------------------------
@@ -4729,13 +4384,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void MultiTask::add_created_region(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Do nothing
-    }
-
-    //--------------------------------------------------------------------------
     void MultiTask::pack_multi_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -4897,7 +4545,6 @@ namespace Legion {
       remote_unique_id = get_unique_id();
       sent_remotely = false;
       top_level_task = false;
-      is_inline = false;
       need_intra_task_alias_analysis = true;
     }
 
@@ -5563,7 +5210,7 @@ namespace Legion {
       {
         // Pass back our created and deleted operations
         if (!top_level_task)
-          return_privilege_state(parent_ctx->get_owner_task());
+          execution_context->return_privilege_state(parent_ctx);
         // The future has already been set so just trigger it
         result.impl->complete_future();
       }
@@ -5792,70 +5439,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::find_enclosing_local_fields(
-           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
-    //--------------------------------------------------------------------------
-    {
-      // Ask the same for our parent context
-      parent_ctx->find_enclosing_local_fields(infos);
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < local_fields.size(); idx++)
-        infos.push_back(local_fields[idx]);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
-    //--------------------------------------------------------------------------
-    {
-      // See if there is anything that we need to wait on before running
-      std::set<ApEvent> wait_on_events;
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        FutureImpl *impl = futures[idx].impl; 
-        wait_on_events.insert(impl->ready_event);
-      }
-      for (unsigned idx = 0; idx < grants.size(); idx++)
-      {
-        GrantImpl *impl = grants[idx].impl;
-        wait_on_events.insert(impl->acquire_grant());
-      }
-      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
-      {
-        ApEvent e = 
-          Runtime::get_previous_phase(wait_barriers[idx].phase_barrier);
-        wait_on_events.insert(e);
-      }
-      // Merge together all the events for the start condition 
-      ApEvent start_condition = Runtime::merge_events(wait_on_events); 
-
-      // See if we need to wait for anything
-      if (start_condition.exists() && !start_condition.has_triggered())
-        start_condition.wait();
-
-      // Run the task  
-      Processor current = parent_ctx->get_executing_processor();
-      // Set the context to be the current inline context
-      parent_ctx = ctx;
-      // Mark that we are an inline task
-      is_inline = true;
-      variant->dispatch_inline(current, this); 
-    }  
-
-    //--------------------------------------------------------------------------
-    bool IndividualTask::is_inline_task(void) const
-    //--------------------------------------------------------------------------
-    {
-      return is_inline;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& IndividualTask::begin_inline_task(void)
-    //--------------------------------------------------------------------------
-    {
-      return parent_ctx->get_physical_regions();
-    }
-
-    //--------------------------------------------------------------------------
     void IndividualTask::end_inline_task(const void *res, 
                                          size_t res_size, bool owned) 
     //--------------------------------------------------------------------------
@@ -5888,25 +5471,19 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PACK_REMOTE_COMPLETE_CALL);
       AddressSpaceID target = runtime->find_address_space(orig_proc);
-      if (!created_requirements.empty())
-        send_back_created_state(target); 
+      if (execution_context->has_created_requirements())
+        execution_context->send_back_created_state(target); 
       // Send back the pointer to the task instance, then serialize
       // everything else that needs to be sent back
       rez.serialize(orig_task);
       RezCheck z(rez);
       // Pack the privilege state
-      pack_privilege_state(rez, target);
+      execution_context->pack_privilege_state(rez, target);
       // Then pack the future result
       {
         RezCheck z2(rez);
         rez.serialize(future_size);
         rez.serialize(future_store,future_size);
-      }
-      if (top_level_task)
-      {
-        rez.serialize<size_t>(created_requirements.size());
-        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
-          pack_region_requirement(created_requirements[idx], rez);
       }
     }
     
@@ -5917,29 +5494,15 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_REMOTE_COMPLETE_CALL);
       DerezCheck z(derez);
       // First unpack the privilege state
-      unpack_privilege_state(derez);
+      ResourceTracker::unpack_privilege_state(derez, parent_ctx);
       // Unpack the future result
       if (must_epoch == NULL)
         result.impl->unpack_future(derez);
       else
         must_epoch->unpack_future(index_point, derez);
-      if (top_level_task)
-      {
-        size_t num_created;
-        derez.deserialize(num_created);
-        created_requirements.resize(num_created);
-        for (unsigned idx = 0; idx < num_created; idx++)
-          unpack_region_requirement(created_requirements[idx], derez);
-      }
       // Mark that we have both finished executing and that our
       // children are complete
       complete_execution();
-#ifdef DEBUG_LEGION
-      // No need for a lock here since we know
-      // that it is a single task
-      assert(!children_complete_invoked);
-      children_complete_invoked = true;
-#endif
       trigger_children_complete();
     }
 
@@ -5955,12 +5518,6 @@ namespace Legion {
     void IndividualTask::unpack_remote_commit(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // Don't need the lock here since we know that
-      // this is an individual task
-      assert(!children_commit_invoked);
-      children_commit_invoked = true;
-#endif
       trigger_children_committed();
     }
     
@@ -6350,14 +5907,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::is_inline_task(void) const
-    //--------------------------------------------------------------------------
-    {
-      // We are never an inline task
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent PointTask::get_task_completion(void) const
     //--------------------------------------------------------------------------
     {
@@ -6369,14 +5918,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return POINT_TASK_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -6406,7 +5947,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(remote_ctx);
-        pack_remote_context(rez, remote_instance);
+        execution_context->pack_remote_context(rez, remote_instance);
       }
       runtime->send_remote_context_response(remote_instance, rez);
       AutoLock o_lock(op_lock);
@@ -6426,11 +5967,10 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       // Release any restrictions we might have had
-      if (!coherence_restrictions.empty())
-        release_restrictions();
+      if (execution_context->has_restrictions())
+        execution_context->release_restrictions();
       // Pass back our created and deleted operations 
-      slice_owner->return_privileges(this);
-
+      slice_owner->return_privileges(execution_context);
       slice_owner->record_child_complete();
       // Since this point is now complete we know
       // that we can trigger it. Note we don't need to do
@@ -6442,18 +5982,10 @@ namespace Legion {
 
       // Invalidate any context that we had so that the child
       // operations can begin committing
-      if (context.exists() && (!is_leaf() || has_virtual_instances()))
-        invalidate_region_tree_contexts();
+      if (execution_context->has_region_tree_context())
+        execution_context->invalidate_region_tree_contexts();
       // See if we need to trigger that our children are complete
-      bool need_commit = false;
-      {
-        AutoLock o_lock(op_lock);
-        if (complete_children.empty() && !children_commit_invoked)
-        {
-          need_commit = true;
-          children_commit_invoked = true;
-        }
-      }
+      const bool need_commit = execution_context->attempt_children_commit();
       // Mark that this operation is now complete
       complete_operation();
       if (need_commit)
@@ -6510,8 +6042,8 @@ namespace Legion {
       derez.deserialize(point_termination);
       set_current_proc(current);
       // Get the context information from our slice owner
-      parent_ctx = slice_owner->get_parent();
-      parent_task = parent_ctx;
+      parent_ctx = slice_owner->get_context();
+      parent_task = parent_ctx->get_task();
       // Check to see if we had no virtual mappings and everything
       // was pre-mapped and we're remote then we can mark this
       // task as being mapped
@@ -6525,18 +6057,6 @@ namespace Legion {
       LegionSpy::log_event_dependence(completion_event, point_termination);
 #endif
       return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::find_enclosing_local_fields(
-           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
-    //--------------------------------------------------------------------------
-    {
-      // Ask the same for our parent context
-      parent_ctx->find_enclosing_local_fields(infos);
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < local_fields.size(); idx++)
-        infos.push_back(local_fields[idx]);
     }
 
     //--------------------------------------------------------------------------
@@ -6560,7 +6080,7 @@ namespace Legion {
         return;
       }
       if (Runtime::legion_spy_enabled)
-        log_created_requirements();
+        execution_context->log_created_requirements();
       if (!map_applied_conditions.empty())
       {
         RtEvent done = Runtime::merge_events(map_applied_conditions);
@@ -6613,1053 +6133,13 @@ namespace Legion {
       point_termination = Runtime::create_ap_user_event();
     }  
 
-    /////////////////////////////////////////////////////////////
-    // Wrapper Task 
-    /////////////////////////////////////////////////////////////
-
     //--------------------------------------------------------------------------
-    WrapperTask::WrapperTask(Runtime *rt)
-      : SingleTask(rt)
+    void PointTask::send_back_created_state(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    WrapperTask::~WrapperTask(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::resolve_false(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::early_map_task(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    bool WrapperTask::distribute_task(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent WrapperTask::perform_must_epoch_version_analysis(MustEpochOp *owner)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent WrapperTask::perform_mapping(MustEpochOp *owner)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    bool WrapperTask::is_stealable(void) const
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool WrapperTask::has_restrictions(unsigned idx, LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool WrapperTask::can_early_complete(ApUserEvent &chain_event)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::trigger_task_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::trigger_task_commit(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::perform_physical_traversal(unsigned idx,
-                                      RegionTreeContext ctx, InstanceSet &valid)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    bool WrapperTask::pack_task(Serializer &rez, Processor target)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool WrapperTask::unpack_task(Deserializer &derez, Processor current,
-                                  std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::handle_future(const void *res, size_t res_size,bool owned)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::handle_post_mapped(RtEvent mapped_precondition)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::activate_wrapper(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_single();
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::deactivate_wrapper(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_single();
-      pending_version_owner_requests.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void WrapperTask::handle_version_owner_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-      SingleTask *local_ctx = runtime->find_context(context_uid);
-      WrapperTask *remote_ctx;
-      derez.deserialize(remote_ctx);
-      bool is_region;
-      derez.deserialize(is_region);
-
-      Serializer rez;
-      rez.serialize(remote_ctx);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-
-        AddressSpaceID result = local_ctx->get_version_owner(node, source);
-        rez.serialize(result);
-        rez.serialize<bool>(true);
-        rez.serialize(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-
-        AddressSpaceID result = local_ctx->get_version_owner(node, source);
-        rez.serialize(result);
-        rez.serialize<bool>(false);
-        rez.serialize(handle);
-      }
-      runtime->send_version_owner_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void WrapperTask::process_version_owner_response(RegionTreeNode *node,
-                                                     AddressSpaceID result)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent to_trigger;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-        assert(region_tree_owners.find(node) == region_tree_owners.end());
-#endif
-        region_tree_owners[node] = 
-          std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
-        // Find the event to trigger
-        std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
-          pending_version_owner_requests.find(node);
-#ifdef DEBUG_LEGION
-        assert(finder != pending_version_owner_requests.end());
-#endif
-        to_trigger = finder->second;
-        pending_version_owner_requests.erase(finder);
-      }
-      Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void WrapperTask::handle_version_owner_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      WrapperTask *ctx;
-      derez.deserialize(ctx);
-      AddressSpaceID result;
-      derez.deserialize(result);
-      bool is_region;
-      derez.deserialize(is_region);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-        ctx->process_version_owner_response(node, result);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-        ctx->process_version_owner_response(node, result);
-      }
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Top Level Task 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    TopLevelTask::TopLevelTask(Runtime *rt)
-      : WrapperTask(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    TopLevelTask::TopLevelTask(const TopLevelTask &rhs)
-      : WrapperTask(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    TopLevelTask::~TopLevelTask(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    TopLevelTask& TopLevelTask::operator=(const TopLevelTask &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void TopLevelTask::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_wrapper();
-      parent_ctx = NULL;
-      parent_task = NULL;
-      runtime->allocate_local_context(this);
-#ifdef DEBUG_LEGION
-      assert(context.exists());
-      runtime->forest->check_context_state(context);
-#endif
-      // Configure this so that remote tasks are always trying to 
-      // schedule all of their tasks
-      outstanding_children_count = UINT_MAX;
-      context_configuration.min_tasks_to_schedule = UINT_MAX;
-      context_configuration.min_frames_to_schedule = 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void TopLevelTask::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      // Do this before deactivating the wrapper which releases our context
-      runtime->forest->invalidate_all_versions(context);
-      deactivate_wrapper();
-      if (!remote_instances.empty())
-      {
-        UniqueID local_uid = get_unique_id();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(local_uid);
-        }
-        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-        {
-          runtime->send_remote_context_free(it->first, rez);
-        }
-        remote_instances.clear();
-      }
-      runtime->free_top_level_task(this);
-      // Tell the runtime that another top level task is done
-      runtime->decrement_outstanding_top_level_tasks();
-    }
-
-    //--------------------------------------------------------------------------
-    int TopLevelTask::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return -1;
-    }
-
-    //--------------------------------------------------------------------------
-    void TopLevelTask::send_remote_context(AddressSpaceID remote_instance,
-                                           RemoteTask *remote_ctx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(remote_instance != runtime->address_space);
-#endif
-      // should only see this call if it is the top-level context
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(remote_ctx);
-        pack_remote_context(rez, remote_instance);
-      }
-      runtime->send_remote_context_response(remote_instance, rez);
-      AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(remote_instances.find(remote_instance) == remote_instances.end());
-#endif
-      remote_instances[remote_instance] = remote_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    void TopLevelTask::pack_remote_context(Serializer &rez, 
-                                           AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize<bool>(true); // top level context, all we need to pack
-      rez.serialize(get_context_uid());
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID TopLevelTask::get_context_uid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return unique_op_id;
-    }
-
-    //--------------------------------------------------------------------------
-    VersionInfo& TopLevelTask::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return *(new VersionInfo());
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* TopLevelTask::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    SingleTask* TopLevelTask::find_parent_context(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    AddressSpaceID TopLevelTask::get_version_owner(RegionTreeNode *node, 
-                                                   AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // We're the top-level task, so we handle the request on the node
-      // that made the region
-      const AddressSpaceID owner_space = node->get_owner_space();
-      if (owner_space == runtime->address_space)
-        return SingleTask::get_version_owner(node, source);
-#ifdef DEBUG_LEGION
-      assert(source == runtime->address_space); // should always be local
-#endif
-      // See if we already have it, or we already sent a request for it
-      bool send_request = false;
-      RtEvent wait_on;
-      {
-        AutoLock o_lock(op_lock);
-        std::map<RegionTreeNode*,
-                 std::pair<AddressSpaceID,bool> >::const_iterator finder =
-          region_tree_owners.find(node);
-        if (finder != region_tree_owners.end())
-          return finder->second.first;
-        // See if we already have an outstanding request
-        std::map<RegionTreeNode*,RtUserEvent>::const_iterator request_finder =
-          pending_version_owner_requests.find(node);
-        if (request_finder == pending_version_owner_requests.end())
-        {
-          // We haven't sent the request yet, so do that now
-          RtUserEvent request_event = Runtime::create_rt_user_event();
-          pending_version_owner_requests[node] = request_event;
-          wait_on = request_event;
-          send_request = true;
-        }
-        else
-          wait_on = request_finder->second;
-      }
-      if (send_request)
-      {
-        Serializer rez;
-        rez.serialize(unique_op_id);
-        rez.serialize<WrapperTask*>(this);
-        if (node->is_region())
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(node->as_region_node()->handle);
-        }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(node->as_partition_node()->handle);
-        }
-        // Send it to the owner space 
-        runtime->send_version_owner_request(owner_space, rez);
-      }
-      wait_on.wait();
-      // Retake the lock in read-only mode and get the answer
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      std::map<RegionTreeNode*,
-               std::pair<AddressSpaceID,bool> >::const_iterator finder = 
-        region_tree_owners.find(node);
-#ifdef DEBUG_LEGION
-      assert(finder != region_tree_owners.end());
-#endif
-      return finder->second.first;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent TopLevelTask::get_task_completion(void) const
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return ApEvent::NO_AP_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    TaskOp::TaskKind TopLevelTask::get_task_kind(void) const
-    //--------------------------------------------------------------------------
-    {
-      return TOP_LEVEL_KIND;
-    }
-    
-    //--------------------------------------------------------------------------
-    void TopLevelTask::find_enclosing_local_fields(
-             LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    SingleTask* TopLevelTask::find_outermost_local_context(SingleTask *previous)
-    //--------------------------------------------------------------------------
-    {
-      return previous;
-    }
-
-    //--------------------------------------------------------------------------
-    SingleTask* TopLevelTask::find_top_context(void)
-    //--------------------------------------------------------------------------
-    {
-      return this;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Remote Task 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    RemoteTask::RemoteTask(Runtime *rt)
-      : WrapperTask(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteTask::RemoteTask(const RemoteTask &rhs)
-      : WrapperTask(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteTask::~RemoteTask(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    RemoteTask& RemoteTask::operator=(const RemoteTask &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    int RemoteTask::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return depth;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::activate(void)
-    //--------------------------------------------------------------------------
-    { 
-      DETAILED_PROFILER(runtime, REMOTE_TASK_ACTIVATE_CALL);
-      activate_wrapper();
-      parent_ctx = NULL;
-      parent_task = NULL;
-      context = RegionTreeContext();
-      remote_owner_uid = 0;
-      parent_context_uid = 0;
-      depth = -1;
-      top_level_context = false; 
-      remote_completion_event = ApEvent::NO_AP_EVENT;
-      // Configure this so that remote tasks are always trying to 
-      // schedule all of their tasks
-      outstanding_children_count = UINT_MAX;
-      context_configuration.min_tasks_to_schedule = UINT_MAX;
-      context_configuration.min_frames_to_schedule = 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REMOTE_TASK_DEACTIVATE_CALL);
-      // Invalidate our context if necessary before deactivating
-      // the wrapper as it will release the context
-      if (!top_level_context)
-      {
-#ifdef DEBUG_LEGION
-        assert(regions.size() == virtual_mapped.size());
-#endif
-        // Deactivate any region trees that we didn't virtually map
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          if (!virtual_mapped[idx])
-            runtime->forest->invalidate_versions(context, regions[idx].region);
-      }
-      else
-        runtime->forest->invalidate_all_versions(context);
-      deactivate_wrapper(); 
-      version_infos.clear();
-      // Context is freed in deactivate single
-      runtime->free_remote_task(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::initialize_remote(UniqueID context_uid)
-    //--------------------------------------------------------------------------
-    {
-      remote_owner_uid = context_uid;
-      runtime->allocate_local_context(this);
-#ifdef DEBUG_LEGION
-      assert(context.exists());
-      runtime->forest->check_context_state(context);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    SingleTask* RemoteTask::find_outermost_local_context(SingleTask *previous)
-    //--------------------------------------------------------------------------
-    {
-      return previous;
-    }
-    
-    //--------------------------------------------------------------------------
-    SingleTask* RemoteTask::find_top_context(void)
-    //--------------------------------------------------------------------------
-    {
-      if (top_level_context)
-        return this;
-      if (parent_ctx == NULL)
-        return find_parent_context()->find_top_context();
-      else
-        return parent_ctx->find_top_context();
-    }
-    
-    //--------------------------------------------------------------------------
-    UniqueID RemoteTask::get_context_uid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return remote_owner_uid;
-    }
-
-    //--------------------------------------------------------------------------
-    VersionInfo& RemoteTask::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-      assert(idx < version_infos.size());
-#endif
-      return version_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* RemoteTask::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-#endif
-      return &version_infos;
-    }
-
-    //--------------------------------------------------------------------------
-    SingleTask* RemoteTask::find_parent_context(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-#endif
-      // See if we already have it
-      if (parent_ctx != NULL)
-        return parent_ctx;
-#ifdef DEBUG_LEGION
-      assert(parent_context_uid != 0);
-#endif
-      // THIS IS ONLY SAFE BECAUSE THIS FUNCTION IS NEVER CALLED BY
-      // A MESSAGE IN THE CONTEXT_VIRTUAL_CHANNEL
-      parent_ctx = runtime->find_context(parent_context_uid);
-      parent_task = parent_ctx;
-      return parent_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    AddressSpaceID RemoteTask::get_version_owner(RegionTreeNode *node,
-                                                 AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      const AddressSpaceID owner_space = node->get_owner_space(); 
-      // If we are the top-level context then we handle the request
-      // on the node that made the region
-      if (top_level_context && (owner_space == runtime->address_space))
-        return SingleTask::get_version_owner(node, source);
-        // Otherwise we fall through and issue the request to the 
-        // the node that actually made the region
-#ifdef DEBUG_LEGION
-      assert(source == runtime->address_space); // should always be local
-#endif
-      // See if we already have it, or we already sent a request for it
-      bool send_request = false;
-      RtEvent wait_on;
-      {
-        AutoLock o_lock(op_lock);
-        std::map<RegionTreeNode*,
-                 std::pair<AddressSpaceID,bool> >::const_iterator finder =
-          region_tree_owners.find(node);
-        if (finder != region_tree_owners.end())
-          return finder->second.first;
-        // See if we already have an outstanding request
-        std::map<RegionTreeNode*,RtUserEvent>::const_iterator request_finder =
-          pending_version_owner_requests.find(node);
-        if (request_finder == pending_version_owner_requests.end())
-        {
-          // We haven't sent the request yet, so do that now
-          RtUserEvent request_event = Runtime::create_rt_user_event();
-          pending_version_owner_requests[node] = request_event;
-          wait_on = request_event;
-          send_request = true;
-        }
-        else
-          wait_on = request_finder->second;
-      }
-      if (send_request)
-      {
-        Serializer rez;
-        rez.serialize(remote_owner_uid);
-        rez.serialize<WrapperTask*>(this);
-        if (node->is_region())
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(node->as_region_node()->handle);
-        }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(node->as_partition_node()->handle);
-        }
-        // Send it to the owner space if we are the top-level context
-        // otherwise we send it to the owner of the context
-        const AddressSpaceID target = top_level_context ? owner_space :  
-                          runtime->get_runtime_owner(remote_owner_uid);
-        runtime->send_version_owner_request(target, rez);
-      }
-      wait_on.wait();
-      // Retake the lock in read-only mode and get the answer
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      std::map<RegionTreeNode*,
-               std::pair<AddressSpaceID,bool> >::const_iterator finder = 
-        region_tree_owners.find(node);
-#ifdef DEBUG_LEGION
-      assert(finder != region_tree_owners.end());
-#endif
-      return finder->second.first;
+      if (execution_context->has_created_requirements())
+        execution_context->send_back_created_state(target);
     } 
-
-    //--------------------------------------------------------------------------
-    ApEvent RemoteTask::get_task_completion(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-#endif
-      return remote_completion_event;
-    }
-
-    //--------------------------------------------------------------------------
-    TaskOp::TaskKind RemoteTask::get_task_kind(void) const
-    //--------------------------------------------------------------------------
-    {
-      return REMOTE_TASK_KIND;
-    } 
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::find_enclosing_local_fields(
-           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-#endif
-      // No need to go up since we are the uppermost task on this runtime
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < local_fields.size(); idx++)
-        infos.push_back(local_fields[idx]);
-    } 
-
-    //--------------------------------------------------------------------------
-    void RemoteTask::unpack_remote_context(Deserializer &derez,
-                                           std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REMOTE_UNPACK_CONTEXT_CALL);
-      derez.deserialize(top_level_context);
-      // If we're the top-level context then we're already done
-      if (top_level_context)
-      {
-        derez.deserialize(remote_owner_uid);
-        return;
-      }
-      derez.deserialize(depth);
-      WrapperReferenceMutator mutator(preconditions);
-      unpack_base_external_task(derez, &mutator);
-      size_t num_virtual;
-      derez.deserialize(num_virtual);
-      virtual_mapped.resize(regions.size(), false);
-      for (unsigned idx = 0; idx < num_virtual; idx++)
-      {
-        unsigned index;
-        derez.deserialize(index);
-        virtual_mapped[index] = true;
-      }
-      version_infos.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (virtual_mapped[idx])
-          version_infos[idx].unpack_version_info(derez, runtime, preconditions);
-        else
-          version_infos[idx].unpack_version_numbers(derez, runtime->forest);
-      }
-      update_no_access_regions();
-      size_t num_local;
-      derez.deserialize(num_local);
-      local_fields.resize(num_local);
-      for (unsigned idx = 0; idx < num_local; idx++)
-      {
-        derez.deserialize(local_fields[idx]);
-        allocate_local_field(local_fields[idx]);
-      }
-      derez.deserialize(remote_completion_event);
-      derez.deserialize(remote_owner_uid);
-      derez.deserialize(parent_context_uid);
-      // See if we can find our parent task, if not don't worry about it
-      // DO NOT CHANGE THIS UNLESS YOU THINK REALLY HARD ABOUT VIRTUAL 
-      // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
-      parent_ctx = runtime->find_context(parent_context_uid, true/*can fail*/);
-      parent_task = parent_ctx;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Inline Task 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    InlineTask::InlineTask(Runtime *rt)
-      : WrapperTask(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    InlineTask::InlineTask(const InlineTask &rhs)
-      : WrapperTask(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    InlineTask::~InlineTask(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    InlineTask& InlineTask::operator=(const InlineTask &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::initialize_inline_task(SingleTask *enc, TaskOp *clone)
-    //--------------------------------------------------------------------------
-    {
-      enclosing = enc;
-      parent_ctx = enclosing; 
-      indexes = clone->indexes;
-      regions = clone->regions;
-      orig_proc = clone->orig_proc;
-      current_proc = clone->current_proc;
-      target_proc = clone->target_proc;
-      physical_regions.resize(regions.size());
-      // Now update the parent regions so that they are valid with
-      // respect to the outermost context
-      for (unsigned idx = 0; idx < indexes.size(); idx++)
-      {
-        unsigned index = enclosing->find_parent_index_region(idx, this);
-        indexes[idx].parent = enclosing->indexes[index].parent;
-      }
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        unsigned index = enclosing->find_parent_region(idx, this);
-        if (index < enclosing->regions.size())
-        {
-          regions[idx].parent = enclosing->regions[index].parent;
-          physical_regions[idx] = enclosing->get_physical_region(index);
-        }
-        else
-        {
-          // This is a created requirements, so we have to make a copy
-          RegionRequirement copy;
-          enclosing->clone_requirement(index, copy);
-          regions[idx].parent = copy.parent;
-          // physical regions are empty becaue they are virtual
-        }
-      }
-      compute_parent_indexes();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_wrapper();
-      enclosing = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_wrapper();
-      runtime->free_inline_task(this);
-    }
-
-    //--------------------------------------------------------------------------
-    RegionTreeContext InlineTask::get_context(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_context();
-    }
-
-    //--------------------------------------------------------------------------
-    ContextID InlineTask::get_context_id(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_context_id();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::send_remote_context(AddressSpaceID remote_inst,
-                                         RemoteTask *remote_ctx)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent InlineTask::get_task_completion(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_task_completion();
-    }
-
-    //--------------------------------------------------------------------------
-    TaskOp::TaskKind InlineTask::get_task_kind(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->get_task_kind();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::find_enclosing_local_fields(
-           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->find_enclosing_local_fields(infos);
-      AutoLock o_lock(op_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < local_fields.size(); idx++)
-        infos.push_back(local_fields[idx]);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned InlineTask::register_new_child_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_new_child_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned InlineTask::register_new_close_operation(CloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->register_new_close_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::add_to_dependence_queue(Operation *op, bool has_lock,
-                                             RtEvent op_precondition)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->add_to_dependence_queue(op, has_lock, op_precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::register_child_executed(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_child_executed(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::register_child_complete(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_child_complete(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::register_child_commit(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_child_commit(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::unregister_child_operation(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->unregister_child_operation(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::register_fence_dependence(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->register_fence_dependence(op);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineTask::update_current_fence(FenceOp *op)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->update_current_fence(op);
-    }
 
     /////////////////////////////////////////////////////////////
     // Index Task 
@@ -7755,7 +6235,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap IndexTask::initialize_task(SingleTask *ctx,
+    FutureMap IndexTask::initialize_task(TaskContext *ctx,
                                          const IndexLauncher &launcher,
                                          bool check_privileges,
                                          bool track /*= true*/)
@@ -7814,7 +6294,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future IndexTask::initialize_task(SingleTask *ctx,
+    Future IndexTask::initialize_task(TaskContext *ctx,
                                       const IndexLauncher &launcher,
                                       ReductionOpID redop_id, 
                                       bool check_privileges,
@@ -7890,7 +6370,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap IndexTask::initialize_task(SingleTask *ctx,
+    FutureMap IndexTask::initialize_task(TaskContext *ctx,
             Processor::TaskFuncID tid,
             const Domain &domain,
             const std::vector<IndexSpaceRequirement> &index_requirements,
@@ -7939,7 +6419,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    Future IndexTask::initialize_task(SingleTask *ctx,
+    Future IndexTask::initialize_task(TaskContext *ctx,
             Processor::TaskFuncID tid,
             const Domain &domain,
             const std::vector<IndexSpaceRequirement> &index_requirements,
@@ -8450,9 +6930,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_COMPLETE_CALL);
-      // Return back our privileges
-      return_privilege_state(parent_ctx);
-
       // Trigger all the futures or set the reduction future result
       // and then trigger it
       if (redop != 0)
@@ -8515,7 +6992,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
+    void IndexTask::perform_inlining(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_INLINING_CALL);
@@ -8539,16 +7016,16 @@ namespace Legion {
       }
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(wait_on_events); 
-
-      // See if we need to wait for anything
-      if (start_condition.exists() && !start_condition.has_triggered())
-        start_condition.wait();
-
       // Enumerate all of the points of our index space and run
       // the task for each one of them either saving or reducing their futures
       Processor current = parent_ctx->get_executing_processor();
-      // Save the context to be the current inline context
-      parent_ctx = ctx;
+      // Select the variant to use
+      VariantImpl *variant = parent_ctx->select_inline_variant(this);
+      // See if we need to wait for anything
+      if (start_condition.exists() && !start_condition.has_triggered())
+        start_condition.wait();
+      // Save this for when things are being returned
+      TaskContext *enclosing = parent_ctx;
       // Make a copy of our region requirements
       std::vector<RegionRequirement> copy_requirements(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -8571,7 +7048,14 @@ namespace Legion {
         TaskArgument local = argument_map.impl->get_point(index_point);
         local_args = local.get_ptr();
         local_arglen = local.get_size();
-        variant->dispatch_inline(current, this);
+        InlineContext *inline_ctx = new InlineContext(runtime, enclosing, this);
+        // Save the inner context as the parent ctx
+        parent_ctx = inline_ctx;
+        variant->dispatch_inline(current, inline_ctx);
+        // Return any created privilege state
+        inline_ctx->return_privilege_state(enclosing);
+        // Then we can delete the inline context
+        delete inline_ctx;
       }
       if (redop == 0)
         future_map.impl->complete_all_futures();
@@ -8583,21 +7067,6 @@ namespace Legion {
       }
       // Trigger all our events event
       Runtime::trigger_event(completion_event);
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexTask::is_inline_task(void) const
-    //--------------------------------------------------------------------------
-    {
-      // We are always an inline task if we are getting called here
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& IndexTask::begin_inline_task(void)
-    //--------------------------------------------------------------------------
-    {
-      return parent_ctx->get_physical_regions();
     }
 
     //--------------------------------------------------------------------------
@@ -8838,11 +7307,7 @@ namespace Legion {
       DerezCheck z(derez);
       size_t points;
       derez.deserialize(points);
-      // Hold the lock when unpacking the privileges
-      {
-        AutoLock o_lock(op_lock);
-        unpack_privilege_state(derez);
-      }
+      ResourceTracker::unpack_privilege_state(derez, parent_ctx);
       if (redop != 0)
       {
 #ifdef DEBUG_LEGION
@@ -8991,6 +7456,16 @@ namespace Legion {
       acquired_instances.clear();
       map_applied_conditions.clear();
       restrict_postconditions.clear();
+      created_regions.clear();
+      created_fields.clear();
+      created_field_spaces.clear();
+      created_index_spaces.clear();
+      created_index_partitions.clear();
+      deleted_regions.clear();
+      deleted_fields.clear();
+      deleted_field_spaces.clear();
+      deleted_index_spaces.clear();
+      deleted_index_partitions.clear();
       runtime->free_slice_task(this);
     }
 
@@ -9427,7 +7902,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::perform_inlining(SingleTask *ctx, VariantImpl *variant)
+    void SliceTask::perform_inlining(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9613,15 +8088,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::return_privileges(PointTask *point)
+    void SliceTask::return_privileges(TaskContext *point_context)
     //--------------------------------------------------------------------------
     {
       // If we're remote, pass our privileges back to ourself
       // otherwise pass them directly back to the index owner
       if (is_remote())
-        point->return_privilege_state(this);
+        point_context->return_privilege_state(this);
       else
-        point->return_privilege_state(index_owner);
+        point_context->return_privilege_state(parent_ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -9891,6 +8366,142 @@ namespace Legion {
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
       Runtime::trigger_event(ready_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_region_creations(
+                                            const std::set<LogicalRegion> &regs)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
+            it != regs.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(created_regions.find(*it) == created_regions.end());
+#endif
+        created_regions.insert(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_region_deletions(
+                                            const std::set<LogicalRegion> &regs)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
+            it != regs.end(); it++)
+        deleted_regions.insert(*it);
+    } 
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_field_creations(
+                        const std::set<std::pair<FieldSpace,FieldID> > &fields)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+            fields.begin(); it != fields.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(created_fields.find(*it) == created_fields.end());
+#endif
+        created_fields.insert(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_field_deletions(
+                        const std::set<std::pair<FieldSpace,FieldID> > &fields)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+            fields.begin(); it != fields.end(); it++)
+        deleted_fields.insert(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_field_space_creations(
+                                            const std::set<FieldSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<FieldSpace>::const_iterator it = spaces.begin();
+            it != spaces.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(created_field_spaces.find(*it) == created_field_spaces.end());
+#endif
+        created_field_spaces.insert(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_field_space_deletions(
+                                            const std::set<FieldSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<FieldSpace>::const_iterator it = spaces.begin();
+            it != spaces.end(); it++)
+        deleted_field_spaces.insert(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_index_space_creations(
+                                            const std::set<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<IndexSpace>::const_iterator it = spaces.begin();
+            it != spaces.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(created_index_spaces.find(*it) == created_index_spaces.end());
+#endif
+        created_index_spaces.insert(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_index_space_deletions(
+                                            const std::set<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<IndexSpace>::const_iterator it = spaces.begin();
+            it != spaces.end(); it++)
+        deleted_index_spaces.insert(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_index_partition_creations(
+                                          const std::set<IndexPartition> &parts)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<IndexPartition>::const_iterator it = parts.begin();
+            it != parts.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(created_index_partitions.find(*it) == 
+               created_index_partitions.end());
+#endif
+        created_index_partitions.insert(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_index_partition_deletions(
+                                          const std::set<IndexPartition> &parts)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      for (std::set<IndexPartition>::const_iterator it = parts.begin();
+            it != parts.end(); it++)
+        deleted_index_partitions.insert(*it);
     }
 
     /////////////////////////////////////////////////////////////

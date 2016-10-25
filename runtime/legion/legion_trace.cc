@@ -19,6 +19,7 @@
 #include "legion_spy.h"
 #include "legion_trace.h"
 #include "legion_tasks.h"
+#include "legion_context.h"
 
 namespace Legion {
   namespace Internal {
@@ -30,7 +31,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LegionTrace::LegionTrace(TraceID t, SingleTask *c)
+    LegionTrace::LegionTrace(TraceID t, TaskContext *c)
       : tid(t), ctx(c), fixed(false), tracing(true)
     //--------------------------------------------------------------------------
     {
@@ -549,7 +550,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCaptureOp::initialize_capture(SingleTask *ctx)
+    void TraceCaptureOp::initialize_capture(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -641,7 +642,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCompleteOp::initialize_complete(SingleTask *ctx)
+    void TraceCompleteOp::initialize_complete(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MIXED_FENCE);

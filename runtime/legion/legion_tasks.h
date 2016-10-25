@@ -29,19 +29,116 @@ namespace Legion {
   namespace Internal {
 
     /**
+     * \class ResourceTracker 
+     * A helper class for tracking which privileges an 
+     * operation owns. This is inherited by multi-tasks
+     * for aggregating the privilege results of their
+     * children as well as task contexts for tracking
+     * which privileges have been accrued or deleted
+     * as part of the execution of the task.
+     */
+    class ResourceTracker {
+    public:
+      ResourceTracker(void);
+      ResourceTracker(const ResourceTracker &rhs);
+      virtual ~ResourceTracker(void);
+    public:
+      ResourceTracker& operator=(const ResourceTracker &rhs);
+    public:
+      virtual void register_region_creations(
+                          const std::set<LogicalRegion> &regions) = 0;
+      virtual void register_region_deletions(
+                          const std::set<LogicalRegion> &regions) = 0;
+    public:
+      virtual void register_field_creations(
+                const std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
+      virtual void register_field_deletions(
+                const std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
+    public:
+      virtual void register_field_space_creations(
+                          const std::set<FieldSpace> &spaces) = 0;
+      virtual void register_field_space_deletions(
+                          const std::set<FieldSpace> &spaces) = 0;
+    public:
+      virtual void register_index_space_creations(
+                          const std::set<IndexSpace> &spaces) = 0;
+      virtual void register_index_space_deletions(
+                          const std::set<IndexSpace> &spaces) = 0;
+    public:
+      virtual void register_index_partition_creations(
+                          const std::set<IndexPartition> &parts) = 0;
+      virtual void register_index_partition_deletions(
+                          const std::set<IndexPartition> &parts) = 0;
+    public:
+      void return_privilege_state(ResourceTracker *target) const;
+      void pack_privilege_state(Serializer &rez, AddressSpaceID target) const;
+      static void unpack_privilege_state(Deserializer &derez,
+                                         ResourceTracker *target);
+    protected:
+      std::set<LogicalRegion>                   created_regions;
+      std::set<std::pair<FieldSpace,FieldID> >  created_fields;
+      std::set<FieldSpace>                      created_field_spaces;
+      std::set<IndexSpace>                      created_index_spaces;
+      std::set<IndexPartition>                  created_index_partitions;
+      std::set<LogicalRegion>                   deleted_regions;
+      std::set<std::pair<FieldSpace,FieldID> >  deleted_fields;
+      std::set<FieldSpace>                      deleted_field_spaces;
+      std::set<IndexSpace>                      deleted_index_spaces;
+      std::set<IndexPartition>                  deleted_index_partitions;
+    };
+
+    /**
+     * \class ExternalTask
+     * An extentions of the external Task with some
+     * methods that help us internally for packing
+     * and unpacking them.
+     */
+    class ExternalTask : public Task {
+    public:
+      ExternalTask(void);
+    public:
+      void pack_external_task(Serializer &rez, AddressSpaceID target);
+      void unpack_external_task(Deserializer &derez, Runtime *runtime,
+                                ReferenceMutator *mutator);
+    public:
+      virtual void set_context_index(unsigned index) = 0;
+    protected:
+      AllocManager *arg_manager;
+    public:
+      static void pack_index_space_requirement(
+          const IndexSpaceRequirement &req, Serializer &rez);
+      static void pack_region_requirement(
+          const RegionRequirement &req, Serializer &rez);
+      static void pack_grant(
+          const Grant &grant, Serializer &rez);
+      static void pack_phase_barrier(
+          const PhaseBarrier &barrier, Serializer &rez);
+    public:
+      static void unpack_index_space_requirement(
+          IndexSpaceRequirement &req, Deserializer &derez);
+      static void unpack_region_requirement(
+          RegionRequirement &req, Deserializer &derez);
+      static void unpack_grant(
+          Grant &grant, Deserializer &derez);
+      static void unpack_phase_barrier(
+          PhaseBarrier &barrier, Deserializer &derez);
+    public:
+      static void pack_point(Serializer &rez, const DomainPoint &p);
+      static void unpack_point(Deserializer &derez, DomainPoint &p);
+    };
+
+    /**
      * \class TaskOp
      * This is the base task operation class for all
      * kinds of tasks in the system.  
      */
-    class TaskOp : public Task, public SpeculativeOp {
+    class TaskOp : public ExternalTask, public SpeculativeOp {
     public:
       enum TaskKind {
         INDIVIDUAL_TASK_KIND,
         POINT_TASK_KIND,
-        REMOTE_TASK_KIND,
         INDEX_TASK_KIND,
         SLICE_TASK_KIND,
-        TOP_LEVEL_KIND,
       };
     public:
       struct DeferDistributeArgs : public LgTaskArgs<DeferDistributeArgs> {
@@ -69,6 +166,7 @@ namespace Legion {
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
       virtual const char* get_task_name(void) const;
     public:
@@ -85,7 +183,7 @@ namespace Legion {
     public:
       void set_must_epoch(MustEpochOp *epoch, unsigned index, 
                           bool do_registration);
-    protected:
+    public:
       void pack_base_task(Serializer &rez, AddressSpaceID target);
       void unpack_base_task(Deserializer &derez, 
                             std::set<RtEvent> &ready_events);
@@ -143,10 +241,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant) = 0;
+      virtual void perform_inlining(void) = 0;
     public:
-      virtual bool is_inline_task(void) const;
-      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
     public:
@@ -176,47 +272,8 @@ namespace Legion {
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);
-      void deactivate_outstanding_task(void);
+      void deactivate_outstanding_task(void); 
     public:
-      void register_region_creation(LogicalRegion handle);
-      void register_region_deletion(LogicalRegion handle);
-      void register_region_creations(const std::set<LogicalRegion> &regions);
-      void register_region_deletions(const std::set<LogicalRegion> &regions);
-    public:
-      void register_field_creation(FieldSpace space, FieldID fid);
-      void register_field_creations(FieldSpace space, 
-                                    const std::vector<FieldID> &fields);
-      void register_field_deletions(FieldSpace space,
-                                    const std::set<FieldID> &to_free);
-      void register_field_creations(
-                const std::set<std::pair<FieldSpace,FieldID> > &fields);
-      void register_field_deletions(
-                const std::set<std::pair<FieldSpace,FieldID> > &fields);
-    public:
-      void register_field_space_creation(FieldSpace space);
-      void register_field_space_deletion(FieldSpace space);
-      void register_field_space_creations(const std::set<FieldSpace> &spaces);
-      void register_field_space_deletions(const std::set<FieldSpace> &spaces);
-    public:
-      bool has_created_index_space(IndexSpace space) const;
-      void register_index_space_creation(IndexSpace space);
-      void register_index_space_deletion(IndexSpace space);
-      void register_index_space_creations(const std::set<IndexSpace> &spaces);
-      void register_index_space_deletions(const std::set<IndexSpace> &spaces);
-    public:
-      void register_index_partition_creation(IndexPartition handle);
-      void register_index_partition_deletion(IndexPartition handle);
-      void register_index_partition_creations(
-                                        const std::set<IndexPartition> &parts);
-      void register_index_partition_deletions(
-                                        const std::set<IndexPartition> &parts);
-    public:
-      virtual void add_created_region(LogicalRegion handle) = 0;
-    public:
-      bool was_created_requirement_deleted(const RegionRequirement &req) const;
-      void return_privilege_state(TaskOp *target);
-      void pack_privilege_state(Serializer &rez, AddressSpaceID target);
-      void unpack_privilege_state(Deserializer &derez);
       void perform_privilege_checks(void);
     public:
       void find_early_mapped_region(unsigned idx, InstanceSet &ref);
@@ -232,7 +289,7 @@ namespace Legion {
       void compute_parent_indexes(void);
       void perform_intra_task_alias_analysis(bool is_tracing,
           LegionTrace *trace, std::vector<RegionTreePath> &privilege_paths);
-    protected:
+    public:
       // These methods get called once the task has executed
       // and all the children have either mapped, completed,
       // or committed.
@@ -253,18 +310,7 @@ namespace Legion {
       // A map of any locks that we need to take for this task
       std::map<Reservation,bool/*exclusive*/>   atomic_locks;
     protected:
-      std::vector<unsigned>                     parent_req_indexes;
-    protected:
-      std::set<LogicalRegion>                   created_regions;
-      std::set<std::pair<FieldSpace,FieldID> >  created_fields;
-      std::set<FieldSpace>                      created_field_spaces;
-      std::set<IndexSpace>                      created_index_spaces;
-      std::set<IndexPartition>                  created_index_partitions;
-      std::set<LogicalRegion>                   deleted_regions;
-      std::set<std::pair<FieldSpace,FieldID> >  deleted_fields;
-      std::set<FieldSpace>                      deleted_field_spaces;
-      std::set<IndexSpace>                      deleted_index_spaces;
-      std::set<IndexPartition>                  deleted_index_partitions;
+      std::vector<unsigned>                     parent_req_indexes; 
     protected:
       bool complete_received;
       bool commit_received;
@@ -275,9 +321,7 @@ namespace Legion {
       mutable bool local_cached;
     protected:
       bool children_complete;
-      bool children_commit;
-    protected:
-      AllocManager *arg_manager;
+      bool children_commit; 
     protected:
       MapperManager *mapper;
     private:
@@ -291,28 +335,7 @@ namespace Legion {
     public:
       // Static methods
       static void process_unpack_task(Runtime *rt,
-                                      Deserializer &derez);
-    public:
-      static void pack_index_space_requirement(
-          const IndexSpaceRequirement &req, Serializer &rez);
-      static void pack_region_requirement(
-          const RegionRequirement &req, Serializer &rez);
-      static void pack_grant(
-          const Grant &grant, Serializer &rez);
-      static void pack_phase_barrier(
-          const PhaseBarrier &barrier, Serializer &rez);
-    public:
-      static void unpack_index_space_requirement(
-          IndexSpaceRequirement &req, Deserializer &derez);
-      static void unpack_region_requirement(
-          RegionRequirement &req, Deserializer &derez);
-      static void unpack_grant(
-          Grant &grant, Deserializer &derez);
-      static void unpack_phase_barrier(
-          PhaseBarrier &barrier, Deserializer &derez);
-    public:
-      static void pack_point(Serializer &rez, const DomainPoint &p);
-      static void unpack_point(Deserializer &derez, DomainPoint &p);
+                                      Deserializer &derez); 
     public:
       static void log_requirement(UniqueID uid, unsigned idx,
                                  const RegionRequirement &req);
@@ -350,6 +373,15 @@ namespace Legion {
       bool is_created_region(unsigned index) const;
       void update_no_access_regions(void);
     public:
+      inline void clone_virtual_mapped(std::vector<bool> &target) const
+        { target = virtual_mapped; }
+      inline void clone_parent_req_indexes(std::vector<unsigned> &target) const
+        { target = parent_req_indexes; }
+      inline const LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked&
+        get_physical_instances(void) const { return physical_instances; }
+      inline const std::vector<bool>& get_no_access_regions(void) const
+        { return no_access_regions; }
+    public:
       void initialize_map_task_input(Mapper::MapTaskInput &input,
                                      Mapper::MapTaskOutput &output,
                                      MustEpochOp *must_epoch_owner,
@@ -357,7 +389,7 @@ namespace Legion {
       void finalize_map_task_output(Mapper::MapTaskInput &input,
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
-                                    std::vector<InstanceSet> &valid_instances);
+                                    std::vector<InstanceSet> &valid_instances); 
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
@@ -371,7 +403,6 @@ namespace Legion {
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez, 
                               std::set<RtEvent> &ready_events);
-      void send_back_created_state(AddressSpaceID target);
     public:
       void restart_task(void);
     public:
@@ -418,6 +449,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0; 
+      virtual void perform_inlining(void);
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
@@ -501,7 +533,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events) = 0;
-      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant) = 0;
+      virtual void perform_inlining(void) = 0;
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
@@ -509,8 +541,6 @@ namespace Legion {
       virtual void handle_future(const DomainPoint &point, const void *result,
                                  size_t result_size, bool owner) = 0;
       virtual void register_must_epoch(void) = 0;
-    public:
-      virtual void add_created_region(LogicalRegion handle);
     public:
       void pack_multi_task(Serializer &rez, AddressSpaceID target);
       void unpack_multi_task(Deserializer &derez,
@@ -533,6 +563,9 @@ namespace Legion {
       const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
       void *reduction_state; 
+    protected:
+      bool children_complete_invoked;
+      bool children_commit_invoked;
     };
 
     /**
@@ -612,9 +645,8 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual bool is_inline_task(void) const;
+      virtual void perform_inlining(void);
       virtual bool is_top_level_task(void) const { return top_level_task; }
-      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
     protected:
@@ -651,8 +683,6 @@ namespace Legion {
       friend class Internal;
       // Special field for the top level task
       bool top_level_task;
-      // Special field for inline tasks
-      bool is_inline;
       // Whether we have to do intra-task alias analysis
       bool need_intra_task_alias_analysis;
     protected:
@@ -698,7 +728,6 @@ namespace Legion {
       virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
-      virtual bool is_inline_task(void) const;
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -714,7 +743,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant);
+      virtual void perform_inlining(void);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
       virtual void record_restrict_postcondition(ApEvent postcondition);
@@ -724,6 +753,7 @@ namespace Legion {
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
     public:
       void initialize_point(SliceTask *owner, MinimalPoint &mp);
+      void send_back_created_state(AddressSpaceID target);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
@@ -819,9 +849,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant);
-      virtual bool is_inline_task(void) const;
-      virtual const std::vector<PhysicalRegion>& begin_inline_task(void);
+      virtual void perform_inlining(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
@@ -891,7 +919,7 @@ namespace Legion {
      * each slice created by the mapper when (possibly recursively)
      * slicing up the domain of the index space task launch.
      */
-    class SliceTask : public MultiTask {
+    class SliceTask : public MultiTask, public ResourceTracker {
     public:
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
     public:
@@ -928,7 +956,7 @@ namespace Legion {
       virtual bool pack_task(Serializer &rez, Processor target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
-      virtual void perform_inlining(TaskContext *ctx, VariantImpl *variant);
+      virtual void perform_inlining(void);
     public:
       virtual SliceTask* clone_as_slice_task(const Domain &d,
           Processor p, bool recurse, bool stealable,
@@ -954,7 +982,7 @@ namespace Legion {
       public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
-      void return_privileges(PointTask *point);
+      void return_privileges(TaskContext *point_context);
       void record_child_mapped(RtEvent child_complete, 
                                ApEvent restrict_postcondition);
       void record_child_complete(void);
@@ -971,6 +999,31 @@ namespace Legion {
       RtEvent defer_map_and_launch(RtEvent precondition);
     public:
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
+    public: // Privilege tracker methods
+      virtual void register_region_creations(
+                          const std::set<LogicalRegion> &regions);
+      virtual void register_region_deletions(
+                          const std::set<LogicalRegion> &regions);
+    public:
+      virtual void register_field_creations(
+                const std::set<std::pair<FieldSpace,FieldID> > &fields);
+      virtual void register_field_deletions(
+                const std::set<std::pair<FieldSpace,FieldID> > &fields);
+    public:
+      virtual void register_field_space_creations(
+                          const std::set<FieldSpace> &spaces);
+      virtual void register_field_space_deletions(
+                          const std::set<FieldSpace> &spaces);
+    public:
+      virtual void register_index_space_creations(
+                          const std::set<IndexSpace> &spaces);
+      virtual void register_index_space_deletions(
+                          const std::set<IndexSpace> &spaces);
+    public:
+      virtual void register_index_partition_creations(
+                          const std::set<IndexPartition> &parts);
+      virtual void register_index_partition_deletions(
+                          const std::set<IndexPartition> &parts);
     protected:
       friend class IndexTask;
       friend class PointTask;

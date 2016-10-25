@@ -4709,29 +4709,29 @@ namespace Legion {
           {
             // Only need to tell our parent if it is a top-level index space
             if (runtime->forest->is_top_level_index_space(index_space))
-              (*parent_ctx)->register_index_space_deletion(index_space);
+              parent_ctx->register_index_space_deletion(index_space);
             break;
           }
         case INDEX_PARTITION_DELETION:
           {
-            (*parent_ctx)->register_index_partition_deletion(index_part);
+            parent_ctx->register_index_partition_deletion(index_part);
             break;
           }
         case FIELD_SPACE_DELETION:
           {
-            (*parent_ctx)->register_field_space_deletion(field_space);
+            parent_ctx->register_field_space_deletion(field_space);
             break;
           }
         case FIELD_DELETION:
           {
-            (*parent_ctx)->register_field_deletions(field_space, free_fields);
+            parent_ctx->register_field_deletions(field_space, free_fields);
             break;
           }
         case LOGICAL_REGION_DELETION:
           {
             // Only need to tell our parent if it is a top-level region
             if (runtime->forest->is_top_level_region(logical_region))
-              (*parent_ctx)->register_region_deletion(logical_region);
+              parent_ctx->register_region_deletion(logical_region);
             break;
           }
         case LOGICAL_PARTITION_DELETION:
@@ -4782,7 +4782,7 @@ namespace Legion {
       assert(creator != NULL);
 #endif
       // We never track internal operations
-      initialize_operation(creator->get_parent(), false/*track*/);
+      initialize_operation(creator->get_context(), false/*track*/);
 #ifdef DEBUG_LEGION
       assert(creator_req_idx == -1);
       assert(create_op == NULL);
@@ -4899,7 +4899,7 @@ namespace Legion {
       open_mask = mask;
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_open_operation(creator->get_parent()->get_unique_id(),
+        LegionSpy::log_open_operation(creator->get_context()->get_unique_id(),
                                       unique_op_id);
         LegionSpy::log_internal_op_creator(unique_op_id, 
                                            creator->get_unique_op_id(), 
@@ -5046,8 +5046,8 @@ namespace Legion {
       parent_is_upper_bound = is_upper;
       if (Runtime::legion_spy_enabled)
       {
-        LegionSpy::log_advance_operation(creator->get_parent()->get_unique_id(),
-                                         unique_op_id);
+        LegionSpy::log_advance_operation(
+            creator->get_context()->get_unique_id(), unique_op_id);
         LegionSpy::log_internal_op_creator(unique_op_id, 
                                            creator->get_unique_op_id(), 
                                            req_idx);
@@ -6183,7 +6183,7 @@ namespace Legion {
     void PostCloseOp::initialize(TaskContext *ctx, unsigned idx) 
     //--------------------------------------------------------------------------
     {
-      initialize_close(ctx, (*ctx)->regions[idx], true/*track*/);
+      initialize_close(ctx, ctx->regions[idx], true/*track*/);
       parent_idx = idx;
       localize_region_requirement(requirement);
       if (Runtime::legion_spy_enabled)
@@ -9405,7 +9405,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochTriggerer::MustEpochTriggerer(MustEpochOp *own)
-      : current_proc(own->get_parent()->get_executing_processor()), owner(own)
+      : current_proc(own->get_context()->get_executing_processor()), owner(own)
     //--------------------------------------------------------------------------
     {
       trigger_lock = Reservation::create_reservation();

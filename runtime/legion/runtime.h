@@ -518,8 +518,8 @@ namespace Legion {
       void perform_scheduling(void);
       void launch_task_scheduler(void);
     public:
-      void activate_context(SingleTask *context);
-      void deactivate_context(SingleTask *context);
+      void activate_context(InnerContext *context);
+      void deactivate_context(InnerContext *context);
       void update_max_context_count(unsigned max_contexts);
     public:
       void process_steal_request(Processor thief, 
@@ -1154,9 +1154,9 @@ namespace Legion {
         get_layout_constraints(void) const { return layout_constraints; } 
     public:
       ApEvent dispatch_task(Processor target, SingleTask *task, 
-                          ApEvent precondition, int priority,
+          TaskContext *ctx, ApEvent precondition, int priority,
                           Realm::ProfilingRequestSet &requests);
-      void dispatch_inline(Processor current, TaskOp *task);
+      void dispatch_inline(Processor current, InlineContext *ctx);
     public:
       Processor::Kind get_processor_kind(bool warn) const;
     public:
@@ -2304,8 +2304,8 @@ namespace Legion {
       inline unsigned get_color_modulus(void) const { return runtime_stride; }
     public:
       // Manage the execution of tasks within a context
-      void activate_context(SingleTask *context);
-      void deactivate_context(SingleTask *context);
+      void activate_context(InnerContext *context);
+      void deactivate_context(InnerContext *context);
     public:
       void remap_unmapped_regions(Processor proc, Context ctx,
             const std::vector<PhysicalRegion> &unmapped_regions);
@@ -2393,12 +2393,6 @@ namespace Legion {
                                                   bool has_lock = false);
       SliceTask*            get_available_slice_task(bool need_cont,
                                                   bool has_lock = false);
-      TopLevelContext*      get_available_top_level_ctx(bool need_cont,
-                                                  bool has_lock = false);
-      RemoteContext*        get_available_remote_ctx(bool need_cont,
-                                                  bool has_lock = false);
-      InlineContext*        get_available_inline_ctx(bool need_cont,
-                                                  bool has_lock = false);
       MapOp*                get_available_map_op(bool need_cont,
                                                   bool has_lock = false);
       CopyOp*               get_available_copy_op(bool need_cont,
@@ -2458,9 +2452,6 @@ namespace Legion {
       void free_point_task(PointTask *task);
       void free_index_task(IndexTask *task);
       void free_slice_task(SliceTask *task);
-      void free_top_level_ctx(TopLevelContext *task);
-      void free_remote_ctx(RemoteContext *task);
-      void free_inline_ctx(InlineContext *task);
       void free_map_op(MapOp *op);
       void free_copy_op(CopyOp *op);
       void free_fence_op(FenceOp *op);
@@ -2489,15 +2480,14 @@ namespace Legion {
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
     public:
-      void allocate_local_context(SingleTask *task);
-      void free_local_context(SingleTask *task);
-      void register_temporary_context(SingleTask *task);
-      void unregister_temporary_context(SingleTask *task);
-      void register_remote_context(UniqueID context_uid, RemoteTask *context,
+      RegionTreeContext allocate_region_tree_context(InnerContext *ctx);
+      void free_region_tree_context(RegionTreeContext tree_ctx, 
+                                    InnerContext *ctx);
+      void register_remote_context(UniqueID context_uid, RemoteContext *ctx,
                                    std::set<RtEvent> &preconditions);
       void unregister_remote_context(UniqueID context_uid);
-      SingleTask* find_context(UniqueID context_uid, 
-                               bool return_null_if_not_found = false);
+      InnerContext* find_context(UniqueID context_uid, 
+                                 bool return_null_if_not_found = false);
       inline AddressSpaceID get_runtime_owner(UniqueID uid) const
         { return (uid % runtime_stride); }
     public:
@@ -2717,9 +2707,6 @@ namespace Legion {
       Reservation point_task_lock;
       Reservation index_task_lock;
       Reservation slice_task_lock;
-      Reservation top_level_task_lock;
-      Reservation remote_task_lock;
-      Reservation inline_task_lock;
       Reservation map_op_lock;
       Reservation copy_op_lock;
       Reservation fence_op_lock;
@@ -2752,9 +2739,6 @@ namespace Legion {
       std::deque<PointTask*>            available_point_tasks;
       std::deque<IndexTask*>            available_index_tasks;
       std::deque<SliceTask*>            available_slice_tasks;
-      std::deque<TopLevelContext*>      available_top_contexts;
-      std::deque<RemoteContext*>        available_remote_contexts;
-      std::deque<InlineContext*>        available_inline_contexts;
       std::deque<MapOp*>                available_map_ops;
       std::deque<CopyOp*>               available_copy_ops;
       std::deque<FenceOp*>              available_fence_ops;

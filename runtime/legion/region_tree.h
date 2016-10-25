@@ -284,7 +284,7 @@ namespace Legion {
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const InstanceSet &source,
-                    ApEvent term_event, SingleTask *context, unsigned index,
+                    ApEvent term_event, InnerContext *context, unsigned index,
                     std::map<PhysicalManager*,InstanceView*> &top_views);
       void initialize_virtual_context(RegionTreeContext ctx,
                                       const RegionRequirement &req);

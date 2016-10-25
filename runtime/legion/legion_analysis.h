@@ -267,13 +267,13 @@ namespace Legion {
                                         const FieldMask &needed_fields,
                                         FieldVersions &field_versions);
     public:
-      void pack_version_info(Serializer &rez);
+      void pack_version_info(Serializer &rez) const;
       void unpack_version_info(Deserializer &derez, Runtime *runtime,
                                std::set<RtEvent> &ready_events);
-      void pack_version_numbers(Serializer &rez);
+      void pack_version_numbers(Serializer &rez) const;
       void unpack_version_numbers(Deserializer &derez,RegionTreeForest *forest);
     protected:
-      void pack_upper_bound_node(Serializer &rez);
+      void pack_upper_bound_node(Serializer &rez) const;
       void unpack_upper_bound_node(Deserializer &derez, 
                                    RegionTreeForest *forest);
     protected:

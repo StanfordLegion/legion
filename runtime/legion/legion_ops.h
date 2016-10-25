@@ -211,7 +211,7 @@ namespace Legion {
       inline RtEvent get_resolved_event(void) const { return resolved_event; }
       inline ApEvent get_completion_event(void) const {return completion_event;}
       inline RtEvent get_commit_event(void) const { return commit_event; }
-      inline TaskContext* get_parent(void) const { return parent_ctx; }
+      inline TaskContext* get_context(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
       inline bool is_tracking_parent(void) const { return track_parent; } 

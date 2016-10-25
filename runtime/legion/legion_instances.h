@@ -161,10 +161,10 @@ namespace Legion {
         { return is_virtual_manager(); }
     public:
       // Methods for creating/finding/destroying logical top views
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner) = 0;
-      void register_active_context(SingleTask *context);
-      void unregister_active_context(SingleTask *context);
+      void register_active_context(InnerContext *context);
+      void unregister_active_context(InnerContext *context);
     public:
       bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions,
@@ -260,7 +260,7 @@ namespace Legion {
       inline Reservation get_read_only_mapping_reservation(void) const
         { return read_only_mapping_reservation; }
     public:
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<Domain::CopySrcDstField> &fields);
@@ -348,7 +348,7 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
     public:
       const ReductionOp *const op;
@@ -479,7 +479,7 @@ namespace Legion {
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
     public:
       static inline VirtualManager* get_virtual_instance(void)

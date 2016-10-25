@@ -6878,9 +6878,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent VariantImpl::dispatch_task(Processor target, SingleTask *task, 
-                                       ApEvent precondition, int priority, 
-                                       Realm::ProfilingRequestSet &requests)
+    ApEvent VariantImpl::dispatch_task(Processor target, SingleTask *task,
+                             TaskContext *ctx, ApEvent precondition, 
+                             int priority, Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6900,19 +6900,18 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REALM_SPAWN_TASK_CALL);
       // If our ready event hasn't triggered, include it in the precondition
       if (!ready_event.has_triggered())
-        return ApEvent(target.spawn(vid, &task, sizeof(task), requests,
+        return ApEvent(target.spawn(vid, &ctx, sizeof(ctx), requests,
                  Runtime::merge_events(precondition, ready_event), priority));
-      return ApEvent(target.spawn(vid, &task, sizeof(task), requests, 
+      return ApEvent(target.spawn(vid, &ctx, sizeof(ctx), requests, 
                                   precondition, priority));
     }
 
     //--------------------------------------------------------------------------
-    void VariantImpl::dispatch_inline(Processor current, TaskOp *task)
+    void VariantImpl::dispatch_inline(Processor current, InlineContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(realm_descriptor != NULL);
-      assert(task->is_inline_task());
 #endif
       const Realm::FunctionPointerImplementation *fp_impl = 
         realm_descriptor->find_impl<Realm::FunctionPointerImplementation>();
@@ -6920,7 +6919,7 @@ namespace Legion {
       assert(fp_impl != NULL);
 #endif
       RealmFnptr inline_ptr = fp_impl->get_impl<RealmFnptr>();
-      (*inline_ptr)(&task, sizeof(task), user_data, user_data_size, current);
+      (*inline_ptr)(&ctx, sizeof(ctx), user_data, user_data_size, current);
     }
 
     //--------------------------------------------------------------------------
@@ -19041,10 +19040,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::allocate_local_context(SingleTask *task)
+    RegionTreeContext Runtime::allocate_local_context(SingleTask *owner)
     //--------------------------------------------------------------------------
     {
-      UniqueID context_uid = task->get_unique_op_id();
+      UniqueID context_uid = owner->get_unique_op_id();
 #ifdef DEBUG_LEGION
       assert((context_uid % runtime_stride) == address_space); // sanity check
 #endif
@@ -19052,7 +19051,7 @@ namespace Legion {
       AutoLock ctx_lock(context_lock);
       if (!available_contexts.empty())
       {
-        task->assign_context(available_contexts.front());
+        RegionTreeContext result = available_contexts.front();
         available_contexts.pop_front();
 #ifdef DEBUG_LEGION
         assert(local_contexts.find(context_uid) == local_contexts.end());

@@ -71,7 +71,7 @@ namespace Legion {
         FieldMask mask;
       };
     public:
-      LegionTrace(TraceID tid, SingleTask *ctx);
+      LegionTrace(TraceID tid, TaskContext *ctx);
       LegionTrace(const LegionTrace &rhs);
       ~LegionTrace(void);
     public:
@@ -123,7 +123,7 @@ namespace Legion {
       std::vector<OperationInfo> op_info;
     protected:
       const TraceID tid;
-      SingleTask *const ctx;
+      TaskContext *const ctx;
       bool fixed;
       bool tracing;
 #ifdef LEGION_SPY
@@ -150,7 +150,7 @@ namespace Legion {
     public:
       TraceCaptureOp& operator=(const TraceCaptureOp &rhs);
     public:
-      void initialize_capture(SingleTask *ctx);
+      void initialize_capture(TaskContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -179,7 +179,7 @@ namespace Legion {
     public:
       TraceCompleteOp& operator=(const TraceCompleteOp &rhs);
     public:
-      void initialize_complete(SingleTask *ctx);
+      void initialize_complete(TaskContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

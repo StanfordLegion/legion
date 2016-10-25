@@ -1143,6 +1143,7 @@ namespace Legion {
     class TaskOp;
 
     // legion_tasks.h
+    class ExternalTask;
     class SingleTask;
     class MultiTask;
     class IndividualTask;
@@ -1284,6 +1285,7 @@ namespace Legion {
     friend class Internal::AttachOp;                        \
     friend class Internal::DetachOp;                        \
     friend class Internal::TimingOp;                        \
+    friend class Internal::ExternalTask;                    \
     friend class Internal::TaskOp;                          \
     friend class Internal::SingleTask;                      \
     friend class Internal::MultiTask;                       \
@@ -1317,6 +1319,12 @@ namespace Legion {
     friend class Internal::InstanceRef;                     \
     friend class Internal::MPILegionHandshakeImpl;          \
     friend class Internal::FutureMapImpl;                   \
+    friend class Internal::TaskContext;                     \
+    friend class Internal::InnerContext;                    \
+    friend class Internal::TopLevelContext;                 \
+    friend class Internal::RemoteContext;                   \
+    friend class Internal::LeafContext;                     \
+    friend class Internal::InlineContext;                   \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 
