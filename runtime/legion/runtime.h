@@ -1381,7 +1381,7 @@ namespace Legion {
         MappingTagID tag;
         TunableID tunable_id;
         unsigned tunable_index; // only valid for LegionSpy
-        SingleTask *task;
+        TaskContext *ctx;
         FutureImpl *result;
       }; 
     public:
@@ -2675,8 +2675,8 @@ namespace Legion {
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
       Reservation context_lock;
-      std::map<UniqueID,SingleTask*> local_contexts;
-      LegionMap<UniqueID,RemoteTask*,
+      std::map<UniqueID,InnerContext*> local_contexts;
+      LegionMap<UniqueID,RemoteContext*,
                 RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
       std::map<UniqueID,RtUserEvent> pending_remote_contexts;
       unsigned total_contexts;

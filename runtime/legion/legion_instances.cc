@@ -19,6 +19,7 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
+#include "legion_context.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -680,21 +681,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::register_active_context(SingleTask *context)
+    void PhysicalManager::register_active_context(InnerContext *context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner()); // should always be on the owner node
 #endif
-      // Save the context to be notified when we deleted
-      GenerationID gen = context->get_generation();
       AutoLock gc(gc_lock);
-      // Perfectly alright to overwrite earlier generations
-      active_contexts[context] = gen;
+      active_contexts.insert(context);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::unregister_active_context(SingleTask *context)
+    void PhysicalManager::unregister_active_context(InnerContext *context)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -935,12 +933,9 @@ namespace Legion {
       // Notify any contexts of our deletion
       // No need to hold the lock, there should be no more contexts
       // being added since we are being deleted
-      for (std::map<SingleTask*,GenerationID>::const_iterator it = 
+      for (std::set<InnerContext*>::const_iterator it = 
             active_contexts.begin(); it != active_contexts.end(); it++)
-      {
-        it->first->notify_instance_deletion(
-            const_cast<PhysicalManager*>(this), it->second);
-      }
+        (*it)->notify_instance_deletion(const_cast<PhysicalManager*>(this));
     }
 
     //--------------------------------------------------------------------------
@@ -1088,8 +1083,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* InstanceManager::create_instance_top_view(SingleTask *own_ctx,
-                                                   AddressSpaceID logical_owner)
+    InstanceView* InstanceManager::create_instance_top_view(
+                            InnerContext *own_ctx, AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1469,7 +1464,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* ReductionManager::create_instance_top_view(
-                              SingleTask *own_ctx, AddressSpaceID logical_owner)
+                            InnerContext *own_ctx, AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1921,8 +1916,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* VirtualManager::create_instance_top_view(SingleTask *context,
-                                                   AddressSpaceID logical_owner)
+    InstanceView* VirtualManager::create_instance_top_view(
+                            InnerContext *context, AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
       // should never be called

@@ -1203,14 +1203,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskContext* Operation::find_logical_context(unsigned index)
+    InnerContext* Operation::find_logical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
       return parent_ctx->find_parent_logical_context(find_parent_index(index));
     }
 
     //--------------------------------------------------------------------------
-    TaskContext* Operation::find_physical_context(unsigned index)
+    InnerContext* Operation::find_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
       return parent_ctx->find_parent_physical_context(find_parent_index(index));

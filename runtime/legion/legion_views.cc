@@ -23,6 +23,7 @@
 #include "legion_instances.h"
 #include "legion_views.h"
 #include "legion_analysis.h"
+#include "legion_context.h"
 
 namespace Legion {
   namespace Internal {
@@ -4736,7 +4737,7 @@ namespace Legion {
                               AddressSpaceID owner_proc, RegionTreeNode *node,
                               AddressSpaceID local_proc, 
                               CompositeVersionInfo *info, ClosedNode *tree, 
-                              SingleTask *context, bool register_now)
+                              InnerContext *context, bool register_now)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, local_proc, 
                      node, register_now), CompositeBase(view_lock),
         version_info(info), closed_tree(tree), owner_context(context)
@@ -4886,47 +4887,6 @@ namespace Legion {
             continue;
           result->record_reduction_view(it->first, overlap);
         }
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    CompositeView* CompositeView::translate_context(SingleTask *target_context)
-    //--------------------------------------------------------------------------
-    {
-      Runtime *runtime = context->runtime; 
-      DistributedID result_did = runtime->get_available_distributed_id(false);
-      // Make a new set of version numbers
-      CompositeVersionInfo *new_info = new CompositeVersionInfo();
-      new_info->set_upper_bound_node(logical_node);
-      CompositeView *result = legion_new<CompositeView>(context, result_did,
-          runtime->address_space, logical_node, runtime->address_space,
-          new_info, closed_tree, target_context, true/*register now*/);
-      // Clone the children
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-        it->first->clone(result, it->second);
-      if (!!dirty_mask)
-      {
-        result->record_dirty_fields(dirty_mask);
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator 
-              it = valid_views.begin(); it != valid_views.end(); it++)
-          result->record_valid_view(it->first, it->second);
-      }
-      // Recursively apply the transformation
-      for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
-            nested_composite_views.begin(); it != 
-            nested_composite_views.end(); it++)
-      {
-        result->record_valid_view(it->first->translate_context(target_context),
-                                  it->second);
-      }
-      if (!!reduction_mask)
-      {
-        result->record_reduction_fields(reduction_mask);
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-              reduction_views.begin(); it != reduction_views.end(); it++)
-          result->record_reduction_view(it->first, it->second);
       }
       return result;
     }
@@ -5345,7 +5305,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    SingleTask* CompositeView::get_owner_context(void) const
+    InnerContext* CompositeView::get_owner_context(void) const
     //--------------------------------------------------------------------------
     {
       return owner_context;
@@ -5426,7 +5386,7 @@ namespace Legion {
       version_info->unpack_version_numbers(derez, runtime->forest);
       ClosedNode *closed_tree = 
         ClosedNode::unpack_closed_node(derez, runtime, is_region);
-      SingleTask *owner_context = runtime->find_context(owner_uid);
+      InnerContext *owner_context = runtime->find_context(owner_uid);
       // Make the composite view, but don't register it yet
       void *location;
       CompositeView *view = NULL;
@@ -5889,7 +5849,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    SingleTask* CompositeNode::get_owner_context(void) const
+    InnerContext* CompositeNode::get_owner_context(void) const
     //--------------------------------------------------------------------------
     {
       return parent->get_owner_context();
@@ -5946,7 +5906,7 @@ namespace Legion {
         // Request final states for all the version states and then either
         // launch a task to do the capture, or do it now
         std::set<RtEvent> capture_preconditions;
-        SingleTask *owner_context = parent->get_owner_context();
+        InnerContext *owner_context = parent->get_owner_context();
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               needed_states.begin(); it != needed_states.end(); it++)
           it->first->request_final_version_state(owner_context, it->second,

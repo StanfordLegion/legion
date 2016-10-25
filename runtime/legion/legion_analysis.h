@@ -803,7 +803,7 @@ namespace Legion {
                                   const FieldMask &closed_mask,
         const LegionMap<LogicalView*,FieldMask>::aligned &valid_above);
       void perform_disjoint_close(InterCloseOp *op, unsigned index,
-                   SingleTask *context, const FieldMask &closing_mask);
+                   InnerContext *context, const FieldMask &closing_mask);
     public:
       PhysicalState* clone(void) const;
       void clone_to(const FieldMask &mask, VersionInfo &target_info) const;
@@ -875,12 +875,13 @@ namespace Legion {
                             const RegionUsage &usage,
                             const FieldMask &user_mask,
                             const InstanceSet &targets,
-                            SingleTask *context, unsigned init_index,
-                            const std::vector<LogicalView*> &corresponding);
+                            InnerContext *context, unsigned init_index,
+                            const std::vector<LogicalView*> &corresponding,
+                            std::set<RtEvent> &applied_events);
     public:
       void record_current_versions(const FieldMask &version_mask,
                                    FieldMask &unversioned_mask,
-                                   SingleTask *context,
+                                   InnerContext *context,
                                    Operation *op, unsigned index,
                                    const RegionUsage &usage,
                                    VersionInfo &version_info,
@@ -889,24 +890,24 @@ namespace Legion {
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events);
       void compute_advance_split_mask(VersionInfo &version_info,
-                                      SingleTask *context,
+                                      InnerContext *context,
                                       const FieldMask &version_mask,
                                       std::set<RtEvent> &ready_events,
          const LegionMap<ProjectionEpochID,FieldMask>::aligned &advance_epochs);
       void record_path_only_versions(const FieldMask &version_mask,
                                      const FieldMask &split_mask,
                                      FieldMask &unversioned_mask,
-                                     SingleTask *context,
+                                     InnerContext *context,
                                      Operation *op, unsigned index,
                                      const RegionUsage &usage,
                                      VersionInfo &version_info,
                                      std::set<RtEvent> &ready_events);
       void record_disjoint_close_versions(const FieldMask &version_mask,
-                                          SingleTask *context,
+                                          InnerContext *context,
                                           Operation *op, unsigned index,
                                           VersionInfo &version_info,
                                           std::set<RtEvent> &ready_events);
-      void advance_versions(FieldMask version_mask, SingleTask *context,
+      void advance_versions(FieldMask version_mask, InnerContext *context,
                             bool update_parent_state,
                             AddressSpaceID source_space,
                             std::set<RtEvent> &applied_events,
@@ -915,7 +916,7 @@ namespace Legion {
                             bool dedup_advances = false, 
                             ProjectionEpochID advance_epoch = 0,
                             const FieldMask *dirty_previous = NULL);
-      void update_child_versions(SingleTask *context,
+      void update_child_versions(InnerContext *context,
                                  const ColorPoint &child_color,
                                  VersioningSet<> &new_states,
                                  std::set<RtEvent> &applied_events);
@@ -983,7 +984,7 @@ namespace Legion {
     protected:
       Reservation manager_lock;
     protected:
-      SingleTask *current_context;
+      InnerContext *current_context;
     protected:
       bool is_owner;
       AddressSpaceID owner_space;
@@ -1031,7 +1032,7 @@ namespace Legion {
       public:
         VersionState *proxy_this;
         AddressSpaceID target;
-        SingleTask *context;
+        InnerContext *context;
         FieldMask *request_mask;
         VersionRequestKind request_kind;
         RtUserEvent to_trigger;
@@ -1050,7 +1051,7 @@ namespace Legion {
       public:
         VersionState *proxy_this;
         PhysicalManager *manager;
-        SingleTask *context;
+        InnerContext *context;
       };
       struct UpdateViewReferences : public LgTaskArgs<UpdateViewReferences> {
       public:
@@ -1070,7 +1071,7 @@ namespace Legion {
       template<VersionRequestKind KIND>
       struct RequestFunctor {
       public:
-        RequestFunctor(VersionState *proxy, SingleTask *ctx,
+        RequestFunctor(VersionState *proxy, InnerContext *ctx,
             AddressSpaceID r, const FieldMask &m, std::set<RtEvent> &pre)
           : proxy_this(proxy), context(ctx), requestor(r), 
             mask(m), preconditions(pre) { }
@@ -1078,7 +1079,7 @@ namespace Legion {
         void apply(AddressSpaceID target);
       private:
         VersionState *proxy_this;
-        SingleTask *context;
+        InnerContext *context;
         AddressSpaceID requestor;
         const FieldMask &mask;
         std::set<RtEvent> &preconditions;
@@ -1098,14 +1099,15 @@ namespace Legion {
     public:
       void initialize(ApEvent term_event, const RegionUsage &usage,
                       const FieldMask &user_mask, const InstanceSet &targets,
-                      SingleTask *context, unsigned init_index,
-                      const std::vector<LogicalView*> &corresponding);
+                      InnerContext *context, unsigned init_index,
+                      const std::vector<LogicalView*> &corresponding,
+                      std::set<RtEvent> &applied_events);
       void update_path_only_state(PhysicalState *state,
                                   const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
       void perform_disjoint_close(InterCloseOp *op, unsigned index,
-            SingleTask *context, const FieldMask &close_mask) const;
+            InnerContext *context, const FieldMask &close_mask) const;
     public: // methods for applying state information
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
@@ -1132,27 +1134,27 @@ namespace Legion {
       // instances fetch only the children they need rather
       // than requesting the full final version state like
       // they currently do
-      void request_children_version_state(SingleTask *context,
+      void request_children_version_state(InnerContext *context,
                                           const FieldMask &request_mask,
                                           std::set<RtEvent> &preconditions);
-      void request_initial_version_state(SingleTask *context,
+      void request_initial_version_state(InnerContext *context,
                                          const FieldMask &request_mask,
                                          std::set<RtEvent> &preconditions);
-      void request_final_version_state(SingleTask *context,
+      void request_final_version_state(InnerContext *context,
                                        const FieldMask &request_mask,
                                        std::set<RtEvent> &preconditions);
     public:
       void send_version_state_update(AddressSpaceID target,
-                                     SingleTask *context,
+                                     InnerContext *context,
                                      const FieldMask &request_mask, 
                                      VersionRequestKind request_kind,
                                      RtUserEvent to_trigger);
       void send_version_state_update_request(AddressSpaceID target, 
-                          SingleTask *context, AddressSpaceID src, 
+                          InnerContext *context, AddressSpaceID src, 
                           RtUserEvent to_trigger, const FieldMask &request_mask,
                           VersionRequestKind request_kind);
       void launch_send_version_state_update(AddressSpaceID target,
-                                     SingleTask *context,
+                                     InnerContext *context,
                                      RtUserEvent to_trigger, 
                                      const FieldMask &request_mask, 
                                      VersionRequestKind request_kind,
@@ -1165,11 +1167,11 @@ namespace Legion {
                                       Runtime *runtime, AddressSpaceID source);
     public:
       void handle_version_state_update_request(AddressSpaceID source, 
-                                        SingleTask *context,
+                                        InnerContext *context,
                                         RtUserEvent to_trigger, 
                                         VersionRequestKind request_kind,
                                         FieldMask &request_mask);
-      void handle_version_state_update_response(SingleTask *context,
+      void handle_version_state_update_response(InnerContext *context,
                                                RtUserEvent to_trigger, 
                                                Deserializer &derez, 
                                                const FieldMask &update, 
@@ -1181,7 +1183,7 @@ namespace Legion {
                                      RtEvent done_event);
       static void process_remove_version_state_ref(const void *args);
     public:
-      void convert_view(PhysicalManager *manager, SingleTask *context,
+      void convert_view(PhysicalManager *manager, InnerContext *context,
                         ReferenceMutator *mutator);
       static void process_convert_view(const void *args);
       static void process_view_references(const void *args);

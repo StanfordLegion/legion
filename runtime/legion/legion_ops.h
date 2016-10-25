@@ -437,8 +437,8 @@ namespace Legion {
                                    GenerationID gen);
     public:
       // Help for finding the contexts for an operation
-      TaskContext* find_logical_context(unsigned index);
-      TaskContext* find_physical_context(unsigned index);
+      InnerContext* find_logical_context(unsigned index);
+      InnerContext* find_physical_context(unsigned index);
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);

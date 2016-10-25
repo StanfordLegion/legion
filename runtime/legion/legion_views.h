@@ -1058,7 +1058,7 @@ namespace Legion {
                                          CompositeCopyNode *result,
            LegionMap<CompositeNode*,FieldMask>::aligned &children_to_traverse);
     public:
-      virtual SingleTask* get_owner_context(void) const = 0;
+      virtual InnerContext* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask) = 0;
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1112,7 +1112,7 @@ namespace Legion {
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
                     AddressSpaceID local_proc, CompositeVersionInfo *info,
-                    ClosedNode *closed_tree, SingleTask *context,
+                    ClosedNode *closed_tree, InnerContext *context,
                     bool register_now);
       CompositeView(const CompositeView &rhs);
       virtual ~CompositeView(void);
@@ -1123,7 +1123,6 @@ namespace Legion {
     public:
       CompositeView* clone(const FieldMask &clone_mask,
         const LegionMap<CompositeView*,FieldMask>::aligned &replacements) const;
-      CompositeView* translate_context(SingleTask *target_context);
     public:
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
@@ -1167,7 +1166,7 @@ namespace Legion {
                                    const FieldMask &needed_fields);
     public:
       // From CompositeBase
-      virtual SingleTask* get_owner_context(void) const;
+      virtual InnerContext* get_owner_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
@@ -1199,7 +1198,7 @@ namespace Legion {
       // The abstraction of the tree that we closed
       ClosedNode *const closed_tree;
       // The translation context if any
-      SingleTask *const owner_context;
+      InnerContext *const owner_context;
     protected:
       // Note that we never record any version state names here, we just
       // record the views and children we immediately depend on and that
@@ -1250,7 +1249,7 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       // From CompositeBase
-      virtual SingleTask* get_owner_context(void) const;
+      virtual InnerContext* get_owner_context(void) const;
       virtual void perform_ready_check(FieldMask mask);
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,

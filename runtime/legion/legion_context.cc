@@ -2014,6 +2014,21 @@ namespace Legion {
     InnerContext::~InnerContext(void)
     //--------------------------------------------------------------------------
     {
+      if (!remote_instances.empty())
+      {
+        UniqueID local_uid = get_unique_id();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(local_uid);
+        }
+        for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          runtime->send_remote_context_free(it->first, rez);
+        }
+        remote_instances.clear();
+      }
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
       {
@@ -2118,7 +2133,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskContext* InnerContext::find_parent_logical_context(unsigned index)
+    InnerContext* InnerContext::find_parent_logical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
       // If this is one of our original region requirements then
@@ -2142,7 +2157,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskContext* InnerContext::find_parent_physical_context(unsigned index)
+    InnerContext* InnerContext::find_parent_physical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3093,7 +3108,8 @@ namespace Legion {
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
                       const std::vector<ApUserEvent> &unmap_events,
-                      std::set<ApEvent> &preconditions)
+                      std::set<ApEvent> &preconditions,
+                      std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_REGION_TREE_CONTEXTS_CALL);
@@ -3136,7 +3152,7 @@ namespace Legion {
         {
           runtime->forest->initialize_current_context(tree_context,
               clone_requirements[idx], physical_instances[idx],
-              unmap_events[idx], this, idx, top_views);
+              unmap_events[idx], this, idx, top_views, applied_events);
 #ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());
 #endif
@@ -3298,8 +3314,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::notify_instance_deletion(PhysicalManager *deleted,
-                                                GenerationID old_gen)
+    void InnerContext::notify_instance_deletion(PhysicalManager *deleted)
     //--------------------------------------------------------------------------
     {
       InstanceView *removed = NULL;
@@ -3448,6 +3463,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(owner_task != NULL);
+      runtime->decrement_total_outstanding_tasks(owner_task->task_id, 
+                                                 false/*meta*/);
+#else
+      runtime->decrement_total_outstanding_tasks();
 #endif
       if (overhead_tracker != NULL)
       {
@@ -3680,6 +3699,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::send_remote_context(AddressSpaceID remote_instance,
+                                           RemoteContext *remote_ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_instance != runtime->address_space);
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_ctx);
+        pack_remote_context(rez, remote_instance);
+      }
+      runtime->send_remote_context_response(remote_instance, rez);
+      AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+      assert(remote_instances.find(remote_instance) == remote_instances.end());
+#endif
+      remote_instances[remote_instance] = remote_ctx;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void InnerContext::handle_version_owner_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -3901,22 +3942,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TopLevelContext::~TopLevelContext(void)
     //--------------------------------------------------------------------------
-    {
-      if (!remote_instances.empty())
-      {
-        UniqueID local_uid = get_unique_id();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(local_uid);
-        }
-        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-        {
-          runtime->send_remote_context_free(it->first, rez);
-        }
-        remote_instances.clear();
-      }
+    { 
       // Tell the runtime that another top level task is done
       runtime->decrement_outstanding_top_level_tasks();
     }

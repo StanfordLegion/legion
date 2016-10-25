@@ -204,7 +204,7 @@ namespace Legion {
       const bool own_domain;
       const PointerConstraint pointer_constraint;
     protected:
-      std::map<SingleTask*,GenerationID> active_contexts;
+      std::set<InnerContext*> active_contexts;
     };
 
     /**

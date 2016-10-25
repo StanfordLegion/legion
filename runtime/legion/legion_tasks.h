@@ -979,7 +979,7 @@ namespace Legion {
     protected:
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
-      public:
+    public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       void return_privileges(TaskContext *point_context);

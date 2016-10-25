@@ -82,6 +82,7 @@ namespace Legion {
         { return physical_regions; }
       inline bool has_created_requirements(void) const
         { return !created_requirements.empty(); }
+      inline TaskOp* get_owner_task(void) const { return owner_task; }
     public:
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const = 0;
@@ -132,8 +133,8 @@ namespace Legion {
       virtual void increment_frame(void) = 0;
       virtual void decrement_frame(void) = 0;
     public:
-      virtual TaskContext* find_parent_logical_context(unsigned index) = 0;
-      virtual TaskContext* find_parent_physical_context(unsigned index) = 0;
+      virtual InnerContext* find_parent_logical_context(unsigned index) = 0;
+      virtual InnerContext* find_parent_physical_context(unsigned index) = 0;
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, VersionInfo &version_info) = 0;
       // Override by RemoteTask and TopLevelTask
@@ -144,15 +145,15 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions) = 0;
+          std::set<ApEvent> &preconditions,
+          std::set<RtEvent> &applied_events) = 0;
       virtual void invalidate_region_tree_contexts(void) = 0;
       virtual void send_back_created_state(AddressSpaceID target) = 0;
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL) = 0;
       static void handle_remote_view_creation(const void *args);
-      virtual void notify_instance_deletion(PhysicalManager *deleted, 
-                                            GenerationID old_gen) = 0;
+      virtual void notify_instance_deletion(PhysicalManager *deleted) = 0;
       virtual void convert_virtual_instance_top_views(
           const std::map<AddressSpaceID,RemoteTask*> &remote_instances) = 0;
       static void handle_create_top_view_request(Deserializer &derez, 
@@ -375,7 +376,7 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_POST_END_ID;
       public:
-        TaskContext *proxy_this;
+        InnerContext *proxy_this;
         void *result;
         size_t result_size;
       };
@@ -383,19 +384,19 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DECREMENT_PENDING_TASK_ID;
       public:
-        TaskContext *parent_ctx;
+        InnerContext *parent_ctx;
       };
       struct WindowWaitArgs : public LgTaskArgs<WindowWaitArgs> {
       public:
         static const LgTaskID TASK_ID = LG_WINDOW_WAIT_TASK_ID;
       public:
-        TaskContext *parent_ctx;
+        InnerContext *parent_ctx;
       };
       struct IssueFrameArgs : public LgTaskArgs<IssueFrameArgs> {
       public:
         static const LgTaskID TASK_ID = LG_ISSUE_FRAME_TASK_ID;
       public:
-        TaskContext *parent_ctx;
+        InnerContext *parent_ctx;
         FrameOp *frame;
         ApEvent frame_termination;
       };
@@ -403,7 +404,7 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_ADD_TO_DEP_QUEUE_TASK_ID;
       public:
-        TaskContext *proxy_this;
+        InnerContext *proxy_this;
         Operation *op;
         RtEvent op_pre;
       };
@@ -411,7 +412,7 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_REMOTE_VIEW_CREATION_TASK_ID;
       public:
-        TaskContext *proxy_this;
+        InnerContext *proxy_this;
         PhysicalManager *manager;
         InstanceView **target;
         RtUserEvent to_trigger;
@@ -426,8 +427,6 @@ namespace Legion {
       virtual ~InnerContext(void);
     public:
       InnerContext& operator=(const InnerContext &rhs);
-    public:
-      inline TaskOp* get_owner_task(void) const { return owner_task; }
     public:
       void print_children(void);
       void perform_window_wait(void);
@@ -486,8 +485,8 @@ namespace Legion {
     
     public:
       virtual TaskContext* find_parent_context(void);
-      virtual TaskContext* find_parent_logical_context(unsigned index);
-      virtual TaskContext* find_parent_physical_context(unsigned index);
+      virtual InnerContext* find_parent_logical_context(unsigned index);
+      virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, VersionInfo &version_info);
     public:
@@ -499,15 +498,15 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions);
+          std::set<ApEvent> &preconditions,
+          std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
       static void handle_remote_view_creation(const void *args);
-      virtual void notify_instance_deletion(PhysicalManager *deleted, 
-                                            GenerationID old_gen);
+      void notify_instance_deletion(PhysicalManager *deleted); 
       virtual void convert_virtual_instance_top_views(
           const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
       static void handle_create_top_view_request(Deserializer &derez, 
@@ -539,6 +538,9 @@ namespace Legion {
                                                 Runtime *runtime);
     public:
       void post_end_task(const void *res, size_t res_size, bool owned);
+    public:
+      void send_remote_context(AddressSpaceID remote_instance, 
+                               RemoteContext *target);
     public:
       const RegionTreeContext tree_context; 
     protected:
@@ -598,6 +600,8 @@ namespace Legion {
         std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
     protected:
       std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
+    protected:
+      std::map<AddressSpaceID,RemoteContext*> remote_instances;
     };
 
     /**
@@ -633,9 +637,7 @@ namespace Legion {
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
     public:
-      const UniqueID context_uid;
-    protected:
-      std::map<AddressSpaceID,RemoteTask*> remote_instances;
+      const UniqueID context_uid; 
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -774,8 +776,8 @@ namespace Legion {
       virtual void decrement_frame(void);
     
     public:
-      virtual TaskContext* find_parent_logical_context(unsigned index);
-      virtual TaskContext* find_parent_physical_context(unsigned index);
+      virtual InnerContext* find_parent_logical_context(unsigned index);
+      virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, VersionInfo &version_info);
       // Override by RemoteTask and TopLevelTask
@@ -786,15 +788,15 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions);
+          std::set<ApEvent> &preconditions,
+          std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
       static void handle_remote_view_creation(const void *args);
-      virtual void notify_instance_deletion(PhysicalManager *deleted, 
-                                            GenerationID old_gen);
+      virtual void notify_instance_deletion(PhysicalManager *deleted); 
       virtual void convert_virtual_instance_top_views(
           const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
       static void handle_create_top_view_request(Deserializer &derez, 
@@ -882,8 +884,8 @@ namespace Legion {
       virtual void decrement_frame(void);
     
     public:
-      virtual TaskContext* find_parent_logical_context(unsigned index);
-      virtual TaskContext* find_parent_physical_context(unsigned index);
+      virtual InnerContext* find_parent_logical_context(unsigned index);
+      virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, VersionInfo &version_info);
       // Override by RemoteTask and TopLevelTask
@@ -894,15 +896,15 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<ApEvent> &preconditions);
+          std::set<ApEvent> &preconditions,
+          std::set<RtEvent> &applied_events);
       virtual void invalidate_region_tree_contexts(void);
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
       static void handle_remote_view_creation(const void *args);
-      virtual void notify_instance_deletion(PhysicalManager *deleted, 
-                                            GenerationID old_gen);
+      virtual void notify_instance_deletion(PhysicalManager *deleted); 
       virtual void convert_virtual_instance_top_views(
           const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
       static void handle_create_top_view_request(Deserializer &derez, 

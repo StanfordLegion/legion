@@ -23,6 +23,7 @@
 #include "legion_instances.h"
 #include "legion_views.h"
 #include "legion_analysis.h"
+#include "legion_context.h"
 
 namespace Legion {
   namespace Internal {
@@ -134,7 +135,7 @@ namespace Legion {
                                  const RegionRequirement &r, VersionInfo &info, 
                                  const FieldMask &k, std::set<RtEvent> &e)
       : ctx(c), op(o), index(idx), req(r), version_info(info),
-        traversal_mask(k), context_uid(o->get_parent()->get_context_uid()),
+        traversal_mask(k), context_uid(o->get_context()->get_context_uid()),
         map_applied_events(e)
     //--------------------------------------------------------------------------
     {
@@ -1571,8 +1572,8 @@ namespace Legion {
         {
           log_run.error("Illegal partial acquire operation (ID %lld) "
                         "performed in task %s (ID %lld)", op->get_unique_id(),
-                        op->get_parent()->get_task_name(),
-                        op->get_parent()->get_unique_id());
+                        op->get_context()->get_task_name(),
+                        op->get_context()->get_unique_id());
 #ifdef DEBUG_LEGION
           assert(false);
 #endif
@@ -1646,8 +1647,8 @@ namespace Legion {
       // It's bad if we get here
       log_run.error("Illegal interfering restriction performed by attach "
                     "operation (ID %lld) in task %s (ID %lld)",
-                    op->get_unique_op_id(), op->get_parent()->get_task_name(),
-                    op->get_parent()->get_unique_op_id());
+                    op->get_unique_op_id(), op->get_context()->get_task_name(),
+                    op->get_context()->get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
 #endif
@@ -1803,8 +1804,8 @@ namespace Legion {
       // It's bad if we get here
       log_run.error("Illegal interfering acquire operation performed by "
                     "acquire operation (ID %lld) in task %s (ID %lld)",
-                    op->get_unique_op_id(), op->get_parent()->get_task_name(),
-                    op->get_parent()->get_unique_op_id());
+                    op->get_unique_op_id(), op->get_context()->get_task_name(),
+                    op->get_context()->get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
 #endif
@@ -1844,8 +1845,8 @@ namespace Legion {
           log_run.error("Illegal partial restriction operation performed by "
                         "attach operation (ID %lld) in task %s (ID %lld)",
                         op->get_unique_op_id(), 
-                        op->get_parent()->get_task_name(),
-                        op->get_parent()->get_unique_op_id());
+                        op->get_context()->get_task_name(),
+                        op->get_context()->get_unique_id());
 #ifdef DEBUG_LEGION
           assert(false);
 #endif
@@ -3559,7 +3560,7 @@ namespace Legion {
         assert(finder != closed_nodes.end()); // better have a closed tree
 #endif
         // Now initialize the operation
-        normal_close_op->initialize(creator->get_parent(), req, finder->second,
+        normal_close_op->initialize(creator->get_context(), req, finder->second,
                                     trace_info, trace_info.req_idx, 
                                     ver_info, normal_close_mask, creator);
         // We can clear this now
@@ -3590,7 +3591,7 @@ namespace Legion {
         root_node->column_source->get_field_set(read_only_close_mask,
                                                trace_info.req.privilege_fields,
                                                req.privilege_fields);
-        read_only_close_op->initialize(creator->get_parent(), req, 
+        read_only_close_op->initialize(creator->get_context(), req, 
                                        trace_info, trace_info.req_idx, 
                                        read_only_close_mask, creator);
       }
@@ -3608,7 +3609,7 @@ namespace Legion {
         // Make a closed tree of just the root node
         // There are no dirty fields here since we just flushing reductions
         ClosedNode *closed_tree = new ClosedNode(root_node);
-        flush_only_close_op->initialize(creator->get_parent(), req, 
+        flush_only_close_op->initialize(creator->get_context(), req, 
             closed_tree, trace_info, trace_info.req_idx, 
             ver_info, flush_only_close_mask, creator);
       }
@@ -3941,7 +3942,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalState::perform_disjoint_close(InterCloseOp *op, unsigned index,
-                             SingleTask *context, const FieldMask &closing_mask)
+                           InnerContext *context, const FieldMask &closing_mask)
     //--------------------------------------------------------------------------
     {
       // Iterate over the current states
@@ -4183,9 +4184,10 @@ namespace Legion {
                                           const RegionUsage &usage,
                                           const FieldMask &user_mask,
                                           const InstanceSet &targets,
-                                          SingleTask *context,
+                                          InnerContext *context,
                                           unsigned init_index,
-                                 const std::vector<LogicalView*> &corresponding)
+                                 const std::vector<LogicalView*> &corresponding,
+                                          std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       // See if we have been assigned
@@ -4204,8 +4206,8 @@ namespace Legion {
       }
       // Make a new version state and initialize it, then insert it
       VersionState *init_state = create_new_version_state(init_version);
-      init_state->initialize(term_event, usage, user_mask, 
-                             targets, context, init_index, corresponding);
+      init_state->initialize(term_event, usage, user_mask, targets, context, 
+                             init_index, corresponding, applied_events);
       // We do need the lock because sometimes these are virtual
       // mapping results comping back
       AutoLock m_lock(manager_lock);
@@ -4226,7 +4228,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::record_current_versions(const FieldMask &version_mask, 
                                                 FieldMask &unversioned_mask,
-                                                SingleTask *context, 
+                                                InnerContext *context, 
                                                 Operation *op, unsigned index,
                                                 const RegionUsage &usage,
                                                 VersionInfo &version_info,
@@ -4434,7 +4436,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::compute_advance_split_mask(VersionInfo &version_info,
-                                                    SingleTask *context,
+                                                    InnerContext *context,
                                                 const FieldMask &version_mask,
                                                 std::set<RtEvent> &ready_events,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned &advance_epochs)
@@ -4485,7 +4487,7 @@ namespace Legion {
                                                 const FieldMask &version_mask,
                                                 const FieldMask &split_mask,
                                                 FieldMask &unversioned_mask,
-                                                SingleTask *context,
+                                                InnerContext *context,
                                                 Operation *op, unsigned index,
                                                 const RegionUsage &usage,
                                                 VersionInfo &version_info,
@@ -4708,7 +4710,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::record_disjoint_close_versions(
                                                 const FieldMask &version_mask,
-                                                SingleTask *context,
+                                                InnerContext *context,
                                                 Operation *op, unsigned index,
                                                 VersionInfo &version_info,
                                                 std::set<RtEvent> &ready_events)
@@ -4770,7 +4772,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::advance_versions(FieldMask mask, SingleTask *context, 
+    void VersionManager::advance_versions(FieldMask mask, InnerContext *context, 
                                           bool update_parent_state,
                                           AddressSpaceID source_space,
                                           std::set<RtEvent> &applied_events,
@@ -5247,7 +5249,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::update_child_versions(SingleTask *context,
+    void VersionManager::update_child_versions(InnerContext *context,
                                               const ColorPoint &child_color,
                                               VersioningSet<> &new_states,
                                               std::set<RtEvent> &applied_events)
@@ -5491,7 +5493,7 @@ namespace Legion {
       if (dedup_advances)
         derez.deserialize(advance_epoch);
 
-      SingleTask *context = runtime->find_context(context_uid);
+      InnerContext *context = runtime->find_context(context_uid);
       ContextID ctx = context->get_context_id();
       VersionManager &manager = node->get_current_version_manager(ctx);
       std::set<RtEvent> done_preconditions;
@@ -5563,7 +5565,7 @@ namespace Legion {
       FieldMask invalidate_mask;
       derez.deserialize(invalidate_mask);
 
-      SingleTask *context = runtime->find_context(context_uid);
+      InnerContext *context = runtime->find_context(context_uid);
       ContextID ctx = context->get_context_id();
       VersionManager &manager = node->get_current_version_manager(ctx);
       manager.invalidate_version_infos(invalidate_mask);
@@ -5671,7 +5673,7 @@ namespace Legion {
       FieldMask request_mask;
       derez.deserialize(request_mask);
 
-      SingleTask *context = runtime->find_context(context_uid);
+      InnerContext *context = runtime->find_context(context_uid);
       ContextID ctx = context->get_context_id();
       VersionManager &manager = node->get_current_version_manager(ctx);
       Serializer rez;
@@ -5990,8 +5992,9 @@ namespace Legion {
     void VersionState::initialize(ApEvent term_event, const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   const InstanceSet &targets,
-                                  SingleTask *context, unsigned init_index,
-                                 const std::vector<LogicalView*> &corresponding)
+                                  InnerContext *context, unsigned init_index,
+                                 const std::vector<LogicalView*> &corresponding,
+                                  std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5999,6 +6002,7 @@ namespace Legion {
       assert(currently_valid);
 #endif
       const UniqueID init_op_id = context->get_unique_id();
+      WrapperReferenceMutator mutator(applied_events);
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         LogicalView *new_view = corresponding[idx];
@@ -6018,7 +6022,7 @@ namespace Legion {
               track_aligned::iterator finder = reduction_views.find(view); 
             if (finder == reduction_views.end())
             {
-              new_view->add_nested_valid_ref(did, context);
+              new_view->add_nested_valid_ref(did, &mutator);
               reduction_views[view] = view_mask;
             }
             else
@@ -6033,7 +6037,7 @@ namespace Legion {
               track_aligned::iterator finder = valid_views.find(new_view);
             if (finder == valid_views.end())
             {
-              new_view->add_nested_valid_ref(did, context);
+              new_view->add_nested_valid_ref(did, &mutator);
               valid_views[new_view] = view_mask;
             }
             else
@@ -6053,7 +6057,7 @@ namespace Legion {
               track_aligned::iterator finder = valid_views.find(new_view);
           if (finder == valid_views.end())
           {
-            new_view->add_nested_valid_ref(did, context);
+            new_view->add_nested_valid_ref(did, &mutator);
             valid_views[new_view] = view_mask;
           }
           else
@@ -6147,7 +6151,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::perform_disjoint_close(InterCloseOp *op, unsigned index,
-                       SingleTask *context, const FieldMask &closing_mask) const
+                     InnerContext *context, const FieldMask &closing_mask) const
     //--------------------------------------------------------------------------
     {
       // Need the lock in read only mode to access these data structures
@@ -6429,7 +6433,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::request_children_version_state(SingleTask *context,
+    void VersionState::request_children_version_state(InnerContext *context,
                     const FieldMask &req_mask, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -6502,7 +6506,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::request_initial_version_state(SingleTask *context,
+    void VersionState::request_initial_version_state(InnerContext *context,
                 const FieldMask &request_mask, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -6581,7 +6585,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::request_final_version_state(SingleTask *context,
+    void VersionState::request_final_version_state(InnerContext *context,
                     const FieldMask &req_mask, std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
@@ -6655,7 +6659,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state_update(AddressSpaceID target,
-                                                SingleTask *context,
+                                                InnerContext *context,
                                                 const FieldMask &request_mask,
                                                 VersionRequestKind request_kind,
                                                 RtUserEvent to_trigger)
@@ -6866,10 +6870,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::send_version_state_update_request(AddressSpaceID target,
-                                    SingleTask *context, AddressSpaceID source, 
-                                    RtUserEvent to_trigger,
-                                    const FieldMask &request_mask, 
-                                    VersionRequestKind request_kind) 
+                                                InnerContext *context, 
+                                                AddressSpaceID source,
+                                                RtUserEvent to_trigger,
+                                                const FieldMask &request_mask, 
+                                                VersionRequestKind request_kind) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6890,7 +6895,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::launch_send_version_state_update(AddressSpaceID target,
-                                                SingleTask *context,
+                                                InnerContext *context,
                                                 RtUserEvent to_trigger, 
                                                 const FieldMask &request_mask, 
                                                 VersionRequestKind request_kind,
@@ -7001,8 +7006,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::handle_version_state_update_request(
-            AddressSpaceID source, SingleTask *context, RtUserEvent to_trigger, 
-            VersionRequestKind request_kind, FieldMask &request_mask)
+          AddressSpaceID source, InnerContext *context, RtUserEvent to_trigger, 
+          VersionRequestKind request_kind, FieldMask &request_mask)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(logical_node->context->runtime,
@@ -7177,7 +7182,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::handle_version_state_update_response(SingleTask *context,
+    void VersionState::handle_version_state_update_response(
+                                                InnerContext *context,
                                                 RtUserEvent to_trigger, 
                                                 Deserializer &derez,
                                                 const FieldMask &update,
@@ -7567,7 +7573,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::convert_view(PhysicalManager *manager,
-                                 SingleTask *context, ReferenceMutator *mutator)
+                               InnerContext *context, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7624,7 +7630,7 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID source;
       derez.deserialize(source);
-      SingleTask *context;
+      InnerContext *context;
       derez.deserialize(context);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -7651,7 +7657,7 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      SingleTask *context;
+      InnerContext *context;
       derez.deserialize(context);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);

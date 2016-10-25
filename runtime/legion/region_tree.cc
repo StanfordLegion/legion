@@ -20,6 +20,7 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
+#include "legion_context.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -1488,7 +1489,7 @@ namespace Legion {
       // If this is a NO_ACCESS, then we'll have no dependences so we're done
       if (IS_NO_ACCESS(req))
         return;
-      SingleTask *context = op->find_logical_context(idx);
+      TaskContext *context = op->find_logical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1535,7 +1536,7 @@ namespace Legion {
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
       // Do our check for restricted coherence
-      SingleTask *parent_ctx = op->get_parent();
+      TaskContext *parent_ctx = op->get_context();
       if (parent_ctx->has_restrictions())
         parent_ctx->perform_restricted_analysis(req, restrict_info);
       // If we have a restriction, then record it on the region requirement
@@ -1567,7 +1568,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
-      SingleTask *context = op->find_logical_context(idx);
+      TaskContext *context = op->find_logical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1634,7 +1635,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
       if (IS_NO_ACCESS(req))
         return;
-      SingleTask *context = op->find_physical_context(idx);
+      InnerContext *context = op->find_physical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1650,7 +1651,7 @@ namespace Legion {
       const unsigned depth = parent_node->get_depth();
       if (!skip_parent_check && (depth > 0))
       {
-        SingleTask *parent_ctx = op->get_parent();
+        TaskContext *parent_ctx = op->get_context();
         unsigned parent_req_index = op->find_parent_index(idx);
         parent_ctx->find_parent_version_info(parent_req_index, depth, 
                                              user_mask, version_info);
@@ -1681,7 +1682,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_ADVANCE_VERSION_NUMBERS_CALL);
-      SingleTask *context = op->find_physical_context(idx);
+      InnerContext *context = op->find_physical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -1721,9 +1722,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, const InstanceSet &sources,
-                    ApEvent term_event, SingleTask *context,unsigned init_index,
-                    std::map<PhysicalManager*,InstanceView*> &top_views)
+                  const RegionRequirement &req, const InstanceSet &sources,
+                  ApEvent term_event, InnerContext *context,unsigned init_index,
+                  std::map<PhysicalManager*,InstanceView*> &top_views,
+                  std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INITIALIZE_CONTEXT_CALL);
@@ -1804,7 +1806,7 @@ namespace Legion {
       }
       // Now we can register all these instances
       top_node->seed_state(ctx.get_id(), term_event, usage, user_mask, 
-                           sources, context, init_index, corresponding); 
+                 sources, context, init_index, corresponding, applied_events); 
     }
 
     //--------------------------------------------------------------------------
@@ -2106,7 +2108,7 @@ namespace Legion {
       // If we are a NO_ACCESS, then we are already done 
       if (IS_NO_ACCESS(req))
         return;
-      SingleTask *context = op->find_physical_context(index);
+      TaskContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -2137,7 +2139,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
-      SingleTask *context = op->find_physical_context(index);
+      InnerContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -2245,7 +2247,7 @@ namespace Legion {
 #endif
       std::vector<std::vector<InstanceView*> > views(regions.size());
       // Do the precondition pass
-      std::vector<SingleTask*> enclosing_contexts(regions.size());
+      std::vector<InnerContext*> enclosing_contexts(regions.size());
       for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
       {
         if (to_skip[idx1])
@@ -2260,7 +2262,7 @@ namespace Legion {
         assert(req.handle_type == SINGULAR);
         assert(!targets.empty());
 #endif
-        SingleTask *context = op->find_physical_context(idx1);
+        InnerContext *context = op->find_physical_context(idx1);
         // Save this for later in case we need it
         enclosing_contexts[idx1] = context;
         RegionNode *region_node = get_node(req.region);
@@ -2362,7 +2364,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_PERFORM_CLOSE_CALL);
-      SingleTask *context = op->find_physical_context(index);
+      InnerContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
@@ -2418,7 +2420,7 @@ namespace Legion {
                        const FieldMask &closing_mask, VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      SingleTask *context = op->find_physical_context(index);
+      InnerContext *context = op->find_physical_context(index);
 #ifdef DEBUG_LEGION
       assert(!close_node->is_region());
 #endif
@@ -2451,7 +2453,7 @@ namespace Legion {
       RegionUsage usage(req);
       TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                          user_mask, map_applied);
-      SingleTask *context = op->find_physical_context(index);
+      InnerContext *context = op->find_physical_context(index);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2510,7 +2512,7 @@ namespace Legion {
                                                  dst_indexes);
       // Convert the destination references to views
       std::vector<MaterializedView*> dst_views(dst_targets.size());
-      SingleTask *dst_context = op->find_physical_context(dst_index);
+      InnerContext *dst_context = op->find_physical_context(dst_index);
       for (unsigned idx = 0; idx < dst_targets.size(); idx++)
       {
         const InstanceRef &dst_ref = dst_targets[idx];
@@ -2529,7 +2531,7 @@ namespace Legion {
       // and issue copies to any of the deferred views
       if (src_targets.empty())
       {
-        SingleTask *src_context = op->find_physical_context(src_index);
+        InnerContext *src_context = op->find_physical_context(src_index);
         RegionTreeContext ctx = src_context->get_context();
 #ifdef DEBUG_LEGION
         assert(ctx.exists());
@@ -3182,7 +3184,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
-      SingleTask *context = op->find_physical_context(index);
+      InnerContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
       RegionNode *fill_node = get_node(req.region);
       FieldMask fill_mask = 
@@ -3248,7 +3250,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
-      SingleTask *context = attach_op->find_physical_context(index);
+      InnerContext *context = attach_op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
       RegionNode *attach_node = get_node(req.region);
       // Perform the attachment
@@ -3269,7 +3271,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
-      SingleTask *context = detach_op->find_physical_context(index);
+      InnerContext *context = detach_op->find_physical_context(index);
       RegionNode *detach_node = get_node(req.region);
       // Perform the detachment
       return detach_node->detach_file(context, version_info, ref);
@@ -12703,9 +12705,8 @@ namespace Legion {
       DerezCheck z(derez);
       UniqueID context_uid;
       derez.deserialize(context_uid);
-      SingleTask *context = runtime->find_context(context_uid);
-      SingleTask *outermost = 
-        context->get_parent()->find_outermost_local_context(context);
+      InnerContext *context = runtime->find_context(context_uid);
+      InnerContext *outermost = context->find_outermost_local_context(); 
       bool is_region;
       derez.deserialize(is_region);
       RegionTreeNode *node = NULL;
@@ -12732,7 +12733,7 @@ namespace Legion {
                                                const FieldMask &version_mask,
                                                FieldMask &unversioned_mask,
                                                Operation *op, unsigned idx,
-                                               SingleTask *parent_ctx,
+                                               InnerContext *parent_ctx,
                                                VersionInfo &version_info,
                                                std::set<RtEvent> &ready_events,
                                                bool partial_traversal,
@@ -12802,7 +12803,7 @@ namespace Legion {
                                                AddressSpaceID local_space,
                                                const RegionTreePath &path,
                                                const FieldMask &advance_mask,
-                                               SingleTask *parent_ctx, 
+                                               InnerContext *parent_ctx, 
                                                bool update_parent_state,
                                                bool skip_update_parent,
                                                bool dedup_opens, 
@@ -12860,7 +12861,7 @@ namespace Legion {
     CompositeView* RegionTreeNode::create_composite_instance(ContextID ctx_id,
                                                 const FieldMask &closing_mask,
                                                 VersionInfo &version_info, 
-                                                SingleTask *owner_ctx,
+                                                InnerContext *owner_ctx,
                                                 ClosedNode *closed_tree,
                                                 std::set<RtEvent> &ready_events,
                   const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs)
@@ -13966,7 +13967,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* RegionTreeNode::convert_manager(PhysicalManager *manager,
-                                                  SingleTask *context)
+                                                  InnerContext *context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13995,7 +13996,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* RegionTreeNode::convert_reference(const InstanceRef &ref,
-                                                    SingleTask *context)
+                                                    InnerContext *context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14007,7 +14008,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::convert_target_views(const InstanceSet &targets,
-                  SingleTask *context, std::vector<InstanceView*> &target_views)
+                InnerContext *context, std::vector<InstanceView*> &target_views)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14083,7 +14084,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::convert_target_views(const InstanceSet &targets,
-              SingleTask *context, std::vector<MaterializedView*> &target_views)
+            InnerContext *context, std::vector<MaterializedView*> &target_views)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -14191,7 +14192,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* RegionTreeNode::find_instance_view(PhysicalManager *manager,
-                                                     SingleTask *context) 
+                                                     InnerContext *context) 
     //--------------------------------------------------------------------------
     {
       std::pair<PhysicalManager*,UniqueID> key(manager, 
@@ -15307,10 +15308,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::register_region(const TraversalInfo &info, 
-                                     SingleTask *context,
+                                     InnerContext *context,
                                      RestrictInfo &restrict_info,
                                    ApEvent term_event, const RegionUsage &usage,
-                                   bool defer_add_users, InstanceSet &targets)
+                                     bool defer_add_users, InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
@@ -15614,17 +15615,18 @@ namespace Legion {
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
                                 const InstanceSet &targets,
-                                SingleTask *context, unsigned init_index,
-                                const std::vector<LogicalView*> &corresponding)
+                                InnerContext *context, unsigned init_index,
+                                const std::vector<LogicalView*> &corresponding,
+                                std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       get_current_version_manager(ctx).initialize_state(term_event, usage, 
-          user_mask, targets, context, init_index, corresponding);
+        user_mask, targets, context, init_index, corresponding, applied_events);
     } 
 
     //--------------------------------------------------------------------------
     void RegionNode::close_state(const TraversalInfo &info, RegionUsage &usage, 
-                                 SingleTask *context, InstanceSet &targets)
+                                 InnerContext *context, InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
@@ -15714,7 +15716,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
                                  const void *value, size_t value_size,
-                                 SingleTask *context, VersionInfo &version_info,
+                                 InnerContext *context,
+                                 VersionInfo &version_info,
                                  std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
@@ -15747,7 +15750,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionNode::eager_fill_fields(ContextID ctx, Operation *op,
                                           const unsigned index, 
-                                          SingleTask *context,
+                                          InnerContext *context,
                                           const FieldMask &fill_mask,
                                           const void *value, size_t value_size,
                                           VersionInfo &version_info, 
@@ -15815,7 +15818,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceRef RegionNode::attach_file(ContextID ctx, SingleTask *parent_ctx, 
+    InstanceRef RegionNode::attach_file(ContextID ctx, InnerContext *parent_ctx, 
                                         const FieldMask &attach_mask,
                                         const RegionRequirement &req,
                                         InstanceManager *manager,
@@ -15838,7 +15841,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionNode::detach_file(SingleTask *context, 
+    ApEvent RegionNode::detach_file(InnerContext *context, 
                               VersionInfo &version_info, const InstanceRef &ref)
     //--------------------------------------------------------------------------
     {
@@ -15855,7 +15858,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* RegionNode::find_context_view(PhysicalManager *manager,
-                                                SingleTask *context)
+                                                InnerContext *context)
     //--------------------------------------------------------------------------
     {
       return convert_reference_region(manager, context);
@@ -15863,7 +15866,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* RegionNode::convert_reference_region(PhysicalManager *manager,
-                                                       SingleTask *context)
+                                                       InnerContext *context)
     //--------------------------------------------------------------------------
     {
       InstanceView *result = find_instance_view(manager, context);
@@ -15886,9 +15889,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::convert_references_region(
-                                const std::vector<PhysicalManager*> &managers,
-                                std::vector<bool> &up_mask, SingleTask *context,
-                                std::vector<InstanceView*> &results)
+                              const std::vector<PhysicalManager*> &managers,
+                              std::vector<bool> &up_mask, InnerContext *context,
+                              std::vector<InstanceView*> &results)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -16872,7 +16875,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* PartitionNode::find_context_view(PhysicalManager *manager,
-                                                   SingleTask *context)
+                                                   InnerContext *context)
     //--------------------------------------------------------------------------
     {
       return convert_reference_partition(manager, context);
@@ -16880,7 +16883,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* PartitionNode::convert_reference_partition(
-                                  PhysicalManager *manager, SingleTask *context)
+                                PhysicalManager *manager, InnerContext *context)
     //--------------------------------------------------------------------------
     {
       InstanceView *result = find_instance_view(manager, context);
@@ -16898,9 +16901,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::convert_references_partition(
-                                const std::vector<PhysicalManager*> &managers,
-                                std::vector<bool> &up_mask, SingleTask *context,
-                                std::vector<InstanceView*> &results)
+                              const std::vector<PhysicalManager*> &managers,
+                              std::vector<bool> &up_mask, InnerContext *context,
+                              std::vector<InstanceView*> &results)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -16936,8 +16939,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::perform_disjoint_close(InterCloseOp *op, unsigned index,
-                             SingleTask *context, const FieldMask &closing_mask,
-                             VersionInfo &version_info)
+                           InnerContext *context, const FieldMask &closing_mask,
+                           VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
