@@ -12189,7 +12189,7 @@ namespace Legion {
         {
 #ifdef LEGION_SPY
           LegionSpy::log_mapping_dependence(
-              op->get_parent()->get_unique_id(),
+              op->get_context()->get_unique_id(),
               it->uid, it->idx, op->get_unique_op_id(),
               0/*idx*/, TRUE_DEPENDENCE);
 #endif
@@ -12222,7 +12222,7 @@ namespace Legion {
         {
 #ifdef LEGION_SPY
           LegionSpy::log_mapping_dependence(
-              op->get_parent()->get_unique_id(),
+              op->get_context()->get_unique_id(),
               it->uid, it->idx, op->get_unique_op_id(), 0/*idx*/, 
               TRUE_DEPENDENCE);
 #endif
@@ -14293,7 +14293,7 @@ namespace Legion {
               {
 #ifdef LEGION_SPY
                 LegionSpy::log_mapping_dependence(
-                    user.op->get_parent()->get_unique_id(),
+                    user.op->get_context()->get_unique_id(),
                     it->uid, it->idx, user.uid, user.idx, dtype);
 #endif
                 if (RECORD)
@@ -14531,7 +14531,7 @@ namespace Legion {
 #ifdef LEGION_SPY
           if (dtype != NO_DEPENDENCE)
             LegionSpy::log_mapping_dependence(
-                closer.user.op->get_parent()->get_unique_id(),
+                closer.user.op->get_context()->get_unique_id(),
                 it->uid, it->idx, closer.user.uid, closer.user.idx, dtype);
 #endif
           // Register the dependence 

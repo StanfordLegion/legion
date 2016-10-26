@@ -18,6 +18,7 @@
 #include "runtime.h"
 #include "legion_ops.h"
 #include "legion_tasks.h"
+#include "legion_context.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
 
@@ -4075,21 +4076,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& Runtime::begin_task(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->begin_task(ctx);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::end_task(Context ctx, const void *result, 
-                                    size_t result_size, bool owned /*= false*/)
-    //--------------------------------------------------------------------------
-    {
-      runtime->end_task(ctx, result, result_size, owned);
-    }
-
-    //--------------------------------------------------------------------------
     Future Runtime::from_value(const void *value, 
                                         size_t value_size, bool owned)
     //--------------------------------------------------------------------------
@@ -4361,9 +4347,9 @@ namespace Legion {
       assert(datalen == sizeof(Context));
 #endif
       ctx = *((const Context*)data);
-      task = reinterpret_cast<Task*>(ctx);
+      task = ctx->get_task();
 
-      regionsptr = &runtime->begin_task(ctx);
+      regionsptr = &ctx->begin_task();
     }
 
     //--------------------------------------------------------------------------
@@ -4373,7 +4359,7 @@ namespace Legion {
 		  size_t retvalsize /*= 0*/)
     //--------------------------------------------------------------------------
     {
-      runtime->end_task(ctx, retvalptr, retvalsize);
+      ctx->end_task(retvalptr, retvalsize, false/*owned*/);
     }
 
 }; // namespace Legion

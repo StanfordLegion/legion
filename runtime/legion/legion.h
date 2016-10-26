@@ -5220,9 +5220,6 @@ namespace Legion {
       // Methods for the wrapper functions to get information from the runtime
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
-      const std::vector<PhysicalRegion>& begin_task(Context ctx);
-      void end_task(Context ctx, const void *result, size_t result_size,
-                    bool owned = false);
       Future from_value(const void *value, size_t value_size, bool owned);
     private:
       VariantID register_variant(const TaskVariantRegistrar &registrar,bool ret,

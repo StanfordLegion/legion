@@ -1921,9 +1921,6 @@ namespace Legion {
       void free_fields(Context ctx, FieldSpace space, 
                        const std::set<FieldID> &to_free);
     public:
-      const std::vector<PhysicalRegion>& begin_task(TaskContext *ctx);
-      void end_task(TaskContext *ctx, const void *result, size_t result_size,
-                    bool owned);
       TaskID generate_dynamic_task_id(void);
       VariantID register_variant(const TaskVariantRegistrar &registrar,
                                  const void *user_data, size_t user_data_size,
@@ -2480,9 +2477,10 @@ namespace Legion {
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
     public:
-      RegionTreeContext allocate_region_tree_context(InnerContext *ctx);
-      void free_region_tree_context(RegionTreeContext tree_ctx, 
-                                    InnerContext *ctx);
+      RegionTreeContext allocate_region_tree_context(void);
+      void free_region_tree_context(RegionTreeContext tree_ctx); 
+      void register_local_context(UniqueID context_uid, InnerContext *ctx);
+      void unregister_local_context(UniqueID context_uid);
       void register_remote_context(UniqueID context_uid, RemoteContext *ctx,
                                    std::set<RtEvent> &preconditions);
       void unregister_remote_context(UniqueID context_uid);

@@ -3674,7 +3674,7 @@ namespace Legion {
         if (!variant->is_leaf() || has_virtual_instances())
         {
           InnerContext *inner_ctx = new InnerContext(runtime, this, regions,
-                                        parent_req_indexes, virtual_mapped);
+                          parent_req_indexes, virtual_mapped, unique_op_id);
           if (mapper == NULL)
             mapper = runtime->find_mapper(current_proc, map_id);
           inner_ctx->configure_context(mapper);
@@ -3931,56 +3931,7 @@ namespace Legion {
       int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
-    }
-
-    //--------------------------------------------------------------------------
-    void SingleTask::perform_inlining(void)
-    //--------------------------------------------------------------------------
-    {
-      // See if there is anything that we need to wait on before running
-      std::set<ApEvent> wait_on_events;
-      for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        FutureImpl *impl = futures[idx].impl; 
-        wait_on_events.insert(impl->ready_event);
-      }
-      for (unsigned idx = 0; idx < grants.size(); idx++)
-      {
-        GrantImpl *impl = grants[idx].impl;
-        wait_on_events.insert(impl->acquire_grant());
-      }
-      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
-      {
-        ApEvent e = 
-          Runtime::get_previous_phase(wait_barriers[idx].phase_barrier);
-        wait_on_events.insert(e);
-      }
-      // Merge together all the events for the start condition 
-      ApEvent start_condition = Runtime::merge_events(wait_on_events); 
-      // Get the processor that we will be running on
-      Processor current = parent_ctx->get_executing_processor();
-      // Select the variant to use
-      VariantImpl *variant = parent_ctx->select_inline_variant(this);
-      if (!Runtime::unsafe_mapper)
-      {
-        MapperManager *mapper = runtime->find_mapper(current, map_id);
-        validate_variant_selection(mapper, variant, "select_task_variant");
-      }
-      // Now make an inline context to use for the execution
-      InlineContext *inline_ctx = new InlineContext(runtime, parent_ctx, this);
-      // Save this for when we are done executing
-      TaskContext *enclosing = parent_ctx;
-      // Set the context to be the current inline context
-      parent_ctx = inline_ctx;
-      // See if we need to wait for anything
-      if (start_condition.exists() && !start_condition.has_triggered())
-        start_condition.wait();
-      variant->dispatch_inline(current, inline_ctx); 
-      // Return any created privilege state
-      inline_ctx->return_privilege_state(enclosing);
-      // Then delete the inline context
-      delete inline_ctx;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Multi Task 
@@ -5148,8 +5099,7 @@ namespace Legion {
         runtime->send_individual_remote_complete(orig_proc,rez);
       }
       // Invalidate any state that we had if we didn't already
-      if (!execution_context->is_leaf_context())
-        execution_context->invalidate_region_tree_contexts();
+      execution_context->invalidate_region_tree_contexts();
       // See if we need to trigger that our children are complete
       // Note it is only safe to do this if we were not sent remotely
       bool need_commit = false;
@@ -5363,6 +5313,55 @@ namespace Legion {
       resolve_speculation();
       // Return true to add ourselves to the ready queue
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::perform_inlining(void)
+    //--------------------------------------------------------------------------
+    {
+      // See if there is anything that we need to wait on before running
+      std::set<ApEvent> wait_on_events;
+      for (unsigned idx = 0; idx < futures.size(); idx++)
+      {
+        FutureImpl *impl = futures[idx].impl; 
+        wait_on_events.insert(impl->ready_event);
+      }
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+      {
+        GrantImpl *impl = grants[idx].impl;
+        wait_on_events.insert(impl->acquire_grant());
+      }
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+      {
+        ApEvent e = 
+          Runtime::get_previous_phase(wait_barriers[idx].phase_barrier);
+        wait_on_events.insert(e);
+      }
+      // Merge together all the events for the start condition 
+      ApEvent start_condition = Runtime::merge_events(wait_on_events); 
+      // Get the processor that we will be running on
+      Processor current = parent_ctx->get_executing_processor();
+      // Select the variant to use
+      VariantImpl *variant = parent_ctx->select_inline_variant(this);
+      if (!Runtime::unsafe_mapper)
+      {
+        MapperManager *mapper = runtime->find_mapper(current, map_id);
+        validate_variant_selection(mapper, variant, "select_task_variant");
+      }
+      // Now make an inline context to use for the execution
+      InlineContext *inline_ctx = new InlineContext(runtime, parent_ctx, this);
+      // Save this for when we are done executing
+      TaskContext *enclosing = parent_ctx;
+      // Set the context to be the current inline context
+      parent_ctx = inline_ctx;
+      // See if we need to wait for anything
+      if (start_condition.exists() && !start_condition.has_triggered())
+        start_condition.wait();
+      variant->dispatch_inline(current, inline_ctx); 
+      // Return any created privilege state
+      inline_ctx->return_privilege_state(enclosing);
+      // Then delete the inline context
+      delete inline_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -5848,6 +5847,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::perform_inlining(void)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      PointTask::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------
@@ -5909,8 +5916,7 @@ namespace Legion {
 
       // Invalidate any context that we had so that the child
       // operations can begin committing
-      if (execution_context->is_leaf_context())
-        execution_context->invalidate_region_tree_contexts();
+      execution_context->invalidate_region_tree_contexts();
       // See if we need to trigger that our children are complete
       const bool need_commit = execution_context->attempt_children_commit();
       // Mark that this operation is now complete

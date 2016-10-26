@@ -6180,11 +6180,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::initialize(TaskContext *ctx, unsigned idx) 
+    void PostCloseOp::initialize(TaskContext *ctx, unsigned idx,
+                                 const InstanceSet &targets) 
     //--------------------------------------------------------------------------
     {
       initialize_close(ctx, ctx->regions[idx], true/*track*/);
       parent_idx = idx;
+      target_instances = targets;
       localize_region_requirement(requirement);
       if (Runtime::legion_spy_enabled)
       {
@@ -6218,6 +6220,7 @@ namespace Legion {
       acquired_instances.clear();
       map_applied_conditions.clear();
       profiling_requests.clear();
+      target_instances.clear();
       runtime->free_post_close_op(this);
     }
 
@@ -6280,16 +6283,11 @@ namespace Legion {
       assert(completion_event.exists());
 #endif
       RegionTreeContext physical_ctx = parent_ctx->get_context(); 
-      // We already know the instances that we are going to need
-      // No need to do the conversion because we know we are closing
-      // for the whole region requirement
-      InstanceSet chosen_instances;
-      parent_ctx->get_physical_references(parent_idx, chosen_instances);
       ApEvent close_event = 
         runtime->forest->physical_close_context(physical_ctx, requirement,
                                                 version_info, this, 0/*idx*/,
                                                 map_applied_conditions,
-                                                chosen_instances
+                                                target_instances 
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -6299,7 +6297,7 @@ namespace Legion {
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
-                                              chosen_instances);
+                                              target_instances);
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, close_event, 
                                         completion_event);

@@ -105,7 +105,7 @@ namespace Legion {
         for (unsigned req_idx = 0; req_idx < num_regions[idx]; req_idx++)
         {
           LegionSpy::log_mapping_dependence(
-              op->get_parent()->get_unique_op_id(), current_uids[idx], req_idx,
+              op->get_context()->get_unique_id(), current_uids[idx], req_idx,
               op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
         }
 #endif
@@ -221,7 +221,7 @@ namespace Legion {
               op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
-                  op->get_parent()->get_unique_op_id(),
+                  op->get_context()->get_unique_id(),
                   current_uids[it->operation_idx], 
                   (it->prev_idx == -1) ? 0 : it->prev_idx,
                   op->get_unique_op_id(), 
@@ -236,7 +236,7 @@ namespace Legion {
                                              it->dependent_mask);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
-                  op->get_parent()->get_unique_op_id(),
+                  op->get_context()->get_unique_id(),
                   current_uids[it->operation_idx], it->prev_idx,
                   op->get_unique_op_id(), it->next_idx, it->dtype);
 #endif
@@ -282,7 +282,7 @@ namespace Legion {
               internal_op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
-                  op->get_parent()->get_unique_op_id(),
+                  op->get_context()->get_unique_id(),
                   current_uids[it->operation_idx], 
                   (it->prev_idx == -1) ? 0 : it->prev_idx,
                   op->get_unique_op_id(), 
@@ -296,7 +296,7 @@ namespace Legion {
                                                  it->dtype, it->dependent_mask);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
-                  internal_op->get_parent()->get_unique_op_id(),
+                  internal_op->get_context()->get_unique_id(),
                   current_uids[it->operation_idx], it->prev_idx,
                   internal_op->get_unique_op_id(), 0, it->dtype);
 #endif

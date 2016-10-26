@@ -14630,21 +14630,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& Runtime::begin_task(TaskContext *ctx)
-    //--------------------------------------------------------------------------
-    {
-      return ctx->begin_task();
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::end_task(TaskContext *ctx, const void *result, 
-                           size_t result_size, bool owned)
-    //--------------------------------------------------------------------------
-    {
-      ctx->end_task(result, result_size, owned);
-    }
-
-    //--------------------------------------------------------------------------
     TaskID Runtime::generate_dynamic_task_id(void)
     //--------------------------------------------------------------------------
     {
@@ -18908,23 +18893,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeContext Runtime::allocate_region_tree_context(InnerContext *owner)
+    RegionTreeContext Runtime::allocate_region_tree_context(void)
     //--------------------------------------------------------------------------
     {
-      UniqueID context_uid = owner->get_unique_id();
-#ifdef DEBUG_LEGION
-      assert((context_uid % runtime_stride) == address_space); // sanity check
-#endif
       // Try getting something off the list of available contexts
       AutoLock ctx_lock(context_lock);
       if (!available_contexts.empty())
       {
         RegionTreeContext result = available_contexts.front();
         available_contexts.pop_front();
-#ifdef DEBUG_LEGION
-        assert(local_contexts.find(context_uid) == local_contexts.end());
-#endif
-        local_contexts[context_uid] = owner;
         return result;
       }
       // If we failed to get a context, double the number of total 
@@ -18946,27 +18923,43 @@ namespace Legion {
       {
         it->second->update_max_context_count(total_contexts); 
       }
-      // Finally save us in the set of contexts
-#ifdef DEBUG_LEGION
-      assert(local_contexts.find(context_uid) == local_contexts.end());
-#endif
-      local_contexts[context_uid] = owner;
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_region_tree_context(RegionTreeContext context,
-                                           InnerContext *ctx)
+    void Runtime::free_region_tree_context(RegionTreeContext context)
     //--------------------------------------------------------------------------
     {
-      UniqueID context_uid = ctx->get_unique_id();
 #ifdef DEBUG_LEGION
       assert(context.exists());
       forest->check_context_state(context);
 #endif
       AutoLock ctx_lock(context_lock);
       available_contexts.push_back(context);
-      // Remove use from the set of contexts
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_local_context(UniqueID context_uid,InnerContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((context_uid % runtime_stride) == address_space); // sanity check
+#endif
+      AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+      assert(local_contexts.find(context_uid) == local_contexts.end());
+#endif
+      local_contexts[context_uid] = ctx;
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::unregister_local_context(UniqueID context_uid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert((context_uid % runtime_stride) == address_space); // sanity check
+#endif
+      AutoLock ctx_lock(context_lock);
       std::map<UniqueID,InnerContext*>::iterator finder = 
         local_contexts.find(context_uid);
 #ifdef DEBUG_LEGION

@@ -43,7 +43,7 @@
 
 namespace BindingLib { class Utility; } // BindingLib namespace
 
-namespace Legion {
+namespace Legion { 
 
   typedef ::legion_error_t LegionErrorType;
   typedef ::legion_privilege_mode_t PrivilegeMode;
@@ -1154,12 +1154,32 @@ namespace Legion {
     class MinimalPoint;
 
     // legion_context.h
+    /**
+     * \class ContextInterface
+     * This is a pure virtual class so users don't try to use it. 
+     * It defines the context interface that the task wrappers use 
+     * for getting access to context data when running a task.
+     */
     class TaskContext;
     class InnerContext;;
     class TopLevelContext;
     class RemoteContext;
     class LeafContext;
     class InlineContext;
+    class ContextInterface {
+    public:
+      virtual Task* get_task(void) = 0;
+      virtual const std::vector<PhysicalRegion>& begin_task(void) = 0;
+      virtual void end_task(const void *result, 
+                            size_t result_size, bool owned) = 0;
+      // This is safe because we see in legion_context.h that
+      // TaskContext implements this interface and no one else
+      // does. If only C++ implemented forward declarations of
+      // inheritence then we wouldn't have this dumb problem
+      // (mixin classes anyone?).
+      inline TaskContext* as_context(void) 
+        { return reinterpret_cast<TaskContext*>(this); }
+    };
     
     // legion_trace.h
     class LegionTrace;
@@ -1416,8 +1436,10 @@ namespace Legion {
       const std::vector<Future> futures);
   typedef void (*RealmFnptr)(const void*,size_t,
                              const void*,size_t,Processor);
-  // The most magical of typedefs
+  // Magical typedefs 
+  // (don't forget to update ones in old HighLevel namespace in legion.inl)
   typedef Internal::TaskContext* Context;
+  typedef Internal::ContextInterface* InternalContext;
   typedef Internal::GeneratorImpl* GeneratorContext;
   typedef void (*GeneratorFnptr)(GeneratorContext,
                                  const TaskGeneratorArguments&, Runtime*);
@@ -1571,7 +1593,7 @@ namespace Legion {
 
 #undef PROC_SHIFT
 #undef PROC_MASK
-  }; // namespace Internal
+  }; // namespace Internal 
 
   // Legion derived event types
   class LgEvent : public Realm::Event {

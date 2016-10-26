@@ -47,10 +47,10 @@ namespace Legion {
     public:
       // A helper method for getting access to the runtime's
       // end_task method with private access
-      static inline void end_helper(Runtime *rt, Context ctx,
+      static inline void end_helper(Runtime *rt, InternalContext ctx,
           const void *result, size_t result_size, bool owned)
       {
-        rt->end_task(ctx, result, result_size, owned);
+        ctx->end_task(result, result_size, owned);
       }
       static inline Future from_value_helper(Runtime *rt, 
           const void *value, size_t value_size, bool owned)
@@ -67,7 +67,7 @@ namespace Legion {
       
       template<typename T, bool HAS_SERIALIZE>
       struct NonPODSerializer {
-        static inline void end_task(Runtime *rt, Context ctx, 
+        static inline void end_task(Runtime *rt, InternalContext ctx,
                                     T *result)
         {
           size_t buffer_size = result->legion_buffer_size();
@@ -93,7 +93,7 @@ namespace Legion {
 
       template<typename T>
       struct NonPODSerializer<T,false> {
-        static inline void end_task(Runtime *rt, Context ctx, 
+        static inline void end_task(Runtime *rt, InternalContext ctx,
                                     T *result)
         {
           end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
@@ -133,7 +133,7 @@ namespace Legion {
       template<typename T, bool IS_STRUCT>
       struct StructHandler {
         static inline void end_task(Runtime *rt, 
-                                    Context ctx, T *result)
+                                    InternalContext ctx, T *result)
         {
           // Otherwise this is a struct, so see if it has serialization methods 
           NonPODSerializer<T,HasSerialize<T>::value>::end_task(rt, ctx, result);
@@ -151,7 +151,7 @@ namespace Legion {
       // False case of template specialization
       template<typename T>
       struct StructHandler<T,false> {
-        static inline void end_task(Runtime *rt, Context ctx, 
+        static inline void end_task(Runtime *rt, InternalContext ctx, 
                                     T *result)
         {
           end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
@@ -182,7 +182,7 @@ namespace Legion {
       // Figure out whether this is a struct or not 
       // and call the appropriate Finisher
       template<typename T>
-      static inline void end_task(Runtime *rt, Context ctx, T *result)
+      static inline void end_task(Runtime *rt, InternalContext ctx, T *result)
       {
         StructHandler<T,IsAStruct<T>::value>::end_task(rt, ctx, result);
       }
@@ -1825,18 +1825,17 @@ namespace Legion {
       LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
       // Get the high level runtime
       Runtime *runtime = Runtime::get_runtime(p);
-
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
-      assert(arglen == sizeof(Context));
+      assert(arglen == sizeof(InternalContext));
 #endif
-      Context ctx = *((const Context*)args);
+      InternalContext ctx = *((const InternalContext*)args);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task();
 
       // Invoke the task with the given context
       T return_value = 
-        (*TASK_PTR)(reinterpret_cast<Task*>(ctx),regions,ctx,runtime);
+        (*TASK_PTR)(ctx->get_task(), regions, ctx->as_context(), runtime);
 
       // Send the return value back
       LegionSerialization::end_task<T>(runtime, ctx, &return_value);
@@ -1858,16 +1857,16 @@ namespace Legion {
 
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
-      assert(arglen == sizeof(Context));
+      assert(arglen == sizeof(InternalContext));
 #endif
-      Context ctx = *((const Context*)args);
+      InternalContext ctx = *((const InternalContext*)args);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx); 
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(); 
 
-      (*TASK_PTR)(reinterpret_cast<Task*>(ctx), regions, ctx, runtime);
+      (*TASK_PTR)(ctx->get_task(), regions, ctx->as_context(), runtime);
 
       // Send an empty return value back
-      runtime->end_task(ctx, NULL, 0);
+      ctx->end_task(NULL, 0, false);
     }
 
     //--------------------------------------------------------------------------
@@ -1891,17 +1890,17 @@ namespace Legion {
 
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
-      assert(arglen == sizeof(Context));
+      assert(arglen == sizeof(InternalContext));
 #endif
-      Context ctx = *((const Context*)args);
+      InternalContext ctx = *((const InternalContext*)args);
 
-      Task *task = reinterpret_cast<Task*>(ctx);
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx); 
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(); 
 
       // Invoke the task with the given context
-      T return_value = (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
+      T return_value = (*TASK_PTR)(ctx->get_task(), regions, 
+                                   ctx->as_context(), runtime, *user_data);
 
       // Send the return value back
       LegionSerialization::end_task<T>(runtime, ctx, &return_value);
@@ -1923,19 +1922,19 @@ namespace Legion {
 
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
-      assert(arglen == sizeof(Context));
+      assert(arglen == sizeof(InternalContext));
 #endif
-      Context ctx = *((const Context*)args);
+      InternalContext ctx = *((const InternalContext*)args);
 
-      Task *task = reinterpret_cast<Task*>(ctx);
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx); 
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(); 
 
-      (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
+      (*TASK_PTR)(ctx->get_task(), regions, 
+                  ctx->as_context(), runtime, *user_data);
 
       // Send an empty return value back
-      runtime->end_task(ctx, NULL, 0);
+      ctx->end_task(NULL, 0, false);
     }
 
     //--------------------------------------------------------------------------
@@ -2489,7 +2488,7 @@ namespace LegionRuntime {
       PartitionProjectionTable;
     typedef void (*RealmFnptr)(const void*,size_t,
                                const void*,size_t,Processor);
-    typedef Legion::Internal::SingleTask* Context; 
+    typedef Legion::Internal::TaskContext* Context; 
   };
 };
 

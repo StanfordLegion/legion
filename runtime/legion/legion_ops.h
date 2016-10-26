@@ -1251,7 +1251,8 @@ namespace Legion {
     public:
       PostCloseOp& operator=(const PostCloseOp &rhs);
     public:
-      void initialize(TaskContext *ctx, unsigned index); 
+      void initialize(TaskContext *ctx, unsigned index, 
+                      const InstanceSet &target_instances); 
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1278,6 +1279,7 @@ namespace Legion {
                                     const Realm::ProfilingResponse &response);
     protected:
       unsigned parent_idx;
+      InstanceSet target_instances;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
     protected:

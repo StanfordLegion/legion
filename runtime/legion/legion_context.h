@@ -31,7 +31,8 @@ namespace Legion {
      * provide all the methods for handling the 
      * execution of a task at runtime.
      */
-    class TaskContext : public ResourceTracker, public Collectable {
+    class TaskContext : public ContextInterface, 
+                        public ResourceTracker, public Collectable {
     public:
       // A struct for keeping track of local field information
       struct LocalFieldInfo {
@@ -374,6 +375,13 @@ namespace Legion {
     protected: 
       bool children_complete_invoked;
       bool children_commit_invoked;
+#ifdef LEGION_SPY
+    public:
+      RtEvent update_previous_mapped_event(RtEvent next);
+    protected:
+      UniqueID current_fence_uid;
+      RtEvent previous_mapped_event;
+#endif
     };
 
     class InnerContext : public TaskContext {
@@ -427,7 +435,8 @@ namespace Legion {
       InnerContext(Runtime *runtime, TaskOp *owner,
                    const std::vector<RegionRequirement> &reqs,
                    const std::vector<unsigned> &parent_indexes,
-                   const std::vector<bool> &virt_mapped);
+                   const std::vector<bool> &virt_mapped,
+                   UniqueID context_uid, bool remote = false);
       InnerContext(const InnerContext &rhs);
       virtual ~InnerContext(void);
     public:
@@ -439,6 +448,7 @@ namespace Legion {
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
+      virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
       virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez,
@@ -541,6 +551,8 @@ namespace Legion {
                                RemoteContext *target);
     public:
       const RegionTreeContext tree_context; 
+      const UniqueID context_uid;
+      const bool remote_context;
     protected:
       Mapper::ContextConfigOutput           context_configuration;
     protected:
@@ -583,13 +595,6 @@ namespace Legion {
     protected:
       // For tracking restricted coherence
       std::list<Restriction*> coherence_restrictions;
-#ifdef LEGION_SPY
-    public:
-      RtEvent update_previous_mapped_event(RtEvent next);
-    protected:
-      UniqueID current_fence_uid;
-      RtEvent previous_mapped_event;
-#endif
     protected:
       std::map<RegionTreeNode*,
         std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
@@ -619,20 +624,15 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual TaskContext* find_parent_context(void);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, VersionInfo &version_info);
     public:
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
     public:
-      virtual UniqueID get_context_uid(void) const;
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
-    public:
-      const UniqueID context_uid; 
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -677,24 +677,18 @@ namespace Legion {
     public:
       virtual int get_depth(void) const;
       virtual Task* get_task(void);
-      virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
       virtual TaskContext* find_parent_context(void);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, VersionInfo &version_info);
     public:
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
     public:
-      virtual UniqueID get_context_uid(void) const;
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
-    public:
-      const UniqueID remote_owner_uid;
     protected:
       UniqueID parent_context_uid;
       TaskContext *parent_ctx;

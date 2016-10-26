@@ -2024,6 +2024,17 @@ namespace Legion {
         infos.push_back(local_fields[idx]);
     } 
 
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    RtEvent TaskContext::update_previous_mapped_event(RtEvent next)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent result = previous_mapped_event;
+      previous_mapped_event = next;
+      return result;
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // Inner Context 
     /////////////////////////////////////////////////////////////
@@ -2032,14 +2043,15 @@ namespace Legion {
     InnerContext::InnerContext(Runtime *rt, TaskOp *owner,
                                const std::vector<RegionRequirement> &reqs,
                                const std::vector<unsigned> &parent_indexes,
-                               const std::vector<bool> &virt_mapped)
+                               const std::vector<bool> &virt_mapped,
+                               UniqueID uid, bool remote)
       : TaskContext(rt, owner, reqs), 
-        tree_context(rt->allocate_region_tree_context(this)),
-        parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped),
-        total_children_count(0), total_close_count(0),
-        outstanding_children_count(0), current_trace(NULL),
-        valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0),
-        pending_frames(0), currently_active_context(false), 
+        tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
+        remote_context(remote), parent_req_indexes(parent_indexes), 
+        virtual_mapped(virt_mapped), total_children_count(0), 
+        total_close_count(0), outstanding_children_count(0), 
+        current_trace(NULL), valid_wait_event(false), outstanding_subtasks(0), 
+        pending_subtasks(0), pending_frames(0), currently_active_context(false),
         current_fence(NULL), fence_gen(0) 
     //--------------------------------------------------------------------------
     {
@@ -2056,11 +2068,14 @@ namespace Legion {
       assert(tree_context.exists());
       runtime->forest->check_context_state(tree_context);
 #endif
+      if (!remote_context)
+        runtime->register_local_context(context_uid, this);
     }
 
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(const InnerContext &rhs)
-      : TaskContext(NULL, NULL, rhs.regions), 
+      : TaskContext(NULL, NULL, rhs.regions), tree_context(rhs.tree_context),
+        context_uid(0), remote_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
         virtual_mapped(rhs.virtual_mapped)
     //--------------------------------------------------------------------------
@@ -2119,6 +2134,8 @@ namespace Legion {
       assert(pending_subtasks == 0);
       assert(pending_frames == 0);
 #endif
+      if (!remote_context)
+        runtime->unregister_local_context(context_uid);
     }
 
     //--------------------------------------------------------------------------
@@ -2128,6 +2145,34 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeContext InnerContext::get_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      return tree_context;
+    }
+
+    //--------------------------------------------------------------------------
+    ContextID InnerContext::get_context_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return tree_context.get_id();
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID InnerContext::get_context_uid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_uid;
+    }
+
+    //--------------------------------------------------------------------------
+    int InnerContext::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner_task->get_depth();
     }
 
     //--------------------------------------------------------------------------
@@ -2553,7 +2598,7 @@ namespace Legion {
 #endif
         complete_children.erase(finder);
         // See if we need to trigger the all children commited call
-        if (executing_children.empty() && 
+        if (task_executed && executing_children.empty() && 
             executed_children.empty() && complete_children.empty() &&
             !children_commit_invoked)
         {
@@ -2636,13 +2681,13 @@ namespace Legion {
           for (unsigned idx = 0; idx < num_regions; idx++)
           {
             LegionSpy::log_mapping_dependence(
-                get_unique_op_id(), current_fence_uid, 0,
+                get_unique_id(), current_fence_uid, 0,
                 op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
           }
         }
         else
           LegionSpy::log_mapping_dependence(
-              get_unique_op_id(), current_fence_uid, 0,
+              get_unique_id(), current_fence_uid, 0,
               op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
 #else
         // If we can prune it then go ahead and do so
@@ -3125,6 +3170,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool InnerContext::has_restrictions(void) const
+    //--------------------------------------------------------------------------
+    {
+      return !coherence_restrictions.empty();
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::perform_restricted_analysis(const RegionRequirement &req,
                                                    RestrictInfo &restrict_info)
     //--------------------------------------------------------------------------
@@ -3305,7 +3357,7 @@ namespace Legion {
         region_tree_owners.clear();
       }
       // Now we can free our region tree context
-      runtime->free_region_tree_context(tree_context, this);
+      runtime->free_region_tree_context(tree_context);
     }
 
     //--------------------------------------------------------------------------
@@ -3504,17 +3556,6 @@ namespace Legion {
         Runtime::trigger_event(to_trigger);
     }
 
-#ifdef LEGION_SPY
-    //--------------------------------------------------------------------------
-    RtEvent InnerContext::update_previous_mapped_event(RtEvent next)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent result = previous_mapped_event;
-      previous_mapped_event = next;
-      return result;
-    }
-#endif
-
     //--------------------------------------------------------------------------
     bool InnerContext::attempt_children_complete(void)
     //--------------------------------------------------------------------------
@@ -3607,7 +3648,7 @@ namespace Legion {
 #endif
           PostCloseOp *close_op = 
             runtime->get_available_post_close_op(true);
-          close_op->initialize(this, idx);
+          close_op->initialize(this, idx, physical_instances[idx]);
           runtime->add_to_dependence_queue(executing_processor, close_op);
         }
         else
@@ -3966,8 +4007,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt, UniqueID ctx_id)
-      : InnerContext(rt, NULL, dummy_requirements, dummy_indexes, dummy_mapped),
-        context_uid(ctx_id)
+      : InnerContext(rt, NULL, dummy_requirements, dummy_indexes, 
+                     dummy_mapped, ctx_id)
     //--------------------------------------------------------------------------
     {
     }
@@ -3975,7 +4016,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(const TopLevelContext &rhs)
       : InnerContext(NULL, NULL, 
-          dummy_requirements, dummy_indexes, dummy_mapped), context_uid(0)
+                     dummy_requirements, dummy_indexes, dummy_mapped, 0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4019,13 +4060,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    UniqueID TopLevelContext::get_context_uid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return context_uid;
     }
 
     //--------------------------------------------------------------------------
@@ -4113,6 +4147,24 @@ namespace Legion {
       return this;
     }
 
+    //--------------------------------------------------------------------------
+    VersionInfo& TopLevelContext::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *new VersionInfo();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<VersionInfo>* TopLevelContext::get_version_infos(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return NULL;
+    }
+
     /////////////////////////////////////////////////////////////
     // Remote Task 
     /////////////////////////////////////////////////////////////
@@ -4191,7 +4243,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(Runtime *rt, UniqueID context_uid)
       : InnerContext(rt, NULL, remote_task.regions, local_parent_req_indexes,
-          local_virtual_mapped), remote_owner_uid(context_uid), 
+          local_virtual_mapped, context_uid, true/*remote*/),
         parent_ctx(NULL), depth(-1), top_level_context(false), 
         remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
@@ -4201,8 +4253,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(const RemoteContext &rhs)
       : InnerContext(NULL, NULL, rhs.regions, local_parent_req_indexes,
-          local_virtual_mapped), remote_owner_uid(0), 
-        remote_task(RemoteTask(this))
+          local_virtual_mapped, 0, true), remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4273,13 +4324,6 @@ namespace Legion {
       return find_parent_context()->find_top_context();
     }
     
-    //--------------------------------------------------------------------------
-    UniqueID RemoteContext::get_context_uid(void) const
-    //--------------------------------------------------------------------------
-    {
-      return remote_owner_uid;
-    }
-
     //--------------------------------------------------------------------------
     VersionInfo& RemoteContext::get_version_info(unsigned idx)
     //--------------------------------------------------------------------------
@@ -4365,7 +4409,7 @@ namespace Legion {
       if (send_request)
       {
         Serializer rez;
-        rez.serialize(remote_owner_uid);
+        rez.serialize(context_uid);
         rez.serialize<InnerContext*>(this);
         if (node->is_region())
         {
@@ -4380,7 +4424,7 @@ namespace Legion {
         // Send it to the owner space if we are the top-level context
         // otherwise we send it to the owner of the context
         const AddressSpaceID target = top_level_context ? owner_space :  
-                          runtime->get_runtime_owner(remote_owner_uid);
+                          runtime->get_runtime_owner(context_uid);
         runtime->send_version_owner_request(target, rez);
       }
       wait_on.wait();
@@ -4764,7 +4808,7 @@ namespace Legion {
     void LeafContext::invalidate_region_tree_contexts(void)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------
