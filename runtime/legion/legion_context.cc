@@ -3581,7 +3581,6 @@ namespace Legion {
           it->impl->unmap_region();
       }
       inline_regions.clear();
-      const bool is_leaf = is_leaf_context();
       // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
 #ifdef DEBUG_LEGION
@@ -3590,42 +3589,36 @@ namespace Legion {
 #else
       SingleTask *single_task = static_cast<SingleTask*>(owner_task);
 #endif
-      if (!is_leaf || single_task->has_virtual_instances())
+      const LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked&
+        physical_instances = single_task->get_physical_instances();
+      // Note that this loop doesn't handle create regions
+      // we deal with that case below
+      for (unsigned idx = 0; idx < physical_instances.size(); idx++)
       {
-        const LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked&
-          physical_instances = single_task->get_physical_instances();
-        // Note that this loop doesn't handle create regions
-        // we deal with that case below
-        for (unsigned idx = 0; idx < physical_instances.size(); idx++)
+        // We also don't need to close up read-only instances
+        // or reduction-only instances (because they are restricted)
+        // so all changes have already been propagated
+        if (!IS_WRITE(regions[idx]))
+          continue;
+        if (!virtual_mapped[idx])
         {
-          // We also don't need to close up read-only instances
-          // or reduction-only instances (because they are restricted)
-          // so all changes have already been propagated
-          if (!IS_WRITE(regions[idx]))
-            continue;
-          if (!virtual_mapped[idx])
-          {
-            if (!is_leaf)
-            {
 #ifdef DEBUG_LEGION
-              assert(!physical_instances[idx].empty());
+          assert(!physical_instances[idx].empty());
 #endif
-              PostCloseOp *close_op = 
-                runtime->get_available_post_close_op(true);
-              close_op->initialize(this, idx);
-              runtime->add_to_dependence_queue(executing_processor, close_op);
-            }
-          }
-          else
-          {
-            // Make a virtual close op to close up the instance
-            VirtualCloseOp *close_op = 
-              runtime->get_available_virtual_close_op(true);
-            close_op->initialize(this, idx, regions[idx]);
-            runtime->add_to_dependence_queue(executing_processor, close_op);
-          }
+          PostCloseOp *close_op = 
+            runtime->get_available_post_close_op(true);
+          close_op->initialize(this, idx);
+          runtime->add_to_dependence_queue(executing_processor, close_op);
         }
-      } 
+        else
+        {
+          // Make a virtual close op to close up the instance
+          VirtualCloseOp *close_op = 
+            runtime->get_available_virtual_close_op(true);
+          close_op->initialize(this, idx, regions[idx]);
+          runtime->add_to_dependence_queue(executing_processor, close_op);
+        }
+      }
       // See if we want to move the rest of this computation onto
       // the utility processor. We also need to be sure that we have 
       // registered all of our operations before we can do the post end task
@@ -3674,7 +3667,6 @@ namespace Legion {
       bool need_complete = false;
       bool need_commit = false;
       std::vector<PhysicalRegion> unmap_regions;
-      if (is_leaf_context())
       {
         std::set<RtEvent> preconditions;
         {
@@ -3728,42 +3720,6 @@ namespace Legion {
           single_task->handle_post_mapped(Runtime::merge_events(preconditions));
         else
           single_task->handle_post_mapped();
-      }
-      else
-      {
-        // Handle the leaf task case
-        AutoLock ctx_lock(context_lock);
-#ifdef DEBUG_LEGION
-        assert(!task_executed);
-#endif
-        // Now that we know the last registration has taken place we
-        // can mark that we are done executing
-        task_executed = true;
-        if (executing_children.empty() && executed_children.empty())
-        {
-          if (!children_complete_invoked)
-          {
-            need_complete = true;
-            children_complete_invoked = true;
-          }
-          if (complete_children.empty() && 
-              !children_commit_invoked)
-          {
-            need_commit = true;
-            children_commit_invoked = true;
-          }
-        }
-        // Finally unmap any physical regions that we mapped
-#ifdef DEBUG_LEGION
-        assert((regions.size() + 
-                  created_requirements.size()) == physical_regions.size());
-#endif
-        for (std::vector<PhysicalRegion>::const_iterator it = 
-              physical_regions.begin(); it != physical_regions.end(); it++)
-        {
-          if (it->impl->is_mapped())
-            unmap_regions.push_back(*it);
-        }
       }
       // Do the unmappings while not holding the lock in case we block
       if (!unmap_regions.empty())
@@ -4596,6 +4552,397 @@ namespace Legion {
       return true;
     }
 
+    //--------------------------------------------------------------------------
+    unsigned LeafContext::register_new_child_operation(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned LeafContext::register_new_close_operation(CloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::add_to_dependence_queue(Operation *op, bool has_lock,
+                                              RtEvent op_precondition)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::register_child_executed(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::register_child_complete(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::register_child_commit(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::unregister_child_operation(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::register_fence_dependence(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::perform_fence_analysis(FenceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::update_current_fence(FenceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::begin_trace(TraceID tid)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::end_trace(TraceID tid)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::issue_frame(FrameOp *frame, ApEvent frame_termination)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::perform_frame_issue(FrameOp *frame, ApEvent frame_term)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::finish_frame(ApEvent frame_termination)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::increment_outstanding(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::decrement_outstanding(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::increment_pending(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent LeafContext::decrement_pending(TaskOp *child) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::decrement_pending(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::increment_frame(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::decrement_frame(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* LeafContext::find_parent_logical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* LeafContext::find_parent_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::find_parent_version_info(unsigned index, unsigned depth,
+                       const FieldMask &version_mask, VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* LeafContext::find_outermost_local_context(InnerContext *prev)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* LeafContext::find_top_context(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::initialize_region_tree_contexts(
+            const std::vector<RegionRequirement> &clone_requirements,
+            const std::vector<ApUserEvent> &unmap_events,
+            std::set<ApEvent> &preconditions, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::invalidate_region_tree_contexts(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::send_back_created_state(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* LeafContext::create_instance_top_view(
+                PhysicalManager *manager, AddressSpaceID source, RtEvent *ready)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::end_task(const void *res, size_t res_size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner_task != NULL);
+      runtime->decrement_total_outstanding_tasks(owner_task->task_id, 
+                                                 false/*meta*/);
+#else
+      runtime->decrement_total_outstanding_tasks();
+#endif
+      if (overhead_tracker != NULL)
+      {
+        const long long current = Realm::Clock::current_time_in_nanoseconds();
+        const long long diff = current - previous_profiling_time;
+        overhead_tracker->application_time += diff;
+      }
+      if (runtime->has_explicit_utility_procs)
+      {
+        PostEndArgs post_end_args;
+        post_end_args.proxy_this = this;
+        post_end_args.result_size = res_size;
+        // If it is not owned make a copy
+        if (!owned)
+        {
+          post_end_args.result = malloc(res_size);
+          memcpy(post_end_args.result, res, res_size);
+        }
+        else
+          post_end_args.result = const_cast<void*>(res);
+        // Give these high priority too since they are cleaning up 
+        // and will allow other tasks to run
+        runtime->issue_runtime_meta_task(post_end_args,
+                                         LG_LATENCY_PRIORITY, owner_task);
+      }
+      else
+        post_end_task(res, res_size, owned);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::post_end_task(const void *res, size_t res_size,bool owned)
+    //--------------------------------------------------------------------------
+    {
+      // Safe to cast to a single task here because this will never
+      // be called while inlining an index space task
+#ifdef DEBUG_LEGION
+      SingleTask *single_task = dynamic_cast<SingleTask*>(owner_task);
+      assert(single_task != NULL);
+#else
+      SingleTask *single_task = static_cast<SingleTask*>(owner_task);
+#endif
+      // Handle the future result
+      single_task->handle_future(res, res_size, owned);
+      bool need_complete = false;
+      bool need_commit = false;
+      std::vector<PhysicalRegion> unmap_regions;
+      {
+        AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+        assert(!task_executed);
+#endif
+        // Now that we know the last registration has taken place we
+        // can mark that we are done executing
+        task_executed = true;
+        if (!children_complete_invoked)
+        {
+          need_complete = true;
+          children_complete_invoked = true;
+        }
+        if (!children_commit_invoked)
+        {
+          need_commit = true;
+          children_commit_invoked = true;
+        }
+        // Finally unmap any physical regions that we mapped
+#ifdef DEBUG_LEGION
+        assert((regions.size() + 
+                  created_requirements.size()) == physical_regions.size());
+#endif
+        for (std::vector<PhysicalRegion>::const_iterator it = 
+              physical_regions.begin(); it != physical_regions.end(); it++)
+        {
+          if (it->impl->is_mapped())
+            unmap_regions.push_back(*it);
+        }
+      }
+      // Do the unmappings while not holding the lock in case we block
+      if (!unmap_regions.empty())
+      {
+        for (std::vector<PhysicalRegion>::const_iterator it = 
+              unmap_regions.begin(); it != unmap_regions.end(); it++)
+          it->impl->unmap_region();
+      }
+      // Mark that we are done executing this operation
+      // We're not actually done until we have registered our pending
+      // decrement of our parent task and recorded any profiling
+      if (!pending_done.has_triggered())
+        owner_task->complete_execution(pending_done);
+      else
+        owner_task->complete_execution();
+      if (need_complete)
+        owner_task->trigger_children_complete();
+      if (need_commit)
+        owner_task->trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::add_acquisition(AcquireOp *op, 
+                                      const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::remove_acquisition(ReleaseOp *op,
+                                         const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::add_restriction(AttachOp *op, InstanceManager *instance,
+                                      const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::remove_restriction(DetachOp *op,
+                                         const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::release_restrictions(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool LeafContext::has_restrictions(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::perform_restricted_analysis(const RegionRequirement &req,
+                                                  RestrictInfo &restrict_info)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
     /////////////////////////////////////////////////////////////
     // Inline Context 
     /////////////////////////////////////////////////////////////
@@ -4656,6 +5003,303 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RegionTreeContext InlineContext::get_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_context();
+    }
+
+    //--------------------------------------------------------------------------
+    ContextID InlineContext::get_context_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_context_id();
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID InlineContext::get_context_uid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner_task->get_unique_id();
+    }
+
+    //--------------------------------------------------------------------------
+    int InlineContext::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner_task->get_depth();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::pack_remote_context(Serializer &rez,
+                                            AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InlineContext::attempt_children_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool InlineContext::attempt_children_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::inline_child_task(TaskOp *child)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->inline_child_task(child);
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl* InlineContext::select_inline_variant(TaskOp *child) const
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->select_inline_variant(child);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned InlineContext::register_new_child_operation(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->register_new_child_operation(op);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned InlineContext::register_new_close_operation(CloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->register_new_close_operation(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::add_to_dependence_queue(Operation *op, bool has_lock,
+                                                RtEvent op_precondition)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->add_to_dependence_queue(op, has_lock, op_precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::register_child_executed(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->register_child_executed(op);
+    }
+    
+    //--------------------------------------------------------------------------
+    void InlineContext::register_child_complete(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->register_child_complete(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::register_child_commit(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->register_child_commit(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::unregister_child_operation(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->unregister_child_operation(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::register_fence_dependence(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->register_fence_dependence(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::perform_fence_analysis(FenceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->perform_fence_analysis(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::update_current_fence(FenceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->update_current_fence(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::begin_trace(TraceID tid)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->begin_trace(tid);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::end_trace(TraceID tid)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->end_trace(tid);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::issue_frame(FrameOp *frame, ApEvent frame_termination)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->issue_frame(frame, frame_termination);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::perform_frame_issue(FrameOp *frame, ApEvent frame_term)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->perform_frame_issue(frame, frame_term);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::finish_frame(ApEvent frame_termination)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->finish_frame(frame_termination);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::increment_outstanding(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->increment_outstanding();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::decrement_outstanding(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->decrement_outstanding();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::increment_pending(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->increment_pending();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent InlineContext::decrement_pending(TaskOp *child) const
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->decrement_pending(child);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::decrement_pending(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->decrement_pending();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::increment_frame(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->increment_frame();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::decrement_frame(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->decrement_frame();
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* InlineContext::find_parent_logical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < parent_req_indexes.size());
+#endif
+      return enclosing->find_parent_logical_context(parent_req_indexes[index]);
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* InlineContext::find_parent_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(index < parent_req_indexes.size());
+#endif
+      return enclosing->find_parent_physical_context(parent_req_indexes[index]);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::find_parent_version_info(unsigned index, unsigned depth,
+                       const FieldMask &version_mask, VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->find_parent_version_info(index, depth, 
+                                          version_mask, version_info);
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* InlineContext::find_outermost_local_context(InnerContext *pre)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->find_outermost_local_context(pre);
+    }
+    
+    //--------------------------------------------------------------------------
+    InnerContext* InlineContext::find_top_context(void)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->find_top_context();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::initialize_region_tree_contexts(
+            const std::vector<RegionRequirement> &clone_requirements,
+            const std::vector<ApUserEvent> &unmap_events,
+            std::set<ApEvent> &preconditions, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::invalidate_region_tree_contexts(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::send_back_created_state(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* InlineContext::create_instance_top_view(
+                PhysicalManager *manager, AddressSpaceID source, RtEvent *ready)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<PhysicalRegion>& InlineContext::begin_task(void)
     //--------------------------------------------------------------------------
     {
@@ -4667,6 +5311,68 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       inline_task->end_inline_task(res, res_size, owned);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::post_end_task(const void *res, 
+                                      size_t res_size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::add_acquisition(AcquireOp *op,
+                                        const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->add_acquisition(op, req);
+    }
+    
+    //--------------------------------------------------------------------------
+    void InlineContext::remove_acquisition(ReleaseOp *op,
+                                           const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->remove_acquisition(op, req);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::add_restriction(AttachOp *op, InstanceManager *instance,
+                                        const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->add_restriction(op, instance, req);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::remove_restriction(DetachOp *op,
+                                           const RegionRequirement &req)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->remove_restriction(op, req);
+    }
+    
+    //--------------------------------------------------------------------------
+    void InlineContext::release_restrictions(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->release_restrictions();
+    }
+
+    //--------------------------------------------------------------------------
+    bool InlineContext::has_restrictions(void) const
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->has_restrictions();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::perform_restricted_analysis(
+                      const RegionRequirement &req, RestrictInfo &restrict_info)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->perform_restricted_analysis(req, restrict_info);
     }
 
   };

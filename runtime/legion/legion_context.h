@@ -59,6 +59,14 @@ namespace Legion {
         FieldSpace handle;
         FieldID fid;
       };
+      struct PostEndArgs : public LgTaskArgs<PostEndArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_POST_END_ID;
+      public:
+        TaskContext *proxy_this;
+        void *result;
+        size_t result_size;
+      };
     public:
       TaskContext(Runtime *runtime, TaskOp *owner,
                   const std::vector<RegionRequirement> &reqs);
@@ -152,14 +160,15 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL) = 0;
       static void handle_remote_view_creation(const void *args);
-      virtual void notify_instance_deletion(PhysicalManager *deleted) = 0;
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
     public:
-      virtual const std::vector<PhysicalRegion>& begin_task(void) = 0;
+      virtual const std::vector<PhysicalRegion>& begin_task(void);
       virtual void end_task(const void *res, size_t res_size, bool owned) = 0;
+      virtual void post_end_task(const void *res, 
+                                 size_t res_size, bool owned) = 0;
     public:
       virtual void add_acquisition(AcquireOp *op, 
                                    const RegionRequirement &req) = 0;
@@ -375,15 +384,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_TRIGGER_DEPENDENCE_ID;
       public:
         Operation *op;
-      };
-      struct PostEndArgs : public LgTaskArgs<PostEndArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_POST_END_ID;
-      public:
-        InnerContext *proxy_this;
-        void *result;
-        size_t result_size;
-      };
+      }; 
       struct DecrementArgs : public LgTaskArgs<DecrementArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DECREMENT_PENDING_TASK_ID;
@@ -513,8 +514,8 @@ namespace Legion {
       static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
     public:
-      virtual const std::vector<PhysicalRegion>& begin_task(void);
       virtual void end_task(const void *res, size_t res_size, bool owned);
+      virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
       virtual void add_acquisition(AcquireOp *op, 
                                    const RegionRequirement &req);
@@ -535,8 +536,6 @@ namespace Legion {
                                           AddressSpaceID result);
       static void handle_version_owner_response(Deserializer &derez,
                                                 Runtime *runtime);
-    public:
-      void post_end_task(const void *res, size_t res_size, bool owned);
     public:
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
@@ -771,7 +770,6 @@ namespace Legion {
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, VersionInfo &version_info);
-      // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
@@ -787,14 +785,13 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
       static void handle_remote_view_creation(const void *args);
-      void notify_instance_deletion(PhysicalManager *deleted); 
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
                                                    Runtime *runtime);
     public:
-      virtual const std::vector<PhysicalRegion>& begin_task(void);
       virtual void end_task(const void *res, size_t res_size, bool owned);
+      virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
       virtual void add_acquisition(AcquireOp *op, 
                                    const RegionRequirement &req);
@@ -868,7 +865,6 @@ namespace Legion {
       virtual void decrement_pending(void);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
-    
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -890,7 +886,6 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
       static void handle_remote_view_creation(const void *args);
-      virtual void notify_instance_deletion(PhysicalManager *deleted); 
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
@@ -898,6 +893,7 @@ namespace Legion {
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(void);
       virtual void end_task(const void *res, size_t res_size, bool owned);
+      virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
       virtual void add_acquisition(AcquireOp *op, 
                                    const RegionRequirement &req);
