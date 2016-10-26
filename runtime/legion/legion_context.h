@@ -31,7 +31,7 @@ namespace Legion {
      * provide all the methods for handling the 
      * execution of a task at runtime.
      */
-    class TaskContext : public ResourceTracker {
+    class TaskContext : public ResourceTracker, public Collectable {
     public:
       // A struct for keeping track of local field information
       struct LocalFieldInfo {
@@ -87,17 +87,16 @@ namespace Legion {
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const = 0;
       virtual ContextID get_context_id(void) const = 0;
-      virtual UniqueID get_context_uid(void) const = 0;
-      virtual int get_depth(void) const = 0;
-      virtual Task* get_task(void) = 0; 
+      virtual UniqueID get_context_uid(void) const;
+      virtual int get_depth(void) const;
+      virtual Task* get_task(void); 
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target) = 0;
-      virtual bool has_region_tree_context(void) const = 0;
       virtual bool attempt_children_complete(void) = 0;
       virtual bool attempt_children_commit(void) = 0;
       virtual void inline_child_task(TaskOp *child) = 0;
       virtual VariantImpl* select_inline_variant(TaskOp *child) const = 0;
-      virtual bool is_leaf_context(void) const = 0;
+      virtual bool is_leaf_context(void) const;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -154,8 +153,6 @@ namespace Legion {
                              AddressSpaceID source, RtEvent *ready = NULL) = 0;
       static void handle_remote_view_creation(const void *args);
       virtual void notify_instance_deletion(PhysicalManager *deleted) = 0;
-      virtual void convert_virtual_instance_top_views(
-          const std::map<AddressSpaceID,RemoteTask*> &remote_instances) = 0;
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
@@ -311,6 +308,10 @@ namespace Legion {
                                       FieldID &bad_field, 
                                       bool skip_privileges) const; 
     public:
+      void add_physical_region(const RegionRequirement &req, bool mapped,
+          MapperID mid, MappingTagID tag, ApUserEvent unmap_event,
+          bool virtual_mapped, const InstanceSet &physical_instances);
+      void initialize_overhead_tracker(void);
       void unmap_all_regions(void); 
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);
@@ -361,6 +362,9 @@ namespace Legion {
     protected:
       RtEvent pending_done;
       bool task_executed;
+    protected: 
+      bool children_complete_invoked;
+      bool children_commit_invoked;
     };
 
     class InnerContext : public TaskContext {
@@ -434,20 +438,16 @@ namespace Legion {
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
-      virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
-      virtual Task* get_task(void);
       virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
-      virtual bool has_region_tree_context(void) const;
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
       virtual VariantImpl* select_inline_variant(TaskOp *child) const;
-      virtual bool is_leaf_context(void) const;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -495,6 +495,7 @@ namespace Legion {
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
     public:
+      void configure_context(MapperManager *mapper);
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const std::vector<ApUserEvent> &unmap_events,
@@ -507,8 +508,6 @@ namespace Legion {
                              AddressSpaceID source, RtEvent *ready = NULL);
       static void handle_remote_view_creation(const void *args);
       void notify_instance_deletion(PhysicalManager *deleted); 
-      virtual void convert_virtual_instance_top_views(
-          const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
@@ -555,10 +554,7 @@ namespace Legion {
       unsigned outstanding_children_count;
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
       LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
-      LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children;
-    protected: 
-      bool children_complete_invoked;
-      bool children_commit_invoked;
+      LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children; 
     protected:
       // Traces for this task's execution
       LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;
@@ -729,12 +725,8 @@ namespace Legion {
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
-      virtual UniqueID get_context_uid(void) const;
-      virtual int get_depth(void) const;
-      virtual Task* get_task(void);
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target);
-      virtual bool has_region_tree_context(void) const;
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -774,7 +766,6 @@ namespace Legion {
       virtual void decrement_pending(void);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
-    
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -796,9 +787,7 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
       static void handle_remote_view_creation(const void *args);
-      virtual void notify_instance_deletion(PhysicalManager *deleted); 
-      virtual void convert_virtual_instance_top_views(
-          const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
+      void notify_instance_deletion(PhysicalManager *deleted); 
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,
@@ -839,15 +828,12 @@ namespace Legion {
       virtual ContextID get_context_id(void) const;
       virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
-      virtual Task* get_task(void);
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target);
-      virtual bool has_region_tree_context(void) const;
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
       virtual VariantImpl* select_inline_variant(TaskOp *child) const;
-      virtual bool is_leaf_context(void) const;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -905,8 +891,6 @@ namespace Legion {
                              AddressSpaceID source, RtEvent *ready = NULL);
       static void handle_remote_view_creation(const void *args);
       virtual void notify_instance_deletion(PhysicalManager *deleted); 
-      virtual void convert_virtual_instance_top_views(
-          const std::map<AddressSpaceID,RemoteTask*> &remote_instances);
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_top_view_response(Deserializer &derez,

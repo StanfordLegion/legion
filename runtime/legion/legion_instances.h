@@ -183,7 +183,7 @@ namespace Legion {
       }
       inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
-      void perform_deletion(RtEvent deferred_event) const;
+      void perform_deletion(RtEvent deferred_event);
       void set_garbage_collection_priority(MapperID mapper_id, Processor p,
                                            GCPriority priority); 
       static void delete_physical_manager(PhysicalManager *manager);

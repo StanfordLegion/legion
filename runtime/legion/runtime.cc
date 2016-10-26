@@ -8454,6 +8454,8 @@ namespace Legion {
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *top_context = 
         new TopLevelContext(this, get_unique_operation_id());
+      // Add a reference to the top level context
+      top_context->add_reference();
       // Set the executing processor
       top_context->set_executing_processor(target);
       TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
@@ -8498,6 +8500,7 @@ namespace Legion {
       // Get a remote task to serve as the top of the top-level task
       TopLevelContext *map_context = 
         new TopLevelContext(this, get_unique_operation_id());
+      map_context->add_reference();
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
@@ -19014,7 +19017,11 @@ namespace Legion {
         context = finder->second;
         remote_contexts.erase(finder);
       }
-      delete context;
+      // Invalidate the region tree context
+      context->invalidate_region_tree_contexts();
+      // Remove our reference and delete it if we're done with it
+      if (context->remove_reference())
+        delete context;
     }
 
     //--------------------------------------------------------------------------
@@ -19074,6 +19081,8 @@ namespace Legion {
           rez.serialize(result);
         }
         send_remote_context_request(target, rez);
+        // Add a reference to the newly created context
+        result->add_reference();
         // Wait for it to be ready
         ready_event.wait();
         // We already know the answer cause we sent the message
@@ -21468,7 +21477,9 @@ namespace Legion {
         case LG_TOP_FINISH_TASK_ID:
           {
             TopFinishArgs *fargs = (TopFinishArgs*)args; 
-            delete fargs->ctx;
+            fargs->ctx->invalidate_region_tree_contexts();
+            if (fargs->ctx->remove_reference())
+              delete fargs->ctx;
             break;
           }
         case LG_MAPPER_TASK_ID:
@@ -21479,8 +21490,10 @@ namespace Legion {
             // Now indicate that we are done with the future
             if (margs->future->remove_base_gc_ref(FUTURE_HANDLE_REF))
               delete margs->future;
+            margs->ctx->invalidate_region_tree_contexts();
             // We can also deactivate the enclosing context 
-            delete margs->ctx;
+            if (margs->ctx->remove_reference())
+              delete margs->ctx;
             // Finally tell the runtime we have one less top level task
             runtime->decrement_outstanding_top_level_tasks();
             break;

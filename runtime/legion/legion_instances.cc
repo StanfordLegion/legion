@@ -687,7 +687,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner()); // should always be on the owner node
 #endif
+      context->add_reference();
       AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(active_contexts.find(context) == active_contexts.end());
+#endif
       active_contexts.insert(context);
     }
 
@@ -695,11 +699,21 @@ namespace Legion {
     void PhysicalManager::unregister_active_context(InnerContext *context)
     //--------------------------------------------------------------------------
     {
-      AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(active_contexts.find(context) != active_contexts.end());
+      assert(is_owner()); // should always be on the owner node
 #endif
-      active_contexts.erase(context);
+      {
+        AutoLock gc(gc_lock);
+        std::set<InnerContext*>::iterator finder = 
+          active_contexts.find(context);
+        // We could already have removed this context if this
+        // physical instance was deleted
+        if (finder == active_contexts.end())
+          return;
+        active_contexts.erase(finder);
+      }
+      if (context->remove_reference())
+        delete context;
     }
 
     //--------------------------------------------------------------------------
@@ -914,7 +928,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::perform_deletion(RtEvent deferred_event) const
+    void PhysicalManager::perform_deletion(RtEvent deferred_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -931,11 +945,24 @@ namespace Legion {
         instance.destroy(deferred_event);
 #endif
       // Notify any contexts of our deletion
-      // No need to hold the lock, there should be no more contexts
-      // being added since we are being deleted
+      // Grab a copy of this in case we get any removal calls
+      // while we are doing the deletion. We know that there
+      // will be no more additions because we are being deleted
+      std::set<InnerContext*> copy_active_contexts;
+      {
+        AutoLock gc(gc_lock);
+        if (active_contexts.empty())
+          return;
+        copy_active_contexts = active_contexts;
+        active_contexts.clear();
+      }
       for (std::set<InnerContext*>::const_iterator it = 
-            active_contexts.begin(); it != active_contexts.end(); it++)
+           copy_active_contexts.begin(); it != copy_active_contexts.end(); it++)
+      {
         (*it)->notify_instance_deletion(const_cast<PhysicalManager*>(this));
+        if ((*it)->remove_reference())
+          delete (*it);
+      }
     }
 
     //--------------------------------------------------------------------------

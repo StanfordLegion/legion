@@ -431,13 +431,6 @@ namespace Legion {
       virtual void send_remote_context(AddressSpaceID target, 
                                        RemoteTask *dst) = 0;
     public:
-      // Override by RemoteTask
-      virtual SingleTask* find_parent_context(void);
-    public:
-      // Override by RemoteTask and TopLevelTask
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
-    public:
       // Override these methods from operation class
       virtual void trigger_mapping(void); 
     protected:

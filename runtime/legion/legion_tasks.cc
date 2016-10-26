@@ -2314,6 +2314,8 @@ namespace Legion {
       map_applied_conditions.clear();
       task_profiling_requests.clear();
       copy_profiling_requests.clear();
+      if ((execution_context != NULL) && execution_context->remove_reference())
+        delete execution_context;
     }
 
     //--------------------------------------------------------------------------
@@ -3613,7 +3615,6 @@ namespace Legion {
       }
     } 
 
-#if 0
     //--------------------------------------------------------------------------
     void SingleTask::launch_task(void)
     //--------------------------------------------------------------------------
@@ -3622,7 +3623,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == no_access_regions.size());
-      assert(physical_regions.empty());
 #endif 
       // If we haven't computed our virtual mapping information
       // yet (e.g. because we mapped locally) then we have to
@@ -3667,8 +3667,24 @@ namespace Legion {
       }
 
       // STEP 2: Set up the task's context
-      std::vector<ApUserEvent> unmap_events(regions.size());
+      // If we're a leaf task and we have virtual mappings
+      // then it's possible for the application to do inline
+      // mappings which require a physical context
       {
+        if (!variant->is_leaf() || has_virtual_instances())
+        {
+          InnerContext *inner_ctx = new InnerContext(runtime, this, regions,
+                                        parent_req_indexes, virtual_mapped);
+          if (mapper == NULL)
+            mapper = runtime->find_mapper(current_proc, map_id);
+          inner_ctx->configure_context(mapper);
+          execution_context = inner_ctx;
+        }
+        else
+          execution_context = new LeafContext(runtime, this);
+        // Add a reference to our execution context
+        execution_context->add_reference();
+        std::vector<ApUserEvent> unmap_events(regions.size());
         std::vector<RegionRequirement> clone_requirements(regions.size());
         // Make physical regions for each our region requirements
         for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -3687,11 +3703,9 @@ namespace Legion {
           {
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
-            physical_regions.push_back(PhysicalRegion(
-                  legion_new<PhysicalRegionImpl>(clone_requirements[idx],
-                    ApEvent::NO_AP_EVENT, false/*mapped*/,
-                    this, map_id, tag, false/*leaf*/, 
-                    virtual_mapped[idx], runtime)));
+            execution_context->add_physical_region(clone_requirements[idx],
+                false/*mapped*/, map_id, tag, unmap_events[idx],
+                virtual_mapped[idx], physical_instances[idx]);
             // Don't switch coherence modes since we virtually
             // mapped it which means we will map in the parent's
             // context
@@ -3708,12 +3722,10 @@ namespace Legion {
             // Also make the region requirement read-write to force
             // people to wait on the value
             clone_requirements[idx].privilege = READ_WRITE;
-            physical_regions.push_back(PhysicalRegion(
-                  legion_new<PhysicalRegionImpl>(clone_requirements[idx],
-                    ApEvent::NO_AP_EVENT, false/*mapped*/,
-                    this, map_id, tag, false/*leaf*/, 
-                    false/*virtual mapped*/, runtime)));
             unmap_events[idx] = Runtime::create_ap_user_event();
+            execution_context->add_physical_region(clone_requirements[idx],
+                    false/*mapped*/, map_id, tag, unmap_events[idx],
+                    false/*virtual mapped*/, physical_instances[idx]);
             // Trigger the user event when the region is 
             // actually ready to be used
             std::set<ApEvent> ready_events;
@@ -3729,15 +3741,10 @@ namespace Legion {
             // context of this task
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
-            physical_regions.push_back(PhysicalRegion(
-                  legion_new<PhysicalRegionImpl>(clone_requirements[idx],
-                    ApEvent::NO_AP_EVENT/*already mapped*/, true/*mapped*/,
-                    this, map_id, tag, variant->is_leaf(), 
-                    false/*virtual mapped*/, runtime)));
-            // Now set the reference for this physical region 
-            // which is pretty much a dummy physical reference except
-            // it references the same view as the outer reference
             unmap_events[idx] = Runtime::create_ap_user_event();
+            execution_context->add_physical_region(clone_requirements[idx],
+                    true/*mapped*/, map_id, tag, unmap_events[idx],
+                    false/*virtual mapped*/, physical_instances[idx]);
             // We reset the reference below after we've
             // initialized the local contexts and received
             // back the local instance references
@@ -3746,81 +3753,9 @@ namespace Legion {
           if (no_access_regions[idx])
             runtime->forest->get_node(clone_requirements[idx].region);
         }
-
-        // If we're a leaf task and we have virtual mappings
-        // then it's possible for the application to do inline
-        // mappings which require a physical context
-        if (!variant->is_leaf() || has_virtual_instances())
-        {
-          // Request a context from the runtime
-          runtime->allocate_local_context(this);
-          // Have the mapper configure the properties of the context
-          context_configuration.max_window_size = 
-            Runtime::initial_task_window_size;
-          context_configuration.hysteresis_percentage = 
-            Runtime::initial_task_window_hysteresis;
-          context_configuration.max_outstanding_frames = 2; 
-          context_configuration.min_tasks_to_schedule = 
-            Runtime::initial_tasks_to_schedule;
-          context_configuration.min_frames_to_schedule = 0;
-          if (mapper == NULL)
-            mapper = runtime->find_mapper(current_proc, map_id);
-          mapper->invoke_configure_context(this, &context_configuration);
-          // Do a little bit of checking on the output.  Make
-          // sure that we only set one of the two cases so we
-          // are counting by frames or by outstanding tasks.
-          if ((context_configuration.min_tasks_to_schedule == 0) && 
-              (context_configuration.min_frames_to_schedule == 0))
-          {
-            log_run.error("Invalid mapper output from call 'configure_context' "
-                          "on mapper %s. One of 'min_tasks_to_schedule' and "
-                          "'min_frames_to_schedule' must be non-zero for task "
-                          "%s (ID %lld)", mapper->get_mapper_name(),
-                          get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_INVALID_CONTEXT_CONFIGURATION);
-          }
-          // If we're counting by frames set min_tasks_to_schedule to zero
-          if (context_configuration.min_frames_to_schedule > 0)
-            context_configuration.min_tasks_to_schedule = 0;
-          // otherwise we know min_frames_to_schedule is zero
-#ifdef DEBUG_LEGION
-          assert(context.exists());
-          runtime->forest->check_context_state(context);
-#endif
-          // If we're going to do the inner task optimization
-          // then when we initialize the contexts also pass in the
-          // start condition so we can add a user off of which
-          // all sub-users should be chained.
-          initialize_region_tree_contexts(clone_requirements,
-                                          unmap_events, wait_on_events);
-          if (!do_inner_task_optimization)
-          {
-            for (unsigned idx = 0; idx < physical_regions.size(); idx++)
-            {
-              if (!virtual_mapped[idx] && !no_access_regions[idx])
-              {
-                physical_regions[idx].impl->reset_references(
-                    physical_instances[idx], unmap_events[idx]);
-              }
-            }
-          } 
-        }
-        else
-        {
-          // Leaf and all non-virtual mappings
-          // Mark that all the local instances are empty
-          for (unsigned idx = 0; idx < physical_regions.size(); idx++)
-          {
-            if (!virtual_mapped[idx] && !no_access_regions[idx])
-            {
-              physical_regions[idx].impl->reset_references(
-                  physical_instances[idx], unmap_events[idx]);
-            }
-          }
-        }
+        // Initialize any region tree contexts
+        execution_context->initialize_region_tree_contexts(clone_requirements,
+            unmap_events, wait_on_events, map_applied_conditions);
       }
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(wait_on_events);
@@ -3877,14 +3812,7 @@ namespace Legion {
           if ((*it) < Mapping::PMID_LEGION_FIRST)
             realm_requests.push_back(*it);
           else if ((*it) == Mapping::PMID_RUNTIME_OVERHEAD)
-          {
-            // Make an overhead tracker
-#ifdef DEBUG_LEGION
-            assert(overhead_tracker == NULL);
-#endif
-            overhead_tracker = new 
-              Mapping::ProfilingMeasurements::RuntimeOverhead();
-          }
+            execution_context->initialize_overhead_tracker();
           else
             assert(false); // should never get here
         }
@@ -3932,7 +3860,7 @@ namespace Legion {
       }
 #endif
       ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
-                            start_condition, task_priority, profiling_requests);
+         execution_context, start_condition, task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
         Runtime::trigger_event(chain_complete_event, task_launch_event);
@@ -3947,7 +3875,6 @@ namespace Legion {
         }
       }
     }
-#endif 
 
     //--------------------------------------------------------------------------
     void SingleTask::add_copy_profiling_request(
@@ -5221,7 +5148,7 @@ namespace Legion {
         runtime->send_individual_remote_complete(orig_proc,rez);
       }
       // Invalidate any state that we had if we didn't already
-      if (execution_context->has_region_tree_context())
+      if (!execution_context->is_leaf_context())
         execution_context->invalidate_region_tree_contexts();
       // See if we need to trigger that our children are complete
       // Note it is only safe to do this if we were not sent remotely
@@ -5982,7 +5909,7 @@ namespace Legion {
 
       // Invalidate any context that we had so that the child
       // operations can begin committing
-      if (execution_context->has_region_tree_context())
+      if (execution_context->is_leaf_context())
         execution_context->invalidate_region_tree_contexts();
       // See if we need to trigger that our children are complete
       const bool need_commit = execution_context->attempt_children_commit();

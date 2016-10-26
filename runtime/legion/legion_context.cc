@@ -34,7 +34,8 @@ namespace Legion {
                              const std::vector<RegionRequirement> &reqs)
       : runtime(rt), owner_task(owner), regions(reqs),
         executing_processor(Processor::NO_PROC), total_tunable_count(0), 
-        overhead_tracker(NULL), task_executed(false)
+        overhead_tracker(NULL), task_executed(false),
+        children_complete_invoked(false), children_commit_invoked(false)
     //--------------------------------------------------------------------------
     {
       context_lock = Reservation::create_reservation();
@@ -64,6 +65,49 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID TaskContext::get_context_uid(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner_task->get_unique_op_id();
+    }
+
+    //--------------------------------------------------------------------------
+    int TaskContext::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner_task->get_depth();
+    }
+
+    //--------------------------------------------------------------------------
+    Task* TaskContext::get_task(void)
+    //--------------------------------------------------------------------------
+    {
+      return owner_task;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TaskContext::is_leaf_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::add_physical_region(const RegionRequirement &req,
+                                   bool mapped, MapperID mid, MappingTagID tag,
+                                   ApUserEvent unmap_event, bool virtual_mapped, 
+                                   const InstanceSet &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
+          ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
+          is_leaf_context(), virtual_mapped, runtime);
+      physical_regions.push_back(PhysicalRegion(impl));
+      if (mapped)
+        impl->reset_references(physical_instances, unmap_event);
     }
 
     //--------------------------------------------------------------------------
@@ -719,7 +763,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(has_region_tree_context());
+      assert(!is_leaf_context());
 #endif
       // Iterate through our region requirements and find the
       // ones we interfere with
@@ -788,7 +832,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(has_region_tree_context());
+      assert(!is_leaf_context());
 #endif
       // Iterate through our region requirements and find the
       // ones we interfere with
@@ -866,7 +910,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(has_region_tree_context());
+      assert(!is_leaf_context());
 #endif
       unsigned parent_index = 0;
       for (std::vector<RegionRequirement>::const_iterator it = 
@@ -911,7 +955,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(has_region_tree_context());
+      assert(!is_leaf_context());
 #endif
       unsigned parent_index = 0;
       for (std::vector<RegionRequirement>::const_iterator it = 
@@ -973,7 +1017,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(has_region_tree_context());
+      assert(!is_leaf_context());
 #endif
       unsigned parent_index = 0;
       for (std::vector<RegionRequirement>::const_iterator it = 
@@ -1039,7 +1083,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(has_region_tree_context());
+      assert(!is_leaf_context());
 #endif
       unsigned parent_index = 0;
       for (std::vector<RegionRequirement>::const_iterator it = 
@@ -1922,7 +1966,19 @@ namespace Legion {
       // tasks now that this task has started running
       pending_done = owner_task->get_context()->decrement_pending(owner_task);
       return physical_regions;
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::initialize_overhead_tracker(void)
+    //--------------------------------------------------------------------------
+    {
+      // Make an overhead tracker
+#ifdef DEBUG_LEGION
+      assert(overhead_tracker == NULL);
+#endif
+      overhead_tracker = new 
+        Mapping::ProfilingMeasurements::RuntimeOverhead();
+    }
 
     //--------------------------------------------------------------------------
     void TaskContext::unmap_all_regions(void)
@@ -1981,8 +2037,7 @@ namespace Legion {
         tree_context(rt->allocate_region_tree_context(this)),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped),
         total_children_count(0), total_close_count(0),
-        outstanding_children_count(0), children_complete_invoked(false),
-        children_commit_invoked(false), current_trace(NULL),
+        outstanding_children_count(0), current_trace(NULL),
         valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0),
         pending_frames(0), currently_active_context(false), 
         current_fence(NULL), fence_gen(0) 
@@ -1997,6 +2052,10 @@ namespace Legion {
       context_configuration.min_tasks_to_schedule = 
         Runtime::initial_tasks_to_schedule;
       context_configuration.min_frames_to_schedule = 0;
+#ifdef DEBUG_LEGION
+      assert(tree_context.exists());
+      runtime->forest->check_context_state(tree_context);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2054,39 +2113,12 @@ namespace Legion {
         valid_wait_event = false;
         Runtime::trigger_event(window_wait);
       }
-      // Clean up our instance top views
-      if (!instance_top_views.empty())
-      {
-        for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
-              instance_top_views.begin(); it != instance_top_views.end(); it++)
-        {
-          it->first->unregister_active_context(this);
-          if (it->second->remove_base_resource_ref(CONTEXT_REF))
-            LogicalView::delete_logical_view(it->second);
-        }
-        instance_top_views.clear();
-      }
-      // Before freeing our context, see if there are any version
-      // state managers we need to reset
-      if (!region_tree_owners.empty())
-      {
-        for (std::map<RegionTreeNode*,
-                      std::pair<AddressSpaceID,bool> >::const_iterator it =
-              region_tree_owners.begin(); it != region_tree_owners.end(); it++)
-        {
-          // If this is a remote only then we don't need to invalidate it
-          if (!it->second.second)
-            it->first->invalidate_version_state(tree_context.get_id()); 
-        }
-        region_tree_owners.clear();
-      }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
       assert(pending_subtasks == 0);
       assert(pending_frames == 0);
 #endif
-      runtime->free_region_tree_context(tree_context, this);
     }
 
     //--------------------------------------------------------------------------
@@ -3105,6 +3137,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::configure_context(MapperManager *mapper)
+    //--------------------------------------------------------------------------
+    {
+      mapper->invoke_configure_context(owner_task, &context_configuration);
+      // Do a little bit of checking on the output.  Make
+      // sure that we only set one of the two cases so we
+      // are counting by frames or by outstanding tasks.
+      if ((context_configuration.min_tasks_to_schedule == 0) && 
+          (context_configuration.min_frames_to_schedule == 0))
+      {
+        log_run.error("Invalid mapper output from call 'configure_context' "
+                      "on mapper %s. One of 'min_tasks_to_schedule' and "
+                      "'min_frames_to_schedule' must be non-zero for task "
+                      "%s (ID %lld)", mapper->get_mapper_name(),
+                      get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_CONTEXT_CONFIGURATION);
+      }
+      // If we're counting by frames set min_tasks_to_schedule to zero
+      if (context_configuration.min_frames_to_schedule > 0)
+        context_configuration.min_tasks_to_schedule = 0;
+      // otherwise we know min_frames_to_schedule is zero
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
                       const std::vector<ApUserEvent> &unmap_events,
@@ -3219,6 +3278,34 @@ namespace Legion {
                 false/*users only*/, created_requirements[idx].region);
         }
       }
+      // Clean up our instance top views
+      if (!instance_top_views.empty())
+      {
+        for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
+              instance_top_views.begin(); it != instance_top_views.end(); it++)
+        {
+          it->first->unregister_active_context(this);
+          if (it->second->remove_base_resource_ref(CONTEXT_REF))
+            LogicalView::delete_logical_view(it->second);
+        }
+        instance_top_views.clear();
+      }
+      // Before freeing our context, see if there are any version
+      // state managers we need to reset
+      if (!region_tree_owners.empty())
+      {
+        for (std::map<RegionTreeNode*,
+                      std::pair<AddressSpaceID,bool> >::const_iterator it =
+              region_tree_owners.begin(); it != region_tree_owners.end(); it++)
+        {
+          // If this is a remote only then we don't need to invalidate it
+          if (!it->second.second)
+            it->first->invalidate_version_state(tree_context.get_id()); 
+        }
+        region_tree_owners.clear();
+      }
+      // Now we can free our region tree context
+      runtime->free_region_tree_context(tree_context, this);
     }
 
     //--------------------------------------------------------------------------
@@ -4436,6 +4523,77 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeContext LeafContext::get_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return RegionTreeContext();
+    }
+
+    //--------------------------------------------------------------------------
+    ContextID LeafContext::get_context_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::pack_remote_context(Serializer &rez,AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool LeafContext::attempt_children_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock ctx_lock(context_lock);
+      if (!children_complete_invoked)
+      {
+        children_complete_invoked = true;
+        return true;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LeafContext::attempt_children_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock ctx_lock(context_lock);
+      if (!children_commit_invoked)
+      {
+        children_commit_invoked = true;
+        return true;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::inline_child_task(TaskOp *child)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VariantImpl* LeafContext::select_inline_variant(TaskOp *child) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LeafContext::is_leaf_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      return true;
     }
 
     /////////////////////////////////////////////////////////////

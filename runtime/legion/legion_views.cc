@@ -4745,6 +4745,7 @@ namespace Legion {
       // Add our references
       version_info->add_reference();
       closed_tree->add_reference();
+      owner_context->add_reference();
 #ifdef DEBUG_LEGION
       assert(owner_context != NULL);
       assert(closed_tree != NULL);
@@ -4810,6 +4811,9 @@ namespace Legion {
       // Remove our references and delete if necessary
       if (closed_tree->remove_reference())
         delete closed_tree;
+      // Remove the reference on our context
+      if (owner_context->remove_reference())
+        delete owner_context;
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
