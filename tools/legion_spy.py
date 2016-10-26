@@ -9384,6 +9384,12 @@ class State(object):
                 slice_ = self.slice_slice[slice_]
             assert slice_ in self.slice_index
             self.slice_index[slice_].add_point_task(point)
+        # Check for any interfering index space launches
+        for op in self.ops.itervalues():
+            if op.kind == INDEX_TASK_KIND and op.is_interfering_index_space_launch():
+                print("ERROR: Found interfering index space launch: %s!" % str(op))
+                if self.assert_on_error:
+                    assert False
         # Fill in any task names
         for task in self.tasks.itervalues():
             if task.op.task_id in self.task_names:
@@ -9622,6 +9628,11 @@ class State(object):
                 return True
         if print_result:
             print("No cycles detected")
+        return False
+
+    def is_interfering_index_space_launch(self):
+        assert self.kind == INDEX_TASK_KIND
+        # TODO: Todd fill in this check
         return False
 
     def perform_user_event_leak_checks(self):
