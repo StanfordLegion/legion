@@ -11024,6 +11024,8 @@ namespace Legion {
       map_applied_conditions.clear();
       restrict_postconditions.clear();
 #ifdef DEBUG_LEGION
+      interfering_requirements.clear();
+      point_requirements.clear();
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -11478,12 +11480,20 @@ namespace Legion {
 #endif
       exit(ERROR_ALIASED_REGION_REQUIREMENTS);
 #else
-      log_run.warning("Region requirements %d and %d of index task "
-                      "%s (UID %lld) in parent task %s (UID %lld) are "
-                      "interfering.  This behavior is currently undefined. "
-                      "You better really know what you are doing.",
-                      idx1, idx2, get_task_name(), get_unique_id(),
+      log_run.warning("Region requirements %d and %d of index task %s "
+                      "(UID %lld) in parent task %s (UID %lld) are potentially "
+                      "interfering.  It's possible that this is a false "
+                      "positive if there are projection region requirements "
+                      "and each of the point tasks are non-interfering. "
+                      "If the runtime is built in debug mode then it will "
+                      "check that the region requirements of all points are "
+                      "actually non-interfering. If you see no further error "
+                      "messages for this index task launch then everything "
+                      "is good.", idx1, idx2, get_task_name(), get_unique_id(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#endif
+#ifdef DEBUG_LEGION
+      interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
 #endif
     }
 
@@ -12103,6 +12113,22 @@ namespace Legion {
         }
         // otherwise it was locally mapped so we are already done
       }
+#ifdef DEBUG_LEGION
+      if (!is_locally_mapped())
+      {
+        std::map<DomainPoint,std::vector<LogicalRegion> > local_requirements;
+        for (unsigned idx = 0; idx < points; idx++)
+        {
+          DomainPoint point;
+          unpack_point(derez, point);
+          std::vector<LogicalRegion> &reqs = local_requirements[point];
+          reqs.resize(regions.size());
+          for (unsigned idx2 = 0; idx2 < regions.size(); idx2++)
+            derez.deserialize(reqs[idx2]);
+        }
+        check_point_requirements(local_requirements);
+      }
+#endif
       return_slice_mapped(points, denom, applied_condition, 
                           restrict_postcondition);
     }
@@ -12186,6 +12212,73 @@ namespace Legion {
       derez.deserialize(task);
       task->unpack_slice_commit(derez);
     }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void IndexTask::check_point_requirements(
+            const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do if there are no interfering requirements
+      if (interfering_requirements.empty())
+        return;
+      for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator 
+            pit = point_reqs.begin(); pit != point_reqs.end(); pit++)
+      {
+        // Add it to the set of point requirements
+        point_requirements.insert(*pit);
+        const std::vector<LogicalRegion> &point_reqs = pit->second;
+        for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator
+              oit = point_requirements.begin(); 
+              oit != point_requirements.end(); oit++)
+        {
+          const std::vector<LogicalRegion> &other_reqs = oit->second;
+          // Now check for interference with any other points
+          for (std::set<std::pair<unsigned,unsigned> >::const_iterator it =
+                interfering_requirements.begin(); it !=
+                interfering_requirements.end(); it++)
+          {
+            if (!runtime->forest->are_disjoint(
+                  point_reqs[it->first].get_index_space(), 
+                  other_reqs[it->second].get_index_space()))
+            {
+              if (pit->first.get_dim() <= 1)
+                log_run.error("ERROR: Index space task launch has intefering "
+                              "region requirements %d of point %zd and region "
+                              "requirement %d of point %zd of %s (UID %lld) in "
+                              "parent task %s (UID %lld) are interfering.",
+                              it->first, pit->first[0], it->second, 
+                              oit->first[0], get_task_name(), get_unique_id(),
+                              parent_ctx->get_task_name(), 
+                              parent_ctx->get_unique_id());
+              else if (pit->first.get_dim() == 2)
+                log_run.error("ERROR: Index space task launch has intefering "
+                              "region requirements %d of point (%zd,%zd) and "
+                              "region requirement %d of point (%zd,%zd) of %s "
+                              "(UID %lld) in parent task %s (UID %lld) are "
+                              "interfering.", it->first, pit->first[0], 
+                              pit->first[1], it->second, oit->first[0], 
+                              oit->first[1], get_task_name(), get_unique_id(),
+                              parent_ctx->get_task_name(), 
+                              parent_ctx->get_unique_id());
+              else if (pit->first.get_dim() == 3)
+                log_run.error("ERROR: Index space task launch has intefering "
+                              "region requirements %d of point (%zd,%zd,%zd) "
+                              "and region requirement %d of point (%zd,%zd,%zd)"
+                              " of %s (UID %lld) in parent task %s (UID %lld) "
+                              "are interfering.", it->first, pit->first[0], 
+                              pit->first[1], pit->first[2], it->second, 
+                              oit->first[0], oit->first[1], oit->first[2],
+                              get_task_name(), get_unique_id(),
+                              parent_ctx->get_task_name(), 
+                              parent_ctx->get_unique_id());
+              assert(false);
+            }
+          }
+        }
+      }
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Slice Task 
@@ -13010,6 +13103,21 @@ namespace Legion {
           }
           // otherwise it was locally mapped so we are already done
         }
+#ifdef DEBUG_LEGION
+        // In debug mode, get all our point region requirements and
+        // then pass them back to the index space task
+        std::map<DomainPoint,std::vector<LogicalRegion> > local_requirements;
+        for (std::vector<PointTask*>::const_iterator it = 
+              points.begin(); it != points.end(); it++)
+        {
+          std::vector<LogicalRegion> &reqs = 
+            local_requirements[(*it)->index_point];
+          reqs.resize(regions.size());
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            reqs[idx] = (*it)->regions[idx].region;
+        }
+        index_owner->check_point_requirements(local_requirements);
+#endif
         if (!restrict_postconditions.empty())
         {
           ApEvent restrict_post = 
@@ -13099,6 +13207,18 @@ namespace Legion {
         for (unsigned pidx = 0; pidx < points.size(); pidx++)
           rez.serialize(points[pidx]->regions[idx].region);
       }
+#ifdef DEBUG_LEGION
+      if (!is_locally_mapped())
+      {
+        for (std::vector<PointTask*>::const_iterator it = 
+              points.begin(); it != points.end(); it++)
+        {
+          pack_point(rez, (*it)->index_point);
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            rez.serialize((*it)->regions[idx].region);
+        }
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
