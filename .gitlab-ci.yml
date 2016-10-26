@@ -167,7 +167,7 @@ linux_gcc49_terra35_cxx11_release:
   variables:
     <<: [*gcc49, *terra35, *release, *cxx11_normal]
 linux_gcc49_terra35_cxx98_debug_checks_gasnet:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *debug, *cxx98_checks, *gasnet]
 linux_gcc49_terra35_cxx98_32bit_debug_noregent:
@@ -201,7 +201,7 @@ linux_clang35_terra35_cxx11_release:
   variables:
     <<: [*clang35, *terra35, *release, *cxx11_normal]
 linux_clang35_terra35_cxx98_debug_checks_gasnet:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *debug, *cxx98_checks, *gasnet]
 linux_clang35_terra35_cxx98_32bit_debug_noregent:

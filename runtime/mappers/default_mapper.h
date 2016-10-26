@@ -453,6 +453,7 @@ namespace Legion {
                LayoutConstraintID>             layout_constraint_cache;
       std::map<std::pair<Memory::Kind,ReductionOpID>,
                LayoutConstraintID>             reduction_constraint_cache;
+      std::map<Processor,Memory>               cached_target_memory;
     protected:
       // The maximum number of tasks a mapper will allow to be stolen at a time
       // Controlled by -dm:thefts

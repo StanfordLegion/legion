@@ -1790,6 +1790,12 @@ namespace Legion {
                                                           Processor target_proc)
     //--------------------------------------------------------------------------
     {
+      // TODO: deal with the updates in machine model which will
+      //       invalidate this cache
+      std::map<Processor,Memory>::iterator it =
+        cached_target_memory.find(target_proc);
+      if (it != cached_target_memory.end()) return it->second;
+
       // Find the visible memories from the processor for the given kind
       Machine::MemoryQuery visible_memories(machine);
       visible_memories.has_affinity_to(target_proc);
@@ -1815,6 +1821,7 @@ namespace Legion {
         }
       }
       assert(chosen.exists());
+      cached_target_memory[target_proc] = chosen;
       return chosen;
     }
 
