@@ -92,7 +92,7 @@ function mouseMoveHandlerWhenUp() {
   var currentTime = x / zoom / scale;
   var unit = "us";
 
-  if (paneWidth / zoom / scale >= 100000) {
+  if (paneWidth / scale >= 100000) {
     currentTime = Math.floor(currentTime / 1000);
     unit = "ms";
   }
@@ -241,12 +241,21 @@ function getMouseOver(zoom) {
     var anchor = relativeX < left ? "start" :
                  relativeX < right ? "middle" : "end";
     var descView = timelineSvg.append("g").attr("id", "desc");
+
+    var total = d.end - d.start;
+    var initiation = "";
+    if ((d.initiation != undefined) && d.initiation != "") {
+      initiation = " initiated by " + operations[d.initiation];
+    } 
+    var title = d.title + initiation + ", total=" + total + "us, start=" + 
+                d.start + "us, end=" + d.end+ "us";
+
     descView.append("text")
       .attr("x", x)
       .attr("y", d.level * thickness - 5)
       .attr("text-anchor", anchor)
       .attr("class", "desc")
-      .text(unescape(escape(d.title)));
+      .text(unescape(escape(title)));
   };
 }
 
@@ -554,6 +563,7 @@ function filterOnlyVisibleData(profilingData, zoom, scale) {
             start: d.start,
             end: d.end,
             color: d.color,
+            initiation: d.initiation,
             title: d.title + " (expanded for visibility)"
           });
         }
@@ -855,22 +865,21 @@ var timeline_loader = function(operation_data) {
 
   d3.tsv(%s,
     function(d, i) {
-        let start = parseFloat(d.start);
-        let end = parseFloat(d.end);
-        let total = end - start;
-        let initiator = "";
-        if ((d.initiation != undefined) && d.initiation != "") {
-          initiator = " initiated by " + operations[d.initiation];
+        var start = +d.start;
+        var end = +d.end;
+        var total = end - start;
+        if (total > 10) {
+            return {
+                id: i,
+                level: d.level,
+                start: start,
+                end: end,
+                color: d.color,
+                opacity: d.opacity,
+                initiation: d.initiation,
+                title: d.title
+            };
         }
-        return {
-          id: i,
-          level: d.level,
-          start: start,
-          end: end,
-          color: d.color,
-          opacity: d.opacity,
-          title: d.title + initiator + ", total=" + total + "us, start=" + d.start + "us, end=" + d.end+ "us"
-        };
     },
     function(data) {
       var timelineGroup = timelineSvg.append("g")
