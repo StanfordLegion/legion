@@ -99,6 +99,7 @@ namespace Legion {
       virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
       virtual Task* get_task(void); 
+      virtual TaskContext* find_parent_context(void);
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target) = 0;
       virtual bool attempt_children_complete(void) = 0;
@@ -495,7 +496,6 @@ namespace Legion {
       virtual void decrement_frame(void);
     
     public:
-      virtual TaskContext* find_parent_context(void);
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 

@@ -89,6 +89,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    TaskContext* TaskContext::find_parent_context(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner_task != NULL);
+#endif
+      return owner_task->get_context();
+    }
+
+    //--------------------------------------------------------------------------
     bool TaskContext::is_leaf_context(void) const
     //--------------------------------------------------------------------------
     {
@@ -2018,7 +2028,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Ask the same for our parent context
-      owner_task->get_context()->find_enclosing_local_fields(infos);
+      TaskContext *parent_ctx = find_parent_context();
+      if (parent_ctx != NULL)
+        parent_ctx->find_enclosing_local_fields(infos);
       AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
       for (unsigned idx = 0; idx < local_fields.size(); idx++)
         infos.push_back(local_fields[idx]);
@@ -2197,17 +2209,7 @@ namespace Legion {
         std::pair<AddressSpaceID,bool>(source, 
                                       (source != runtime->address_space));
       return source;
-    }
-
-    //--------------------------------------------------------------------------
-    TaskContext* InnerContext::find_parent_context(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(owner_task != NULL);
-#endif
-      return owner_task->get_context();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_logical_context(unsigned index)
