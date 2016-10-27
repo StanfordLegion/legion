@@ -402,7 +402,8 @@ namespace Legion {
     class ProjectionInfo {
     public:
       ProjectionInfo(void)
-        : projection(NULL), projection_domain(Domain::NO_DOMAIN) { }
+        : projection(NULL), projection_type(SINGULAR),
+          projection_domain(Domain::NO_DOMAIN) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
                      const Domain &launch_domain);
     public:
