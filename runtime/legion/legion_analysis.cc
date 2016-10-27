@@ -7267,17 +7267,39 @@ namespace Legion {
               }
               if (deferred_children != NULL)
               {
-                // Launch a task to do the merge later
-                UpdateStateReduceArgs args;
-                args.proxy_this = this;
-                args.child_color = child;
-                // Takes ownership for deallocation
-                args.children = deferred_children;
                 RtEvent precondition = 
                   Runtime::merge_events(deferred_children_events);
-                RtEvent done = runtime->issue_runtime_meta_task(args, 
-                            LG_LATENCY_PRIORITY, NULL, precondition);
-                preconditions.insert(done);
+                if (!precondition.has_triggered())
+                {
+                  // Launch a task to do the merge later
+                  UpdateStateReduceArgs args;
+                  args.proxy_this = this;
+                  args.child_color = child;
+                  // Takes ownership for deallocation
+                  args.children = deferred_children;
+                  args.state_lock = state_lock;
+                  // Take the lock on behalf of the this task
+                  // Kind of scary asking for the lock we currently
+                  // hold but such is the world of deferred execution
+                  RtEvent actual_pre = 
+                    Runtime::acquire_rt_reservation(state_lock, 
+                        true/*exclusive*/, precondition);
+                  // Need resource priority since we asked for the lock
+                  RtEvent done = runtime->issue_runtime_meta_task(args, 
+                              LG_RESOURCE_PRIORITY, NULL, actual_pre);
+                  preconditions.insert(done);
+                }
+                else // We can run it now
+                {
+                  FieldMask update_mask;
+                  for (VersioningSet<>::iterator it = 
+                        deferred_children->begin(); it != 
+                        deferred_children->end(); it++)
+                    update_mask |= it->second;
+                  reduce_open_children(child, update_mask, *deferred_children,
+                      preconditions, false/*need lock*/, false/*local update*/);
+                  delete deferred_children;
+                }
               }
             }
           }
@@ -7315,17 +7337,33 @@ namespace Legion {
               }
               if (!reduce_preconditions.empty())
               {
-                // Launch a task to do the merge later
-                UpdateStateReduceArgs args;
-                args.proxy_this = this;
-                args.child_color = child;
-                // Takes ownership for deallocation
-                args.children = reduce_children;
                 RtEvent precondition = 
                   Runtime::merge_events(reduce_preconditions);
-                RtEvent done = runtime->issue_runtime_meta_task(args,
-                    LG_LATENCY_PRIORITY, NULL, precondition);
-                preconditions.insert(done);
+                if (!precondition.has_triggered())
+                {
+                  // Launch a task to do the merge later
+                  UpdateStateReduceArgs args;
+                  args.proxy_this = this;
+                  args.child_color = child;
+                  // Takes ownership for deallocation
+                  args.children = reduce_children;
+                  args.state_lock = state_lock;
+                  // Ask for the reservation on behalf of the task
+                  RtEvent actual_pre = 
+                    Runtime::acquire_rt_reservation(state_lock,
+                        true/*exclusive*/, precondition);
+                  // Need resource priority since we asked for the lock
+                  RtEvent done = runtime->issue_runtime_meta_task(args,
+                      LG_RESOURCE_PRIORITY, NULL, actual_pre);
+                  preconditions.insert(done);
+                }
+                else // We can run it now
+                {
+                  reduce_open_children(child, update_mask, *reduce_children,
+                                       preconditions, false/*need lock*/,
+                                       false/*local udpate*/);
+                  delete reduce_children;
+                }
               }
               else
               {
@@ -7536,10 +7574,13 @@ namespace Legion {
             it != reduce_args->children->end(); it++)
         update_mask |= it->second;
       std::set<RtEvent> done_events;
+      // Lock was acquired by the caller
       reduce_args->proxy_this->reduce_open_children(reduce_args->child_color,
           update_mask, *reduce_args->children, done_events, 
-          true/*need lock*/, false/*local update*/);
+          false/*need lock*/, false/*local update*/);
       delete reduce_args->children;
+      // Release the lock before waiting
+      Runtime::release_reservation(reduce_args->state_lock);
       // Wait for all the effects to be applied
       if (!done_events.empty())
       {
