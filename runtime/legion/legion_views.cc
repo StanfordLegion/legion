@@ -5591,6 +5591,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      // Should not be any duplicates
       for (std::vector<VersionState*>::const_iterator it = 
             top_version_states.begin(); it != top_version_states.end(); it++)
         assert((*it) != state);
@@ -5598,7 +5599,7 @@ namespace Legion {
       // Just record it for now, we'll add a reference shortly
       top_version_states.push_back(state);
     }
-
+    
     //--------------------------------------------------------------------------
     void CompositeView::finalize_capture(void)
     //--------------------------------------------------------------------------

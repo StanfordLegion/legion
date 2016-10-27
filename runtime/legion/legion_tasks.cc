@@ -9475,7 +9475,7 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
                                       one_below_path, version_infos[idx], 
                                       ready_events, false/*partial*/, 
-                                      false/*disjoint close*/,
+                                      false/*disjoint close*/, NULL/*filter*/,
                                       one_below, &proj_epochs, 
                                       true/*skip parent check*/);
       }
