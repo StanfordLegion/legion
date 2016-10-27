@@ -287,7 +287,7 @@ namespace Legion {
     public:
       PhysicalRegionImpl& operator=(const PhysicalRegionImpl &rhs);
     public:
-      void wait_until_valid(void);
+      void wait_until_valid(bool warn = false, const char *src = NULL);
       bool is_valid(void) const;
       bool is_mapped(void) const;
       LogicalRegion get_logical_region(void) const;
@@ -2204,7 +2204,7 @@ namespace Legion {
     public:
       void remap_unmapped_regions(Processor proc, Context ctx,
             const std::vector<PhysicalRegion> &unmapped_regions);
-      void execute_task_launch(Context ctx, TaskOp *task_op);
+      void execute_task_launch(Context ctx, TaskOp *task_op, bool index);
       void add_to_dependence_queue(Processor p, Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                   bool prev_fail, RtEvent wait_on = RtEvent::NO_RT_EVENT);
@@ -2750,6 +2750,7 @@ namespace Legion {
       static unsigned gc_epoch_size;
       static bool runtime_started;
       static bool runtime_backgrounded;
+      static bool runtime_warnings;
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;
