@@ -4568,30 +4568,30 @@ namespace Legion {
        * -------------
        *  Stealing
        * -------------
-       * -hl:nosteal  Disable any stealing in the runtime.  The runtime
+       * -lg:nosteal  Disable any stealing in the runtime.  The runtime
        *              will never query any mapper about stealing.
        * ------------------------
        *  Out-of-order Execution
        * ------------------------
-       * -hl:window <int> Specify the maximum number of child tasks
+       * -lg:window <int> Specify the maximum number of child tasks
        *              allowed in a given task context at a time.  A call
        *              to launch more tasks than the allotted window
        *              will stall the parent task until child tasks
        *              begin completing.  The default is 1024.
-       * -hl:sched <int> The run-ahead factor for the runtime.  How many
+       * -lg:sched <int> The run-ahead factor for the runtime.  How many
        *              outstanding tasks ready to run should be on each
        *              processor before backing off the mapping procedure.
-       * -hl:width <int> Scheduling granularity when handling dependence
+       * -lg:width <int> Scheduling granularity when handling dependence
        *              analysis and issuing operations.  Effectively the
        *              Legion runtime superscalar width.
-       * -hl:inorder  Execute operations in strict propgram order. This
+       * -lg:inorder  Execute operations in strict propgram order. This
        *              flag will actually run the entire operation through
        *              the pipeline and wait for it to complete before
        *              permitting the next operation to start.
        * -------------
        *  Messaging
        * -------------
-       * -hl:message <int> Maximum size in bytes of the active messages
+       * -lg:message <int> Maximum size in bytes of the active messages
        *              to be sent between instances of the high-level 
        *              runtime.  This can help avoid the use of expensive
        *              per-pair-of-node RDMA buffers in the low-level
@@ -4600,35 +4600,35 @@ namespace Legion {
        * ---------------------
        *  Dependence Analysis
        * ---------------------
-       * -hl:no_dyn   Disable dynamic disjointness tests when the runtime
+       * -lg:no_dyn   Disable dynamic disjointness tests when the runtime
        *              has been compiled with macro DYNAMIC_TESTS defined
        *              which enables dynamic disjointness testing.
-       * -hl:epoch <int> Change the size of garbage collection epochs. The
+       * -lg:epoch <int> Change the size of garbage collection epochs. The
        *              default value is 64. Increasing it adds latency to
        *              the garbage collection but makes it more efficient.
        *              Decreasing the value reduces latency, but adds
        *              inefficiency to the collection.
-       * -hl:unsafe_launch Tell the runtime to skip any checks for 
+       * -lg:unsafe_launch Tell the runtime to skip any checks for 
        *              checking for deadlock between a parent task and
        *              the sub-operations that it is launching. Note
        *              that this is unsafe for a reason. The application
        *              can and will deadlock if any currently mapped
        *              regions conflict with those requested by a child
        *              task or other operation.
-       * -hl:unsafe_mapper Tell the runtime to skip any checks for 
+       * -lg:unsafe_mapper Tell the runtime to skip any checks for 
        *              validating the correctness of the results from 
        *              mapper calls. Turning this off may result in 
        *              internal crashes in the runtime if the mapper
        *              provides invalid output from any mapper call.
        *              (Default: false in debug mode, true in release mode.)
-       * -hl:safe_mapper Tell the runtime to perform all correctness
+       * -lg:safe_mapper Tell the runtime to perform all correctness
        *              checks on mapper calls regardless of the 
        *              optimization level. (Default: true in debug mode,
        *              false in release mode.)
        * ---------------------
        *  Resiliency
        * ---------------------
-       * -hl:resilient Enable features that make the runtime resilient
+       * -lg:resilient Enable features that make the runtime resilient
        *              including deferred commit that can be controlled
        *              by the next two flags.  By default this is off
        *              for performance reasons.  Once resiliency mode
@@ -4637,43 +4637,44 @@ namespace Legion {
        * -------------
        *  Debugging
        * ------------- 
-       * -hl:ldb <replay_file> Replay the execution of the application
+       * -lg:warn     Enable all verbose runtime warnings
+       * -lg:ldb <replay_file> Replay the execution of the application
        *              with the associated replay file generted by LegionSpy. 
        *              This will run the application in the Legion debugger.
-       * -hl:replay <replay_file> Rerun the execution of the application with
+       * -lg:replay <replay_file> Rerun the execution of the application with
        *              the associated replay file generated by LegionSpy.
-       * -hl:tree     Dump intermediate physical region tree states before
+       * -lg:tree     Dump intermediate physical region tree states before
        *              and after every operation.  The runtime must be
        *              compiled in debug mode with the DEBUG_LEGION
        *              macro defined.
-       * -hl:disjointness Verify the specified disjointness of 
+       * -lg:disjointness Verify the specified disjointness of 
        *              partitioning operations.  The runtime must be
        *              compiled with the DEBUG_LEGION macro defined.
-       * -hl:separate Indicate that separate instances of the high
+       * -lg:separate Indicate that separate instances of the high
        *              level runtime should be made for each processor.
        *              The default is one runtime instance per node.
        *              This is primarily useful for debugging purposes
        *              to force messages to be sent between runtime 
        *              instances on the same node.
-       * -hl:registration Record the mapping from low-level task IDs to
+       * -lg:registration Record the mapping from low-level task IDs to
        *              task variant names for debugging low-level runtime
        *              error messages.
-       * -hl:test     Replace the default mapper with the test mapper
+       * -lg:test     Replace the default mapper with the test mapper
        *              which will generate sound but random mapping 
        *              decision in order to stress-test the runtime.
-       * -hl:delay <sec> Delay the start of the runtime by 'sec' seconds.
+       * -lg:delay <sec> Delay the start of the runtime by 'sec' seconds.
        *              This is often useful for attaching debuggers on 
        *              one or more nodes prior to an application beginning.
        * -------------
        *  Profiling
        * -------------
-       * -hl:spy      Enable light-weight logging for Legion Spy which
+       * -lg:spy      Enable light-weight logging for Legion Spy which
        *              is valuable for understanding properties of an
        *              application such as the shapes of region trees
        *              and the kinds of tasks/operations that are created.
        *              Checking of the runtime with Legion Spy will still
        *              require the runtime to be compiled with -DLEGION_SPY.
-       * -hl:prof <int> Specify the number of nodes on which to enable
+       * -lg:prof <int> Specify the number of nodes on which to enable
        *              profiling information to be collected.  By default
        *              all nodes are disabled. Zero will disable all
        *              profiling while each number greater than zero will
