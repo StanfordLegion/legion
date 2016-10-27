@@ -271,7 +271,8 @@ namespace Legion {
       std::vector<MappingInstance> instances(1, 
             Mapping::PhysicalInstance::get_virtual_instance());
       const UniqueID unique_op_id = get_unique_id();
-      const size_t original_size = owner_task->regions.size();
+      const size_t original_size = 
+        (owner_task == NULL) ? 0 : owner_task->regions.size();
       for (unsigned idx = 0; idx < created_requirements.size(); idx++)
       {
         // Skip it if there are no privilege fields
