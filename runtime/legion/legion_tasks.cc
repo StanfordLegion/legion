@@ -2310,6 +2310,7 @@ namespace Legion {
       deactivate_task();
       target_processors.clear();
       physical_instances.clear();
+      virtual_mapped.clear();
       no_access_regions.clear();
       map_applied_conditions.clear();
       task_profiling_requests.clear();
@@ -2618,7 +2619,7 @@ namespace Legion {
     void SingleTask::finalize_map_task_output(Mapper::MapTaskInput &input,
                                               Mapper::MapTaskOutput &output,
                                               MustEpochOp *must_epoch_owner,
-                                      std::vector<InstanceSet> &valid)
+                                              std::vector<InstanceSet> &valid)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, FINALIZE_MAP_TASK_CALL);
@@ -4926,7 +4927,7 @@ namespace Legion {
       }
       // If we succeeded in mapping and everything was mapped
       // then we get to mark that we are done mapping
-      if (is_leaf())
+      if (is_leaf() && !has_virtual_instances())
       {
         RtEvent applied_condition;
         if (!map_applied_conditions.empty())
@@ -5741,7 +5742,7 @@ namespace Legion {
           version_infos[idx].apply_mapping(map_applied_conditions);
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
-      if (is_leaf()) 
+      if (is_leaf() && !has_virtual_instances()) 
       {
         if (!map_applied_conditions.empty())
         {
