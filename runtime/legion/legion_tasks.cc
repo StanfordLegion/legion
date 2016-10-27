@@ -7366,18 +7366,18 @@ namespace Legion {
             {
               if (pit->first.get_dim() <= 1)
                 log_run.error("ERROR: Index space task launch has intefering "
-                              "region requirements %d of point %zd and region "
-                              "requirement %d of point %zd of %s (UID %lld) in "
-                              "parent task %s (UID %lld) are interfering.",
+                              "region requirements %d of point %lld and region "
+                              "requirement %d of point %lld of %s (UID %lld) "
+                              "in parent task %s (UID %lld) are interfering.",
                               it->first, pit->first[0], it->second, 
                               oit->first[0], get_task_name(), get_unique_id(),
                               parent_ctx->get_task_name(), 
                               parent_ctx->get_unique_id());
               else if (pit->first.get_dim() == 2)
                 log_run.error("ERROR: Index space task launch has intefering "
-                              "region requirements %d of point (%zd,%zd) and "
-                              "region requirement %d of point (%zd,%zd) of %s "
-                              "(UID %lld) in parent task %s (UID %lld) are "
+                              "region requirements %d of point (%lld,%lld) and "
+                              "region requirement %d of point (%lld,%lld) of "
+                              "%s (UID %lld) in parent task %s (UID %lld) are "
                               "interfering.", it->first, pit->first[0], 
                               pit->first[1], it->second, oit->first[0], 
                               oit->first[1], get_task_name(), get_unique_id(),
@@ -7385,13 +7385,13 @@ namespace Legion {
                               parent_ctx->get_unique_id());
               else if (pit->first.get_dim() == 3)
                 log_run.error("ERROR: Index space task launch has intefering "
-                              "region requirements %d of point (%zd,%zd,%zd) "
-                              "and region requirement %d of point (%zd,%zd,%zd)"
-                              " of %s (UID %lld) in parent task %s (UID %lld) "
-                              "are interfering.", it->first, pit->first[0], 
-                              pit->first[1], pit->first[2], it->second, 
-                              oit->first[0], oit->first[1], oit->first[2],
-                              get_task_name(), get_unique_id(),
+                              "region requirements %d of point (%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld) of %s (UID %lld) in parent "
+                              "task %s (UID %lld) are interfering.", it->first, 
+                              pit->first[0], pit->first[1], pit->first[2], 
+                              it->second, oit->first[0], oit->first[1], 
+                              oit->first[2], get_task_name(), get_unique_id(),
                               parent_ctx->get_task_name(), 
                               parent_ctx->get_unique_id());
               assert(false);
