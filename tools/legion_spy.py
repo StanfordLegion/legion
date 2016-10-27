@@ -5443,8 +5443,8 @@ class Operation(object):
         if self.reqs is None or self.points is None:
             return False
         all_reqs = list()
-        # Find all non-index requirements, and ensure that they are compatible
-        # with themselves (as they will be used by all point tasks)
+        # Find all non-projection requirements, and ensure that they are
+        # compatible with themselves (as they will be used by all point tasks)
         for req in self.reqs.itervalues():
             if not req.is_projection():
                 if len(self.points) > 1:
@@ -5461,11 +5461,11 @@ class Operation(object):
         # All requirements should be non interfering
         for idx1 in xrange(0, len(all_reqs)):
             req1 = all_reqs[idx1]
-            if req1.priv is NO_ACCESS:
+            if req1.is_no_access():
                 continue
             for idx2 in xrange(idx1+1, len(all_reqs)):
                 req2 = all_reqs[idx2]
-                if req2.priv is NO_ACCESS:
+                if req2.is_no_access():
                     continue
                 if req1.parent.tree_id != req2.parent.tree_id:
                     continue
