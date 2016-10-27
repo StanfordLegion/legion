@@ -5611,14 +5611,18 @@ namespace Legion {
                                                      version_info,
                                                      preconditions,
                                                      false/*partial*/,
-                                                     true/*disjoint close*/);
+                                                     true/*disjoint close*/,
+                                                     &disjoint_close_mask);
         FieldMask non_disjoint = close_mask - disjoint_close_mask;
         if (!!non_disjoint) // handle any remaining fields
           runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                        requirement,
                                                        privilege_path,
                                                        version_info,
-                                                       preconditions);
+                                                       preconditions,
+                                                       false/*partial*/,
+                                                       false/*disjoint close*/,
+                                                       &non_disjoint);
       }
       else // the normal path
         runtime->forest->perform_versioning_analysis(this, 0/*idx*/,

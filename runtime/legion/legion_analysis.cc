@@ -6159,7 +6159,7 @@ namespace Legion {
       for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit = 
             open_children.begin(); cit != open_children.end(); cit++)
       {
-        FieldMask child_overlap = cit->second.get_valid_mask();
+        FieldMask child_overlap = closing_mask & cit->second.get_valid_mask();
         if (!child_overlap)
           continue;
         RegionTreeNode *child_node = logical_node->get_tree_child(cit->first);

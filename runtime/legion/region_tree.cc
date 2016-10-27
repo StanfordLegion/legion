@@ -1627,7 +1627,8 @@ namespace Legion {
                         unsigned idx, const RegionRequirement &req,
                         const RegionTreePath &path, VersionInfo &version_info,
                         std::set<RtEvent> &ready_events, bool partial_traversal,
-                        bool disjoint_close, RegionTreeNode *parent_node,
+                        bool disjoint_close, FieldMask *filter_mask,
+                        RegionTreeNode *parent_node,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs,
                         bool skip_parent_check)
     //--------------------------------------------------------------------------
@@ -1645,6 +1646,9 @@ namespace Legion {
         parent_node = get_node(req.parent);
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
+      // If we have a filter mask, then apply it
+      if (filter_mask != NULL)
+        user_mask &= *filter_mask;
       // If this is not the top of the tree, see if we have to get
       // any version infromation from our parent context (e.g. because
       // it virtually mapped above where we have privileges)
@@ -12762,7 +12766,6 @@ namespace Legion {
         {
           manager.record_disjoint_close_versions(version_mask, 
                     parent_ctx, op, idx, version_info, ready_events);
-                        
         }
         else
         {

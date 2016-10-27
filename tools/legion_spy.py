@@ -5440,7 +5440,55 @@ class Operation(object):
 
     def is_interfering_index_space_launch(self):
         assert self.kind == INDEX_TASK_KIND
-        # TODO: Todd fill in this check
+        if self.reqs is None or self.points is None:
+            return False
+        all_reqs = list()
+        # Find all non-projection requirements, and ensure that they are
+        # compatible with themselves (as they will be used by all point tasks)
+        for req in self.reqs.itervalues():
+            if not req.is_projection():
+                if len(self.points) > 1:
+                    dep_type = compute_dependence_type(req, req)
+                    if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
+                        print(("Non index region requirement %d of index space "
+                               "operation %s is self interfering in %s") %
+                               (req.index,str(self),str(self.context)))
+                        return True
+                all_reqs.append(req)
+        for point_task in self.points.itervalues():
+            for req in point_task.op.reqs.itervalues():
+                all_reqs.append(req)
+        # All requirements should be non interfering
+        for idx1 in xrange(0, len(all_reqs)):
+            req1 = all_reqs[idx1]
+            if req1.is_no_access():
+                continue
+            for idx2 in xrange(idx1+1, len(all_reqs)):
+                req2 = all_reqs[idx2]
+                if req2.is_no_access():
+                    continue
+                if req1.parent.tree_id != req2.parent.tree_id:
+                    continue
+                # No interference if the fields are disjoint
+                fields_disjoint = True
+                for field in req1.fields:
+                    if field in req2.fields:
+                        fields_disjoint = False
+                        break
+                if fields_disjoint:
+                    continue
+                # Check for interference at a common ancestor
+                aliased,ancestor = self.state.has_aliased_ancestor_tree_only(
+                    req1.logical_node.get_index_node(),
+                    req2.logical_node.get_index_node())
+                if aliased:
+                    assert ancestor
+                    dep_type = compute_dependence_type(req1, req2)
+                    if dep_type == TRUE_DEPENDENCE or dep_type == ANTI_DEPENDENCE:
+                        print(("Region requirements %d and %d of operation %s "+
+                               "are interfering in %s") %
+                               (req1.index,req2.index,str(self),str(self.context)))
+                        return True
         return False
 
     def analyze_logical_requirement(self, index, perform_checks):

@@ -263,6 +263,7 @@ namespace Legion {
                                        std::set<RtEvent> &ready_events,
                                        bool partial_traversal = false,
                                        bool disjoint_close = false,
+                                       FieldMask *filter_mask = NULL,
                                        RegionTreeNode *parent_node = NULL,
               // For computing split masks for projection epochs only
               const LegionMap<ProjectionEpochID,
