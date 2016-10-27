@@ -1043,6 +1043,7 @@ namespace Legion {
         VersionState *proxy_this;
         ColorPoint child_color;
         VersioningSet<> *children;
+        Reservation state_lock;
       };
       struct ConvertViewArgs : public LgTaskArgs<ConvertViewArgs> {
       public:
