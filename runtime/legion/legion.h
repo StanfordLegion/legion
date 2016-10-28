@@ -1170,6 +1170,8 @@ namespace Legion {
       // means that either field sets are independent or region
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
+    public:
+      bool                               silence_warnings;
     };
 
     /**
@@ -1238,6 +1240,8 @@ namespace Legion {
       // means that either field sets are independent or region
       // requirements are disjoint based on the region tree.
       bool                               independent_requirements;
+    public:
+      bool                               silence_warnings;
     };
 
     /**
@@ -1313,6 +1317,8 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
     };
 
     /**
@@ -1347,6 +1353,8 @@ namespace Legion {
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
+    public:
+      bool                            silence_warnings;
     };
 
     //==========================================================================
@@ -1681,6 +1689,8 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
     };
 
     /**
@@ -1717,6 +1727,8 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
     };
 
     //==========================================================================
@@ -1744,10 +1756,12 @@ namespace Legion {
                                   const TaskLauncher &launcher);
       inline void add_index_task(const IndexLauncher &launcher);
     public:
-      MapperID                        map_id;
-      MappingTagID               mapping_tag;
-      std::vector<TaskLauncher> single_tasks;
-      std::vector<IndexLauncher> index_tasks;
+      MapperID                      map_id;
+      MappingTagID                  mapping_tag;
+      std::vector<TaskLauncher>     single_tasks;
+      std::vector<IndexLauncher>    index_tasks;
+    public:
+      bool                          silence_warnings;
     };
 
     //==========================================================================

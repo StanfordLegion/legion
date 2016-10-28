@@ -12057,7 +12057,7 @@ namespace Legion {
       Future result = task->initialize_task(ctx, launcher,
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task, false/*index*/);
+      execute_task_launch(ctx, task, false/*index*/, launcher.silence_warnings);
       ctx->end_runtime_call();
       return result;
     }
@@ -12190,7 +12190,7 @@ namespace Legion {
       FutureMap result = task->initialize_task(ctx, launcher,
                                           false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task, true/*index*/);
+      execute_task_launch(ctx, task, true/*index*/, launcher.silence_warnings);
       ctx->end_runtime_call();
       return result;
     }
@@ -12273,7 +12273,7 @@ namespace Legion {
       Future result = task->initialize_task(ctx, launcher, redop, 
                                   false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task, true/*index*/);
+      execute_task_launch(ctx, task, true/*index*/, launcher.silence_warnings);
       ctx->end_runtime_call();
       return result;
     }
@@ -12324,7 +12324,7 @@ namespace Legion {
       Future result = task->initialize_task(ctx, task_id, indexes, 
                 regions, arg, predicate, id, tag, false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task, false/*index*/);
+      execute_task_launch(ctx, task, false/*index*/, false/*silence warnings*/);
       ctx->end_runtime_call();
       return result;
     }
@@ -12380,7 +12380,7 @@ namespace Legion {
                           indexes, regions, global_arg, arg_map, predicate,
                           must_parallelism, id, tag, false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task, true/*index*/);
+      execute_task_launch(ctx, task, true/*index*/, false/*silence warnings*/);
       ctx->end_runtime_call();
       return result;
     }
@@ -12441,7 +12441,7 @@ namespace Legion {
                             initial_value, predicate, must_parallelism,
                             id, tag, false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task, true/*index*/);
+      execute_task_launch(ctx, task, true/*index*/, false/*silence warnings*/);
       ctx->end_runtime_call();
       return result;
     }
@@ -12968,7 +12968,7 @@ namespace Legion {
         ctx->find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
           log_run.warning("WARNING: Runtime is unmapping and remapping "
               "physical regions around fill_fields call in task %s (UID %lld).",
               ctx->get_task_name(), ctx->get_unique_id());
@@ -13252,7 +13252,7 @@ namespace Legion {
         ctx->find_conflicting_regions(copy_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
           log_run.warning("WARNING: Runtime is unmapping and remapping "
               "physical regions around issue_copy_operation call in "
               "task %s (UID %lld).", ctx->get_task_name(), 
@@ -13722,7 +13722,7 @@ namespace Legion {
         ctx->find_conflicting_regions(acquire_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
           log_run.warning("WARNING: Runtime is unmapping and remapping "
               "physical regions around issue_acquire call in "
               "task %s (UID %lld).", ctx->get_task_name(), 
@@ -13775,7 +13775,7 @@ namespace Legion {
         ctx->find_conflicting_regions(release_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
           log_run.warning("WARNING: Runtime is unmapping and remapping "
               "physical regions around issue_release call in "
               "task %s (UID %lld).", ctx->get_task_name(), 
@@ -13987,7 +13987,7 @@ namespace Legion {
         epoch_op->find_conflicted_regions(unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
           log_run.warning("WARNING: Runtime is unmapping and remapping "
               "physical regions around issue_release call in "
               "task %s (UID %lld).", ctx->get_task_name(), 
@@ -17435,7 +17435,8 @@ namespace Legion {
     }
  
     //--------------------------------------------------------------------------
-    void Runtime::execute_task_launch(Context ctx, TaskOp *task, bool index)
+    void Runtime::execute_task_launch(Context ctx, TaskOp *task, 
+                                      bool index, bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       Processor proc = ctx->get_executing_processor();
@@ -17462,7 +17463,7 @@ namespace Legion {
           ctx->find_conflicting_regions(task, unmapped_regions);
         if (!unmapped_regions.empty())
         {
-          if (Runtime::runtime_warnings)
+          if (Runtime::runtime_warnings && !silence_warnings)
           {
             if (index)
               log_run.warning("WARNING: Runtime is unmapping and remapping "
