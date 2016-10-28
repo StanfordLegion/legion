@@ -1273,7 +1273,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskLauncher::TaskLauncher(void)
       : task_id(0), argument(TaskArgument()), predicate(Predicate::TRUE_PRED),
-        map_id(0), tag(0), point(DomainPoint())
+        map_id(0), tag(0), point(DomainPoint()), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1283,7 +1283,7 @@ namespace Legion {
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : task_id(tid), argument(arg), predicate(pred), 
-        map_id(mid), tag(t), point(DomainPoint())
+        map_id(mid), tag(t), point(DomainPoint()), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1297,7 +1297,7 @@ namespace Legion {
       : task_id(0), launch_domain(Domain::NO_DOMAIN), 
         global_arg(TaskArgument()), argument_map(ArgumentMap()), 
         predicate(Predicate::TRUE_PRED), must_parallelism(false), 
-        map_id(0), tag(0)
+        map_id(0), tag(0), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1311,7 +1311,7 @@ namespace Legion {
                                  MappingTagID t /*=0*/)
       : task_id(tid), launch_domain(dom), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must),
-        map_id(mid), tag(t)
+        map_id(mid), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1343,7 +1343,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
-      : predicate(pred), map_id(mid), tag(t)
+      : predicate(pred), map_id(mid), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1358,7 +1358,7 @@ namespace Legion {
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t)
+        predicate(pred), map_id(id), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1373,7 +1373,7 @@ namespace Legion {
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t)
+        predicate(pred), map_id(id), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1386,7 +1386,8 @@ namespace Legion {
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p,
                                TaskArgument arg, 
                                Predicate pred /*= Predicate::TRUE_PRED*/)
-      : handle(h), parent(p), argument(arg), predicate(pred)
+      : handle(h), parent(p), argument(arg), 
+        predicate(pred), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1394,7 +1395,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
                                Predicate pred /*= Predicate::TRUE_PRED*/)
-      : handle(h), parent(p), future(f), predicate(pred)
+      : handle(h), parent(p), future(f), 
+        predicate(pred), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1406,7 +1408,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MustEpochLauncher::MustEpochLauncher(MapperID id /*= 0*/,   
                                          MappingTagID tag/*= 0*/)
-      : map_id(id), mapping_tag(tag)
+      : map_id(id), mapping_tag(tag), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }

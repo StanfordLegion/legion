@@ -2209,7 +2209,8 @@ namespace Legion {
     public:
       void remap_unmapped_regions(Processor proc, Context ctx,
             const std::vector<PhysicalRegion> &unmapped_regions);
-      void execute_task_launch(Context ctx, TaskOp *task_op, bool index);
+      void execute_task_launch(Context ctx, TaskOp *task_op, 
+                               bool index, bool silence_warnings);
       void add_to_dependence_queue(Processor p, Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                   bool prev_fail, RtEvent wait_on = RtEvent::NO_RT_EVENT);
