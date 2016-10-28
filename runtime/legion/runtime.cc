@@ -428,9 +428,19 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void FutureImpl::get_void_result(void)
+    void FutureImpl::get_void_result(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings && 
+          (producer_op != NULL))
+      {
+        SingleTask *context = producer_op->get_parent();
+        if (!context->is_leaf())
+          log_run.warning("WARNING: Waiting on a future in non-leaf task %s "
+             "(UID %lld) is a violation of Legion's deferred execution model "
+             "best practices. You may notice a severe performance degradation.",
+             context->get_task_name(), context->get_unique_id());
+      }
       if (!ready_event.has_triggered())
       {
         SingleTask *context = 
@@ -458,9 +468,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* FutureImpl::get_untyped_result(void)
+    void* FutureImpl::get_untyped_result(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings && 
+          (producer_op != NULL))
+      {
+        SingleTask *context = producer_op->get_parent();
+        if (!context->is_leaf())
+          log_run.warning("WARNING: Waiting on a future in non-leaf task %s "
+             "(UID %lld) is a violation of Legion's deferred execution model "
+             "best practices. You may notice a severe performance degradation.",
+             context->get_task_name(), context->get_unique_id());
+      }
       if (!ready_event.has_triggered())
       {
         SingleTask *context = 
@@ -498,9 +518,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FutureImpl::is_empty(bool block)
+    bool FutureImpl::is_empty(bool block, bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings && 
+          (producer_op != NULL))
+      {
+        SingleTask *context = producer_op->get_parent();
+        if (!context->is_leaf())
+          log_run.warning("WARNING: Performing a block is_empty test on a "
+              "in non-leaf task %s (UID %lld) is a violation of Legion's "
+              "deferred execution model best practices. You may notice a "
+              "severe performance degradation.", context->get_task_name(), 
+              context->get_unique_id());
+      }
       if (block && !ready_event.has_triggered())
         ready_event.wait();
       if (block)
@@ -919,17 +950,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::get_void_result(const DomainPoint &point)
+    void FutureMapImpl::get_void_result(const DomainPoint &point,
+                                        bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       Future f = get_future(point);
-      f.get_void_result();
+      f.get_void_result(silence_warnings);
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::wait_all_results(void)
+    void FutureMapImpl::wait_all_results(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings && 
+          (context != NULL) && !context->is_leaf())
+        log_run.warning("WARNING: Waiting for all futures in a future map in "
+            "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
+            "execution model best practices. You may notice a severe "
+            "performance degredation.", context->get_task_name(),
+            context->get_unique_id());
       // Wait on the event that indicates the entire task has finished
       if (valid && !ready_event.has_triggered())
         ready_event.wait();
@@ -996,7 +1035,8 @@ namespace Legion {
                                    bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), virtual_mapped(virt), ready_event(ready), 
-        req(r), mapped(m), valid(false), trigger_on_unmap(false)
+        req(r), mapped(m), valid(false), trigger_on_unmap(false), 
+        made_accessor(false)
     //--------------------------------------------------------------------------
     {
 #ifdef BOUNDS_CHECKS
@@ -1009,7 +1049,7 @@ namespace Legion {
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
         leaf_region(false), virtual_mapped(false), 
         ready_event(ApEvent::NO_AP_EVENT), mapped(false),
-        valid(false), trigger_on_unmap(false)
+        valid(false), trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1042,9 +1082,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::wait_until_valid(bool warn, const char *source)
+    void PhysicalRegionImpl::wait_until_valid(bool silence_warnings, 
+                                              bool warn, const char *source)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings &&
+          (context != NULL) && !context->is_leaf())
+      {
+        if (source != NULL)
+          log_run.warning("WARNING: Waiting for a physical region to be valid "
+              "for call %s in non-leaf task %s (UID %lld) is a violation of "
+              "Legion's deferred execution model best practices. You may "
+              "notice a severe performance degradation.", source,
+              context->get_task_name(), context->get_unique_id());
+        else
+          log_run.warning("WARNING: Waiting for a physical region to be valid "
+              "in non-leaf task %s (UID %lld) is a violation of Legion's "
+              "deferred execution model best practices. You may notice a "
+              "severe performance degradation.", context->get_task_name(), 
+              context->get_unique_id());
+      }
 #ifdef DEBUG_LEGION
       assert(mapped); // should only be waiting on mapped regions
 #endif
@@ -1053,11 +1110,12 @@ namespace Legion {
         return;
       if (!ready_event.has_triggered())
       {
-        if (warn && (source != NULL))
+        if (warn && !silence_warnings && (source != NULL))
           log_run.warning("WARNING: Request for %s was performed on a "
               "physical region in task %s (ID %lld) without first waiting "
-              "for the physical region to be valid.", source, 
-              context->get_task_name(), context->get_unique_id());
+              "for the physical region to be valid. Legion is performing "
+              "the wait for you.", source, context->get_task_name(), 
+              context->get_unique_id());
         if (context != NULL)
           context->begin_task_wait(false/*from runtime*/);
         ready_event.wait();
@@ -1113,9 +1171,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
       LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegionImpl::get_accessor(void)
+        PhysicalRegionImpl::get_accessor(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (context != NULL)
+      {
+        if (context->is_inner())
+        {
+          log_run.warning("ERROR: Illegal call to 'get_accessor' inside task "
+            "%s (UID %lld) for a variant that was labeled as an 'inner' "
+            "variant.", context->get_task_name(), context->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INNER_TASK_VIOLATION);
+        }
+        else if (Runtime::runtime_warnings && !silence_warnings &&
+                  !context->is_leaf())
+          log_run.warning("WARNING: Call to 'get_accessor' in non-leaf task %s "
+              "(UID %lld) is a blocking operation in violation of Legion's "
+              "deferred execution model best practices. You may notice a "
+              "severe performance degradation.", context->get_task_name(),
+              context->get_unique_id());
+      }
       // If this physical region isn't mapped, then we have to
       // map it before we can return an accessor
       if (!mapped)
@@ -1130,7 +1208,7 @@ namespace Legion {
 #endif
           exit(ERROR_ILLEGAL_IMPLICIT_MAPPING);
         }
-        if (Runtime::runtime_warnings)
+        if (Runtime::runtime_warnings && !silence_warnings)
           log_run.warning("WARNING: Request for 'get_accessor' was "
                           "performed on an unmapped region in task %s "
                           "(UID %lld). Legion is mapping it for you. "
@@ -1144,7 +1222,8 @@ namespace Legion {
 #endif
       }
       // Wait until we are valid before returning the accessor
-      wait_until_valid(Runtime::runtime_warnings, "get_accessor");
+      wait_until_valid(silence_warnings, 
+                       Runtime::runtime_warnings, "get_accessor");
       // You can only legally invoke this method when you have one instance
       if (references.size() > 1)
       {
@@ -1159,6 +1238,7 @@ namespace Legion {
 #endif
         exit(ERROR_DEPRECATED_METHOD_USE);
       }
+      made_accessor = true;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
@@ -1177,9 +1257,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          PhysicalRegionImpl::get_field_accessor(FieldID fid)
+          PhysicalRegionImpl::get_field_accessor(FieldID fid, 
+                                                 bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (context != NULL)
+      {
+        if (context->is_inner())
+        {
+          log_run.warning("ERROR: Illegal call to 'get_field_accessor' inside "
+            "task %s (UID %lld) for a variant that was labeled as an 'inner' "
+            "variant.", context->get_task_name(), context->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INNER_TASK_VIOLATION);
+        }
+        else if (Runtime::runtime_warnings && !silence_warnings &&
+                  !context->is_leaf())
+          log_run.warning("WARNING: Call to 'get_field_accessor' in non-leaf "
+              "task %s (UID %lld) is a blocking operation in violation of "
+              "Legion's deferred execution model best practices. You may "
+              "notice a severe performance degradation.", 
+              context->get_task_name(), context->get_unique_id());
+      }
       // If this physical region isn't mapped, then we have to
       // map it before we can return an accessor
       if (!mapped)
@@ -1194,7 +1295,7 @@ namespace Legion {
 #endif
           exit(ERROR_ILLEGAL_IMPLICIT_MAPPING);
         }
-        if (Runtime::runtime_warnings)
+        if (Runtime::runtime_warnings && !silence_warnings)
           log_run.warning("WARNING: Request for 'get_field_accessor' was "
                           "performed on an unmapped region in task %s "
                           "(UID %lld). Legion is mapping it for you. "
@@ -1208,7 +1309,8 @@ namespace Legion {
 #endif 
       }
       // Wait until we are valid before returning the accessor
-      wait_until_valid(Runtime::runtime_warnings, "get_field_acessor");
+      wait_until_valid(silence_warnings, 
+                       Runtime::runtime_warnings, "get_field_acessor");
 #ifdef DEBUG_LEGION
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
       {
@@ -1218,6 +1320,7 @@ namespace Legion {
         exit(ERROR_INVALID_FIELD_PRIVILEGES);
       }
 #endif
+      made_accessor = true;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
