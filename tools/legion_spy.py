@@ -9121,7 +9121,10 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         p1 = state.get_task(int(m.group('point1')))
         p2 = state.get_task(int(m.group('point2')))
-        state.alias_individual_points(p1, p2)
+        assert p1 not in state.point_point
+        assert p2 not in state.point_point
+        # Holdoff on doing the merge until after parsing
+        state.point_point[p1] = p2
         return True
     m = op_index_pat.match(line)
     if m is not None:
@@ -9309,8 +9312,8 @@ class State(object):
                  'field_spaces', 'regions', 'partitions', 'top_spaces', 'trees',
                  'ops', 'tasks', 'task_names', 'variants', 'projection_functions',
                  'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 
-                 'no_event', 'slice_index', 'slice_slice', 'point_slice', 'futures', 
-                 'next_generation', 'next_realm_num', 'detailed_graphs', 
+                 'no_event', 'slice_index', 'slice_slice', 'point_slice', 'point_point',
+                 'futures', 'next_generation', 'next_realm_num', 'detailed_graphs', 
                  'assert_on_error', 'assert_on_warning', 'config', 'detailed_logging']
     def __init__(self, verbose, details, assert_on_error, assert_on_warning):
         self.config = False
@@ -9351,6 +9354,7 @@ class State(object):
         self.slice_index = dict()
         self.slice_slice = dict()
         self.point_slice = dict()
+        self.point_point = dict()
         self.futures = dict()
         # For physical traversals
         self.next_generation = 1
@@ -9431,6 +9435,9 @@ class State(object):
         for region in self.regions.itervalues():
             if region.parent is None:
                 self.trees[region.tree_id] = region
+        # Merge the individual tasks
+        for p1,p2 in self.point_point.iteritems():
+            self.alias_individual_points(p1, p2)
         # Merge the points and slices
         for point,slice_ in self.point_slice.iteritems():
             while slice_ in self.slice_slice:
