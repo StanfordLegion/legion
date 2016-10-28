@@ -162,7 +162,7 @@ def check_preconditions(preconditions, op, check_reorder):
             # Special case for handling when read-only operations
             # are mapped out of order, check to see if the anti-dependence
             # was serialized in the other order
-            if pre in op.physical_outgoing:
+            if check_reorder and pre in op.physical_outgoing:
                 continue
             return pre
     return None
@@ -2012,9 +2012,14 @@ class IndexSpace(object):
 
     def set_parent(self, parent, color):
         self.parent = parent
-        self.depth = parent.depth+1
         self.color = color
         self.parent.add_child(self)
+        self.update_depth(parent.depth)
+
+    def update_depth(self, parent_depth):
+        self.depth = parent_depth + 1
+        for child in self.children.itervalues():
+            child.update_depth(self.depth)
 
     def add_child(self, child):
         self.children[child.color] = child
@@ -2255,9 +2260,14 @@ class IndexPartition(object):
 
     def set_parent(self, parent, color):
         self.parent = parent
-        self.depth = parent.depth+1
         self.color = color
         self.parent.add_child(self)
+        self.update_depth(parent.depth)
+
+    def update_depth(self, parent_depth):
+        self.depth = parent_depth + 1
+        for child in self.children.itervalues():
+            child.update_depth(self.depth)
 
     def set_disjoint(self, disjoint):
         self.disjoint = disjoint
@@ -4227,26 +4237,26 @@ class VerificationTraverser(object):
             copy.get_physical_reachable(copy.reachable_cache, False)
         src_preconditions = src.find_verification_copy_dependences(self.src_depth,
             self.src_field, self.point, self.op, self.src_req.index, True, 0)
-        for pre in src_preconditions:
-            if pre not in copy.reachable_cache:
-                print("ERROR: Missing source precondition for "+str(copy)+
-                    " on field "+str(self.src_field)+" for op "+self.error_str+
-                    " on "+str(pre))
-                self.failed_analysis = True
-                if self.op.state.assert_on_error:
-                    assert False
-                return
+        bad = check_preconditions(src_preconditions, copy, self.src_req.is_read_only())
+        if bad is not None:
+            print("ERROR: Missing source precondition for "+str(copy)+
+                " on field "+str(self.src_field)+" for op "+self.error_str+
+                " on "+str(bad))
+            self.failed_analysis = True
+            if self.op.state.assert_on_error:
+                assert False
+            return
         dst_preconditions = dst.find_verification_copy_dependences(self.dst_depth,
             self.dst_field, self.point, self.op, self.dst_req.index, False, src.redop)
-        for pre in dst_preconditions:
-            if pre not in copy.reachable_cache:
-                print("ERROR: Missing destination precondition for "+str(copy)+
-                    " on field "+str(self.dst_field)+" for op "+self.error_str+
-                    " on "+str(pre))
-                self.failed_analysis = True
-                if self.op.state.assert_on_error:
-                    assert False
-                return
+        bad = check_preconditions(dst_preconditions, copy, self.dst_req.is_read_only())
+        if bad is not None:
+            print("ERROR: Missing destination precondition for "+str(copy)+
+                " on field "+str(self.dst_field)+" for op "+self.error_str+
+                " on "+str(bad))
+            self.failed_analysis = True
+            if self.op.state.assert_on_error:
+                assert False
+            return
         src.add_verification_copy_user(self.src_depth, self.src_field, self.point, 
                                        copy, self.src_req.index, True, 0)
         dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
@@ -4277,15 +4287,15 @@ class VerificationTraverser(object):
             dst = fill.dsts[fill.fields.index(self.dst_field)]
             preconditions = dst.find_verification_copy_dependences(self.dst_depth,
                 self.dst_field, self.point, self.op, self.dst_req.index, False, 0)
-            for pre in preconditions:
-                if pre not in fill.reachable_cache:
-                    print("ERROR: Missing destination precondition for "+
-                        str(fill)+" on field "+str(self.dst_field)+" for op "+
-                        self.error_str+" on "+str(pre))
-                    self.failed_analysis = True
-                    if self.op.state.assert_on_error:
-                        assert False
-                    break
+            bad = check_preconditions(preconditions, fill, self.dst_req.is_read_only())
+            if bad is not None:
+                print("ERROR: Missing destination precondition for "+
+                    str(fill)+" on field "+str(self.dst_field)+" for op "+
+                    self.error_str+" on "+str(bad))
+                self.failed_analysis = True
+                if self.op.state.assert_on_error:
+                    assert False
+                return
             dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                                            fill, self.dst_req.index, False, 0)
         return False
@@ -4589,24 +4599,24 @@ class VerificationState(object):
                     copy.get_physical_reachable(copy.reachable_cache, False)
                 src_preconditions = src_inst.find_verification_copy_dependences(
                     src_depth, src_field, self.point, op, src_req.index, True, 0)
-                for pre in src_preconditions:
-                    if pre not in copy.reachable_cache:
-                        print("ERROR: Missing source precondition for "+str(copy)+
-                              " on field "+str(src_field)+" for "+str(op)+
-                              " on "+str(pre))
-                        if op.state.assert_on_error:
-                            assert False
-                        return False
+                bad = check_preconditions(src_preconditions, copy, src_req.is_read_only())
+                if bad is not None:
+                    print("ERROR: Missing source precondition for "+str(copy)+
+                          " on field "+str(src_field)+" for "+str(op)+
+                          " on "+str(bad))
+                    if op.state.assert_on_error:
+                        assert False
+                    return False
                 dst_preconditions = dst_inst.find_verification_copy_dependences(
                     dst_depth, dst_field, self.point, op, dst_req.index, False, redop)
-                for pre in dst_preconditions:
-                    if pre not in copy.reachable_cache:
-                        print("ERROR: Missing destination precondition for "+str(copy)+
-                              " on field "+str(dst_field)+" for "+str(op)+
-                              " on "+str(pre))
-                        if op.state.assert_on_error:
-                            assert False
-                        return False
+                bad = check_preconditions(dst_preconditions, copy, dst_req.is_read_only())
+                if bad is not None:
+                    print("ERROR: Missing destination precondition for "+str(copy)+
+                          " on field "+str(dst_field)+" for "+str(op)+
+                          " on "+str(bad))
+                    if op.state.assert_on_error:
+                        assert False
+                    return False
                 # Then we can do the registration ourselves
                 src_inst.add_verification_copy_user(src_depth, src_field, self.point,
                                                     copy, src_req.index, True, 0)
@@ -5259,10 +5269,14 @@ class Operation(object):
             assert not other.temporaries
         if not self.start_event.exists():
             self.start_event = other.start_event
+            if self.start_event.exists():
+                self.start_event.update_outgoing_op(other, self)
         else:
             assert not other.start_event.exists()
         if not self.finish_event.exists():
             self.finish_event = other.finish_event
+            if self.finish_event.exists():
+                self.finish_event.update_incoming_op(other, self)
         else:
             assert not other.finish_event.exists() 
         if not self.inter_close_ops:
@@ -5271,10 +5285,16 @@ class Operation(object):
             assert not other.inter_close_ops
         if not self.realm_copies:
             self.realm_copies = other.realm_copies
+            if self.realm_copies:
+                for copy in self.realm_copies:
+                    copy.update_creator(self)
         else:
             assert not other.realm_copies
         if not self.realm_fills:
             self.realm_fills = other.realm_fills
+            if self.realm_fills:
+                for fill in self.realm_fills:
+                    fill.update_creator(self)
         else:
             assert not other.realm_fills
         if self.task_id == -1:
@@ -7624,6 +7644,16 @@ class Event(object):
             self.outgoing_ops = set()
         self.outgoing_ops.add(op)
 
+    def update_incoming_op(self, old, new):
+        assert old in self.incoming_ops
+        self.incoming_ops.remove(old)
+        self.incoming_ops.add(new)
+
+    def update_outgoing_op(self, old, new):
+        assert old in self.outgoing_ops
+        self.outgoing_ops.remove(old)
+        self.outgoing_ops.add(new)
+
     def add_incoming_fill(self, fill):
         if self.incoming_fills is None:
             self.incoming_fills = set()
@@ -7858,6 +7888,11 @@ class RealmCopy(RealmBase):
         self.creator = creator
         self.creator.add_realm_copy(self)
 
+    def update_creator(self, new_creator):
+        assert self.creator
+        assert new_creator is not self.creator
+        self.creator = new_creator
+
     def add_field(self, src_fid, src, dst_fid, dst, redop):
         assert self.region is not None
         # Always get the fields from the source and destination regions
@@ -7959,6 +7994,11 @@ class RealmFill(RealmBase):
         assert self.creator is None
         self.creator = creator
         self.creator.add_realm_fill(self)
+
+    def update_creator(self, new_creator):
+        assert self.creator
+        assert new_creator is not self.creator
+        self.creator = new_creator
 
     def add_field(self, fid, dst):
         assert self.region is not None
