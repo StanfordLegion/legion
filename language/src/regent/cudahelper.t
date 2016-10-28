@@ -41,6 +41,7 @@ end
 --
 
 local ef = terralib.externfunction
+local externcall_builtin = terralib.externfunction
 
 local RuntimeAPI = terralib.includec("cuda_runtime.h")
 local HijackAPI = terralib.includec("legion_terra_cudart_hijack.h")
@@ -170,6 +171,14 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   end
   local device = init_cuda()
   local version = get_cuda_version(device)
+  local libdevice =
+    terralib.cudahome..
+    string.format("/nvvm/libdevice/libdevice.compute_%d.10.bc",
+                  tonumber(version))
+  local llvmbc = terralib.linkllvm(libdevice)
+  externcall_builtin = function(name, ftype)
+    return llvmbc:extern(name, ftype)
+  end
   local ptx = cudalib.toptx(module, nil, version)
   local handle = register_ptx(ptx, #ptx, version)
 
@@ -201,6 +210,33 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, N, T)
     [setupArguments];
     RuntimeAPI.cudaLaunch([&int8](kernel_id))
   end
+end
+
+local builtin_gpu_fns = {
+  acos  = externcall_builtin("__nv_acos"  , double -> double),
+  asin  = externcall_builtin("__nv_asin"  , double -> double),
+  atan  = externcall_builtin("__nv_atan"  , double -> double),
+  cbrt  = externcall_builtin("__nv_cbrt"  , double -> double),
+  ceil  = externcall_builtin("__nv_ceil"  , double -> double),
+  cos   = externcall_builtin("__nv_cos"   , double -> double),
+  fabs  = externcall_builtin("__nv_fabs"  , double -> double),
+  floor = externcall_builtin("__nv_floor" , double -> double),
+  fmod  = externcall_builtin("__nv_fmod"  , {double, double} -> double),
+  log   = externcall_builtin("__nv_log"   , double -> double),
+  pow   = externcall_builtin("__nv_pow"   , {double, double} -> double),
+  sin   = externcall_builtin("__nv_sin"   , double -> double),
+  sqrt  = externcall_builtin("__nv_sqrt"  , double -> double),
+  tan   = externcall_builtin("__nv_tan"   , double -> double),
+}
+
+local cpu_fn_to_gpu_fn = {}
+
+function cudahelper.register_builtin(name, cpu_fn)
+  cpu_fn_to_gpu_fn[cpu_fn] = builtin_gpu_fns[name]
+end
+
+function cudahelper.replace_with_builtin(fn)
+  return cpu_fn_to_gpu_fn[fn] or fn
 end
 
 return cudahelper

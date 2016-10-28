@@ -1675,9 +1675,13 @@ end
 
 function codegen.expr_function(cx, node)
   local value_type = std.as_read(node.expr_type)
+  local value = node.value
+  if cx.task_meta:getcuda() then
+    value = cudahelper.replace_with_builtin(value)
+  end
   return values.value(
     node,
-    expr.just(emit_debuginfo(node), node.value),
+    expr.just(emit_debuginfo(node), value),
     value_type)
 end
 
@@ -6620,22 +6624,26 @@ function codegen.stat_for_list(cx, node)
     local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
     local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
     local bid_x   = cudalib.nvvm_read_ptx_sreg_ctaid_x
-    local n_bid_x = cudalib.nvvm_read_ptx_sreg_ctaid_x
+    local n_bid_x = cudalib.nvvm_read_ptx_sreg_nctaid_x
 
     local tid_y   = cudalib.nvvm_read_ptx_sreg_tid_y
     local n_tid_y = cudalib.nvvm_read_ptx_sreg_ntid_y
     local bid_y   = cudalib.nvvm_read_ptx_sreg_ctaid_y
-    local n_bid_y = cudalib.nvvm_read_ptx_sreg_ctaid_y
+    local n_bid_y = cudalib.nvvm_read_ptx_sreg_nctaid_y
 
     local tid_z   = cudalib.nvvm_read_ptx_sreg_tid_z
     local n_tid_z = cudalib.nvvm_read_ptx_sreg_ntid_z
     local bid_z   = cudalib.nvvm_read_ptx_sreg_ctaid_z
-    local n_bid_z = cudalib.nvvm_read_ptx_sreg_ctaid_z
+    local n_bid_z = cudalib.nvvm_read_ptx_sreg_nctaid_z
 
     body = quote
-      var local_tid = tid_x() + tid_y() * n_tid_x() + tid_z() * n_tid_y() * n_tid_x()
+      --var local_tid = tid_x() + tid_y() * n_tid_x() + tid_z() * n_tid_y() * n_tid_x()
+      --var global_offset = bid_x() + bid_y() * n_bid_x() + bid_z() * n_bid_y() * n_bid_x()
+      --var [tid] = local_tid + global_offset
+      var local_tid = tid_x()
       var global_offset = bid_x() + bid_y() * n_bid_x() + bid_z() * n_bid_y() * n_bid_x()
-      var [tid] = local_tid + global_offset
+      var [tid] = local_tid + global_offset * n_tid_x()
+
       [body]
     end
 
@@ -8308,6 +8316,7 @@ function codegen.top(cx, node)
           return codegen.top_task(cx, cuda_node)
       end)
       std.register_task(cuda_task)
+      cpu_task:set_cuda_variant(cuda_task)
 
       return cpu_task
     end

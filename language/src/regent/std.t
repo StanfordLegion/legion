@@ -3829,7 +3829,7 @@ do
     end)
   end
 
-  local supported_math_ops = {
+  local supported_math_ops = { -- math operators supported by ISA
     "ceil",
     "cos",
     "exp",
@@ -3844,8 +3844,29 @@ do
     "trunc"
   }
 
+  local cmath_ops = { -- math operators backed by standard library
+    "acos",
+    "asin",
+    "atan",
+    "cbrt",
+    "tan",
+    "pow",
+    "fmod",
+  }
+
   for _, fname in pairs(supported_math_ops) do
     std[fname] = math_op_factory(fname)
+    if std.config["cuda"] and cudahelper.check_cuda_available() then
+      cudahelper.register_builtin(fname, std[fname](double))
+    end
+  end
+
+  local cmath = terralib.includec("math.h")
+  for _, fname in pairs(cmath_ops) do
+    std[fname] = function(arg_type) return cmath[fname] end
+    if std.config["cuda"] and cudahelper.check_cuda_available() then
+      cudahelper.register_builtin(fname, std[fname](double))
+    end
   end
 
   function std.is_math_op(op)
