@@ -1671,10 +1671,16 @@ namespace Legion {
     void* Future::get_untyped_result(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-        return impl->get_untyped_result(silence_warnings);
-      else
-        return NULL;
+      if (impl == NULL)
+      {
+        Internal::log_run.error("Illegal request for future "
+                                "value from empty future");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_REQUEST_FOR_EMPTY_FUTURE);
+      }
+      return impl->get_untyped_result(silence_warnings);
     }
 
     /////////////////////////////////////////////////////////////
