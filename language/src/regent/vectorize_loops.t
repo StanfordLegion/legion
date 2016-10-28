@@ -573,7 +573,7 @@ function check_vectorizability.block(cx, node)
 end
 
 -- reject an aliasing between the read set and write set
-function check_vectorizability.check_aliasing(cx, write_set)
+function check_vectorizability.has_aliasing(cx, write_set)
   -- ignore write accesses directly to the region being iterated over
   cx.loop_symbol:gettype():bounds():map(function(r)
     write_set[r] = nil
@@ -592,11 +592,12 @@ function check_vectorizability.check_aliasing(cx, write_set)
           end
           cx:report_error_when_demanded(node, error_prefix ..
             "aliasing update of path " ..  tostring(ty) .. path)
-          return false
+          return true
         end
       end
     end
   end
+  return false
 end
 
 function check_vectorizability.stat(cx, node)
@@ -690,7 +691,9 @@ function check_vectorizability.stat(cx, node)
           write_set[ty][field_hash] = data.newtuple(field, node)
         end
       end)
-      check_vectorizability.check_aliasing(cx, write_set)
+      if check_vectorizability.has_aliasing(cx, write_set) then
+        return false
+      end
     end
 
     return true
