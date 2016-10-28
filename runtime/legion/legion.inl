@@ -1361,27 +1361,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T Future::get_result(void)
+    inline T Future::get_result(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       // Unpack the value using LegionSerialization in case
       // the type has an alternative method of unpacking
-      return LegionSerialization::unpack<T>(get_untyped_result());
+      return 
+        LegionSerialization::unpack<T>(get_untyped_result(silence_warnings));
     }
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline const T& Future::get_reference(void)
+    inline const T& Future::get_reference(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      return *((const T*)get_untyped_result());
+      return *((const T*)get_untyped_result(silence_warnings));
     }
 
     //--------------------------------------------------------------------------
-    inline const void* Future::get_untyped_pointer(void)
+    inline const void* Future::get_untyped_pointer(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      return get_untyped_result();
+      return get_untyped_result(silence_warnings);
     }
 
     //--------------------------------------------------------------------------
@@ -1404,11 +1405,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T FutureMap::get_result(const DomainPoint &dp)
+    inline T FutureMap::get_result(const DomainPoint &dp, bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       Future f = get_future(dp);
-      return f.get_result<T>();
+      return f.get_result<T>(silence_warnings);
     }
 
     //--------------------------------------------------------------------------

@@ -126,6 +126,7 @@ list(APPEND LOW_RUNTIME_SRC
 )
 find_package(Threads REQUIRED)
 add_library(LowLevelRuntime ${LOW_RUNTIME_SRC})
+target_compile_definitions(LowLevelRuntime PUBLIC __STDC_FORMAT_MACROS)
 target_link_libraries(LowLevelRuntime
   PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
 )

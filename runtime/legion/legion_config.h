@@ -356,6 +356,8 @@ typedef enum legion_error_t {
   ERROR_UNATTACHED_DETACH = 158,
   ERROR_INVALID_PROJECTION_RESULT = 159,
   ERROR_ILLEGAL_IMPLICIT_MAPPING = 160,
+  ERROR_INNER_TASK_VIOLATION = 161,
+  ERROR_REQUEST_FOR_EMPTY_FUTURE = 162,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

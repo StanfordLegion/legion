@@ -1650,30 +1650,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Future::get_void_result(void) const
+    void Future::get_void_result(bool silence_warnings) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->get_void_result();
+        impl->get_void_result(silence_warnings);
     }
 
     //--------------------------------------------------------------------------
-    bool Future::is_empty(bool block /*= true*/) const
+    bool Future::is_empty(bool block /*= true*/, 
+                          bool silence_warnings/*=false*/) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        return impl->is_empty(block);
+        return impl->is_empty(block, silence_warnings);
       return true;
     }
 
     //--------------------------------------------------------------------------
-    void* Future::get_untyped_result(void)
+    void* Future::get_untyped_result(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-        return impl->get_untyped_result();
-      else
-        return NULL;
+      if (impl == NULL)
+      {
+        Internal::log_run.error("Illegal request for future "
+                                "value from empty future");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_REQUEST_FOR_EMPTY_FUTURE);
+      }
+      return impl->get_untyped_result(silence_warnings);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1743,19 +1750,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMap::get_void_result(const DomainPoint &point)
+    void FutureMap::get_void_result(const DomainPoint &point, 
+                                    bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->get_void_result(point);
+        impl->get_void_result(point, silence_warnings);
     }
 
     //--------------------------------------------------------------------------
-    void FutureMap::wait_all_results(void)
+    void FutureMap::wait_all_results(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->wait_all_results();
+        impl->wait_all_results(silence_warnings);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1824,13 +1832,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegion::wait_until_valid(void)
+    void PhysicalRegion::wait_until_valid(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->wait_until_valid();
+      impl->wait_until_valid(silence_warnings);
     }
 
     //--------------------------------------------------------------------------
@@ -1856,25 +1864,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
       LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_accessor(void) const
+        PhysicalRegion::get_accessor(bool silence_warnings) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->get_accessor();
+      return impl->get_accessor(silence_warnings);
     }
 
     //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
       LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegion::get_field_accessor(FieldID fid) const
+        PhysicalRegion::get_field_accessor(FieldID fid, 
+                                           bool silence_warnings) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      return impl->get_field_accessor(fid);
+      return impl->get_field_accessor(fid, silence_warnings);
     }
 
     //--------------------------------------------------------------------------

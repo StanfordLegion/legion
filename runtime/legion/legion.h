@@ -947,13 +947,15 @@ namespace Legion {
        * Wait on the result of this future.  Return
        * the value of the future as the specified 
        * template type.
+       * @param silence_warnings silence any warnings for this blocking call
        * @return the value of the future cast as the template type
        */
-      template<typename T> inline T get_result(void);
+      template<typename T> inline T get_result(bool silence_warnings = false);
       /**
        * Block until the future completes.
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      void get_void_result(void) const;
+      void get_void_result(bool silence_warnings = false) const;
       /**
        * Check to see if the future is empty.  The
        * user can specify whether to block and wait
@@ -961,8 +963,10 @@ namespace Legion {
        * returning.  If the non-blocking version
        * of the call will return true, until
        * the future actually completes.
+       * @param block indicate whether to block for the result
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      bool is_empty(bool block = false) const;
+      bool is_empty(bool block = false, bool silence_warnings = false) const;
     public:
       /**
        * Return a const reference to the future.
@@ -974,8 +978,10 @@ namespace Legion {
        * own risk.  Note also that this call will not
        * properly deserialize buffers that were serialized
        * with a 'legion_serialize' method.
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      template<typename T> inline const T& get_reference(void);
+      template<typename T> 
+        inline const T& get_reference(bool silence_warnings = false);
       /**
        * Return an untyped pointer to the 
        * future result.  WARNING: this
@@ -983,8 +989,9 @@ namespace Legion {
        * as get_reference.  It also will not 
        * deserialize anything serialized with a 
        * legion_serialize method.
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      inline const void* get_untyped_pointer(void);
+      inline const void* get_untyped_pointer(bool silence_warnings = false);
     public:
       /**
        * Allow users to generate their own futures. These
@@ -1002,7 +1009,7 @@ namespace Legion {
 						const void *buffer,
 						size_t bytes);
     private:
-      void* get_untyped_result(void); 
+      void* get_untyped_result(bool silence_warnings); 
     };
 
     /**
@@ -1040,10 +1047,12 @@ namespace Legion {
        * Block until we can return the result for the
        * task executing for the given domain point.
        * @param point the point task to wait for
+       * @param silence_warnings silence any warnings for this blocking call
        * @return the return value of the task
        */
       template<typename T>
-        inline T get_result(const DomainPoint &point);
+        inline T get_result(const DomainPoint &point,
+                            bool silence_warnings = false);
       /**
        * Non-blocking call that will return a future that
        * will contain the value from the given index task
@@ -1056,8 +1065,10 @@ namespace Legion {
        * Blocking call that will return one the point
        * in the index space task has executed.
        * @param point the point task to wait for
+       * @param silience_warnings silence any warnings for this blocking call
        */
-      void get_void_result(const DomainPoint &point);
+      void get_void_result(const DomainPoint &point,
+                           bool silence_warnings = false);
     public:
       /**
        * An older method for getting the result of
@@ -1089,8 +1100,9 @@ namespace Legion {
       /**
        * Wait for all the tasks in the index space launch of
        * tasks to complete before returning.
+       * @param silence_warnings silience warnings for this blocking call
        */
-      void wait_all_results(void); 
+      void wait_all_results(bool silence_warnings = false); 
     }; 
 
 
@@ -1538,9 +1550,11 @@ namespace Legion {
       /**
        * For physical regions returned as the result of an
        * inline mapping, this call will block until the physical
-       * instance has a valid copy of the data.
+       * instance has a valid copy of the data. You can silence
+       * warnings about this blocking call with the 
+       * 'silence_warnings' parameter.
        */
-      void wait_until_valid(void);
+      void wait_until_valid(bool silence_warnings = false);
       /**
        * For physical regions returned from inline mappings,
        * this call will query if the instance contains valid
@@ -1556,17 +1570,21 @@ namespace Legion {
        * @deprecated
        * Return a generic accessor for the entire physical region.
        * This method is now deprecated. Please use the 'get_field_accessor'
-       * method instead.
+       * method instead. You can silence warnings about this blocking
+       * call with the 'silence_warnings' parameter.
        */
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
-          get_accessor(void) const;
+          get_accessor(bool silience_warnings = false) const;
       /**
        * Return a field accessor for a specific field within the region.
+       * You can silence warnings regarding this blocking call with
+       * the 'silence_warnings' parameter.
        */
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
-          get_field_accessor(FieldID field) const; 
+          get_field_accessor(FieldID field, 
+                             bool silence_warnings = false) const;
       /**
        * Return the memories where the underlying physical instances locate.
        */

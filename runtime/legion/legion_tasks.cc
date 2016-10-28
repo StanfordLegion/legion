@@ -7426,6 +7426,51 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
+      // See if there are any runtime warnings to issue
+      if (Runtime::runtime_warnings)
+      {
+        if (total_children_count == 0)
+        {
+          // If there were no sub operations and this wasn't marked a
+          // leaf task then signal a warning
+          if (!is_leaf())
+          {
+            VariantImpl *impl = 
+              runtime->find_variant_impl(task_id, selected_variant);
+            log_run.warning("WARNING: Variant %s of task %s (UID %lld) was "
+                "not marked as a 'leaf' variant but it didn't execute any "
+                "operations. Did you forget the 'leaf' annotation?", 
+                impl->get_name(), get_task_name(), get_unique_id());
+          }
+        }
+        else if (!is_inner())
+        {
+          // If this task had sub operations and wasn't marked as inner
+          // and made no accessors warn about missing 'inner' annotation
+          bool has_accessor = false;
+          for (unsigned idx = 0; idx < physical_regions.size(); idx++)
+          {
+            if (!physical_regions[idx].impl->created_accessor())
+              continue;
+            has_accessor = true;
+            break;
+          }
+          if (!has_accessor)
+          {
+            VariantImpl *impl = 
+              runtime->find_variant_impl(task_id, selected_variant);
+            log_run.warning("WARNING: Variant %s of task %s (UID %lld) was "
+                "not marked as an 'inner' variant but it only launched "
+                "operations and did not make any accessors. Did you "
+                "forget the 'inner' annotation?",
+                impl->get_name(), get_task_name(), get_unique_id());
+          }
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert((regions.size() + 
+                created_requirements.size()) == physical_regions.size());
+#endif
       // Quick check to make sure the user didn't forget to end a trace
       if (current_trace != NULL)
       {
