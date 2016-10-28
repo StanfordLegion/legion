@@ -293,6 +293,9 @@ function base.task:setname(name)
   if self:get_parallel_variant() then
     self:get_parallel_variant():setname(name .. data.newtuple("parallelized"))
   end
+  if self:get_cuda_variant() then
+    self:get_cuda_variant():setname(name)
+  end
 end
 
 function base.task:getdefinition()
@@ -344,6 +347,14 @@ end
 
 function base.task:get_parallel_variant()
   return self.parallel_variant
+end
+
+function base.task:set_cuda_variant(task)
+  self.cuda_variant = task
+end
+
+function base.task:get_cuda_variant()
+  return self.cuda_variant
 end
 
 function base.task:make_variant()
@@ -419,6 +430,7 @@ do
       complete_thunk = false,
       is_complete = false,
       parallel_variant = false,
+      cuda_variant = false,
     }, base.task)
   end
 end
