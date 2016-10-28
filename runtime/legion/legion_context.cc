@@ -106,6 +106,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskContext::is_inner_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::add_physical_region(const RegionRequirement &req,
                                    bool mapped, MapperID mid, MappingTagID tag,
                                    ApUserEvent unmap_event, bool virtual_mapped, 
@@ -2053,18 +2060,19 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    InnerContext::InnerContext(Runtime *rt, TaskOp *owner,
+    InnerContext::InnerContext(Runtime *rt, TaskOp *owner, bool full_inner,
                                const std::vector<RegionRequirement> &reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, bool remote)
       : TaskContext(rt, owner, reqs), 
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
-        remote_context(remote), parent_req_indexes(parent_indexes), 
-        virtual_mapped(virt_mapped), total_children_count(0), 
-        total_close_count(0), outstanding_children_count(0), 
-        current_trace(NULL), valid_wait_event(false), outstanding_subtasks(0), 
-        pending_subtasks(0), pending_frames(0), currently_active_context(false),
+        remote_context(remote), full_inner_context(full_inner),
+        parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
+        total_children_count(0), total_close_count(0), 
+        outstanding_children_count(0), current_trace(NULL), 
+        valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0), 
+        pending_frames(0), currently_active_context(false),
         current_fence(NULL), fence_gen(0) 
     //--------------------------------------------------------------------------
     {
@@ -2088,7 +2096,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(const InnerContext &rhs)
       : TaskContext(NULL, NULL, rhs.regions), tree_context(rhs.tree_context),
-        context_uid(0), remote_context(false),
+        context_uid(0), remote_context(false), full_inner_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
         virtual_mapped(rhs.virtual_mapped)
     //--------------------------------------------------------------------------
@@ -2186,6 +2194,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return owner_task->get_depth();
+    }
+
+    //--------------------------------------------------------------------------
+    bool InnerContext::is_inner_context(void) const
+    //--------------------------------------------------------------------------
+    {
+      return full_inner_context;
     }
 
     //--------------------------------------------------------------------------
@@ -3605,6 +3620,54 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
+// Safe to cast to a single task here because this will never
+      // be called while inlining an index space task
+#ifdef DEBUG_LEGION
+      SingleTask *single_task = dynamic_cast<SingleTask*>(owner_task);
+      assert(single_task != NULL);
+#else
+      SingleTask *single_task = static_cast<SingleTask*>(owner_task);
+#endif
+      // See if there are any runtime warnings to issue
+      if (Runtime::runtime_warnings)
+      {
+        if (total_children_count == 0)
+        {
+          // If there were no sub operations and this wasn't marked a
+          // leaf task then signal a warning
+          VariantImpl *impl = 
+            runtime->find_variant_impl(single_task->task_id, 
+                                       single_task->get_selected_variant());
+          log_run.warning("WARNING: Variant %s of task %s (UID %lld) was "
+              "not marked as a 'leaf' variant but it didn't execute any "
+              "operations. Did you forget the 'leaf' annotation?", 
+              impl->get_name(), get_task_name(), get_unique_id());
+        }
+        else if (!single_task->is_inner())
+        {
+          // If this task had sub operations and wasn't marked as inner
+          // and made no accessors warn about missing 'inner' annotation
+          bool has_accessor = false;
+          for (unsigned idx = 0; idx < physical_regions.size(); idx++)
+          {
+            if (!physical_regions[idx].impl->created_accessor())
+              continue;
+            has_accessor = true;
+            break;
+          }
+          if (!has_accessor)
+          {
+            VariantImpl *impl = 
+              runtime->find_variant_impl(single_task->task_id, 
+                                         single_task->get_selected_variant());
+            log_run.warning("WARNING: Variant %s of task %s (UID %lld) was "
+                "not marked as an 'inner' variant but it only launched "
+                "operations and did not make any accessors. Did you "
+                "forget the 'inner' annotation?",
+                impl->get_name(), get_task_name(), get_unique_id());
+          }
+        }
+      }
       // Quick check to make sure the user didn't forget to end a trace
       if (current_trace != NULL)
       {
@@ -3624,15 +3687,7 @@ namespace Legion {
         if (it->impl->is_mapped())
           it->impl->unmap_region();
       }
-      inline_regions.clear();
-      // Safe to cast to a single task here because this will never
-      // be called while inlining an index space task
-#ifdef DEBUG_LEGION
-      SingleTask *single_task = dynamic_cast<SingleTask*>(owner_task);
-      assert(single_task != NULL);
-#else
-      SingleTask *single_task = static_cast<SingleTask*>(owner_task);
-#endif
+      inline_regions.clear(); 
       const LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked&
         physical_instances = single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
@@ -4010,15 +4065,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt, UniqueID ctx_id)
-      : InnerContext(rt, NULL, dummy_requirements, dummy_indexes, 
-                     dummy_mapped, ctx_id)
+      : InnerContext(rt, NULL, false/*full inner*/, dummy_requirements, 
+                     dummy_indexes, dummy_mapped, ctx_id)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(const TopLevelContext &rhs)
-      : InnerContext(NULL, NULL, 
+      : InnerContext(NULL, NULL, false,
                      dummy_requirements, dummy_indexes, dummy_mapped, 0)
     //--------------------------------------------------------------------------
     {
@@ -4245,8 +4300,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(Runtime *rt, UniqueID context_uid)
-      : InnerContext(rt, NULL, remote_task.regions, local_parent_req_indexes,
-          local_virtual_mapped, context_uid, true/*remote*/),
+      : InnerContext(rt, NULL, false/*full inner*/, remote_task.regions, 
+          local_parent_req_indexes, local_virtual_mapped, 
+          context_uid, true/*remote*/),
         parent_ctx(NULL), depth(-1), top_level_context(false), 
         remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
@@ -4255,7 +4311,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(const RemoteContext &rhs)
-      : InnerContext(NULL, NULL, rhs.regions, local_parent_req_indexes,
+      : InnerContext(NULL, NULL, false, rhs.regions, local_parent_req_indexes,
           local_virtual_mapped, 0, true), remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {

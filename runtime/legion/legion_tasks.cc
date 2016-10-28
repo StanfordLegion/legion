@@ -3674,8 +3674,9 @@ namespace Legion {
       {
         if (!variant->is_leaf() || has_virtual_instances())
         {
-          InnerContext *inner_ctx = new InnerContext(runtime, this, regions,
-                          parent_req_indexes, virtual_mapped, unique_op_id);
+          InnerContext *inner_ctx = new InnerContext(runtime, this, 
+              variant->is_inner(), regions, parent_req_indexes, 
+              virtual_mapped, unique_op_id);
           if (mapper == NULL)
             mapper = runtime->find_mapper(current_proc, map_id);
           inner_ctx->configure_context(mapper);

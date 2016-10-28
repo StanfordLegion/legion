@@ -381,6 +381,8 @@ namespace Legion {
         get_physical_instances(void) const { return physical_instances; }
       inline const std::vector<bool>& get_no_access_regions(void) const
         { return no_access_regions; }
+      inline VariantID get_selected_variant(void) const 
+        { return selected_variant; }
     public:
       void initialize_map_task_input(Mapper::MapTaskInput &input,
                                      Mapper::MapTaskOutput &output,

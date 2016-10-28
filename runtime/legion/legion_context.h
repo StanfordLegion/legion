@@ -107,6 +107,7 @@ namespace Legion {
       virtual void inline_child_task(TaskOp *child) = 0;
       virtual VariantImpl* select_inline_variant(TaskOp *child) const = 0;
       virtual bool is_leaf_context(void) const;
+      virtual bool is_inner_context(void) const;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -433,7 +434,7 @@ namespace Legion {
         AddressSpaceID source;
       };
     public:
-      InnerContext(Runtime *runtime, TaskOp *owner,
+      InnerContext(Runtime *runtime, TaskOp *owner, bool full_inner,
                    const std::vector<RegionRequirement> &reqs,
                    const std::vector<unsigned> &parent_indexes,
                    const std::vector<bool> &virt_mapped,
@@ -451,6 +452,7 @@ namespace Legion {
       virtual ContextID get_context_id(void) const;
       virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
+      virtual bool is_inner_context(void) const;
       virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
@@ -553,6 +555,7 @@ namespace Legion {
       const RegionTreeContext tree_context; 
       const UniqueID context_uid;
       const bool remote_context;
+      const bool full_inner_context;
     protected:
       Mapper::ContextConfigOutput           context_configuration;
     protected:
