@@ -123,6 +123,8 @@ namespace Legion {
         InstanceInfo *instance = unpack_instance(f);
         instance_infos[instance->original_id] = instance;
       }
+      // Unpack the ID of the top level task
+      ignore_result(fread(&top_level_id, sizeof(top_level_id), 1, f));
       unsigned num_tasks;
       ignore_result(fread(&num_tasks, sizeof(num_tasks), 1, f));
       for (unsigned idx = 0; idx < num_tasks; idx++)
@@ -287,8 +289,9 @@ namespace Legion {
                                       MapTaskOutput&     output)
     //--------------------------------------------------------------------------
     {
-      TaskMappingInfo *mapping = find_task_mapping(ctx, task, task.index_point);  
-      assert(mapping->mappings.size() == task.regions.size());
+      TaskMappingInfo *mapping = find_task_mapping(ctx, task, task.index_point);
+      // Legion Spy might overapproximate for newly created regions
+      assert(task.regions.size() <= mapping->mappings.size());
       for (unsigned idx = 0; idx < task.regions.size(); idx++)
         mapping->mappings[idx]->map_requirement(runtime, ctx, 
             task.regions[idx].parent, output.chosen_instances[idx]);
@@ -637,7 +640,7 @@ namespace Legion {
       rez.serialize(task.get_unique_id());
       rez.serialize(mapping->original_unique_id);
       runtime->broadcast(ctx, rez.get_buffer(), 
-                         rez.get_buffer_size(), ID_MAPPING_MESSAGE);
+                         rez.get_used_bytes(), ID_MAPPING_MESSAGE);
     }
 
     //--------------------------------------------------------------------------
@@ -707,7 +710,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Nothing to do, no stealing in the replay mapper
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -796,7 +798,7 @@ namespace Legion {
             std::map<unsigned long,InstanceInfo*>::const_iterator finder = 
               instance_infos.find(original_id);
             assert(finder != instance_infos.end());
-            finder->second->decrement_use_count(runtime, ctx);
+            finder->second->decrement_use_count(runtime, ctx, false);
             break;
           }
         default:
@@ -990,6 +992,7 @@ namespace Legion {
                     sizeof(info->original_unique_id), 1, f));
       ignore_result(fread(&info->target_proc, sizeof(info->target_proc), 1, f));
       ignore_result(fread(&info->priority, sizeof(info->priority), 1, f));
+      ignore_result(fread(&info->variant, sizeof(info->variant), 1, f));
       unsigned num_premappings;
       ignore_result(fread(&num_premappings, sizeof(num_premappings), 1, f));
       for (unsigned idx = 0; idx < num_premappings; idx++)
@@ -1252,8 +1255,18 @@ namespace Legion {
         assert(task_mappings.find(key) != task_mappings.end());
         return task_mappings[key];
       }
+      else if (task.get_depth() == 0)
+      {
+        // Handle the root case
+        std::pair<UniqueID,DomainPoint> key(top_level_id, p);
+        assert(task_mappings.find(key) != task_mappings.end());
+        // Save the ID 
+        original_mappings[unique_id] = top_level_id;
+        return task_mappings[key];
+      }
       else
       {
+
         // We're doing the lookup for a child task mapping
         // Find the parent task ID mapping
         TaskMappingInfo *parent_info = 
@@ -1262,11 +1275,25 @@ namespace Legion {
         // Now that we've got the parent, look up our original operation id
         unsigned operation_index = task.get_context_index();
         assert(operation_index < parent_info->operation_ids.size());
-        UniqueID original_id = parent_info->operation_ids[operation_index];
+        const UniqueID original_id = parent_info->operation_ids[operation_index];
+        original_mappings[unique_id] = original_id;
+        if (task.is_index_space)
+        {
+          // If this is an index task, just return the first one
+          // with the proper ID
+          for (std::map<std::pair<UniqueID,DomainPoint>,
+                        TaskMappingInfo*>::const_iterator it = 
+                task_mappings.begin(); it != task_mappings.end(); it++)
+          {
+            if (it->first.first == original_id)
+              return it->second;
+          }
+          assert(false);
+        }
+        // Single task case
         std::pair<UniqueID,DomainPoint> key(original_id, p);
         assert(task_mappings.find(key) != task_mappings.end());
         // Save the ID
-        original_mappings[unique_id] = original_id;
         return task_mappings[key];
       }
     }
@@ -1395,7 +1422,7 @@ namespace Legion {
         assert(false);
       }
       // Update the use count
-      decrement_use_count(runtime, ctx);
+      decrement_use_count(runtime, ctx, true);
       return instance;
     }
 
@@ -1452,19 +1479,20 @@ namespace Legion {
         rez.serialize(original_id);
         runtime->pack_physical_instance(ctx, rez, instance);
         runtime->broadcast(ctx, rez.get_buffer(), 
-                           rez.get_buffer_size(), INSTANCE_CREATION_MESSAGE); 
+                           rez.get_used_bytes(), INSTANCE_CREATION_MESSAGE); 
       }
       else
       {
         // Send a request to make it if one hasn't been sent yet
         if (!request_event.exists())
         {
+          // Make the event before sending the message
+          request_event = runtime->create_mapper_event(ctx);
           Legion::Serializer rez;
           rez.serialize(original_id);
           rez.serialize(handle);
           runtime->send_message(ctx, creator, rez.get_buffer(), 
-                                rez.get_buffer_size(), CREATE_INSTANCE_MESSAGE);
-          request_event = runtime->create_mapper_event(ctx);
+                                rez.get_used_bytes(), CREATE_INSTANCE_MESSAGE);
         }
         runtime->wait_on_mapper_event(ctx, request_event);
       }
@@ -1487,7 +1515,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplayMapper::InstanceInfo::decrement_use_count(MapperRuntime *runtime,
-                                                         MapperContext ctx)
+                                                  MapperContext ctx, bool first)
     //--------------------------------------------------------------------------
     {
       if (is_owner)
@@ -1499,7 +1527,7 @@ namespace Legion {
           runtime->set_garbage_collection_priority(ctx, instance, 
                                                    GC_MAX_PRIORITY);
       }
-      else
+      else if (first)
       {
         // Send a user decrement message
         runtime->broadcast(ctx, &original_id, 

@@ -47,7 +47,8 @@ namespace Legion {
                              LogicalRegion handle);
         void record_created_instance(MapperRuntime *runtime, MapperContext ctx,
                                      PhysicalInstance result);
-        void decrement_use_count(MapperRuntime *runtime, MapperContext ctx);
+        void decrement_use_count(MapperRuntime *runtime, 
+                                 MapperContext ctx, bool first);
       public:
         unsigned long original_id;
         unsigned num_uses;
@@ -340,6 +341,7 @@ namespace Legion {
       std::map<UniqueID/*original*/,CloseMappingInfo*>   close_mappings;
       std::map<UniqueID/*original*/,ReleaseMappingInfo*> release_mappings;
     protected:
+      UniqueID                                           top_level_id;
       std::map<UniqueID/*current*/,UniqueID/*original*/> original_mappings;
       std::map<UniqueID/*current*/,MapperEvent>          pending_task_ids;
     protected:
