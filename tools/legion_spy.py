@@ -6992,6 +6992,7 @@ class Task(object):
             replay_file.write(struct.pack('I',0))
         # Pack the temporaries
         if self.op.temporaries:
+            replay_file.write(struct.pack('I',len(self.op.temporaries)))
             for index,temp in self.op.temporaries.iteritems():
                 replay_file.write(struct.pack('I',index))
                 self.op.pack_temporary_replay_info(replay_file, 
@@ -7585,7 +7586,7 @@ class Instance(object):
             for color in path:
                 replay_file.write(struct.pack('i', color.dim))
                 for idx in range(color.dim):
-                    replay_file.write(struct.pack('i', color.vals[idx]))
+                    replay_file.write(struct.pack('Q', color.vals[idx]))
 
 class EventHandle(object):
     __slots__ = ['uid']
