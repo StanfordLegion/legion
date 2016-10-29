@@ -516,7 +516,8 @@ namespace Legion {
     public:
       void prepare_for_shutdown(void);
     public:
-      void add_mapper(MapperID mid, MapperManager *m, bool check, bool own);
+      void add_mapper(MapperID mid, MapperManager *m, 
+                      bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
       MapperManager* find_mapper(MapperID mid, bool need_lock = true) const;
     public:

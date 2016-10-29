@@ -65,6 +65,7 @@ namespace Legion {
       public:
         MapperManager *manager;
         Processor sender;
+        unsigned kind;
         void *message;
         size_t size;
         bool broadcast;
