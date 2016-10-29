@@ -960,7 +960,7 @@ namespace Legion {
           ignore_result(fread(&offset.offset, sizeof(offset.offset), 1, f));
         }
       }
-      // Unpack the paths
+      // Unpack the paths for describing the logical subregions
       unsigned num_paths;
       ignore_result(fread(&num_paths, sizeof(num_paths), 1, f));
       info->region_paths.resize(num_paths);
@@ -1017,7 +1017,11 @@ namespace Legion {
       unsigned num_temporaries;
       ignore_result(fread(&num_temporaries, sizeof(num_temporaries), 1, f));
       for (unsigned idx = 0; idx < num_temporaries; idx++)
-        info->temporaries[idx] = unpack_temporary(f);
+      {
+        unsigned index;
+        ignore_result(fread(&index, sizeof(index), 1, f));
+        info->temporaries[index] = unpack_temporary(f);
+      }
       unsigned num_tunables;
       ignore_result(fread(&num_tunables, sizeof(num_tunables), 1, f));
       info->tunables.resize(num_tunables);
@@ -1520,8 +1524,12 @@ namespace Legion {
     {
       if (is_owner)
       {
+        // Legion spy isn't computing use counts properly
+        // TODO: fix this
+#if 0
         assert(num_uses > 0);
         num_uses--;
+#endif
         // If we're done using it, we can set a high GC priority
         if (num_uses == 0)
           runtime->set_garbage_collection_priority(ctx, instance, 
