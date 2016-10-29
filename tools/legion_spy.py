@@ -6297,6 +6297,8 @@ class Operation(object):
             # Get the unique set of instances
             unique_insts = set()
             for inst in mapping.itervalues():
+                if inst.is_virtual():
+                    continue
                 unique_insts.add(inst)
             replay_file.write(struct.pack('I',len(unique_insts)))
             for inst in unique_insts:
@@ -6318,6 +6320,7 @@ class Operation(object):
 
     def pack_inline_replay_info(self, replay_file):
         assert self.kind == MAP_OP_KIND
+        replay_file.write(struct.pack('Q',self.uid))
         assert 0 in self.reqs
         assert 0 in self.mappings
         assert len(self.mappings) == 1
@@ -6334,6 +6337,7 @@ class Operation(object):
 
     def pack_copy_replay_info(self, replay_file):
         assert self.kind == COPY_OP_KIND
+        replay_file.write(struct.pack('Q',self.uid))
         assert len(self.reqs) % 2 == 0
         half = len(self.reqs) / 2
         replay_file.write(struct.pack('I',half))
@@ -6361,6 +6365,7 @@ class Operation(object):
         
     def pack_close_replay_info(self, replay_file):
         assert self.kind == INTER_CLOSE_OP_KIND
+        replay_file.write(struct.pack('Q',self.uid))
         assert 0 in self.reqs
         if 0 in self.mappings:
             assert len(self.mappings) == 1
@@ -6380,6 +6385,7 @@ class Operation(object):
 
     def pack_release_replay_info(self, replay_file):
         assert self.kind == RELEASE_OP_KIND
+        replay_file.write(struct.pack('Q',self.uid))
         if self.temporaries:
             assert 0 in self.reqs
             assert 0 in self.mappings
@@ -6951,11 +6957,12 @@ class Task(object):
         replay_file.write(struct.pack('Q', op_id))
         replay_file.write(struct.pack('i', self.point.dim))
         for idx in range(self.point.dim):
-            replay_file.write(struct.pack('i',self.point.vals[idx]))
+            replay_file.write(struct.pack('Q',self.point.vals[idx]))
         # Pack the base data
         replay_file.write(struct.pack('Q', op_id)) 
         replay_file.write(struct.pack('Q', self.processor.uid))
         replay_file.write(struct.pack('i', self.priority))
+        replay_file.write(struct.pack('Q', self.variant.vid))
         # Pack premappings
         if self.premappings:
             replay_file.write(struct.pack('I',len(self.premappings)))
@@ -9918,6 +9925,8 @@ class State(object):
                 closes.add(op)
             elif op.kind == RELEASE_OP_KIND:
                 releases.add(op)
+        # Write out the ID of the top-level task
+        replay_file.write(struct.pack('Q',self.top_level_uid))
         # Write out the tasks first 
         replay_file.write(struct.pack('I',len(single_tasks)+total_index))
         for op in single_tasks:
