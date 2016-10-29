@@ -6051,7 +6051,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(finder != acquired->end());
 #endif
-              if (!finder->second.second)
+              // Permit this if we are doing replay mapping
+              if (!finder->second.second && (Runtime::replay_file == NULL))
               {
                 log_run.error("Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper made an illegal decision "
