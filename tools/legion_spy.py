@@ -4894,7 +4894,7 @@ class Operation(object):
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
                  'need_logical_replay', 'reachable_cache', 
                  'transitive_warning_issued', 'arrival_barriers', 'wait_barriers',
-                 'created_futures', 'used_futures']
+                 'created_futures', 'used_futures', 'merged']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -4948,6 +4948,8 @@ class Operation(object):
         # Future information
         self.created_futures = None
         self.used_futures = None
+        # Check if this operation was merged
+        self.merged = False
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND or \
@@ -5355,6 +5357,7 @@ class Operation(object):
         # Should only be called on point tasks
         assert not self.points
         assert not other.points
+        other.merged = True
 
     def compute_physical_reachable(self):
         # We can skip some of these
@@ -6310,8 +6313,8 @@ class Operation(object):
             unique_pairs[mapping[fid]] = inst
         replay_file.write(struct.pack('I',len(unique_pairs)))
         for dst,src in unique_pairs.iteritems():
-            replay_file.write(struct.pack('Q',dst))
-            replay_file.write(struct.pack('Q',src))
+            replay_file.write(struct.pack('Q',dst.handle))
+            replay_file.write(struct.pack('Q',src.handle))
 
     def pack_inline_replay_info(self, replay_file):
         assert self.kind == MAP_OP_KIND
@@ -6945,6 +6948,7 @@ class Task(object):
 
     def pack_task_replay_info(self, replay_file, op_id):
         # Pack the point
+        replay_file.write(struct.pack('Q', op_id))
         replay_file.write(struct.pack('i', self.point.dim))
         for idx in range(self.point.dim):
             replay_file.write(struct.pack('i',self.point.vals[idx]))
@@ -6963,10 +6967,13 @@ class Task(object):
         else:
             replay_file.write(struct.pack('I',0))
         # Pack mappings
-        replay_file.write(struct.pack('I',len(self.op.reqs)))
-        for index in range(len(self.op.reqs)):
-            self.op.pack_requirement_replay_info(replay_file, self.op.reqs[index], 
-                None if index not in self.op.mappings else self.op.mappings[index])
+        if self.op.reqs:
+            replay_file.write(struct.pack('I',len(self.op.reqs)))
+            for index in range(len(self.op.reqs)):
+                self.op.pack_requirement_replay_info(replay_file, self.op.reqs[index], 
+                    None if index not in self.op.mappings else self.op.mappings[index])
+        else:
+            replay_file.write(struct.pack('I',0))
         # Pack postmappings
         if self.postmappings:
             replay_file.write(struct.pack('I',len(self.postmappings)))
@@ -9880,7 +9887,7 @@ class State(object):
                 continue
             inst.pack_inst_replay_info(replay_file)
         # Find all the sets of operations
-        total_tasks = 0
+        total_index = 0
         single_tasks = set()
         index_tasks = set()
         inlines = set()
@@ -9892,12 +9899,17 @@ class State(object):
                 # If it doesn't have a task and a processor, then it's not real
                 if not op.task or op.task.processor is None:
                     continue
+                # Dont' count points in index space tasks
+                if op.index_owner:
+                    continue
+                # If it was merged we don't count it
+                if op.merged:
+                    continue
                 single_tasks.add(op)
-                total_tasks += 1
             if op.kind == INDEX_TASK_KIND:
                 index_tasks.add(op) 
                 assert op.points is not None
-                total_tasks += len(op.points)
+                total_index += len(op.points)
             elif op.kind == MAP_OP_KIND:
                 inlines.add(op)
             elif op.kind == COPY_OP_KIND:
@@ -9907,16 +9919,15 @@ class State(object):
             elif op.kind == RELEASE_OP_KIND:
                 releases.add(op)
         # Write out the tasks first 
-        replay_file.write(struct.pack('I',total_tasks))
-        actual_packed_tasks = 0
+        replay_file.write(struct.pack('I',len(single_tasks)+total_index))
         for op in single_tasks:
             op.task.pack_task_replay_info(replay_file, op.uid)
-            actual_packed_tasks += 1
+        actual_index_tasks = 0
         for task in index_tasks:
             for point in task.points.itervalues():
                 point.pack_task_replay_info(replay_file, task.uid)
-                actual_packed_tasks += 1
-        assert actual_packed_tasks == total_tasks
+                actual_index_tasks += 1
+        assert actual_index_tasks == total_index
         # Write out the inlines
         replay_file.write(struct.pack('I',len(inlines)))
         for op in inlines:
