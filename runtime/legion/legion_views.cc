@@ -1746,14 +1746,6 @@ namespace Legion {
               current_versions.erase(finder);
             current_versions[it->first+1] |= overlap;
             invalidate_mask |= overlap;
-            // If we are remote update our read masks
-            if (!is_logical_owner())
-            {
-              previous_remote_read_requests -= overlap;
-              previous_remote_read_requests |= 
-                (current_remote_read_requests & overlap);
-              current_remote_read_requests -= overlap;
-            }
           }
         }
         if (!!invalidate_mask)
@@ -1816,12 +1808,6 @@ namespace Legion {
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
             add_versions.begin(); it != add_versions.end(); it++)
         current_versions[it->first] |= it->second;
-      // If we are remote we need to filter our read request masks
-      if (!is_logical_owner())
-      {
-        previous_remote_read_requests -= filter_mask;
-        current_remote_read_requests -= filter_mask;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1891,14 +1877,6 @@ namespace Legion {
             }
             else // no valid iterator so just put in the value
               current_versions[next_number] = intersect;
-            // If we are remote, filter back our previous read requests
-            if (!is_logical_owner())
-            {
-              previous_remote_read_requests -= intersect;
-              previous_remote_read_requests |= 
-                (current_remote_read_requests & intersect);
-              current_remote_read_requests -= intersect;
-            }
             overlap -= intersect;
             if (!overlap)
               continue;
@@ -3052,31 +3030,19 @@ namespace Legion {
           FieldMask overlap = it->second & check_mask;
           if (!overlap)
             continue;
-          // See if we can find it as either the current or the next
-          // version number
+          // See if we can find it as the current version number
           LegionMap<VersionID,FieldMask>::aligned::const_iterator finder = 
             current_versions.find(it->first);
           if (finder != current_versions.end())
           {
-            FieldMask version_overlap = overlap & finder->second;
-            if (!!version_overlap)
-            {
-              // If we've already done the read check for these fields
-              // then we are done
-              FieldMask valid_fields = 
-                version_overlap & current_remote_read_requests;
-              if (!!valid_fields)
-              {
-                need_valid_update -= valid_fields;
-                current_remote_read_requests |= version_overlap;
-              }
-            }
+            const FieldMask version_overlap = overlap & finder->second;
+            if (!version_overlap)
+              continue;
+            need_valid_update -= version_overlap;
+            if (!need_valid_update)
+              break;
           }
         }
-        // When these requests are done the current version number
-        // will have all its field read requests done
-        if (!!need_valid_update)
-          current_remote_read_requests |= need_valid_update;
         // Also look for any pending requests that overlap since they
         // will bring the result up to date for us too
         if (!remote_update_requests.empty())

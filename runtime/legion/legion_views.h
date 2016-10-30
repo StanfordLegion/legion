@@ -648,9 +648,6 @@ namespace Legion {
       // valid lease from the logical owner node. On the owner node it
       // tracks a summary of all the fields that have remote leases.
       FieldMask remote_valid_mask;
-      // These masks track whether we have sent the remote read requests
-      // for fields for the current and previous versions
-      FieldMask current_remote_read_requests, previous_remote_read_requests;
       // Remote nodes also have a data structure for deduplicating
       // requests to the logical owner for updates to particular fields
       LegionMap<RtEvent,FieldMask>::aligned remote_update_requests;
