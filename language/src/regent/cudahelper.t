@@ -187,7 +187,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   end
 end
 
-function cudahelper.codegen_kernel_call(kernel_id, count, args, N, T)
+function cudahelper.codegen_kernel_call(kernel_id, counts, args)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -200,14 +200,54 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, N, T)
     offset = offset + size
   end
 
+  local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
+  local block = terralib.newsymbol(RuntimeAPI.dim3, "block")
+  local launch_domain_init
+
+  local function round_exp(v, n)
+    return `((v + (n - 1)) / n)
+  end
+
+  -- TODO: Make this handle different thread block sizes and access strides
+  if #counts == 1 then
+    local threadSizeX = 128
+    launch_domain_init = quote
+      [grid].x, [grid].y, [grid].z =
+        [round_exp(counts[1], threadSizeX)], 1, 1
+      [block].x, [block].y, [block].z =
+        threadSizeX, 1, 1
+    end
+  elseif #counts == 2 then
+    local threadSizeX = 16
+    local threadSizeY = 16
+    launch_domain_init = quote
+      [grid].x, [grid].y, [grid].z =
+        [round_exp(counts[1], threadSizeX)],
+        [round_exp(counts[2], threadSizeY)], 1
+      [block].x, [block].y, [block].z =
+        [threadSizeX], [threadSizeY], 1
+    end
+  elseif #counts == 3 then
+    local threadSizeX = 16
+    local threadSizeY = 8
+    local threadSizeZ = 2
+    launch_domain_init = quote
+      [grid].x, [grid].y, [grid].z =
+        [round_exp(counts[1], threadSizeX)],
+        [round_exp(counts[2], threadSizeY)],
+        [round_exp(counts[3], threadSizeZ)]
+      [block].x, [block].y, [block].z =
+        [threadSizeX], [threadSizeY], [threadSizeZ]
+    end
+  else
+    assert(false, "Indexspaces more than 3 dimensions are not supported")
+  end
+
   return quote
-    var grid : RuntimeAPI.dim3, block : RuntimeAPI.dim3
-    var threadsPerBlock : uint = T -- hard-coded for the moment
-    var numBlocks : uint = (([count] + (N - 1)) / N + (threadsPerBlock - 1)) / threadsPerBlock
-    grid.x, grid.y, grid.z = numBlocks, 1, 1
-    block.x, block.y, block.z = threadsPerBlock, 1, 1
-    RuntimeAPI.cudaConfigureCall(grid, block, 0, nil)
-    [setupArguments];
+    var [grid], [block]
+    [launch_domain_init]
+    RuntimeAPI.cudaConfigureCall([grid], [block], 0, nil)
+    [setupArguments]
     RuntimeAPI.cudaLaunch([&int8](kernel_id))
   end
 end
