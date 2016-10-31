@@ -2432,7 +2432,9 @@ function parallelize_tasks.top_task(global_cx, node)
     },
     region_divergence = false,
     prototype = prototype,
-    annotations = ast.default_annotations(),
+    annotations = node.annotations {
+      parallel = ast.annotation.Forbid { value = false },
+    },
     span = node.span,
   }
 
