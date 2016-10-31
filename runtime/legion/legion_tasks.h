@@ -125,8 +125,6 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
-      virtual const LegionMap<ProjectionEpochID,FieldMask>::aligned*
-                  get_projection_epochs(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
@@ -847,8 +845,6 @@ namespace Legion {
       virtual void map_and_launch(void) = 0;
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
-      virtual const LegionMap<ProjectionEpochID,FieldMask>::aligned*
-                  get_projection_epochs(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
     public:
@@ -1061,8 +1057,6 @@ namespace Legion {
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
-      virtual const LegionMap<ProjectionEpochID,FieldMask>::aligned*
-                  get_projection_epochs(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual bool is_inline_task(void) const;

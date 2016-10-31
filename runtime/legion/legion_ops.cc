@@ -2075,7 +2075,7 @@ namespace Legion {
                                                 false/*defer add users*/,
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
-                                                mapped_instances, NULL
+                                                mapped_instances
 #ifdef DEBUG_LEGION
                                                , get_logging_name()
                                                , unique_op_id
@@ -2099,7 +2099,7 @@ namespace Legion {
                                                 false/*defer add users*/,
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
-                                                mapped_instances, NULL
+                                                mapped_instances
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -3398,7 +3398,7 @@ namespace Legion {
                                                   false/*defer add users*/,
                                                   true/*read only locks*/,
                                                   map_applied_conditions,
-                                                  src_targets, NULL
+                                                  src_targets
 #ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
@@ -3425,7 +3425,7 @@ namespace Legion {
                                                 false/*defer add users*/,
                                                 false/*not read only*/,
                                                 map_applied_conditions,
-                                                dst_targets, NULL
+                                                dst_targets
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -6826,7 +6826,7 @@ namespace Legion {
                                               false/*defer add users*/,
                                               false/*not read only*/,
                                               map_applied_conditions,
-                                              mapped_instances, NULL
+                                              mapped_instances
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
@@ -7403,7 +7403,7 @@ namespace Legion {
                                               false/*defer add users*/,
                                               false/*not read only*/,
                                               map_applied_conditions,
-                                              mapped_instances, NULL
+                                              mapped_instances
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
@@ -10709,7 +10709,7 @@ namespace Legion {
                                                   false/*defer add users*/,
                                                   false/*not read only*/,
                                                   map_applied_conditions,
-                                                  mapped_instances, NULL
+                                                  mapped_instances
 #ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
@@ -10795,7 +10795,7 @@ namespace Legion {
                                                 false/*defer add users*/,
                                                 false/*not read only*/,
                                                 map_applied_conditions,
-                                                mapped_instances, NULL
+                                                mapped_instances
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id

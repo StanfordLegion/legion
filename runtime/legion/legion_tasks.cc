@@ -709,14 +709,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const LegionMap<ProjectionEpochID,FieldMask>::aligned* 
-                                     TaskOp::get_projection_epochs(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* TaskOp::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
@@ -2315,8 +2307,7 @@ namespace Legion {
                               version_info, restrict_info, this, *it,
                               completion_event, (regions.size() > 1), 
                               true/*need read only reservatins*/,
-                              applied_conditions, chosen_instances,
-                              get_projection_epochs(*it)
+                              applied_conditions, chosen_instances
 #ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
 #endif
@@ -6482,8 +6473,7 @@ namespace Legion {
                                     multiple_requirements/*defer add users*/,
                                     !multiple_requirements/*read only locks*/,
                                     map_applied_conditions,
-                                    physical_instances[idx],
-                                    get_projection_epochs(idx)
+                                    physical_instances[idx]
 #ifdef DEBUG_LEGION
                                     , get_logging_name()
                                     , unique_op_id
@@ -6698,8 +6688,7 @@ namespace Legion {
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
                           true/*defer add users*/, 
                           true/*need read only locks*/,
-                          map_applied_conditions, result,
-                          get_projection_epochs(idx)
+                          map_applied_conditions, result
 #ifdef DEBUG_LEGION
                           , get_logging_name(), unique_op_id
 #endif
@@ -8159,20 +8148,6 @@ namespace Legion {
       assert(idx < restrict_infos.size());
 #endif
       return restrict_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    const LegionMap<ProjectionEpochID,FieldMask>::aligned*
-                                  MultiTask::get_projection_epochs(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < projection_infos.size());
-#endif
-      const ProjectionInfo &info = projection_infos[idx];
-      if (info.is_projecting())
-        return &info.get_projection_epochs();
-      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -9683,14 +9658,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->get_restrict_info(idx);
-    }
-
-    //--------------------------------------------------------------------------
-    const LegionMap<ProjectionEpochID,FieldMask>::aligned*
-                                  PointTask::get_projection_epochs(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      return slice_owner->get_projection_epochs(idx);
     }
 
     //--------------------------------------------------------------------------
