@@ -10758,7 +10758,9 @@ namespace Legion {
       if (arrived && proj_info.is_projecting())
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
-           proj_info.projection_domain, proj_info, are_all_children_disjoint());
+           proj_info.projection_domain, are_all_children_disjoint());
+        if (IS_REDUCE(user.usage))
+          proj_info.set_first_reduction();
         merge_new_field_state(state, new_state);
       }
       else if (next_child.is_valid())
@@ -11448,7 +11450,7 @@ namespace Legion {
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
                         as_partition_node()->row_source->color_space,
-                        proj_info, true/*disjoint*/));
+                        true/*disjoint*/));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -11467,8 +11469,15 @@ namespace Legion {
 #endif
               if (IS_REDUCE(closer.user.usage))
               {
+                const FieldMask overlap = it->valid_fields & current_mask;
+                // Record that some fields are already open
+                open_below |= overlap;
+                // Make the new state to add
+                new_states.push_back(FieldState(closer.user.usage, overlap, 
+                         proj_info.projection, proj_info.projection_domain, 
+                         are_all_children_disjoint()));
                 // If we are a reduction, we can go straight there
-                it->valid_fields -= current_mask;
+                it->valid_fields -= overlap;
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -11545,7 +11554,7 @@ namespace Legion {
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
                         as_partition_node()->row_source->color_space,
-                        proj_info, true/*disjoint*/));
+                        true/*disjoint*/));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -11570,9 +11579,14 @@ namespace Legion {
       // the child below is not valid because projection functions
       // are guaranteed to project down below
       if (!!open_mask)
+      {
         new_states.push_back(FieldState(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_domain, 
-              proj_info, are_all_children_disjoint()));
+              are_all_children_disjoint()));
+        // If this is the first projection reduction record it
+        if (IS_REDUCE(closer.user.usage))
+          proj_info.set_first_reduction();
+      }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);

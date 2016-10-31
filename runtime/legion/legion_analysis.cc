@@ -2761,7 +2761,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, const Domain &proj_dom, 
-                           ProjectionInfo &info, bool disjoint)
+                           bool disjoint)
       : ChildState(m), redop(0), projection(proj), 
         projection_domain(proj_dom), rebuild_timeout(1)
     //--------------------------------------------------------------------------
@@ -2775,7 +2775,6 @@ namespace Legion {
       {
         open_state = OPEN_REDUCE_PROJ;
         redop = usage.redop;
-        info.set_first_reduction();
       }
       else if (disjoint && (projection->depth == 0))
         open_state = OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW;

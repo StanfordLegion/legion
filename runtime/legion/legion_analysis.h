@@ -526,8 +526,7 @@ namespace Legion {
       FieldState(const GenericUser &u, const FieldMask &m, 
                  const ColorPoint &child);
       FieldState(const RegionUsage &u, const FieldMask &m,
-                 ProjectionFunction *proj, const Domain &proj_domain, 
-                 ProjectionInfo &info, bool dis);
+                 ProjectionFunction *proj, const Domain &proj_domain, bool dis);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 
