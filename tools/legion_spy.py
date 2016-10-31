@@ -4187,9 +4187,10 @@ class VerificationTraverser(object):
         if 0 in copy.redops:
             # Normal copy
             # See if we need to do the dataflow check
-            if not self.found_dataflow_path and self.dataflow_stack:
-                if self.dst_field in copy.dst_fields and \
-                    copy.dsts[copy.dst_fields.index(self.dst_field)] is \
+            # and the copy has our field
+            if not self.found_dataflow_path and self.dataflow_stack and \
+                    self.dst_field in copy.dst_fields:
+                if copy.dsts[copy.dst_fields.index(self.dst_field)] is \
                        self.dataflow_stack[-1] and \
                     self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
                     # Traverse the dataflow path
