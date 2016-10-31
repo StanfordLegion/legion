@@ -34,6 +34,7 @@ user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<star
 task_wait_info_pat = re.compile(prefix + r'Prof Task Wait Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
 meta_wait_info_pat = re.compile(prefix + r'Prof Meta Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
 kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
+kind_pat_over = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<over>[0-1])')
 variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
 operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
 multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
@@ -267,9 +268,9 @@ class TaskRange(TimeRange):
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.task)
+        initiation = ''
         if self.task.is_meta:
-            title += (' '+self.task.get_initiation())
-        title += (' '+self.task.get_timing())
+            initiation = str(self.task.op.op_id)
         if not self.task.is_task:
             color = self.task.color or "#555555"
         else:
@@ -278,29 +279,29 @@ class TaskRange(TimeRange):
             start_time = self.start_time
             cur_level = base_level + (max_levels - level)
             for wait_interval in self.task.wait_intervals:
-                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\t%s\n" % \
                         (cur_level,
                          start_time,
-                         wait_interval.start, color, title))
-                tsv_file.write("%d\t%ld\t%ld\t%s\t0.15\t%s\n" % \
+                         wait_interval.start, color, title, initiation))
+                tsv_file.write("%d\t%ld\t%ld\t%s\t0.15\t%s\t%s\n" % \
                         (cur_level,
                          wait_interval.start,
-                         wait_interval.ready, color, title))
-                tsv_file.write("%d\t%ld\t%ld\t%s\t0.45\t%s\n" % \
+                         wait_interval.ready, color, title, initiation))
+                tsv_file.write("%d\t%ld\t%ld\t%s\t0.45\t%s\t%s\n" % \
                         (cur_level,
                          wait_interval.ready,
-                         wait_interval.end, color, title))
+                         wait_interval.end, color, title, initiation))
                 start_time = max(start_time, wait_interval.end)
             if start_time < self.stop_time:
-                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\t%s\n" % \
                         (cur_level,
                          start_time,
-                         self.stop_time, color, title))
+                         self.stop_time, color, title, initiation))
         else:
-            tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+            tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\t%s\n" % \
                     (base_level + (max_levels - level),
                      self.start_time, self.stop_time,
-                     color,title))
+                     color,title,initiation))
         for subrange in self.subranges:
             subrange.emit_tsv(tsv_file, base_level, max_levels, level + 1)
 
@@ -366,7 +367,6 @@ class MessageRange(TimeRange):
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.message)
-        title += (' '+self.message.get_timing())
         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
@@ -407,7 +407,6 @@ class MapperCallRange(TimeRange):
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.call)
-        title += (' '+self.call.get_timing())
         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
@@ -448,7 +447,6 @@ class RuntimeCallRange(TimeRange):
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         title = repr(self.call)
-        title += (' '+self.call.get_timing())
         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
                 (base_level + (max_levels - level),
                  self.start_time, self.stop_time,
@@ -1024,10 +1022,7 @@ class Copy(object):
         return self.op.get_color()
 
     def __repr__(self):
-        return 'Copy initiated by="'+repr(self.op)+'" size='+str(self.size)+\
-                ' total='+str(self.stop-self.start)+ \
-                ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
-
+        return 'Copy size='+str(self.size) + '\t' + str(self.op.op_id)
 class Fill(object):
     def __init__(self, dst, op):
         self.dst = dst
@@ -1041,8 +1036,7 @@ class Fill(object):
         return self.op.get_color()
 
     def __repr__(self):
-        return 'Fill initiated by="'+repr(self.op)+'" total='+str(self.stop-self.start)+ \
-                ' us start='+str(self.start)+' us stop='+str(self.stop)+' us'
+        return 'Fill\t' + str(self.op.op_id)
 
 class Instance(object):
     def __init__(self, inst_id, op):
@@ -1450,8 +1444,12 @@ class State(object):
                     continue
                 m = kind_pat.match(line)
                 if m is not None:
+                    self.log_kind(int(m.group('tid')), m.group('name'), 1)
+                    continue
+                m = kind_pat_over.match(line)
+                if m is not None:
                     self.log_kind(int(m.group('tid')),
-                                  m.group('name'))
+                                  m.group('name'), int(m.group('over')))
                     continue
                 m = variant_pat.match(line)
                 if m is not None:
@@ -1669,10 +1667,10 @@ class State(object):
         assert op_id in variant.op
         variant.op[op_id].add_wait_interval(start, ready, end)
 
-    def log_kind(self, task_id, name):
+    def log_kind(self, task_id, name, overwrite):
         if task_id not in self.task_kinds:
             self.task_kinds[task_id] = TaskKind(task_id, name)
-        else:
+        elif overwrite == 1:
             self.task_kinds[task_id].name = name
 
     def log_variant(self, task_id, variant_id, name):
@@ -2010,18 +2008,36 @@ class State(object):
                                     repr(tsv_file_name)))
         html_file.close()
 
+    def find_unique_dirname(self, dirname):
+        if (not os.path.exists(dirname)):
+            return dirname
+        # if the dirname exists, loop through dirname.i until wee
+        # find one that doesn't exist
+        i = 1
+        while (True):
+            potential_dir = dirname + "." + str(i)
+            if (not os.path.exists(potential_dir)):
+                return potential_dir
+            i += 1
+
     def emit_interactive_visualization(self, output_prefix, show_procs,
                                        show_channels, show_instances):
         self.assign_colors()
-        template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "legion_prof.html.template")
-        data_tsv_file_name = output_prefix + "_data.tsv"
-        processor_tsv_file_name = output_prefix + "_processor.tsv"
-        html_file_name = output_prefix + ".html"
-        print 'Generating interactive visualization files %s, %s, and %s' % \
-                (data_tsv_file_name,processor_tsv_file_name,html_file_name)
 
-        template_file = open(template_file_name, "r")
+        html_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+                "legion_prof.html.template")
+        js_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+                "timeline.js.template")
+        output_dirname = self.find_unique_dirname(output_prefix)
+        data_tsv_file_name = os.path.join(output_dirname, "legion_prof_data.tsv")
+        processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
+        html_file_name = os.path.join(output_dirname, "index.html")
+        js_file_name = os.path.join(output_dirname, "timeline.js")
+        ops_file_name = os.path.join(output_dirname, "legion_prof_ops.tsv")
+        print 'Generating interactive visualization files in directory ' + output_dirname
+
+        os.mkdir(output_dirname)
+        template_file = open(js_template_file_name, "r")
         template = template_file.read()
         template_file.close()
 
@@ -2031,7 +2047,7 @@ class State(object):
         base_level = 0
         last_time = 0
         data_tsv_file = open(data_tsv_file_name, "w")
-        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\n")
+        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n")
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
                 if len(proc.tasks) > 0:
@@ -2052,6 +2068,12 @@ class State(object):
                     last_time = max(last_time, memory.last_time)
         data_tsv_file.close()
 
+        ops_file = open(ops_file_name, "w")
+        ops_file.write("op_id\toperation\n")
+        for op_id, operation in self.operations.iteritems():
+            ops_file.write("\t".join(map(str, [op_id, operation])) + "\n")
+        ops_file.close()
+
         processor_tsv_file = open(processor_tsv_file_name, "w")
         processor_tsv_file.write("level\tprocessor\n")
         if show_procs:
@@ -2065,11 +2087,12 @@ class State(object):
                 processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(memory)))
         processor_tsv_file.close()
 
-        html_file = open(html_file_name, "w")
-        html_file.write(template % (last_time, base_level + 1,
+        js_file = open(js_file_name, "w")
+        js_file.write(template % (last_time, base_level + 1,
                                     repr(os.path.basename(data_tsv_file_name)),
                                     repr(os.path.basename(processor_tsv_file_name))))
-        html_file.close()
+        js_file.close()
+        shutil.copyfile(html_template_file_name, html_file_name)
 
 def usage():
     print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'

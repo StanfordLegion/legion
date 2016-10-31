@@ -946,13 +946,15 @@ namespace Legion {
        * Wait on the result of this future.  Return
        * the value of the future as the specified 
        * template type.
+       * @param silence_warnings silence any warnings for this blocking call
        * @return the value of the future cast as the template type
        */
-      template<typename T> inline T get_result(void);
+      template<typename T> inline T get_result(bool silence_warnings = false);
       /**
        * Block until the future completes.
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      void get_void_result(void) const;
+      void get_void_result(bool silence_warnings = false) const;
       /**
        * Check to see if the future is empty.  The
        * user can specify whether to block and wait
@@ -960,8 +962,10 @@ namespace Legion {
        * returning.  If the non-blocking version
        * of the call will return true, until
        * the future actually completes.
+       * @param block indicate whether to block for the result
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      bool is_empty(bool block = false) const;
+      bool is_empty(bool block = false, bool silence_warnings = false) const;
     public:
       /**
        * Return a const reference to the future.
@@ -973,8 +977,10 @@ namespace Legion {
        * own risk.  Note also that this call will not
        * properly deserialize buffers that were serialized
        * with a 'legion_serialize' method.
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      template<typename T> inline const T& get_reference(void);
+      template<typename T> 
+        inline const T& get_reference(bool silence_warnings = false);
       /**
        * Return an untyped pointer to the 
        * future result.  WARNING: this
@@ -982,8 +988,9 @@ namespace Legion {
        * as get_reference.  It also will not 
        * deserialize anything serialized with a 
        * legion_serialize method.
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      inline const void* get_untyped_pointer(void);
+      inline const void* get_untyped_pointer(bool silence_warnings = false);
     public:
       /**
        * Allow users to generate their own futures. These
@@ -1001,7 +1008,7 @@ namespace Legion {
 						const void *buffer,
 						size_t bytes);
     private:
-      void* get_untyped_result(void); 
+      void* get_untyped_result(bool silence_warnings); 
     };
 
     /**
@@ -1039,10 +1046,12 @@ namespace Legion {
        * Block until we can return the result for the
        * task executing for the given domain point.
        * @param point the point task to wait for
+       * @param silence_warnings silence any warnings for this blocking call
        * @return the return value of the task
        */
       template<typename T>
-        inline T get_result(const DomainPoint &point);
+        inline T get_result(const DomainPoint &point,
+                            bool silence_warnings = false);
       /**
        * Non-blocking call that will return a future that
        * will contain the value from the given index task
@@ -1055,8 +1064,10 @@ namespace Legion {
        * Blocking call that will return one the point
        * in the index space task has executed.
        * @param point the point task to wait for
+       * @param silience_warnings silence any warnings for this blocking call
        */
-      void get_void_result(const DomainPoint &point);
+      void get_void_result(const DomainPoint &point,
+                           bool silence_warnings = false);
     public:
       /**
        * An older method for getting the result of
@@ -1088,8 +1099,9 @@ namespace Legion {
       /**
        * Wait for all the tasks in the index space launch of
        * tasks to complete before returning.
+       * @param silence_warnings silience warnings for this blocking call
        */
-      void wait_all_results(void); 
+      void wait_all_results(bool silence_warnings = false); 
     }; 
 
 
@@ -1149,6 +1161,8 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
+    public:
+      bool                               silence_warnings;
     };
 
     /**
@@ -1209,6 +1223,8 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
+    public:
+      bool                               silence_warnings;
     };
 
     /**
@@ -1284,6 +1300,8 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
     };
 
     /**
@@ -1318,6 +1336,8 @@ namespace Legion {
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
+    public:
+      bool                            silence_warnings;
     };
 
     //==========================================================================
@@ -1521,9 +1541,11 @@ namespace Legion {
       /**
        * For physical regions returned as the result of an
        * inline mapping, this call will block until the physical
-       * instance has a valid copy of the data.
+       * instance has a valid copy of the data. You can silence
+       * warnings about this blocking call with the 
+       * 'silence_warnings' parameter.
        */
-      void wait_until_valid(void);
+      void wait_until_valid(bool silence_warnings = false);
       /**
        * For physical regions returned from inline mappings,
        * this call will query if the instance contains valid
@@ -1539,17 +1561,21 @@ namespace Legion {
        * @deprecated
        * Return a generic accessor for the entire physical region.
        * This method is now deprecated. Please use the 'get_field_accessor'
-       * method instead.
+       * method instead. You can silence warnings about this blocking
+       * call with the 'silence_warnings' parameter.
        */
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
-          get_accessor(void) const;
+          get_accessor(bool silience_warnings = false) const;
       /**
        * Return a field accessor for a specific field within the region.
+       * You can silence warnings regarding this blocking call with
+       * the 'silence_warnings' parameter.
        */
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
-          get_field_accessor(FieldID field) const; 
+          get_field_accessor(FieldID field, 
+                             bool silence_warnings = false) const;
       /**
        * Return the memories where the underlying physical instances locate.
        */
@@ -1644,6 +1670,8 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
     };
 
     /**
@@ -1680,6 +1708,8 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
     };
 
     //==========================================================================
@@ -1707,10 +1737,12 @@ namespace Legion {
                                   const TaskLauncher &launcher);
       inline void add_index_task(const IndexLauncher &launcher);
     public:
-      MapperID                        map_id;
-      MappingTagID               mapping_tag;
-      std::vector<TaskLauncher> single_tasks;
-      std::vector<IndexLauncher> index_tasks;
+      MapperID                      map_id;
+      MappingTagID                  mapping_tag;
+      std::vector<TaskLauncher>     single_tasks;
+      std::vector<IndexLauncher>    index_tasks;
+    public:
+      bool                          silence_warnings;
     };
 
     //==========================================================================
@@ -4536,30 +4568,30 @@ namespace Legion {
        * -------------
        *  Stealing
        * -------------
-       * -hl:nosteal  Disable any stealing in the runtime.  The runtime
+       * -lg:nosteal  Disable any stealing in the runtime.  The runtime
        *              will never query any mapper about stealing.
        * ------------------------
        *  Out-of-order Execution
        * ------------------------
-       * -hl:window <int> Specify the maximum number of child tasks
+       * -lg:window <int> Specify the maximum number of child tasks
        *              allowed in a given task context at a time.  A call
        *              to launch more tasks than the allotted window
        *              will stall the parent task until child tasks
        *              begin completing.  The default is 1024.
-       * -hl:sched <int> The run-ahead factor for the runtime.  How many
+       * -lg:sched <int> The run-ahead factor for the runtime.  How many
        *              outstanding tasks ready to run should be on each
        *              processor before backing off the mapping procedure.
-       * -hl:width <int> Scheduling granularity when handling dependence
+       * -lg:width <int> Scheduling granularity when handling dependence
        *              analysis and issuing operations.  Effectively the
        *              Legion runtime superscalar width.
-       * -hl:inorder  Execute operations in strict propgram order. This
+       * -lg:inorder  Execute operations in strict propgram order. This
        *              flag will actually run the entire operation through
        *              the pipeline and wait for it to complete before
        *              permitting the next operation to start.
        * -------------
        *  Messaging
        * -------------
-       * -hl:message <int> Maximum size in bytes of the active messages
+       * -lg:message <int> Maximum size in bytes of the active messages
        *              to be sent between instances of the high-level 
        *              runtime.  This can help avoid the use of expensive
        *              per-pair-of-node RDMA buffers in the low-level
@@ -4568,35 +4600,35 @@ namespace Legion {
        * ---------------------
        *  Dependence Analysis
        * ---------------------
-       * -hl:no_dyn   Disable dynamic disjointness tests when the runtime
+       * -lg:no_dyn   Disable dynamic disjointness tests when the runtime
        *              has been compiled with macro DYNAMIC_TESTS defined
        *              which enables dynamic disjointness testing.
-       * -hl:epoch <int> Change the size of garbage collection epochs. The
+       * -lg:epoch <int> Change the size of garbage collection epochs. The
        *              default value is 64. Increasing it adds latency to
        *              the garbage collection but makes it more efficient.
        *              Decreasing the value reduces latency, but adds
        *              inefficiency to the collection.
-       * -hl:unsafe_launch Tell the runtime to skip any checks for 
+       * -lg:unsafe_launch Tell the runtime to skip any checks for 
        *              checking for deadlock between a parent task and
        *              the sub-operations that it is launching. Note
        *              that this is unsafe for a reason. The application
        *              can and will deadlock if any currently mapped
        *              regions conflict with those requested by a child
        *              task or other operation.
-       * -hl:unsafe_mapper Tell the runtime to skip any checks for 
+       * -lg:unsafe_mapper Tell the runtime to skip any checks for 
        *              validating the correctness of the results from 
        *              mapper calls. Turning this off may result in 
        *              internal crashes in the runtime if the mapper
        *              provides invalid output from any mapper call.
        *              (Default: false in debug mode, true in release mode.)
-       * -hl:safe_mapper Tell the runtime to perform all correctness
+       * -lg:safe_mapper Tell the runtime to perform all correctness
        *              checks on mapper calls regardless of the 
        *              optimization level. (Default: true in debug mode,
        *              false in release mode.)
        * ---------------------
        *  Resiliency
        * ---------------------
-       * -hl:resilient Enable features that make the runtime resilient
+       * -lg:resilient Enable features that make the runtime resilient
        *              including deferred commit that can be controlled
        *              by the next two flags.  By default this is off
        *              for performance reasons.  Once resiliency mode
@@ -4605,43 +4637,44 @@ namespace Legion {
        * -------------
        *  Debugging
        * ------------- 
-       * -hl:ldb <replay_file> Replay the execution of the application
+       * -lg:warn     Enable all verbose runtime warnings
+       * -lg:ldb <replay_file> Replay the execution of the application
        *              with the associated replay file generted by LegionSpy. 
        *              This will run the application in the Legion debugger.
-       * -hl:replay <replay_file> Rerun the execution of the application with
+       * -lg:replay <replay_file> Rerun the execution of the application with
        *              the associated replay file generated by LegionSpy.
-       * -hl:tree     Dump intermediate physical region tree states before
+       * -lg:tree     Dump intermediate physical region tree states before
        *              and after every operation.  The runtime must be
        *              compiled in debug mode with the DEBUG_LEGION
        *              macro defined.
-       * -hl:disjointness Verify the specified disjointness of 
+       * -lg:disjointness Verify the specified disjointness of 
        *              partitioning operations.  The runtime must be
        *              compiled with the DEBUG_LEGION macro defined.
-       * -hl:separate Indicate that separate instances of the high
+       * -lg:separate Indicate that separate instances of the high
        *              level runtime should be made for each processor.
        *              The default is one runtime instance per node.
        *              This is primarily useful for debugging purposes
        *              to force messages to be sent between runtime 
        *              instances on the same node.
-       * -hl:registration Record the mapping from low-level task IDs to
+       * -lg:registration Record the mapping from low-level task IDs to
        *              task variant names for debugging low-level runtime
        *              error messages.
-       * -hl:test     Replace the default mapper with the test mapper
+       * -lg:test     Replace the default mapper with the test mapper
        *              which will generate sound but random mapping 
        *              decision in order to stress-test the runtime.
-       * -hl:delay <sec> Delay the start of the runtime by 'sec' seconds.
+       * -lg:delay <sec> Delay the start of the runtime by 'sec' seconds.
        *              This is often useful for attaching debuggers on 
        *              one or more nodes prior to an application beginning.
        * -------------
        *  Profiling
        * -------------
-       * -hl:spy      Enable light-weight logging for Legion Spy which
+       * -lg:spy      Enable light-weight logging for Legion Spy which
        *              is valuable for understanding properties of an
        *              application such as the shapes of region trees
        *              and the kinds of tasks/operations that are created.
        *              Checking of the runtime with Legion Spy will still
        *              require the runtime to be compiled with -DLEGION_SPY.
-       * -hl:prof <int> Specify the number of nodes on which to enable
+       * -lg:prof <int> Specify the number of nodes on which to enable
        *              profiling information to be collected.  By default
        *              all nodes are disabled. Zero will disable all
        *              profiling while each number greater than zero will

@@ -5868,7 +5868,7 @@ class Task(object):
         if not self.restrictions: 
             return
         # Requirements that are read-only or reduce can never be restricted
-        if req.priv == READ_ONLY or req.priv == REDUCE:
+        if req.priv == READ_ONLY:
             return
         # Otherwise iterate through the restrictions and
         # find any restrictions we have

@@ -428,11 +428,32 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void FutureImpl::get_void_result(void)
+    void FutureImpl::get_void_result(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings && 
+          (producer_op != NULL))
+      {
+        SingleTask *context = producer_op->get_parent();
+        if (!context->is_leaf())
+          log_run.warning("WARNING: Waiting on a future in non-leaf task %s "
+             "(UID %lld) is a violation of Legion's deferred execution model "
+             "best practices. You may notice a severe performance degradation.",
+             context->get_task_name(), context->get_unique_id());
+      }
       if (!ready_event.has_triggered())
-        ready_event.wait();
+      {
+        SingleTask *context = 
+          (producer_op == NULL) ? NULL : producer_op->get_parent();
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          ready_event.wait();
+          context->end_task_wait();
+        }
+        else
+          ready_event.wait();
+      }
       if (empty)
       {
         if (producer_op != NULL)
@@ -447,11 +468,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* FutureImpl::get_untyped_result(void)
+    void* FutureImpl::get_untyped_result(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings && 
+          (producer_op != NULL))
+      {
+        SingleTask *context = producer_op->get_parent();
+        if (!context->is_leaf())
+          log_run.warning("WARNING: Waiting on a future in non-leaf task %s "
+             "(UID %lld) is a violation of Legion's deferred execution model "
+             "best practices. You may notice a severe performance degradation.",
+             context->get_task_name(), context->get_unique_id());
+      }
       if (!ready_event.has_triggered())
-        ready_event.wait();
+      {
+        SingleTask *context = 
+          (producer_op == NULL) ? NULL : producer_op->get_parent();
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          ready_event.wait();
+          context->end_task_wait();
+        }
+        else
+          ready_event.wait();
+      }
       if (empty)
       {
         if (producer_op != NULL)
@@ -476,9 +518,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FutureImpl::is_empty(bool block)
+    bool FutureImpl::is_empty(bool block, bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings && 
+          (producer_op != NULL))
+      {
+        SingleTask *context = producer_op->get_parent();
+        if (!context->is_leaf())
+          log_run.warning("WARNING: Performing a block is_empty test on a "
+              "in non-leaf task %s (UID %lld) is a violation of Legion's "
+              "deferred execution model best practices. You may notice a "
+              "severe performance degradation.", context->get_task_name(), 
+              context->get_unique_id());
+      }
       if (block && !ready_event.has_triggered())
         ready_event.wait();
       if (block)
@@ -897,17 +950,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::get_void_result(const DomainPoint &point)
+    void FutureMapImpl::get_void_result(const DomainPoint &point,
+                                        bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       Future f = get_future(point);
-      f.get_void_result();
+      f.get_void_result(silence_warnings);
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::wait_all_results(void)
+    void FutureMapImpl::wait_all_results(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings && 
+          (context != NULL) && !context->is_leaf())
+        log_run.warning("WARNING: Waiting for all futures in a future map in "
+            "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
+            "execution model best practices. You may notice a severe "
+            "performance degredation.", context->get_task_name(),
+            context->get_unique_id());
       // Wait on the event that indicates the entire task has finished
       if (valid && !ready_event.has_triggered())
         ready_event.wait();
@@ -974,7 +1035,8 @@ namespace Legion {
                                    bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), virtual_mapped(virt), ready_event(ready), 
-        req(r), mapped(m), valid(false), trigger_on_unmap(false)
+        req(r), mapped(m), valid(false), trigger_on_unmap(false), 
+        made_accessor(false)
     //--------------------------------------------------------------------------
     {
 #ifdef BOUNDS_CHECKS
@@ -987,7 +1049,7 @@ namespace Legion {
       : Collectable(), runtime(NULL), context(NULL), map_id(0), tag(0),
         leaf_region(false), virtual_mapped(false), 
         ready_event(ApEvent::NO_AP_EVENT), mapped(false),
-        valid(false), trigger_on_unmap(false)
+        valid(false), trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1020,9 +1082,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::wait_until_valid(void)
+    void PhysicalRegionImpl::wait_until_valid(bool silence_warnings, 
+                                              bool warn, const char *source)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::runtime_warnings && !silence_warnings &&
+          (context != NULL) && !context->is_leaf())
+      {
+        if (source != NULL)
+          log_run.warning("WARNING: Waiting for a physical region to be valid "
+              "for call %s in non-leaf task %s (UID %lld) is a violation of "
+              "Legion's deferred execution model best practices. You may "
+              "notice a severe performance degradation.", source,
+              context->get_task_name(), context->get_unique_id());
+        else
+          log_run.warning("WARNING: Waiting for a physical region to be valid "
+              "in non-leaf task %s (UID %lld) is a violation of Legion's "
+              "deferred execution model best practices. You may notice a "
+              "severe performance degradation.", context->get_task_name(), 
+              context->get_unique_id());
+      }
 #ifdef DEBUG_LEGION
       assert(mapped); // should only be waiting on mapped regions
 #endif
@@ -1031,6 +1110,12 @@ namespace Legion {
         return;
       if (!ready_event.has_triggered())
       {
+        if (warn && !silence_warnings && (source != NULL))
+          log_run.warning("WARNING: Request for %s was performed on a "
+              "physical region in task %s (ID %lld) without first waiting "
+              "for the physical region to be valid. Legion is performing "
+              "the wait for you.", source, context->get_task_name(), 
+              context->get_unique_id());
         if (context != NULL)
           context->begin_task_wait(false/*from runtime*/);
         ready_event.wait();
@@ -1086,9 +1171,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
       LegionRuntime::Accessor::AccessorType::Generic>
-        PhysicalRegionImpl::get_accessor(void)
+        PhysicalRegionImpl::get_accessor(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (context != NULL)
+      {
+        if (context->is_inner())
+        {
+          log_run.warning("ERROR: Illegal call to 'get_accessor' inside task "
+            "%s (UID %lld) for a variant that was labeled as an 'inner' "
+            "variant.", context->get_task_name(), context->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INNER_TASK_VIOLATION);
+        }
+        else if (Runtime::runtime_warnings && !silence_warnings &&
+                  !context->is_leaf())
+          log_run.warning("WARNING: Call to 'get_accessor' in non-leaf task %s "
+              "(UID %lld) is a blocking operation in violation of Legion's "
+              "deferred execution model best practices. You may notice a "
+              "severe performance degradation.", context->get_task_name(),
+              context->get_unique_id());
+      }
       // If this physical region isn't mapped, then we have to
       // map it before we can return an accessor
       if (!mapped)
@@ -1103,6 +1208,12 @@ namespace Legion {
 #endif
           exit(ERROR_ILLEGAL_IMPLICIT_MAPPING);
         }
+        if (Runtime::runtime_warnings && !silence_warnings)
+          log_run.warning("WARNING: Request for 'get_accessor' was "
+                          "performed on an unmapped region in task %s "
+                          "(UID %lld). Legion is mapping it for you. "
+                          "Please try to be more careful.",
+                          context->get_task_name(), context->get_unique_id());
         runtime->remap_region(context, PhysicalRegion(this));
         // At this point we should have a new ready event
         // and be mapped
@@ -1111,7 +1222,8 @@ namespace Legion {
 #endif
       }
       // Wait until we are valid before returning the accessor
-      wait_until_valid();
+      wait_until_valid(silence_warnings, 
+                       Runtime::runtime_warnings, "get_accessor");
       // You can only legally invoke this method when you have one instance
       if (references.size() > 1)
       {
@@ -1126,6 +1238,7 @@ namespace Legion {
 #endif
         exit(ERROR_DEPRECATED_METHOD_USE);
       }
+      made_accessor = true;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
@@ -1144,9 +1257,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          PhysicalRegionImpl::get_field_accessor(FieldID fid)
+          PhysicalRegionImpl::get_field_accessor(FieldID fid, 
+                                                 bool silence_warnings)
     //--------------------------------------------------------------------------
     {
+      if (context != NULL)
+      {
+        if (context->is_inner())
+        {
+          log_run.warning("ERROR: Illegal call to 'get_field_accessor' inside "
+            "task %s (UID %lld) for a variant that was labeled as an 'inner' "
+            "variant.", context->get_task_name(), context->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INNER_TASK_VIOLATION);
+        }
+        else if (Runtime::runtime_warnings && !silence_warnings &&
+                  !context->is_leaf())
+          log_run.warning("WARNING: Call to 'get_field_accessor' in non-leaf "
+              "task %s (UID %lld) is a blocking operation in violation of "
+              "Legion's deferred execution model best practices. You may "
+              "notice a severe performance degradation.", 
+              context->get_task_name(), context->get_unique_id());
+      }
       // If this physical region isn't mapped, then we have to
       // map it before we can return an accessor
       if (!mapped)
@@ -1161,6 +1295,12 @@ namespace Legion {
 #endif
           exit(ERROR_ILLEGAL_IMPLICIT_MAPPING);
         }
+        if (Runtime::runtime_warnings && !silence_warnings)
+          log_run.warning("WARNING: Request for 'get_field_accessor' was "
+                          "performed on an unmapped region in task %s "
+                          "(UID %lld). Legion is mapping it for you. "
+                          "Please try to be more careful.",
+                          context->get_task_name(), context->get_unique_id());
         runtime->remap_region(context, PhysicalRegion(this));
         // At this point we should have a new ready event
         // and be mapped
@@ -1169,7 +1309,8 @@ namespace Legion {
 #endif 
       }
       // Wait until we are valid before returning the accessor
-      wait_until_valid();
+      wait_until_valid(silence_warnings, 
+                       Runtime::runtime_warnings, "get_field_acessor");
 #ifdef DEBUG_LEGION
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
       {
@@ -1179,6 +1320,7 @@ namespace Legion {
         exit(ERROR_INVALID_FIELD_PRIVILEGES);
       }
 #endif
+      made_accessor = true;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
@@ -6194,7 +6336,7 @@ namespace Legion {
       {
         const SemanticInfo &info = semantic_infos[NAME_SEMANTIC_TAG]; 
         const char *name = (const char*)info.buffer;
-        runtime->profiler->register_task_kind(task_id, name);
+        runtime->profiler->register_task_kind(task_id, name, false);
       }
     }
 
@@ -6412,7 +6554,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((tag == NAME_SEMANTIC_TAG) && (runtime->profiler != NULL))
-        runtime->profiler->register_task_kind(task_id, (const char*)buffer);
+        runtime->profiler->register_task_kind(task_id,(const char*)buffer,true);
 
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
@@ -9793,6 +9935,11 @@ namespace Legion {
         ctx->find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_field call "
+              "in task %s (UID %lld).", ctx->get_task_name(), 
+              ctx->get_unique_id());
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
       }
@@ -9860,6 +10007,11 @@ namespace Legion {
         ctx->find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_image call "
+              "in task %s (UID %lld).", ctx->get_task_name(), 
+              ctx->get_unique_id());
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
       }
@@ -9928,6 +10080,11 @@ namespace Legion {
         ctx->find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_preimage call "
+              "in task %s (UID %lld).", ctx->get_task_name(), 
+              ctx->get_unique_id());
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
       }
@@ -11573,7 +11730,7 @@ namespace Legion {
       Future result = task->initialize_task(ctx, launcher,
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task);
+      execute_task_launch(ctx, task, false/*index*/, launcher.silence_warnings);
       ctx->end_runtime_call();
       return result;
     }
@@ -11709,7 +11866,7 @@ namespace Legion {
       FutureMap result = task->initialize_task(ctx, launcher,
                                           false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task);
+      execute_task_launch(ctx, task, true/*index*/, launcher.silence_warnings);
       ctx->end_runtime_call();
       return result;
     }
@@ -11792,7 +11949,7 @@ namespace Legion {
       Future result = task->initialize_task(ctx, launcher, redop, 
                                   false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task);
+      execute_task_launch(ctx, task, true/*index*/, launcher.silence_warnings);
       ctx->end_runtime_call();
       return result;
     }
@@ -11843,7 +12000,7 @@ namespace Legion {
       Future result = task->initialize_task(ctx, task_id, indexes, 
                 regions, arg, predicate, id, tag, false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task);
+      execute_task_launch(ctx, task, false/*index*/, false/*silence warnings*/);
       ctx->end_runtime_call();
       return result;
     }
@@ -11899,7 +12056,7 @@ namespace Legion {
                           indexes, regions, global_arg, arg_map, predicate,
                           must_parallelism, id, tag, false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task);
+      execute_task_launch(ctx, task, true/*index*/, false/*silence warnings*/);
       ctx->end_runtime_call();
       return result;
     }
@@ -11960,7 +12117,7 @@ namespace Legion {
                             initial_value, predicate, must_parallelism,
                             id, tag, false/*check privileges*/);
 #endif
-      execute_task_launch(ctx, task);
+      execute_task_launch(ctx, task, true/*index*/, false/*silence warnings*/);
       ctx->end_runtime_call();
       return result;
     }
@@ -12239,11 +12396,13 @@ namespace Legion {
         ctx->find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_field call in task %s (UID %lld).",
+              ctx->get_task_name(), ctx->get_unique_id());
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
           unmapped_regions[idx].impl->unmap_region();
-        }
       }
       // Issue the copy operation
       add_to_dependence_queue(proc, fill_op);
@@ -12295,11 +12454,13 @@ namespace Legion {
         ctx->find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_field call in task %s (UID %lld).",
+              ctx->get_task_name(), ctx->get_unique_id());
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
           unmapped_regions[idx].impl->unmap_region();
-        }
       }
       // Issue the copy operation
       add_to_dependence_queue(proc, fill_op);
@@ -12353,11 +12514,13 @@ namespace Legion {
         ctx->find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_fields call in task %s (UID %lld).",
+              ctx->get_task_name(), ctx->get_unique_id());
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
           unmapped_regions[idx].impl->unmap_region();
-        }
       }
       // Issue the copy operation
       add_to_dependence_queue(proc, fill_op);
@@ -12410,11 +12573,13 @@ namespace Legion {
         ctx->find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_fields call in task %s (UID %lld).",
+              ctx->get_task_name(), ctx->get_unique_id());
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
           unmapped_regions[idx].impl->unmap_region();
-        }
       }
       // Issue the copy operation
       add_to_dependence_queue(proc, fill_op);
@@ -12461,11 +12626,13 @@ namespace Legion {
         ctx->find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_fields call in task %s (UID %lld).",
+              ctx->get_task_name(), ctx->get_unique_id());
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
           unmapped_regions[idx].impl->unmap_region();
-        }
       }
       // Issue the copy operation
       add_to_dependence_queue(proc, fill_op);
@@ -12743,11 +12910,14 @@ namespace Legion {
         ctx->find_conflicting_regions(copy_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_copy_operation call in "
+              "task %s (UID %lld).", ctx->get_task_name(), 
+              ctx->get_unique_id());
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
           unmapped_regions[idx].impl->unmap_region();
-        }
       }
       // Issue the copy operation
       add_to_dependence_queue(proc, copy_op);
@@ -13216,10 +13386,13 @@ namespace Legion {
         ctx->find_conflicting_regions(acquire_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_acquire call in "
+              "task %s (UID %lld).", ctx->get_task_name(), 
+              ctx->get_unique_id());
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
           unmapped_regions[idx].impl->unmap_region();
-        }
       }
       // Issue the acquire operation
       add_to_dependence_queue(ctx->get_executing_processor(), acquire_op);
@@ -13266,10 +13439,13 @@ namespace Legion {
         ctx->find_conflicting_regions(release_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_release call in "
+              "task %s (UID %lld).", ctx->get_task_name(), 
+              ctx->get_unique_id());
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-        {
           unmapped_regions[idx].impl->unmap_region();
-        }
       }
       // Issue the release operation
       add_to_dependence_queue(ctx->get_executing_processor(), release_op);
@@ -13475,6 +13651,11 @@ namespace Legion {
         epoch_op->find_conflicted_regions(unmapped_regions);
       if (!unmapped_regions.empty())
       {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_release call in "
+              "task %s (UID %lld).", ctx->get_task_name(), 
+              ctx->get_unique_id());
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
         {
           unmapped_regions[idx].impl->unmap_region();
@@ -16826,7 +17007,8 @@ namespace Legion {
     }
  
     //--------------------------------------------------------------------------
-    void Runtime::execute_task_launch(Context ctx, TaskOp *task)
+    void Runtime::execute_task_launch(Context ctx, TaskOp *task, 
+                                      bool index, bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       Processor proc = ctx->get_executing_processor();
@@ -16853,6 +17035,19 @@ namespace Legion {
           ctx->find_conflicting_regions(task, unmapped_regions);
         if (!unmapped_regions.empty())
         {
+          if (Runtime::runtime_warnings && !silence_warnings)
+          {
+            if (index)
+              log_run.warning("WARNING: Runtime is unmapping and remapping "
+                  "physical regions around execute_index_space call in "
+                  "task %s (UID %lld).", ctx->get_task_name(), 
+                  ctx->get_unique_id());
+            else
+              log_run.warning("WARNING: Runtime is unmapping and remapping "
+                  "physical regions around execute_task call in "
+                  "task %s (UID %lld).", ctx->get_task_name(),
+                  ctx->get_unique_id());
+          }
           for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           {
             unmapped_regions[idx].impl->unmap_region();
@@ -19751,6 +19946,7 @@ namespace Legion {
                                       DEFAULT_GC_EPOCH_SIZE;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
+    /*static*/ bool Runtime::runtime_warnings = false;
     /*static*/ bool Runtime::separate_runtime_instances = false;
     /*static*/ bool Runtime::record_registration = false;
     /*sattic*/ bool Runtime::stealing_disabled = false;
@@ -19846,6 +20042,7 @@ namespace Legion {
         the_runtime = NULL;
         runtime_map = NULL;
         mpi_rank_table = NULL;
+        runtime_warnings = false;
         separate_runtime_instances = false;
         record_registration = false;
         stealing_disabled = false;
@@ -19891,6 +20088,61 @@ namespace Legion {
         unsigned delay_start = 0;
         for (int i = 1; i < argc; i++)
         {
+          BOOL_ARG("-lg:warn",runtime_warnings);
+          BOOL_ARG("-lg:separate",separate_runtime_instances);
+          BOOL_ARG("-lg:registration",record_registration);
+          BOOL_ARG("-lg:nosteal",stealing_disabled);
+          BOOL_ARG("-lg:resilient",resilient_mode);
+          BOOL_ARG("-lg:unsafe_launch",unsafe_launch);
+          BOOL_ARG("-lg:unsafe_mapper",unsafe_mapper);
+          if (!strcmp(argv[i],"-lg:safe_mapper"))
+            unsafe_mapper = false;
+          BOOL_ARG("-lg:inorder",program_order_execution);
+          INT_ARG("-lg:window", initial_task_window_size);
+          INT_ARG("-lg:hysteresis", initial_task_window_hysteresis);
+          INT_ARG("-lg:sched", initial_tasks_to_schedule);
+          INT_ARG("-lg:width", superscalar_width);
+          INT_ARG("-lg:message",max_message_size);
+          INT_ARG("-lg:epoch", gc_epoch_size);
+          if (!strcmp(argv[i],"-lg:no_dyn"))
+            dynamic_independence_tests = false;
+          BOOL_ARG("-lg:spy",legion_spy_enabled);
+          BOOL_ARG("-lg:test",enable_test_mapper);
+          INT_ARG("-lg:delay", delay_start);
+          if (!strcmp(argv[i],"-lg:replay"))
+          {
+            replay_file = argv[++i];
+            continue;
+          }
+          if (!strcmp(argv[i],"-lg:ldb"))
+          {
+            replay_file = argv[++i];
+            legion_ldb_enabled = true;
+            continue;
+          }
+#ifdef DEBUG_LEGION
+          BOOL_ARG("-lg:tree",logging_region_tree_state);
+          BOOL_ARG("-lg:verbose",verbose_logging);
+          BOOL_ARG("-lg:logical_only",logical_logging_only);
+          BOOL_ARG("-lg:physical_only",physical_logging_only);
+          BOOL_ARG("-lg:disjointness",verify_disjointness);
+          BOOL_ARG("-lg:bit_masks",bit_mask_logging);
+#else
+          if (!strcmp(argv[i],"-lg:tree"))
+          {
+            log_run.warning("WARNING: Region tree state logging is "
+                          "disabled.  To enable region tree state logging "
+                                                  "compile in debug mode.");
+          }
+          if (!strcmp(argv[i],"-lg:disjointness"))
+          {
+            log_run.warning("WARNING: Disjointness verification for "
+                      "partition creation is disabled.  To enable dynamic "
+                              "disjointness testing compile in debug mode.");
+          }
+#endif
+          INT_ARG("-lg:prof", num_profiling_nodes);
+          // These are all the deprecated versions of these flag
           BOOL_ARG("-hl:separate",separate_runtime_instances);
           BOOL_ARG("-hl:registration",record_registration);
           BOOL_ARG("-hl:nosteal",stealing_disabled);
@@ -20014,7 +20266,7 @@ namespace Legion {
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         fprintf(stderr,"!!! YOU ARE PROFILING WITH LegionSpy ENABLED  !!!\n");
         fprintf(stderr,"!!! SERIOUS PERFORMANCE DEGRADATION WILL OCCUR!!!\n");
-        fprintf(stderr,"!!! RUN WITHOUT -hl:spy flag FOR PROFILING    !!!\n");
+        fprintf(stderr,"!!! RUN WITHOUT -lg:spy flag FOR PROFILING    !!!\n");
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         for (int i = 0; i < 4; i++)

@@ -159,9 +159,9 @@ namespace Legion {
       virtual VirtualChannelKind get_virtual_channel(void) const 
         { return DEFAULT_VIRTUAL_CHANNEL; }
     public:
-      void get_void_result(void);
-      void* get_untyped_result(void);
-      bool is_empty(bool block);
+      void get_void_result(bool silence_warnings = true);
+      void* get_untyped_result(bool silence_warnings = true);
+      bool is_empty(bool block, bool silence_warnings = true);
       size_t get_untyped_size(void);
       ApEvent get_ready_event(void) const { return ready_event; }
     public:
@@ -234,8 +234,9 @@ namespace Legion {
       FutureMapImpl& operator=(const FutureMapImpl &rhs);
     public:
       Future get_future(const DomainPoint &point);
-      void get_void_result(const DomainPoint &point);
-      void wait_all_results(void);
+      void get_void_result(const DomainPoint &point, 
+                            bool silence_warnings = true);
+      void wait_all_results(bool silence_warnings = true);
       void complete_all_futures(void);
       bool reset_all_futures(void);
 #ifdef DEBUG_LEGION
@@ -287,16 +288,19 @@ namespace Legion {
     public:
       PhysicalRegionImpl& operator=(const PhysicalRegionImpl &rhs);
     public:
-      void wait_until_valid(void);
+      inline bool created_accessor(void) const { return made_accessor; }
+    public:
+      void wait_until_valid(bool silence_warnings, 
+                            bool warn = false, const char *src = NULL);
       bool is_valid(void) const;
       bool is_mapped(void) const;
       LogicalRegion get_logical_region(void) const;
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
-          get_accessor(void);
+          get_accessor(bool silence_warnings = true);
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
-          get_field_accessor(FieldID field);
+          get_field_accessor(FieldID field, bool silence_warnings = true);
     public:
       void unmap_region(void);
       void remap_region(ApEvent new_ready_event);
@@ -336,6 +340,7 @@ namespace Legion {
       // whether to trigger the termination event
       // upon unmap
       bool trigger_on_unmap;
+      bool made_accessor;
       ApUserEvent termination_event;
       ApEvent wait_for_unmap;
 #ifdef BOUNDS_CHECKS
@@ -2204,7 +2209,8 @@ namespace Legion {
     public:
       void remap_unmapped_regions(Processor proc, Context ctx,
             const std::vector<PhysicalRegion> &unmapped_regions);
-      void execute_task_launch(Context ctx, TaskOp *task_op);
+      void execute_task_launch(Context ctx, TaskOp *task_op, 
+                               bool index, bool silence_warnings);
       void add_to_dependence_queue(Processor p, Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                   bool prev_fail, RtEvent wait_on = RtEvent::NO_RT_EVENT);
@@ -2750,6 +2756,7 @@ namespace Legion {
       static unsigned gc_epoch_size;
       static bool runtime_started;
       static bool runtime_backgrounded;
+      static bool runtime_warnings;
       static bool separate_runtime_instances;
       static bool record_registration;
       static bool stealing_disabled;

@@ -1675,9 +1675,13 @@ end
 
 function codegen.expr_function(cx, node)
   local value_type = std.as_read(node.expr_type)
+  local value = node.value
+  if cx.task_meta:getcuda() then
+    value = cudahelper.replace_with_builtin(value)
+  end
   return values.value(
     node,
-    expr.just(emit_debuginfo(node), node.value),
+    expr.just(emit_debuginfo(node), value),
     value_type)
 end
 
@@ -6517,6 +6521,15 @@ function codegen.stat_for_list(cx, node)
              node.expr_type:bounds() == node.value.expr_type:bounds() then
              accesses[node.value] = nil
           end
+        elseif node:is(ast.typed.expr.FieldAccess) and
+               node.field_name == "bounds" and
+               (std.is_region(std.as_read(node.value.expr_type)) or
+                std.is_ispace(std.as_read(node.value.expr_type))) then
+          local ispace_type = std.as_read(node.value.expr_type)
+          if std.is_region(ispace_type) then
+            ispace_type = ispace_type:ispace()
+          end
+          undefined[cx:ispace(ispace_type).bounds] = true
         elseif node:is(ast.typed.expr.Deref) and
                std.is_ref(node.expr_type) and
                node.expr_type:bounds() ~= node.value.expr_type:bounds() then
@@ -6547,10 +6560,6 @@ function codegen.stat_for_list(cx, node)
     end
 
     -- Now wrap the body as a terra function
-
-    -- FIXME: These parameters should be customizable
-    local N = 1
-    local T = 64
 
     local indices = terralib.newlist()
     local lower_bounds = terralib.newlist()
@@ -6583,13 +6592,6 @@ function codegen.stat_for_list(cx, node)
             [block]
           end
         end
-        for i = 2, ispace_type.dim do
-          body = quote
-            for [ indices[i] ] = [ lower_bounds[i] ], [ upper_bounds[i] ] + 1 do
-              [body]
-            end
-          end
-        end
       else
         indices:insert(terralib.newsymbol(c.coord_t, "idx"))
         body = quote
@@ -6601,48 +6603,60 @@ function codegen.stat_for_list(cx, node)
       end
     end
 
-    local tid = terralib.newsymbol(c.size_t, "tid")
-    body = quote
-      do
-        var [ indices[1] ] = [tid] + [ lower_bounds[1] ]
-        if [ indices[1] ] > [ upper_bounds[1] ] then return end
-        [body]
-      end
-    end
-    for i = 2, N do
-      body = quote
-        [body]
-        [tid] = [tid] + T
-        [body]
-      end
-    end
-
     local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
     local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
     local bid_x   = cudalib.nvvm_read_ptx_sreg_ctaid_x
-    local n_bid_x = cudalib.nvvm_read_ptx_sreg_ctaid_x
 
     local tid_y   = cudalib.nvvm_read_ptx_sreg_tid_y
     local n_tid_y = cudalib.nvvm_read_ptx_sreg_ntid_y
     local bid_y   = cudalib.nvvm_read_ptx_sreg_ctaid_y
-    local n_bid_y = cudalib.nvvm_read_ptx_sreg_ctaid_y
 
     local tid_z   = cudalib.nvvm_read_ptx_sreg_tid_z
     local n_tid_z = cudalib.nvvm_read_ptx_sreg_ntid_z
     local bid_z   = cudalib.nvvm_read_ptx_sreg_ctaid_z
-    local n_bid_z = cudalib.nvvm_read_ptx_sreg_ctaid_z
+
+    local index_inits = terralib.newlist()
+    for idx = 1, #indices do
+      index_inits:insert(quote
+        var [ indices[idx] ] = [ lower_bounds[idx] ]
+      end)
+    end
+    if #indices >= 1 then
+      index_inits:insert(quote
+        [ indices[1] ] = [ indices[1] ] + tid_x() + bid_x() * n_tid_x()
+      end)
+    end
+    if #indices >= 2 then
+      index_inits:insert(quote
+        [ indices[2] ] = [ indices[2] ] + tid_y() + bid_y() * n_tid_y()
+      end)
+    end
+    if #indices >= 3 then
+      index_inits:insert(quote
+        [ indices[3] ] = [ indices[3] ] + tid_z() + bid_z() * n_tid_z()
+      end)
+    end
+
+    local index_checks = terralib.newlist()
+    for idx = 1, #indices do
+      index_checks:insert(quote
+        if [ indices[idx] ] > [ upper_bounds[idx] ] then return end
+      end)
+    end
 
     body = quote
-      var local_tid = tid_x() + tid_y() * n_tid_x() + tid_z() * n_tid_y() * n_tid_x()
-      var global_offset = bid_x() + bid_y() * n_bid_x() + bid_z() * n_bid_y() * n_bid_x()
-      var [tid] = local_tid + global_offset
+      [index_inits]
+      [index_checks]
       [body]
     end
 
     local args = terralib.newlist()
     for base_pointer, _ in pairs(base_pointers) do args:insert(base_pointer) end
     for stride, _ in pairs(strides) do args:insert(stride) end
-    for symbol, _ in pairs(undefined) do args:insert(symbol:getsymbol()) end
+    for symbol, _ in pairs(undefined) do
+      if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
+      args:insert(symbol)
+    end
     args:insertall(lower_bounds)
     args:insertall(upper_bounds)
     args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
@@ -6652,17 +6666,20 @@ function codegen.stat_for_list(cx, node)
     -- Register the kernel function to JIT
     local kernel_id = cx.task_meta:addcudakernel(kernel)
 
-    -- kernel launch
-    local count = terralib.newsymbol(c.size_t, "count")
-    local kernel_call = cudahelper.codegen_kernel_call(kernel_id, count, args, N, T)
+    ---- kernel launch
+    local counts = terralib.newlist()
+    for idx = 1, #indices do
+      counts:insert(terralib.newsymbol(c.size_t, "dim_size_" .. idx))
+    end
+    local kernel_call = cudahelper.codegen_kernel_call(kernel_id, counts, args)
 
     if ispace_type:is_opaque() then
       return quote
         [actions]
         while iterator_has_next([it]) do
-          var [count] = 0
-          var [ lower_bounds[1] ] = iterator_next_span([it], &[count], -1).value
-          var [ upper_bounds[1] ] = [ lower_bounds[1] ] + [count] - 1
+          var [ counts[1] ] = 0
+          var [ lower_bounds[1] ] = iterator_next_span([it], &[ counts[1] ], -1).value
+          var [ upper_bounds[1] ] = [ lower_bounds[1] ] + [ counts[1] ] - 1
           [kernel_call]
         end
         [cleanup_actions]
@@ -6674,16 +6691,23 @@ function codegen.stat_for_list(cx, node)
       local bounds_setup = terralib.newlist()
       for idx = 1, ispace_type.dim do
         bounds_setup:insert(quote
-          var [ lower_bounds[idx] ], [ upper_bounds[idx] ] =
-            [rect].lo.x[ [idx - 1] ], [rect].hi.x[ [idx - 1] ]
+          var [ lower_bounds[idx] ], [ upper_bounds[idx] ], [ counts[idx] ] =
+            [rect].lo.x[ [idx - 1] ], [rect].hi.x[ [idx - 1] ],
+            [rect].hi.x[ [idx - 1] ] - [rect].lo.x[ [idx - 1] ] + 1
         end)
+      end
+      for idx = 1, ispace_type.dim do
+        kernel_call = quote
+          if [ counts[idx] ] > 0 then
+            [kernel_call]
+          end
+        end
       end
       return quote
         [actions]
         var [rect] = [domain_get_rect]([domain])
         [bounds_setup]
-        var [count] = [rect].hi.x[0] - [rect].lo.x[0] + 1
-        if [count] > 0 then [kernel_call] end
+        [kernel_call]
         [cleanup_actions]
       end
     end
@@ -8308,6 +8332,7 @@ function codegen.top(cx, node)
           return codegen.top_task(cx, cuda_node)
       end)
       std.register_task(cuda_task)
+      cpu_task:set_cuda_variant(cuda_task)
 
       return cpu_task
     end
