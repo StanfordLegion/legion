@@ -471,13 +471,13 @@ namespace Legion {
       // These first two methods do two-phase updates for copies
       // These methods must be called while holding the lock
       // in non-exclusive and exclusive mode respectively
-      void find_version_updates(const FieldMask &user_mask,
-                                VersionTracker *version_tracker,
-                                FieldMask &write_skip_mask,
-                                FieldMask &filter_mask,
+      void find_copy_version_updates(const FieldMask &copy_mask,
+                                     VersionTracker *version_tracker,
+                                     FieldMask &write_skip_mask,
+                                     FieldMask &filter_mask,
                             LegionMap<VersionID,FieldMask>::aligned &advance,
                             LegionMap<VersionID,FieldMask>::aligned &add_only,
-                                bool is_reducing);
+                                     bool is_reducing);
       void apply_version_updates(FieldMask &filter_mask,
                       const LegionMap<VersionID,FieldMask>::aligned &advance,
                       const LegionMap<VersionID,FieldMask>::aligned &add_only,
@@ -579,6 +579,7 @@ namespace Legion {
                                       bool reading,
                                       std::set<RtEvent> *wait_on = NULL);
       void perform_read_invalidations(const FieldMask &check_mask,
+                                      bool use_split_previous,
                                       VersionTracker *version_tracker,
                                       const AddressSpaceID source,
                                       std::set<RtEvent> &applied_events);
@@ -1150,10 +1151,10 @@ namespace Legion {
     public:
       // From VersionTracker
       virtual bool is_upper_bound_node(RegionTreeNode *node) const;
-      virtual void get_field_versions(RegionTreeNode *node,
+      virtual void get_field_versions(RegionTreeNode *node, bool split_prev,
                                       const FieldMask &needed_fields,
                                       FieldVersions &field_versions);
-      virtual void get_advance_versions(RegionTreeNode *node,
+      virtual void get_advance_versions(RegionTreeNode *node, bool base,
                                         const FieldMask &needed_fields,
                                         FieldVersions &field_versions);
       virtual void get_split_mask(RegionTreeNode *node, 

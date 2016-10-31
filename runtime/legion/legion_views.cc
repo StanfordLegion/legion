@@ -678,7 +678,7 @@ namespace Legion {
         FieldMask observed, non_dominated, write_skip_mask;
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // Find any version updates as well our write skip mask
-        find_version_updates(copy_mask, versions, write_skip_mask, 
+        find_copy_version_updates(copy_mask, versions, write_skip_mask, 
             filter_mask, advance_versions, add_versions, redop > 0);
         // Can only do the write-skip optimization if this is a single copy
         if (single_copy && !!write_skip_mask)
@@ -782,7 +782,7 @@ namespace Legion {
         FieldMask observed, non_dominated, write_skip_mask;
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // Find any version updates as well our write skip mask
-        find_version_updates(copy_mask, versions, write_skip_mask, 
+        find_copy_version_updates(copy_mask, versions, write_skip_mask, 
             filter_mask, advance_versions, add_versions, redop > 0);
         // Can only do the write skip optimization if this is a single copy
         if (single_copy && !!write_skip_mask)
@@ -917,9 +917,11 @@ namespace Legion {
           // Figure out which version infos we need
           LegionMap<VersionID,FieldMask>::aligned needed_versions;
           FieldVersions field_versions;
-          // We don't need the split fields advanced here 
-          // because we are just contributing
-          versions->get_field_versions(logical_node, copy_mask, field_versions);
+          // We don't need to worry about split fields here, that
+          // will be taken care of on the handler side, just pack
+          // up the version infos as they are currently stored
+          versions->get_field_versions(logical_node, false/*split prev*/,
+                                       copy_mask, field_versions);
           for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
                 field_versions.begin(); it != field_versions.end(); it++)
           {
@@ -963,8 +965,8 @@ namespace Legion {
           versions->get_split_mask(logical_node, copy_mask, split_mask);
           FieldMask non_split = copy_mask - split_mask;
           if (!!non_split)
-            perform_read_invalidations(non_split, versions, 
-                                       source, applied_events);
+            perform_read_invalidations(non_split, true/*use split previous*/,
+                                       versions, source, applied_events);
         }
       }
       if (issue_collect)
@@ -1199,7 +1201,8 @@ namespace Legion {
       if (IS_WRITE(usage))
       {
         FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node,user_mask,advance_versions);
+        versions->get_advance_versions(logical_node, true/*base*/,
+                                       user_mask, advance_versions);
         need_version_update = update_version_numbers(user_mask,advance_versions,
                                                      source, applied_events);
       }
@@ -1247,7 +1250,8 @@ namespace Legion {
       if (need_version_update)
       {
         FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node,user_mask,advance_versions);
+        versions->get_advance_versions(logical_node, false/*base*/,
+                                       user_mask, advance_versions);
         need_update_above = update_version_numbers(user_mask, advance_versions,
                                                    source, applied_events);
       }
@@ -1301,9 +1305,11 @@ namespace Legion {
           // Figure out which version infos we need
           LegionMap<VersionID,FieldMask>::aligned needed_versions;
           FieldVersions field_versions;
-          // No need to advance the split fields here since we
-          // are just reading from the previous version state
-          versions->get_field_versions(logical_node, user_mask, field_versions);
+          // We don't need to worry about split fields here, that
+          // will be taken care of on the handler side, just pack
+          // up the version infos as they are currently stored
+          versions->get_field_versions(logical_node, false/*split previous*/,
+                                       user_mask, field_versions);
           for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
                 field_versions.begin(); it != field_versions.end(); it++)
           {
@@ -1344,8 +1350,8 @@ namespace Legion {
         versions->get_split_mask(logical_node, user_mask, split_mask);
         FieldMask non_split = user_mask - split_mask;
         if (!!non_split)
-          perform_read_invalidations(non_split, versions, 
-                                     source, applied_events);
+          perform_read_invalidations(non_split, false/*use split previous*/,
+                                     versions, source, applied_events);
       }
       if (outstanding_gc_events.find(term_event) == 
           outstanding_gc_events.end())
@@ -1383,7 +1389,8 @@ namespace Legion {
       if (IS_WRITE(usage) && update_versions)
       {
         FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node,user_mask,advance_versions);
+        versions->get_advance_versions(logical_node, true/*base*/,
+                                       user_mask, advance_versions);
         need_version_update = update_version_numbers(user_mask,advance_versions,
                                                      source, applied_events);
       }
@@ -1441,7 +1448,8 @@ namespace Legion {
       if (need_version_update)
       {
         FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node,user_mask,advance_versions);
+        versions->get_advance_versions(logical_node, false/*base*/, 
+                                       user_mask, advance_versions);
         need_update_above = update_version_numbers(user_mask, advance_versions,
                                                    source, applied_events);
       }
@@ -1598,33 +1606,33 @@ namespace Legion {
     }    
 
     //--------------------------------------------------------------------------
-    void MaterializedView::find_version_updates(const FieldMask &user_mask,
-                                                VersionTracker *versions,
-                                                FieldMask &write_skip_mask,
-                                                FieldMask &filter_mask,
+    void MaterializedView::find_copy_version_updates(const FieldMask &copy_mask,
+                                                     VersionTracker *versions,
+                                                     FieldMask &write_skip_mask,
+                                                     FieldMask &filter_mask,
                               LegionMap<VersionID,FieldMask>::aligned &advance,
                               LegionMap<VersionID,FieldMask>::aligned &add_only,
-                                                bool is_reduction)
+                                                     bool is_reduction)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       sanity_check_versions();
 #endif
-      // These should be the field versions that we are targeting
-      // (e.g. the versions after this operation is done)
-      FieldVersions advance_versions;
-      versions->get_advance_versions(logical_node, user_mask, advance_versions);
+      // These are updates for a copy, so we are never going to the
+      // next version number, we only go to the current versions
+      FieldVersions update_versions;
+      versions->get_field_versions(logical_node, true/*split previous*/,
+                                   copy_mask, update_versions);
 #ifndef LEGION_SPY
       FieldMask split_mask;
-      versions->get_split_mask(logical_node, user_mask, split_mask);
+      versions->get_split_mask(logical_node, copy_mask, split_mask);
 #endif
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            advance_versions.begin(); it != advance_versions.end(); it++)
+            update_versions.begin(); it != update_versions.end(); it++)
       {
-        FieldMask overlap = it->second & user_mask;
+        FieldMask overlap = it->second & copy_mask;
         if (!overlap)
           continue;
-        // Special case for the zero version number
         if (it->first == 0)
         {
           filter_mask |= overlap;
@@ -3021,7 +3029,11 @@ namespace Legion {
         // the right version number and whether we have done the read
         // request yet for our given version number
         FieldVersions field_versions;
-        versions->get_field_versions(logical_node, check_mask, field_versions);
+        versions->get_field_versions(logical_node, true/*split prev*/,
+                                     check_mask, field_versions);
+        FieldMask split_mask;
+        versions->get_split_mask(logical_node, check_mask, split_mask);
+        const bool has_split_mask = !!split_mask;
         need_valid_update = check_mask;
         AutoLock v_lock(view_lock);
         for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
@@ -3036,11 +3048,31 @@ namespace Legion {
           if (finder != current_versions.end())
           {
             const FieldMask version_overlap = overlap & finder->second;
-            if (!version_overlap)
+            if (!!version_overlap)
+            {
+              need_valid_update -= version_overlap;
+              if (!need_valid_update)
+                break;
+            }
+          }
+          // If we have a split mask, it's also alright if the current
+          // versions are at the next version number
+          if (has_split_mask)
+          {
+            const FieldMask split_overlap = overlap & split_mask;
+            if (!split_overlap)
               continue;
-            need_valid_update -= version_overlap;
-            if (!need_valid_update)
-              break;
+            finder = current_versions.find(it->first + 1);
+            if (finder != current_versions.end())
+            {
+              const FieldMask version_overlap = split_overlap & finder->second;
+              if (!!version_overlap)
+              {
+                need_valid_update -= version_overlap;
+                if (!need_valid_update)
+                  break;
+              }
+            }
           }
         }
         // Also look for any pending requests that overlap since they
@@ -3130,7 +3162,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::perform_read_invalidations(
-                 const FieldMask &check_mask, VersionTracker *versions,
+         const FieldMask &check_mask, bool split_prev, VersionTracker *versions,
                  const AddressSpaceID source, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -3146,7 +3178,8 @@ namespace Legion {
       // for those fields.
       FieldMask invalidate_mask;
       FieldVersions field_versions;
-      versions->get_field_versions(logical_node, check_mask, field_versions);
+      versions->get_field_versions(logical_node, split_prev,
+                                   check_mask, field_versions);
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
             field_versions.begin(); it != field_versions.end(); it++)
       {
@@ -5222,7 +5255,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::get_field_versions(RegionTreeNode *node,
+    void CompositeView::get_field_versions(RegionTreeNode *node,bool split_prev,
                                            const FieldMask &needed_fields,
                                            FieldVersions &field_versions)
     //--------------------------------------------------------------------------
@@ -5232,7 +5265,8 @@ namespace Legion {
       if ((node == logical_node) || 
           (node->get_depth() <= logical_node->get_depth()))
       {
-        version_info->get_field_versions(node, needed_fields, field_versions);
+        version_info->get_field_versions(node, split_prev,
+                                         needed_fields, field_versions);
         return;
       }
       // See if we've already cached the result
@@ -5264,7 +5298,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::get_advance_versions(RegionTreeNode *node,
+    void CompositeView::get_advance_versions(RegionTreeNode *node, bool base,
                                              const FieldMask &needed_fields,
                                              FieldVersions &field_versions)
     //--------------------------------------------------------------------------

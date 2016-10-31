@@ -969,7 +969,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::get_field_versions(RegionTreeNode *node,
+    void VersionInfo::get_field_versions(RegionTreeNode *node, bool split_prev,
                                          const FieldMask &needed_fields,
                                          FieldVersions &result_versions)
     //--------------------------------------------------------------------------
@@ -977,12 +977,52 @@ namespace Legion {
       const unsigned depth = node->get_depth();
 #ifdef DEBUG_LEGION
       assert(depth < field_versions.size());
+      assert(depth < split_masks.size());
 #endif
-      result_versions = field_versions[depth];
+      const FieldMask &split_mask = split_masks[depth];
+      const FieldVersions &local_versions = field_versions[depth];
+      if (!split_prev || !!split_mask)
+      {
+        // If we don't care about the split previous mask then we can
+        // just copy over what we need
+        for (FieldVersions::const_iterator it = local_versions.begin();
+              it != local_versions.end(); it++)
+        {
+          const FieldMask overlap = needed_fields & it->second;
+          if (!overlap)
+            continue;
+          result_versions[it->first] = overlap;
+        }
+      }
+      else
+      {
+        // We need to save any fields that are needed, and we want
+        // the previous version number for any split fields
+        for (FieldVersions::const_iterator it = local_versions.begin();
+              it != local_versions.end(); it++)
+        {
+          FieldMask overlap = needed_fields & it->second;
+          if (!overlap)
+            continue;
+          FieldMask split_overlap = overlap & split_mask;
+          if (!split_overlap)
+          {
+            result_versions[it->first] = overlap;
+            continue;
+          }
+#ifdef DEBUG_LEGION
+          assert(it->first > 0);
+#endif
+          result_versions[it->first - 1] = split_overlap;
+          overlap -= split_overlap;
+          if (!!overlap)
+            result_versions[it->first] = overlap;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::get_advance_versions(RegionTreeNode *node,
+    void VersionInfo::get_advance_versions(RegionTreeNode *node, bool base,
                                            const FieldMask &needed_fields,
                                            FieldVersions &result_versions)
     //--------------------------------------------------------------------------
@@ -992,29 +1032,15 @@ namespace Legion {
       assert(depth < split_masks.size());
       assert(depth < field_versions.size());
 #endif
-      FieldMask split_overlap = split_masks[depth] & needed_fields;
-      if (!!split_overlap)
+      const FieldVersions &local_versions = field_versions[depth];
+      if (base)
       {
-        // Intermediate node with split fields, we only need the
-        // split fields for the advance part
-        const FieldVersions &local_versions = field_versions[depth];
-        for (FieldVersions::const_iterator it = local_versions.begin();
-              it != local_versions.end(); it++)
-        {
-          FieldMask overlap = it->second & split_overlap;
-          if (!overlap)
-            continue;
-          result_versions[it->first+1] = overlap;
-          split_overlap -= overlap;
-          if (!split_overlap)
-            break;
-        }
-      }
-      else if (depth == (field_versions.size() - 1))
-      {
+        // Should be no split masks for base updates
+#ifdef DEBUG_LEGION
+        assert(!split_masks[depth]);
+#endif
         // Bottom node with no split fields so therefore we need all
         // the fields advanced
-        const FieldVersions &local_versions = field_versions[depth];
         for (FieldVersions::const_iterator it = local_versions.begin();
               it != local_versions.end(); it++)
         {
@@ -1024,8 +1050,19 @@ namespace Legion {
           result_versions[it->first+1] = overlap;
         }
       }
-      // Otherwise it was an intermediate level with no split mask
-      // so there are by definition no advance fields
+      else
+      {
+        // Above versions have already been advanced as reflected
+        // by split fields
+        for (FieldVersions::const_iterator it = local_versions.begin();
+              it != local_versions.end(); it++)
+        {
+          FieldMask overlap = needed_fields & it->second;
+          if (!overlap)
+            continue;
+          result_versions[it->first] = overlap;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

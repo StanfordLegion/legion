@@ -197,10 +197,10 @@ namespace Legion {
     class VersionTracker {
     public:
       virtual bool is_upper_bound_node(RegionTreeNode *node) const = 0;
-      virtual void get_field_versions(RegionTreeNode *node, 
+      virtual void get_field_versions(RegionTreeNode *node, bool split_prev, 
                                       const FieldMask &needed_fields,
                                       FieldVersions &field_versions) = 0;
-      virtual void get_advance_versions(RegionTreeNode *node,
+      virtual void get_advance_versions(RegionTreeNode *node, bool base,
                                         const FieldMask &needed_fields,
                                         FieldVersions &field_versions) = 0;
       virtual void get_split_mask(RegionTreeNode *node, 
@@ -260,10 +260,10 @@ namespace Legion {
       virtual void get_split_mask(RegionTreeNode *node, 
                                   const FieldMask &needed_fields,
                                   FieldMask &split);
-      virtual void get_field_versions(RegionTreeNode *node,
+      virtual void get_field_versions(RegionTreeNode *node, bool split_prev,
                                       const FieldMask &needed_fields,
                                       FieldVersions &field_versions);
-      virtual void get_advance_versions(RegionTreeNode *node,
+      virtual void get_advance_versions(RegionTreeNode *node, bool base,
                                         const FieldMask &needed_fields,
                                         FieldVersions &field_versions);
     public:
