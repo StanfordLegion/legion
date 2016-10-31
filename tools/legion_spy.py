@@ -157,13 +157,18 @@ def compute_dependence_type(req1, req2):
 
 def check_preconditions(preconditions, op, check_reorder):
     assert op.reachable_cache is not None
+    forward_reachable = None
     for pre in preconditions:
         if pre not in op.reachable_cache:
             # Special case for handling when read-only operations
             # are mapped out of order, check to see if the anti-dependence
             # was serialized in the other order
-            if check_reorder and pre in op.physical_outgoing:
-                continue
+            if check_reorder:
+                if not forward_reachable:
+                    forward_reachable = set()
+                    op.get_physical_reachable(forward_reachable, True)
+                if pre in forward_reachable:
+                    continue
             return pre
     return None
 
