@@ -323,7 +323,9 @@ namespace Legion {
                                   bool defer_add_users,
                                   bool need_read_only_reservations,
                                   std::set<RtEvent> &map_applied,
-                                  InstanceSet &targets
+                                  InstanceSet &targets,
+                                  // projection_epochs can be NULL
+        const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs
 #ifdef DEBUG_LEGION
                                  , const char *log_name
                                  , UniqueID uid
@@ -1778,7 +1780,8 @@ namespace Legion {
       void register_region(const TraversalInfo &info, SingleTask *context, 
                            RestrictInfo &restrict_info, ApEvent term_event,
                            const RegionUsage &usage, bool defer_add_users,
-                           InstanceSet &targets);
+                           InstanceSet &targets,
+           const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs);
       void seed_state(ContextID ctx, ApEvent term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,

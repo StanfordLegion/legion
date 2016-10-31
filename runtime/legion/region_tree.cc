@@ -2132,7 +2132,8 @@ namespace Legion {
                                                bool defer_add_users,
                                                bool need_read_only_reservations,
                                                std::set<RtEvent> &map_applied,
-                                               InstanceSet &targets
+                                               InstanceSet &targets,
+                  const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs
 #ifdef DEBUG_LEGION
                                                , const char *log_name
                                                , UniqueID uid
@@ -2192,7 +2193,7 @@ namespace Legion {
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, local_applied);
         child_node->register_region(info, context, restrict_info, term_event,
-                                    usage, defer_add_users, targets);
+                                    usage, defer_add_users, targets, epochs);
         
         if (!local_applied.empty())
         {
@@ -2219,7 +2220,7 @@ namespace Legion {
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, map_applied);
         child_node->register_region(info, context, restrict_info, term_event,
-                                    usage, defer_add_users, targets);
+                                    usage, defer_add_users, targets, epochs);
       }
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -15313,7 +15314,8 @@ namespace Legion {
                                      SingleTask *context,
                                      RestrictInfo &restrict_info,
                                    ApEvent term_event, const RegionUsage &usage,
-                                   bool defer_add_users, InstanceSet &targets)
+                                   bool defer_add_users, InstanceSet &targets,
+                  const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
@@ -15330,8 +15332,23 @@ namespace Legion {
         const bool update_parent_state = 
           !info.version_info.is_upper_bound_node(this);
         const AddressSpaceID local_space = context->runtime->address_space;
-        manager.advance_versions(info.traversal_mask, context,
-            update_parent_state, local_space, info.map_applied_events);
+        // See if we have any projection epochs we're doing this advance for
+        if (epochs != NULL)
+        {
+          for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
+                it = epochs->begin(); it != epochs->end(); it++)
+          {
+            FieldMask overlap = it->second & info.traversal_mask;
+            if (!overlap)
+              continue;
+            manager.advance_versions(overlap, context, update_parent_state,
+                local_space, info.map_applied_events, false/*dedup opens*/, 0,
+                true/*dedup advances*/, it->first);
+          }
+        }
+        else
+          manager.advance_versions(info.traversal_mask, context,
+              update_parent_state, local_space, info.map_applied_events);
       }
       // Sine we're mapping we need to record the advance versions
       // where we'll put the results when we're done
@@ -15640,7 +15657,7 @@ namespace Legion {
       // logical analysis or will be done as part of the registration.
       RestrictInfo empty_restrict_info;
       register_region(info, context, empty_restrict_info, ApEvent::NO_AP_EVENT,
-                      usage, false/*defer add users*/, targets);
+                      usage, false/*defer add users*/, targets, NULL);
     }
 
     //--------------------------------------------------------------------------
