@@ -4409,8 +4409,17 @@ class VerificationTraverser(object):
             # themselves since they might have occurred after the op
             if op.realm_copies:
                 for copy in op.realm_copies:
+                    if not copy.reachable_cache:
+                        copy.reachable_cache = set()
+                        copy.get_physical_reachable(copy.reachable_cache, False)
+                    # We only have to do the traversal from copies which
+                    # occurred after the operation
+                    if op not in copy.reachable_cache:
+                        copy.reachable_cache = None
+                        continue
                     self.generation = op.state.get_next_traversal_generation()
                     self.visit_node(copy)
+                    copy.reachable_cache = None
         else:
             # Traverse the node and then see if we satisfied everything
             self.traverse_node(op, True)
@@ -5310,16 +5319,22 @@ class Operation(object):
             self.name = other.name
         if not self.reqs:
             self.reqs = other.reqs
-        else:
-            assert not other.reqs
+        elif other.reqs:
+            for idx,req in other.reqs.iteritems():
+                assert idx not in self.reqs
+                self.reqs[idx] = req
         if not self.mappings:
             self.mappings = other.mappings
-        else:
-            assert not other.mappings
+        elif other.mappings:
+            for idx,mapping in other.mappings.iteritems():
+                assert idx not in self.mappings
+                self.mappings[idx] = mapping
         if not self.temporaries:
             self.temporaries = other.temporaries
-        else:
-            assert not other.temporaries
+        elif other.temporaries:
+            for idx,temp in other.temporaries.iteritems():
+                assert idx not in self.temporaries
+                self.temporaries[idx] = temp
         if not self.start_event.exists():
             self.start_event = other.start_event
             if self.start_event.exists():
