@@ -403,13 +403,15 @@ namespace Legion {
     public:
       ProjectionInfo(void)
         : projection(NULL), projection_type(SINGULAR),
-          projection_domain(Domain::NO_DOMAIN) { }
+          projection_domain(Domain::NO_DOMAIN), first_reduction(false) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
                      const Domain &launch_domain);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
       inline const LegionMap<ProjectionEpochID,FieldMask>::aligned&
         get_projection_epochs(void) const { return projection_epochs; }
+      inline bool is_first_reduction(void) const { return first_reduction; }
+      inline void set_first_reduction(void) { first_reduction = true; }
       void record_projection_epoch(ProjectionEpochID epoch,
                                    const FieldMask &epoch_mask);
       void clear(void);
@@ -425,6 +427,12 @@ namespace Legion {
       // Use this information to deduplicate between different points
       // trying to advance information for the same projection epoch
       LegionMap<ProjectionEpochID,FieldMask>::aligned projection_epochs;
+    protected:
+      // Track whether this is the first reduction in a reduction-only
+      // projection epoch which will require a special advance be done
+      // by the point tasks to ensure that the VersionState objects
+      // get registered with their parents
+      bool first_reduction;
     };
 
     /**
@@ -518,7 +526,8 @@ namespace Legion {
       FieldState(const GenericUser &u, const FieldMask &m, 
                  const ColorPoint &child);
       FieldState(const RegionUsage &u, const FieldMask &m,
-                 ProjectionFunction *proj, const Domain &proj_domain, bool dis);
+                 ProjectionFunction *proj, const Domain &proj_domain, 
+                 ProjectionInfo &info, bool dis);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 

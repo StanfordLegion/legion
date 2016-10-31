@@ -10746,7 +10746,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::add_open_field_state(LogicalState &state, bool arrived,
-                                              const ProjectionInfo &proj_info,
+                                              ProjectionInfo &proj_info,
                                               const LogicalUser &user,
                                               const FieldMask &open_mask,
                                               const ColorPoint &next_child)
@@ -10758,7 +10758,7 @@ namespace Legion {
       if (arrived && proj_info.is_projecting())
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
-             proj_info.projection_domain, are_all_children_disjoint());
+           proj_info.projection_domain, proj_info, are_all_children_disjoint());
         merge_new_field_state(state, new_state);
       }
       else if (next_child.is_valid())
@@ -11298,7 +11298,7 @@ namespace Legion {
     void RegionTreeNode::siphon_logical_projection(LogicalCloser &closer,
                                                 LogicalState &state,
                                                 const FieldMask &current_mask,
-                                                const ProjectionInfo &proj_info,
+                                                ProjectionInfo &proj_info,
                                                 bool record_close_operations,
                                                 FieldMask &open_below)
     //--------------------------------------------------------------------------
@@ -11448,7 +11448,7 @@ namespace Legion {
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
                         as_partition_node()->row_source->color_space,
-                        true/*disjoint*/));
+                        proj_info, true/*disjoint*/));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -11545,7 +11545,7 @@ namespace Legion {
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
                         as_partition_node()->row_source->color_space,
-                        true/*disjoint*/));
+                        proj_info, true/*disjoint*/));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -11572,7 +11572,7 @@ namespace Legion {
       if (!!open_mask)
         new_states.push_back(FieldState(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_domain, 
-              are_all_children_disjoint()));
+              proj_info, are_all_children_disjoint()));
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
       sanity_check_logical_state(state);

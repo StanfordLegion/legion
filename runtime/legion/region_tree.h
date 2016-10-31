@@ -1317,7 +1317,7 @@ namespace Legion {
                                const LogicalUser &user,
                                const TraceInfo &trace_info);
       void add_open_field_state(LogicalState &state, bool arrived,
-                                const ProjectionInfo &projection_info,
+                                ProjectionInfo &projection_info,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
                                 const ColorPoint &next_child);
@@ -1338,7 +1338,7 @@ namespace Legion {
       void siphon_logical_projection(LogicalCloser &closer,
                                      LogicalState &state,
                                      const FieldMask &closing_mask,
-                                     const ProjectionInfo &proj_info,
+                                     ProjectionInfo &proj_info,
                                      bool record_close_operations,
                                      FieldMask &open_below);
       void flush_logical_reductions(LogicalCloser &closer,

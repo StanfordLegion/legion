@@ -1946,7 +1946,7 @@ namespace Legion {
           runtime->find_projection_function(req.projection) : NULL),
         projection_type(req.handle_type),
         projection_domain((req.handle_type != SINGULAR) ?
-            launch_domain : Domain::NO_DOMAIN)
+            launch_domain : Domain::NO_DOMAIN), first_reduction(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1972,6 +1972,7 @@ namespace Legion {
       projection_type = SINGULAR;
       projection_domain = Domain::NO_DOMAIN;
       projection_epochs.clear();
+      first_reduction = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1985,6 +1986,7 @@ namespace Legion {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
+      rez.serialize<bool>(first_reduction);
     }
 
     //--------------------------------------------------------------------------
@@ -2006,6 +2008,7 @@ namespace Legion {
         derez.deserialize(epoch_id);
         derez.deserialize(projection_epochs[epoch_id]);
       }
+      derez.deserialize<bool>(first_reduction);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2757,7 +2760,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
-                ProjectionFunction *proj, const Domain &proj_dom, bool disjoint)
+                           ProjectionFunction *proj, const Domain &proj_dom, 
+                           ProjectionInfo &info, bool disjoint)
       : ChildState(m), redop(0), projection(proj), 
         projection_domain(proj_dom), rebuild_timeout(1)
     //--------------------------------------------------------------------------
@@ -2771,6 +2775,7 @@ namespace Legion {
       {
         open_state = OPEN_REDUCE_PROJ;
         redop = usage.redop;
+        info.set_first_reduction();
       }
       else if (disjoint && (projection->depth == 0))
         open_state = OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW;
