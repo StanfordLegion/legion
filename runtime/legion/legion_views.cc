@@ -3082,7 +3082,6 @@ namespace Legion {
         if (!!need_valid_update)
         {
           request_event = Runtime::create_rt_user_event();
-          local_wait_on.insert(request_event);
           remote_update_requests[request_event] = need_valid_update;
         }
       }
@@ -3126,6 +3125,7 @@ namespace Legion {
           rez.serialize(need_valid_update);
         }
         context->runtime->send_view_update_request(logical_owner, rez);
+        local_wait_on.insert(request_event);
       }
       // If we have a parent, see if it needs to send requests too so 
       // we can get as many in flight as possible in parallel
