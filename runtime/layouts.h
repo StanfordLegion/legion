@@ -36,6 +36,7 @@ namespace LegionRuntime {
       DIM_Z
     };
 
+    static inline coord_t BLOCK_UP(coord_t a, coord_t b) { return a - a % b + b - 1; }
     static inline int min(int a, int b) { return (a < b) ? a : b; }
     static inline coord_t min(coord_t a, coord_t b) { return (a < b) ? a : b; }
 
@@ -99,14 +100,44 @@ namespace LegionRuntime {
 
       bool image_is_dense(const Rect<IDIM> r) const
       {
-        assert(0);
-        return false;
+        Rect<1> convex = image_convex(r);
+        coord_t prod = 1;
+        for (unsigned i = 0; i < IDIM; i++) {
+          prod *= 1 + (r.hi[i] - r.lo[i]);
+        }
+        return (convex.hi[0] - convex.lo[0] + 1) == prod;
       }
 
       Rect<ODIM> image_dense_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect) const
       {
-        assert(0);
-        return Rect<ODIM> (Point<ODIM>::ZEROES(), Point<ODIM>::ZEROES());
+        Rect<IDIM> local_r(r.lo - lo_in, r.hi - lo_in);
+        Rect<IDIM> local_s(local_r.lo, local_r.lo);
+        // TODO: for now each dimension can fold at most once
+        coord_t count = 1, subtotal = 1;
+        std::vector<bool> folded(3, false);
+        for (unsigned i = 0; i < dim_sum; i++) {
+          if (count != subtotal) break;
+          unsigned idx;
+          switch (dim_kind[i]) {
+            case DIM_X:
+              idx = 0; break;
+            case DIM_Y:
+              idx = 1; break;
+            case DIM_Z:
+              idx = 2; break;
+            default:
+              assert(0);
+          }
+          if (folded[idx]) break;
+          local_s.hi.x[idx] = min(BLOCK_UP(local_r.lo.x[idx], dim_size[i]),
+                                  local_r.hi.x[idx]);
+          count *= (local_s.hi.x[idx] - local_s.lo.x[idx] + 1);
+          folded[idx] = true;
+          subtotal *= dim_size[i];
+        }
+        subrect = Rect<IDIM>(local_s.lo + lo_in, local_s.hi + lo_in);
+        assert(image_is_dense(subrect));
+        return image_convex(subrect);
       }
 
       Point<ODIM> image_linear_subrect(const Rect<IDIM> r, Rect<IDIM>& subrect, Point<ODIM> strides[IDIM]) const
@@ -254,19 +285,25 @@ namespace LegionRuntime {
         Rect<DIM> r, src_subrect, dst_subrect;
         Point<1> src_strides[DIM], dst_strides[DIM];
         coord_t subtotal = 1;
+        coord_t idx = cur_idx;
+        for (unsigned i = 0; i < DIM; i++) {
+          r.lo.x[i] = idx % orig_rect.dim_size(i) + orig_rect.lo.x[i];
+          idx = idx / orig_rect.dim_size(i);
+        }
+        r.hi = orig_rect.hi;
         switch(iter_order) {
           case XferOrder::SRC_FIFO:
-            r = src_mapping->preimage(make_point(cur_idx + idx_offset));
-            assert(r.volume() == 1);
-            r.hi = orig_rect.hi;
+            //r = src_mapping->preimage(make_point(cur_idx + idx_offset));
+            //assert(r.volume() == 1);
+            //r.hi = orig_rect.hi;
             src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
             dst_idx = dst_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
             break;
           case XferOrder::DST_FIFO:
           case XferOrder::ANY_ORDER:
-            r = dst_mapping->preimage(make_point(cur_idx + idx_offset));
-            assert(r.volume() == 1);
-            r.hi = orig_rect.hi;
+            //r = dst_mapping->preimage(make_point(cur_idx + idx_offset));
+            //assert(r.volume() == 1);
+            //r.hi = orig_rect.hi;
             dst_idx = dst_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
             src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
             break;
@@ -284,11 +321,13 @@ namespace LegionRuntime {
 
         return subtotal;
       }
+
       void move(int steps)
       {
         cur_idx += steps;
         assert(cur_idx <= rect_size);
       }
+
     private:
       Rect<DIM> orig_rect;
       Mapping<DIM, 1> *src_mapping, *dst_mapping;
