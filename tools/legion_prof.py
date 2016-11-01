@@ -1442,14 +1442,15 @@ class State(object):
                                             read_time(m.group('ready')),
                                             read_time(m.group('end')))
                     continue
-                m = kind_pat.match(line)
-                if m is not None:
-                    self.log_kind(int(m.group('tid')), m.group('name'), 1)
-                    continue
+                # Put this one first for maximal munch
                 m = kind_pat_over.match(line)
                 if m is not None:
                     self.log_kind(int(m.group('tid')),
                                   m.group('name'), int(m.group('over')))
+                    continue
+                m = kind_pat.match(line)
+                if m is not None:
+                    self.log_kind(int(m.group('tid')), m.group('name'), 1)
                     continue
                 m = variant_pat.match(line)
                 if m is not None:
