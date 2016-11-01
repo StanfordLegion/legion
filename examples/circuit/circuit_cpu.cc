@@ -15,7 +15,9 @@
 
 
 #include "circuit.h"
+#if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
+#endif
 #include <cmath>
 
 using namespace LegionRuntime::Accessor;

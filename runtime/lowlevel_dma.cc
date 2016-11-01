@@ -40,7 +40,9 @@
 
 using namespace LegionRuntime::Accessor;
 
+#ifndef __GNUC__
 #include "atomics.h"
+#endif
 
 #include "realm/timers.h"
 #include "realm/serialize.h"
