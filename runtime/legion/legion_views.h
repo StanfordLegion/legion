@@ -579,7 +579,6 @@ namespace Legion {
                                       bool reading,
                                       std::set<RtEvent> *wait_on = NULL);
       void perform_read_invalidations(const FieldMask &check_mask,
-                                      bool use_split_previous,
                                       VersionTracker *version_tracker,
                                       const AddressSpaceID source,
                                       std::set<RtEvent> &applied_events);
@@ -640,6 +639,28 @@ namespace Legion {
       LegionMap<VersionID,FieldMask,
                 PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
     protected:
+      // The scheme for tracking whether remote copies of the meta-data
+      // are valid is as follows:
+      //
+      // For readers:
+      //  - At the base view: must be at the current version number
+      //  - At an above view: must be at the current version number
+      //    minus the split mask
+      // These two cases allow us to find Read-After-Write (true) dependences
+      //
+      // For writers:
+      //  - They must have a valid lease tracked by 'remote_valid_mask'
+      //
+      // Mask invalidation is as follows:
+      //  - Writes that advance the version number invalidate the lease so
+      //    we can get the Write-After-Write (anti) dependences correct
+      //  - Any read invalidates the lease so that we can get the
+      //    Write-After-Read (anti) dependences correct
+      //
+      // Note that this scheme still permits as many reads to occur in
+      // parallel on different nodes, and writes to disjoint sub-regions
+      // to occur in parallel without unnecessary invalidations.
+
       // The logical owner node maintains a data structure to track which
       // remote copies of this view have valid field data, whenever the
       // set of users gets filtered for a field from current to previous

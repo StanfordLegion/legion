@@ -958,16 +958,11 @@ namespace Legion {
                             outstanding_gc_events.end());
         outstanding_gc_events.insert(copy_term);
         // See if we need to check for read only invalidates
+        // Don't worry about writing copies, their invalidations
+        // will be sent if they update the version number
         if (!valid_remote_instances.empty() && IS_READ_ONLY(usage))
-        {
-          // We only actually have to do the invalidations if we are not split
-          FieldMask split_mask;
-          versions->get_split_mask(logical_node, copy_mask, split_mask);
-          FieldMask non_split = copy_mask - split_mask;
-          if (!!non_split)
-            perform_read_invalidations(non_split, true/*use split previous*/,
-                                       versions, source, applied_events);
-        }
+          perform_read_invalidations(copy_mask, versions, 
+                                     source, applied_events);
       }
       if (issue_collect)
       {
@@ -1343,16 +1338,10 @@ namespace Legion {
       // Finally add our user and return if we need to issue a GC meta-task
       add_current_user(new_user, term_event, user_mask);
       // See if we need to check for read only invalidates
+      // Don't worry about read-write, the invalidations will
+      // be sent automatically if the version number is advanced
       if (!valid_remote_instances.empty() && IS_READ_ONLY(usage))
-      {
-        // We only actually have to do the invalidations if we are not split
-        FieldMask split_mask;
-        versions->get_split_mask(logical_node, user_mask, split_mask);
-        FieldMask non_split = user_mask - split_mask;
-        if (!!non_split)
-          perform_read_invalidations(non_split, false/*use split previous*/,
-                                     versions, source, applied_events);
-      }
+        perform_read_invalidations(user_mask, versions, source, applied_events);
       if (outstanding_gc_events.find(term_event) == 
           outstanding_gc_events.end())
       {
@@ -3096,8 +3085,6 @@ namespace Legion {
           local_wait_on.insert(request_event);
           remote_update_requests[request_event] = need_valid_update;
         }
-        else if (local_wait_on.empty())
-          return; // no updates need here
       }
       else
       {
@@ -3105,23 +3092,22 @@ namespace Legion {
         // if we're not valid we have to send a request
         AutoLock v_lock(view_lock);
         need_valid_update = check_mask - remote_valid_mask;
-        if (!need_valid_update)
-          return; // We're done if all our fields are valid
-        // See which fields we already have requests for
-        for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-              remote_update_requests.begin(); it != 
-              remote_update_requests.end(); it++)
+        if (!remote_update_requests.empty())
         {
-          FieldMask overlap = need_valid_update & it->second;
-          if (!overlap)
-            continue;
-          if (wait_on != NULL)
-            wait_on->insert(it->first);
-          else
-            local_wait_on.insert(it->first);
-          need_valid_update -= overlap;
-          if (!need_valid_update)
-            break;
+          // See which fields we already have requests for
+          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
+                remote_update_requests.begin(); it != 
+                remote_update_requests.end(); it++)
+          {
+            FieldMask overlap = check_mask & it->second;
+            if (!overlap)
+              continue;
+            if (wait_on != NULL)
+              wait_on->insert(it->first);
+            else
+              local_wait_on.insert(it->first);
+            need_valid_update -= overlap;
+          }
         }
         if (!!need_valid_update)
         {
@@ -3162,7 +3148,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::perform_read_invalidations(
-         const FieldMask &check_mask, bool split_prev, VersionTracker *versions,
+                 const FieldMask &check_mask, VersionTracker *versions,
                  const AddressSpaceID source, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -3173,30 +3159,24 @@ namespace Legion {
       // Quick test for intersection here to see if we are done early
       if (check_mask * remote_valid_mask)
         return;
-      // If we are reading exactly the current version number for any of
-      // these fields, then we need to send invalidations to remote nodes
-      // for those fields.
       FieldMask invalidate_mask;
-      FieldVersions field_versions;
-      versions->get_field_versions(logical_node, split_prev,
-                                   check_mask, field_versions);
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            field_versions.begin(); it != field_versions.end(); it++)
+      // Check to see if we have a split mask, any fields which are
+      // not split have to be invalidated since we're directly reading
+      // the current version number (we know we're reading the current
+      // version number or else something else is broken). In the
+      // case of split version numbers the advance of the version
+      // number already invalidated the remote leases so we don't
+      // have to worry about it.
+      FieldMask split_mask;
+      versions->get_split_mask(logical_node, check_mask, split_mask);
+      if (!!split_mask)
       {
-        FieldMask overlap = it->second & check_mask;
-        if (!overlap)
-          continue;
-        LegionMap<VersionID,FieldMask>::aligned::const_iterator finder = 
-          current_versions.find(it->first);
-        if (finder == current_versions.end())
-          continue;
-        FieldMask version_overlap = overlap & finder->second;
-        if (!version_overlap)
-          continue;
-        invalidate_mask |= version_overlap; 
+        const FieldMask invalidate_mask = check_mask - split_mask;
+        if (!!invalidate_mask)
+          send_invalidations(invalidate_mask, source, applied_events);
       }
-      if (!!invalidate_mask)
-        send_invalidations(invalidate_mask, source, applied_events);
+      else // Reading at the base invalidates all remote leases
+        send_invalidations(check_mask, source, applied_events);
     }
 
     //--------------------------------------------------------------------------
