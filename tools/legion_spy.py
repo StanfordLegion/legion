@@ -5420,8 +5420,9 @@ class Operation(object):
                 continue
             if field not in self.version_numbers[index]:
                 continue
+            # Don't allow these through for now
             if point not in self.version_numbers[index][field]:
-                continue
+                return False
             # At this point, we're interfering so we have to make a choice 
             # See if the version numbers are the same
             if self.version_numbers[index][field][point] == version_number:
