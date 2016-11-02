@@ -4155,10 +4155,10 @@ class VerificationTraverser(object):
             assert False # should never get here
 
     def traverse_node(self, node, first = False):
+        if first:
+            self.generation = node.state.get_next_traversal_generation()
         node.generation = self.generation
         if node.physical_incoming:
-            if first:
-                self.generation = node.state.get_next_traversal_generation()
             for next_node in node.physical_incoming:
                 self.visit_node(next_node)
                 if self.verified() or self.failed_analysis:
@@ -4222,10 +4222,6 @@ class VerificationTraverser(object):
                             # Push it on the stack and continue traversal
                             self.dataflow_stack.append(src)
                             return True
-                else:
-                    # Doesn't impact our desintation instance so keep going
-                    self.skipped_nodes.append(copy)
-                    return True
         else:
             # Reduction copy
             if self.dst_field in copy.dst_fields and \
@@ -5400,26 +5396,29 @@ class Operation(object):
         self.version_numbers[index][field][point] = version_number
 
     def can_traverse_through(self, tree_id, field, point, version_number):
-        # See if we can find a region requirement with the 
-        # correct region tree, field, point and version number
-        if not self.reqs or not self.version_numbers:
+        # We can traverse through this operation if it doesn't
+        # interfere with our point in anyway or if it does, but
+        # we have exactly the same version number
+        if not self.reqs:
             return False
         for index,req in self.reqs.iteritems():
             if req.tid != tree_id:
                 continue
-            if index not in self.version_numbers:
+            if not self.version_numbers or index not in self.version_numbers:
                 continue
             if field not in req.fields:
                 continue
             if field not in self.version_numbers[index]:
                 continue
-            # If it doesn't have our point then we can't go through
             if point not in self.version_numbers[index][field]:
                 continue
+            # At this point, we're interfering so we have to make a choice 
             # See if the version numbers are the same
             if self.version_numbers[index][field][point] == version_number:
                 return True
-        return False 
+            else:
+                return False
+        return True
 
     def compute_physical_reachable(self):
         # We can skip some of these
@@ -6059,6 +6058,9 @@ class Operation(object):
                 continue
             if not req.logical_node.perform_physical_verification(depth, field,
                     self, req, inst, perform_checks, perform_registration):
+                # Switch privilege back if necessary
+                if self.kind == INTER_CLOSE_OP_KIND:
+                    req.priv = READ_WRITE
                 return False
         return True
 
