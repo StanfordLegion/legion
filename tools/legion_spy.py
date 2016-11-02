@@ -4117,7 +4117,11 @@ class VerificationTraverser(object):
         self.error_str = error_str
         self.across = across 
         self.skipped_nodes = list()
-        if state.pending_reductions:
+        # There is an implicit assumption here that if we did a close
+        # to flush a bunch of reductions then copies will always come
+        # from the newly created instance and not from an composite
+        # instance that also buffered the reductions
+        if state.pending_reductions and not state.valid_instances:
             assert state.is_initialized()
             self.found_dataflow_path = dst_inst in state.previous_instances
         else:
@@ -4127,7 +4131,7 @@ class VerificationTraverser(object):
             self.dataflow_stack = list()
             # If there are reductions we can't add the instance to 
             # the stack until we've gone through a reduction
-            if not state.pending_reductions:
+            if not state.pending_reductions or state.valid_instances:
                 self.dataflow_stack.append(dst_inst)    
         self.observed_reductions = set()
         self.failed_analysis = False
@@ -4358,7 +4362,7 @@ class VerificationTraverser(object):
                     assert False
             return False
         # See if we saw all the needed reductions
-        if self.state.pending_reductions and \
+        if self.state.pending_reductions and not self.state.valid_instances and \
             len(self.state.pending_reductions) != len(self.observed_reductions):
             if last:
                 print("ERROR: Missing reductions to apply to field "+
@@ -4499,7 +4503,13 @@ class VerificationState(object):
             # Now that it is up to date, we can update the instance sets
             if req.is_write():
                 # We overwrite everything else
-                self.reset()
+                # Unless we are a close operation in which case we
+                # aren't really making a new version, we're just 
+                # flushing everything to a common instance which 
+                # makes a new valid instance but doesn't invalidate
+                # any of the other data that already exists
+                if op.kind != INTER_CLOSE_OP_KIND:
+                    self.reset()
                 self.valid_instances.add(inst)
             else:
                 assert req.is_read_only()
