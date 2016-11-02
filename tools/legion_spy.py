@@ -4208,7 +4208,7 @@ class VerificationTraverser(object):
                     src = copy.srcs[copy.dst_fields.index(self.src_field)]
                     # See if the source is a valid instance or a
                     # previous instance in the presence of pending reductions
-                    if not self.state.pending_reductions:
+                    if not self.state.pending_reductions or self.state.valid_instances:
                         if src in self.state.valid_instances:
                             self.found_dataflow_path = True
                             self.perform_copy_analysis(copy, src, 
