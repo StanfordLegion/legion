@@ -1679,7 +1679,10 @@ namespace Legion {
             // This is a write skip field since we're already
             // at the version number at this view, but we're only
             // really at the version number if we're not reducing
-            if (!is_reduction)
+            // For now we can only do this at the base level because
+            // at the intermediate levels there might be users
+            // from different version numbers
+            if (base && !is_reduction)
               write_skip_mask |= intersect;
             overlap -= intersect;
             if (!overlap)
