@@ -1633,6 +1633,8 @@ namespace Legion {
       else
         versions->get_field_versions(logical_node, true/*split previous*/,
                                      copy_mask, update_versions);
+      FieldMask split_mask;
+      versions->get_split_mask(logical_node, copy_mask, split_mask);
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
             update_versions.begin(); it != update_versions.end(); it++)
       {
@@ -1679,11 +1681,15 @@ namespace Legion {
             // This is a write skip field since we're already
             // at the version number at this view, but we're only
             // really at the version number if we're not reducing
-            // For now we can only do this at the base level because
-            // at the intermediate levels there might be users
-            // from different version numbers
-            if (base && !is_reduction)
-              write_skip_mask |= intersect;
+            // We can't count split fields here because they might
+            // contain users from many versions
+            if (!is_reduction)
+            {
+              if (!!split_mask)
+                write_skip_mask |= (intersect - split_mask);
+              else
+                write_skip_mask |= intersect;
+            }
             overlap -= intersect;
             if (!overlap)
               continue;
