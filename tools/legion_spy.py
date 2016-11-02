@@ -5402,7 +5402,7 @@ class Operation(object):
     def can_traverse_through(self, tree_id, field, point, version_number):
         # See if we can find a region requirement with the 
         # correct region tree, field, point and version number
-        if not self.reqs:
+        if not self.reqs or not self.version_numbers:
             return False
         for index,req in self.reqs.iteritems():
             if req.tid != tree_id:
