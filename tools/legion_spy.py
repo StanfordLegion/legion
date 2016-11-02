@@ -2689,6 +2689,21 @@ class LogicalRegion(object):
                 state = self.get_verification_state(depth, field, point)
                 state.initialize_verification_state(inst)
 
+    def compute_current_version_numbers(self, depth, field, op, index, point_set = None):
+        if not point_set:
+            # First get the point set
+            self.compute_current_version_numbers(depth, field, op, index, 
+                                                 self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            self.parent.parent.compute_current_version_numbers(depth, field, op,
+                                                               index, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                op.record_current_version(index, field, point, state.version_number)
+
     def perform_fill_verification(self, depth, field, op, req, point_set=None):
         if not point_set:
             # First get the point set
@@ -2984,6 +2999,10 @@ class LogicalPartition(object):
         if field not in self.logical_state:
             return
         self.logical_state[field].close_logical_tree(closed_users, permit_leave_open)
+
+    def compute_current_version_numbers(self, depth, field, op, index):
+        self.parent.compute_current_version_numbers(depth, field, op, 
+                                                    index, self.get_point_set())
 
     def perform_physical_verification(self, depth, field, op, req, inst, perform_checks,
                                       perform_registration):
@@ -4149,22 +4168,10 @@ class VerificationTraverser(object):
         # Can't traverse through if we're doing a copy across
         if self.src_field is not self.dst_field:
             return False
-        # We can traverse through an operation if it is read only
-        # for the same field or has a non-interfering region
-        if op.reqs:
-            for req in op.reqs.itervalues():
-                # Make sure we are in the right region tree
-                if self.tree.tree_id != req.tid:
-                    continue
-                # See if it has the right field
-                if self.src_field not in req.fields:
-                    continue
-                # Can only traverse through if it has our point
-                if not req.logical_node.get_point_set().has_point(self.point):
-                    continue 
-                # If it didn't impact the instance then we can traverse through
-                if req.is_read_only():
-                    return True 
+        # See if we can traverse through this operation
+        if op.can_traverse_through(self.tree.tree_id, self.src_field, 
+                                   self.point, self.state.version_number):
+            return True
         return False
 
     def visit_copy(self, copy):
@@ -4904,8 +4911,8 @@ class Operation(object):
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
                  'advance_ops', 'task', 'task_id', 'predicate', 'futures', 
                  'index_owner', 'points', 'launch_rect', 'creator', 
-                 'realm_copies', 'realm_fills', 'internal_idx', 
-                 'disjoint_close_fields', 'partition_kind', 
+                 'realm_copies', 'realm_fills', 'version_numbers', 
+                 'internal_idx', 'disjoint_close_fields', 'partition_kind', 
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
                  'need_logical_replay', 'reachable_cache', 
                  'transitive_warning_issued', 'arrival_barriers', 'wait_barriers',
@@ -4933,6 +4940,7 @@ class Operation(object):
         self.advance_ops = None
         self.realm_copies = None
         self.realm_fills = None
+        self.version_numbers = None
         self.predicate = None
         self.futures = None
         # Only valid for tasks
@@ -5379,6 +5387,39 @@ class Operation(object):
         assert not self.points
         assert not other.points
         other.merged = True
+
+    def record_current_version(self, index, field, point, version_number):
+        assert index in self.reqs
+        if not self.version_numbers:
+            self.version_numbers = dict()
+        if index not in self.version_numbers:
+            self.version_numbers[index] = dict()
+        if field not in self.version_numbers[index]:
+            self.version_numbers[index][field] = dict()
+        assert point not in self.version_numbers[index][field]
+        self.version_numbers[index][field][point] = version_number
+
+    def can_traverse_through(self, tree_id, field, point, version_number):
+        # See if we can find a region requirement with the 
+        # correct region tree, field, point and version number
+        if not self.reqs:
+            return False
+        for index,req in self.reqs.iteritems():
+            if req.tid != tree_id:
+                continue
+            if index not in self.version_numbers:
+                continue
+            if field not in req.fields:
+                continue
+            if field not in self.version_numbers[index]:
+                continue
+            # If it doesn't have our point then we can't go through
+            if point not in self.version_numbers[index][field]:
+                continue
+            # See if the version numbers are the same
+            if self.version_numbers[index][field][point] == version_number:
+                return True
+        return False 
 
     def compute_physical_reachable(self):
         # We can skip some of these
@@ -5896,6 +5937,19 @@ class Operation(object):
                     if not fill.analyzed:
                         print('    '+str(fill)+' was unnecessary')
 
+    def compute_current_version_numbers(self):
+        assert self.context
+        # Now do all of our region requirements
+        assert not self.version_numbers
+        for index,req in self.reqs.iteritems():
+            if self.mappings and index in self.mappings:
+                mapping = self.mappings[index]
+            else:
+                mapping = None
+            depth = self.context.find_enclosing_context_depth(req, mapping)
+            for field in req.fields:
+                req.logical_node.compute_current_version_numbers(depth, field, self, index)
+
     def verify_copy_requirements(self, src_idx, src_req, dst_idx, dst_req, perform_checks):
         # We always copy from the destination point set which 
         # should be smaller than the src point set
@@ -6059,6 +6113,8 @@ class Operation(object):
         self.get_physical_reachable(self.reachable_cache, False)
         # Handle special cases
         if self.kind == COPY_OP_KIND:
+            # Compute our version numbers first
+            self.compute_current_version_numbers()
             num_reqs = len(self.reqs)
             assert num_reqs % 2 == 0
             num_copies = num_reqs / 2
@@ -6067,6 +6123,8 @@ class Operation(object):
                         idx+num_copies, self.reqs[idx+num_copies], perform_checks):
                     return False
         elif self.kind == FILL_OP_KIND:
+            # Compute our version numbers first
+            self.compute_current_version_numbers()
             for index,req in self.reqs.iteritems():
                 if not self.verify_fill_requirement(index, req, perform_checks):
                     return False
@@ -6075,6 +6133,8 @@ class Operation(object):
             pass
         else:
             if self.reqs:
+                # Compute our version numbers first
+                self.compute_current_version_numbers()
                 for index,req, in self.reqs.iteritems():
                     if not self.verify_physical_requirement(index, req, perform_checks):
                         return False
@@ -6263,12 +6323,10 @@ class Operation(object):
         if self.realm_copies:
             for copy in self.realm_copies:
                 if copy not in elevate:
-                    #elevate[copy] = copy.get_event_context()
                     elevate[copy] = copy.get_context()
         if self.realm_fills:
             for fill in self.realm_fills:
                 if fill not in elevate:
-                    #elevate[fill] = fill.get_event_context()
                     elevate[fill] = fill.get_context()
         if self.is_physical_operation():
             # Finally put ourselves in the set if we are a physical operation
@@ -7781,9 +7839,10 @@ class Event(object):
         self.phase_barrier = True
 
 class RealmBase(object):
-    __slots__ = ['state', 'realm_num', 'creator', 'region', 'intersect', 'start_event', 
-                 'finish_event', 'physical_incoming', 'physical_outgoing', 'generation', 
-                 'event_context', 'analyzed', 'cluster_name', 'reachable_cache']
+    __slots__ = ['state', 'realm_num', 'creator', 'region', 'intersect', 
+                 'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
+                  'generation', 'event_context', 'analyzed', 'cluster_name', 
+                  'reachable_cache']
     def __init__(self, state, realm_num):
         self.state = state
         self.realm_num = realm_num
@@ -7895,51 +7954,6 @@ class RealmBase(object):
                 if op.get_physical_reachable(reachable, False, origin):
                     return True
         return False
-
-    def get_event_context(self):
-        if self.event_context is not None:
-            return self.event_context
-        # Find all the preceding and postceding operations and then
-        # find their common ancestor in the task hierarchy
-        def traverse_op(node, traverser):
-            traverser.ops.add(node)
-            return False
-        op_finder = EventGraphTraverser(True, True, 
-            self.state.get_next_traversal_generation(), None, traverse_op)
-        op_finder.ops = set()
-        if self.finish_event.exists():
-            op_finder.visit_event(self.finish_event)
-        if self.start_event.exists():
-            op_finder.forwards = False
-            op_finder.visit_event(self.start_event)
-        if op_finder.ops:
-            result = None
-            for op in op_finder.ops:
-                assert op.context is not None
-                if result is not None:
-                    if op.context is not result:
-                        # We have to do a merge
-                        result_depth = result.get_depth()
-                        other = op.context
-                        other_depth = other.get_depth()
-                        while result_depth > other_depth:
-                            result = result.get_parent_context()
-                            result_depth -= 1
-                        while other_depth > result_depth:
-                            other = other.get_parent_context()
-                            other_depth -= 1
-                        # As long as they are not the same keep going up
-                        while other is not result:
-                            result = result.get_parent_context()
-                            other = other.get_parent_context()
-                else:
-                    result = op.context
-        else:
-            # If it is empty put ourselves in the same context as our creator
-            result = self.get_context()
-        assert result is not None
-        self.event_context = result
-        return result
 
     def print_incoming_event_edges(self, printer):
         for src in self.physical_incoming:
