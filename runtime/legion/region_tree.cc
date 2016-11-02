@@ -13180,7 +13180,7 @@ namespace Legion {
           assert(!!it->second);
 #endif
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
-                                             true/*single copy*/,
+                                             true/*single copy*/, restrict_out,
                                              it->second, &info.version_info,
                                              info.op->get_unique_op_id(),
                                              info.index, local_space, 
@@ -13190,7 +13190,7 @@ namespace Legion {
         }
         // Now do the destination
         dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                     true/*single copy*/,
+                                     true/*single copy*/, restrict_out,
                                      update_mask, &info.version_info,
                                      info.op->get_unique_op_id(),
                                      info.index, local_space, preconditions,
@@ -13208,16 +13208,16 @@ namespace Legion {
           }
         }
         LegionMap<ApEvent,FieldMask>::aligned postconditions;
-        issue_grouped_copies(info, dst, preconditions, update_mask,
-                 src_instances, &info.version_info, postconditions);
+        issue_grouped_copies(info, dst, restrict_out, preconditions, 
+            update_mask, src_instances, &info.version_info, postconditions);
         // Tell the destination about all of the copies that were done
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
               postconditions.begin(); it != postconditions.end(); it++)
         {
           dst->add_copy_user(0/*redop*/, it->first, &info.version_info, 
                              info.op->get_unique_op_id(), info.index,
-                             it->second, false/*reading*/, local_space, 
-                             info.map_applied_events);
+                             it->second, false/*reading*/, restrict_out,
+                             local_space, info.map_applied_events);
         }
         if (restrict_out && restrict_info.has_restrictions())
         {
@@ -13465,6 +13465,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::issue_grouped_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
+                                              bool restrict_out,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
@@ -13525,8 +13526,8 @@ namespace Legion {
           {
             it->first->add_copy_user(0/*redop*/, copy_post, src_versions,
                                      info.op->get_unique_op_id(), info.index,
-                                     it->second, true/*reading*/, local_space,
-                                     info.map_applied_events);
+                                     it->second, true/*reading*/, restrict_out,
+                                     local_space, info.map_applied_events);
           }
           postconditions[copy_post] = pre_set.set_mask;
         }
@@ -15794,9 +15795,9 @@ namespace Legion {
         InstanceView *target = target_views[idx];
         LegionMap<ApEvent,FieldMask>::aligned preconditions;
         target->find_copy_preconditions(0/*redop*/, false/*reading*/, 
-                                true/*single copy*/, fill_mask,
-                                &version_info, op->get_unique_op_id(), index,
-                                local_space, preconditions, map_applied_events);
+                          true/*single copy*/, true/*restrict out*/, fill_mask,
+                          &version_info, op->get_unique_op_id(), index,
+                          local_space, preconditions, map_applied_events);
         if (sync_precondition.exists())
           preconditions[sync_precondition] = fill_mask;
         // Sort the preconditions into event sets
@@ -15819,7 +15820,8 @@ namespace Legion {
         target->add_copy_user(0/*redop*/, op->get_completion_event(), 
                               &version_info, op->get_unique_op_id(), 
                               index, fill_mask, false/*reading*/,
-                              local_space, map_applied_events);
+                              true/*restrict out*/, local_space, 
+                              map_applied_events);
       }
       // Finally do the update to the physical state like a normal fill
       PhysicalState *state = get_physical_state(version_info);

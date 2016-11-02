@@ -1477,7 +1477,7 @@ namespace Legion {
                LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances);
       // Issue copies for fields with the same event preconditions
       void issue_grouped_copies(const TraversalInfo &info,
-                                MaterializedView *dst,
+                                MaterializedView *dst, bool restrict_out,
                       LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                 const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,

@@ -556,6 +556,7 @@ namespace Legion {
     void MaterializedView::find_copy_preconditions(ReductionOpID redop, 
                                                    bool reading, 
                                                    bool single_copy,
+                                                   bool restrict_out,
                                                    const FieldMask &copy_mask,
                                                    VersionTracker *versions,
                                                    const UniqueID creator_op_id,
@@ -581,20 +582,20 @@ namespace Legion {
       // If we can filter we can do the normal case, otherwise
       // we do the above case where we don't filter
       if (can_filter)
-        find_local_copy_preconditions(redop, reading, single_copy, copy_mask, 
-                                      ColorPoint(), origin_node, versions, 
-                                      creator_op_id, index, source, 
-                                      preconditions, applied_events);
-      else
-        find_local_copy_preconditions_above(redop, reading, single_copy, 
+        find_local_copy_preconditions(redop, reading, single_copy, restrict_out,
                                       copy_mask, ColorPoint(), origin_node, 
                                       versions, creator_op_id, index, source, 
                                       preconditions, applied_events);
+      else
+        find_local_copy_preconditions_above(redop, reading, single_copy, 
+                                      restrict_out, copy_mask, ColorPoint(), 
+                                      origin_node, versions,creator_op_id,index,
+                                      source, preconditions, applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, single_copy,
-                   copy_mask, local_point, origin_node, versions, 
+                   restrict_out, copy_mask, local_point, origin_node, versions, 
                    creator_op_id, index, source, preconditions, applied_events);
       }
     }
@@ -603,6 +604,7 @@ namespace Legion {
     void MaterializedView::find_copy_preconditions_above(ReductionOpID redop,
                                                          bool reading,
                                                          bool single_copy,
+                                                         bool restrict_out,
                                                      const FieldMask &copy_mask,
                                                   const ColorPoint &child_color,
                                                   RegionNode *origin_node,
@@ -614,15 +616,15 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      find_local_copy_preconditions_above(redop, reading, single_copy,copy_mask,
-                            child_color, origin_node, versions, creator_op_id, 
-                            index, source, preconditions, applied_events);
+      find_local_copy_preconditions_above(redop, reading, restrict_out, 
+                  single_copy, copy_mask, child_color, origin_node, versions, 
+                  creator_op_id, index, source, preconditions, applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, single_copy, 
-                  copy_mask, local_point, origin_node, versions, creator_op_id,
-                  index, source, preconditions, applied_events);
+                  restrict_out, copy_mask, local_point, origin_node, versions, 
+                  creator_op_id, index, source, preconditions, applied_events);
       }
     }
     
@@ -630,6 +632,7 @@ namespace Legion {
     void MaterializedView::find_local_copy_preconditions(ReductionOpID redop,
                                                          bool reading,
                                                          bool single_copy,
+                                                         bool restrict_out,
                                                      const FieldMask &copy_mask,
                                                   const ColorPoint &child_color,
                                                   RegionNode *origin_node,
@@ -679,7 +682,8 @@ namespace Legion {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // Find any version updates as well our write skip mask
         find_copy_version_updates(copy_mask, versions, write_skip_mask, 
-            filter_mask, advance_versions, add_versions, redop > 0);
+            filter_mask, advance_versions, add_versions, redop > 0,
+            restrict_out, true/*base*/);
         // Can only do the write-skip optimization if this is a single copy
         if (single_copy && !!write_skip_mask)
         {
@@ -739,6 +743,7 @@ namespace Legion {
                                                   ReductionOpID redop, 
                                                   bool reading,
                                                   bool single_copy,
+                                                  bool restrict_out,
                                                   const FieldMask &copy_mask,
                                                   const ColorPoint &child_color,
                                                   RegionNode *origin_node,
@@ -783,7 +788,8 @@ namespace Legion {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // Find any version updates as well our write skip mask
         find_copy_version_updates(copy_mask, versions, write_skip_mask, 
-            filter_mask, advance_versions, add_versions, redop > 0);
+            filter_mask, advance_versions, add_versions, redop > 0,
+            restrict_out, false/*base*/);
         // Can only do the write skip optimization if this is a single copy
         if (single_copy && !!write_skip_mask)
         {
@@ -831,7 +837,8 @@ namespace Legion {
                                          VersionTracker *versions,
                                          const UniqueID creator_op_id,
                                          const unsigned index,
-                                     const FieldMask &copy_mask, bool reading,
+                                         const FieldMask &copy_mask, 
+                                         bool reading, bool restrict_out,
                                          const AddressSpaceID source,
                                          std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -853,11 +860,11 @@ namespace Legion {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_copy_user_above(usage, copy_term, local_color,
                                origin_node, versions, creator_op_id, index,
-                               copy_mask, source, applied_events);
+                               restrict_out, copy_mask, source, applied_events);
       }
-      add_local_copy_user(usage, copy_term, true/*base*/, ColorPoint(),
-          origin_node, versions, creator_op_id, index, copy_mask, 
-          source, applied_events);
+      add_local_copy_user(usage, copy_term, true/*base*/, restrict_out,
+          ColorPoint(), origin_node, versions, creator_op_id, index, 
+          copy_mask, source, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -868,6 +875,7 @@ namespace Legion {
                                                VersionTracker *versions,
                                                const UniqueID creator_op_id,
                                                const unsigned index,
+                                               const bool restrict_out,
                                                const FieldMask &copy_mask,
                                                const AddressSpaceID source,
                                               std::set<RtEvent> &applied_events)
@@ -877,16 +885,18 @@ namespace Legion {
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_copy_user_above(usage, copy_term, local_color, origin_node,
-            versions, creator_op_id, index, copy_mask, source, applied_events);
+                                  versions, creator_op_id, index, restrict_out, 
+                                  copy_mask, source, applied_events);
       }
-      add_local_copy_user(usage, copy_term, false/*base*/, child_color, 
-          origin_node, versions, creator_op_id, index, copy_mask, 
-          source, applied_events);
+      add_local_copy_user(usage, copy_term, false/*base*/, restrict_out,
+                      child_color, origin_node, versions, creator_op_id, 
+                      index, copy_mask, source, applied_events);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::add_local_copy_user(const RegionUsage &usage, 
-                                               ApEvent copy_term,bool base_user,
+                                               ApEvent copy_term,
+                                               bool base_user,bool restrict_out,
                                                const ColorPoint &child_color,
                                                RegionNode *origin_node,
                                                VersionTracker *versions,
@@ -907,6 +917,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(remote_update_event);
           rez.serialize<bool>(true); // is copy
+          rez.serialize<bool>(restrict_out);
           rez.serialize(usage);
           rez.serialize(copy_mask);
           rez.serialize(child_color);
@@ -1290,6 +1301,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(remote_update_event);
           rez.serialize<bool>(false); // is copy
+          rez.serialize<bool>(false); // restrict out
           rez.serialize(usage);
           rez.serialize(user_mask);
           rez.serialize(child_color);
@@ -1601,7 +1613,7 @@ namespace Legion {
                                                      FieldMask &filter_mask,
                               LegionMap<VersionID,FieldMask>::aligned &advance,
                               LegionMap<VersionID,FieldMask>::aligned &add_only,
-                                                     bool is_reduction)
+                                bool is_reduction, bool restrict_out, bool base)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1610,12 +1622,17 @@ namespace Legion {
       // These are updates for a copy, so we are never going to the
       // next version number, we only go to the current versions
       FieldVersions update_versions;
-      versions->get_field_versions(logical_node, true/*split previous*/,
-                                   copy_mask, update_versions);
-#ifndef LEGION_SPY
-      FieldMask split_mask;
-      versions->get_split_mask(logical_node, copy_mask, split_mask);
-#endif
+      // If we're doing a restrict out copy, the version we are updating
+      // is the advance version, otherwise it is the current version
+      // before the operation. We want split previous here because we
+      // haven't actually done the write yet, so if we're writing then
+      // we're just copying the previous version over.
+      if (restrict_out)
+        versions->get_advance_versions(logical_node, base, 
+                                       copy_mask, update_versions);
+      else
+        versions->get_field_versions(logical_node, true/*split previous*/,
+                                     copy_mask, update_versions);
       for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
             update_versions.begin(); it != update_versions.end(); it++)
       {
@@ -1638,7 +1655,7 @@ namespace Legion {
           current_versions.find(previous_number);
         if (finder != current_versions.end())
         {
-          FieldMask intersect = overlap & finder->second;
+          const FieldMask intersect = overlap & finder->second;
           if (!!intersect)
           {
             advance[previous_number] = intersect;
@@ -1656,25 +1673,14 @@ namespace Legion {
         if ((finder != current_versions.end()) && 
             (finder->first == next_number))
         {
-          FieldMask intersect = overlap & finder->second;
+          const FieldMask intersect = overlap & finder->second;
           if (!!intersect)
           {
             // This is a write skip field since we're already
             // at the version number at this view, but we're only
-            // really at the version number if we are not a split
-            // version number and we're not reducing
-            // We skip this optimization if we are doing Legion Spy
-            // because Legion Spy doesn't currently understand
-            // version numbers and so it can't do the same check
-#ifndef LEGION_SPY
+            // really at the version number if we're not reducing
             if (!is_reduction)
-            {
-              if (!!split_mask)
-                write_skip_mask |= (intersect - split_mask);
-              else
-                write_skip_mask |= intersect;
-            }
-#endif
+              write_skip_mask |= intersect;
             overlap -= intersect;
             if (!overlap)
               continue;
@@ -3553,6 +3559,8 @@ namespace Legion {
       derez.deserialize(update_event);
       bool is_copy;
       derez.deserialize(is_copy);
+      bool restrict_out;
+      derez.deserialize(restrict_out);
       RegionUsage usage;
       derez.deserialize(usage);
       FieldMask user_mask;
@@ -3595,12 +3603,12 @@ namespace Legion {
         // actually use the results and assuming single copy means
         // that fewer users will potentially be filtered
         find_local_copy_preconditions(usage.redop, IS_READ_ONLY(usage),
-                                    true/*single copy*/,
+                                    true/*single copy*/, restrict_out,
                                     user_mask, child_color, origin_node,
                                     &dummy_version_info, op_id, index, source,
                                     dummy_preconditions, applied_conditions);
-        add_local_copy_user(usage, term_event, true/*base user*/,
-                            child_color, origin_node,
+        add_local_copy_user(usage, term_event, true/*base user*/, 
+                            restrict_out, child_color, origin_node,
                             &dummy_version_info, op_id, index,
                             user_mask, source, applied_conditions);
       }
@@ -4000,8 +4008,8 @@ namespace Legion {
         if (copy_pre.exists())
           temporary_dst->add_copy_user(0/*redop*/, copy_pre, 
               &info.version_info, info.op->get_unique_op_id(), info.index,
-              it->set_mask, false/*reading*/, local_space, 
-              info.map_applied_events); 
+              it->set_mask, false/*reading*/, false/*restrict out*/, 
+              local_space, info.map_applied_events); 
         // Perform the copy
         std::vector<Domain::CopySrcDstField> src_fields;
         std::vector<Domain::CopySrcDstField> dst_fields;
@@ -4018,12 +4026,14 @@ namespace Legion {
         {
           dst->add_copy_user(0/*redop*/, copy_post, &info.version_info,
                              info.op->get_unique_op_id(), info.index,
-                             it->set_mask, false/*reading*/, local_space,
+                             it->set_mask, false/*reading*/, 
+                             false/*restrict out*/, local_space,
                              info.map_applied_events);
           temporary_dst->add_copy_user(0/*redop*/, copy_post, 
                              &info.version_info, info.op->get_unique_op_id(),
                              info.index, it->set_mask, false/*reading*/,
-                             local_space, info.map_applied_events);
+                             false/*restrict out*/, local_space, 
+                             info.map_applied_events);
           postconditions[copy_post] = it->set_mask;
         }
       }
@@ -4129,6 +4139,7 @@ namespace Legion {
         {
           it->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
                                              true/*single copy*/,
+                                             false/*restrict out*/,
                                              it->second, src_version_tracker,
                                              info.op->get_unique_op_id(),
                                              info.index, local_space, 
@@ -4152,10 +4163,10 @@ namespace Legion {
         }
         // issue the grouped copies and put the result in the postconditions
         // We are the intersect
-        dst->logical_node->issue_grouped_copies(info, dst, src_preconditions,
-                                 actual_copy_mask, src_instances, 
-                                 src_version_tracker, postconditions, 
-                                 across_helper, logical_node);
+        dst->logical_node->issue_grouped_copies(info, dst,false/*restrict out*/,
+                                 src_preconditions, actual_copy_mask, 
+                                 src_instances, src_version_tracker, 
+                                 postconditions, across_helper, logical_node);
       }
       if (!deferred_instances.empty())
       {
@@ -5114,7 +5125,7 @@ namespace Legion {
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
-                                   false/*single copy*/,
+                                   false/*single copy*/, restrict_out,
                                    copy_mask, &info.version_info, 
                                    info.op->get_unique_op_id(), info.index,
                                    local_space, preconditions, 
@@ -5171,8 +5182,8 @@ namespace Legion {
           done_event = Runtime::merge_events(it->preconditions);
         dst->add_copy_user(0/*redop*/, done_event, &info.version_info,
                            info.op->get_unique_op_id(), info.index,
-                           it->set_mask, false/*reading*/, local_space,
-                           info.map_applied_events);
+                           it->set_mask, false/*reading*/, restrict_out,
+                           local_space, info.map_applied_events);
       }
       if (restrict_out && restrict_info.has_restrictions())
       {
@@ -6410,7 +6421,7 @@ namespace Legion {
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       // We know we're going to write all these fields so we can filter
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/,
-                                   true/*single copy*/,
+                                   true/*single copy*/, restrict_out,
                                    copy_mask, &info.version_info, 
                                    info.op->get_unique_op_id(),
                                    info.index, local_space, 
@@ -6436,8 +6447,8 @@ namespace Legion {
       {
         dst->add_copy_user(0/*redop*/, it->first, &info.version_info, 
                            info.op->get_unique_op_id(), info.index,
-                           it->second, false/*reading*/, local_space, 
-                           info.map_applied_events);
+                           it->second, false/*reading*/, restrict_out,
+                           local_space, info.map_applied_events);
       }
       if (restrict_out && restrict_info.has_restrictions())
       {
@@ -6633,12 +6644,13 @@ namespace Legion {
 
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       target->find_copy_preconditions(manager->redop, false/*reading*/, 
-            false/*single copy*/, reduce_mask, versions, op->get_unique_op_id(),
-            index, local_space, preconditions, map_applied_events);
+            false/*single copy*/, restrict_out, reduce_mask, versions, 
+            op->get_unique_op_id(), index, local_space, preconditions, 
+            map_applied_events);
       this->find_copy_preconditions(manager->redop, true/*reading*/, 
-           true/*single copy*/, reduce_mask, versions, op->get_unique_op_id(), 
-           index, local_space, preconditions, map_applied_events);
-
+           true/*single copy*/, restrict_out, reduce_mask, versions, 
+           op->get_unique_op_id(), index, local_space, preconditions, 
+           map_applied_events);
       std::set<ApEvent> event_preconds;
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
             preconditions.begin(); it != preconditions.end(); it++)
@@ -6654,10 +6666,12 @@ namespace Legion {
                                                      NULL/*intersect*/);
       target->add_copy_user(manager->redop, reduce_post, versions,
                            op->get_unique_op_id(), index, reduce_mask, 
-                           false/*reading*/, local_space, map_applied_events);
+                           false/*reading*/, restrict_out, local_space, 
+                           map_applied_events);
       this->add_copy_user(manager->redop, reduce_post, versions,
                          op->get_unique_op_id(), index, reduce_mask, 
-                         true/*reading*/, local_space, map_applied_events);
+                         true/*reading*/, restrict_out, local_space, 
+                         map_applied_events);
       if (restrict_out)
         op->record_restrict_postcondition(reduce_post);
     } 
@@ -6684,8 +6698,8 @@ namespace Legion {
       // Don't need to ask the target for preconditions as they 
       // are included as part of the pre set
       find_copy_preconditions(manager->redop, true/*reading*/, 
-                              true/*single copy*/, red_mask, 
-                              versions, op->get_unique_op_id(), index, 
+                              true/*single copy*/, false/*restrict out*/,
+                              red_mask, versions, op->get_unique_op_id(), index,
                               local_space, src_pre, map_applied_events);
       std::set<ApEvent> preconditions = pre;
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
@@ -6702,7 +6716,8 @@ namespace Legion {
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, versions,
                     op->get_unique_op_id(), index, red_mask, 
-                    true/*reading*/, local_space, map_applied_events);
+                    true/*reading*/, false/*restrict out*/,
+                    local_space, map_applied_events);
       return reduce_post;
     }
 
@@ -6729,8 +6744,8 @@ namespace Legion {
       // Don't need to ask the target for preconditions as they 
       // are included as part of the pre set
       find_copy_preconditions(manager->redop, true/*reading*/, 
-                              true/*singe copy*/, red_mask, 
-                              versions, op->get_unique_op_id(), index, 
+                              true/*singe copy*/, false/*restrict out*/,
+                              red_mask, versions, op->get_unique_op_id(), index,
                               local_space, src_pre, map_applied_events);
       std::set<ApEvent> preconditions = preconds;
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
@@ -6748,7 +6763,8 @@ namespace Legion {
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, versions,
                     op->get_unique_op_id(), index, red_mask, 
-                    true/*reading*/, local_space, map_applied_events);
+                    true/*reading*/, false/*restrict out*/,
+                    local_space, map_applied_events);
       return reduce_post;
     }
 
@@ -6771,6 +6787,7 @@ namespace Legion {
     void ReductionView::find_copy_preconditions(ReductionOpID redop,
                                                 bool reading,
                                                 bool single_copy,
+                                                bool restrict_out,
                                                 const FieldMask &copy_mask,
                                                 VersionTracker *versions,
                                                 const UniqueID creator_op_id,
@@ -6887,7 +6904,8 @@ namespace Legion {
                                       VersionTracker *versions,
                                       const UniqueID creator_op_id,
                                       const unsigned index,
-                                      const FieldMask &mask, bool reading,
+                                      const FieldMask &mask, 
+                                      bool reading, bool restrict_out,
                                       const AddressSpaceID source,
                                       std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------

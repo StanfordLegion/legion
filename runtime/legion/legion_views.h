@@ -125,6 +125,7 @@ namespace Legion {
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
+                                           bool restrict_out,
                                            const FieldMask &copy_mask,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
@@ -136,8 +137,8 @@ namespace Legion {
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
-                                 const unsigned index,
-                                 const FieldMask &mask, bool reading,
+                                 const unsigned index, const FieldMask &mask, 
+                                 bool reading, bool restrict_out,
                                  const AddressSpaceID source,
                                  std::set<RtEvent> &applied_events) = 0;
       virtual ApEvent find_user_precondition(const RegionUsage &user,
@@ -294,6 +295,7 @@ namespace Legion {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
+                                           bool restrict_out,
                                            const FieldMask &copy_mask,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
@@ -304,7 +306,7 @@ namespace Legion {
                                            bool can_filter = true);
     protected: 
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
-                                         bool single_copy,
+                                         bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -318,7 +320,7 @@ namespace Legion {
       // Give composite views special access here so they can filter
       // back just the users at the particular level
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
-                                         bool single_copy,
+                                         bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -328,8 +330,8 @@ namespace Legion {
                                          const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                          std::set<RtEvent> &applied_events);
-      void find_local_copy_preconditions_above(ReductionOpID redop,
-                                         bool reading, bool single_copy,
+      void find_local_copy_preconditions_above(ReductionOpID redop,bool reading,
+                                         bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -344,7 +346,8 @@ namespace Legion {
                                  VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
-                                 const FieldMask &mask, bool reading,
+                                 const FieldMask &mask, 
+                                 bool reading, bool restrict_out,
                                  const AddressSpaceID source,
                                  std::set<RtEvent> &applied_events);
     protected:
@@ -353,12 +356,12 @@ namespace Legion {
                                RegionNode *origin_node,
                                VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
-                               const unsigned index,
+                               const unsigned index, const bool restrict_out,
                                const FieldMask &copy_mask,
                                const AddressSpaceID source,
                                std::set<RtEvent> &applied_events);
-      void add_local_copy_user(const RegionUsage &usage, 
-                               ApEvent copy_term, bool base_user,
+      void add_local_copy_user(const RegionUsage &usage, ApEvent copy_term,
+                               bool base_user, bool restrict_out,
                                const ColorPoint &child_color,
                                RegionNode *origin_node,
                                VersionTracker *version_tracker,
@@ -477,7 +480,7 @@ namespace Legion {
                                      FieldMask &filter_mask,
                             LegionMap<VersionID,FieldMask>::aligned &advance,
                             LegionMap<VersionID,FieldMask>::aligned &add_only,
-                                     bool is_reducing);
+                              bool is_reducing, bool restrict_out, bool base);
       void apply_version_updates(FieldMask &filter_mask,
                       const LegionMap<VersionID,FieldMask>::aligned &advance,
                       const LegionMap<VersionID,FieldMask>::aligned &add_only,
@@ -748,6 +751,7 @@ namespace Legion {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
+                                           bool restrict_out,
                                            const FieldMask &copy_mask,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
@@ -760,7 +764,8 @@ namespace Legion {
                                  VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
-                                 const FieldMask &mask, bool reading,
+                                 const FieldMask &mask, 
+                                 bool reading, bool restrict_out,
                                  const AddressSpaceID source,
                                  std::set<RtEvent> &applied_events);
       virtual ApEvent find_user_precondition(const RegionUsage &user,
