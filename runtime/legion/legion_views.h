@@ -125,6 +125,7 @@ namespace Legion {
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
+                                           bool restrict_out,
                                            const FieldMask &copy_mask,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
@@ -136,8 +137,8 @@ namespace Legion {
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
-                                 const unsigned index,
-                                 const FieldMask &mask, bool reading,
+                                 const unsigned index, const FieldMask &mask, 
+                                 bool reading, bool restrict_out,
                                  const AddressSpaceID source,
                                  std::set<RtEvent> &applied_events) = 0;
       virtual ApEvent find_user_precondition(const RegionUsage &user,
@@ -294,6 +295,7 @@ namespace Legion {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
+                                           bool restrict_out,
                                            const FieldMask &copy_mask,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
@@ -304,7 +306,7 @@ namespace Legion {
                                            bool can_filter = true);
     protected: 
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
-                                         bool single_copy,
+                                         bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -318,7 +320,7 @@ namespace Legion {
       // Give composite views special access here so they can filter
       // back just the users at the particular level
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
-                                         bool single_copy,
+                                         bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -328,8 +330,8 @@ namespace Legion {
                                          const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                          std::set<RtEvent> &applied_events);
-      void find_local_copy_preconditions_above(ReductionOpID redop,
-                                         bool reading, bool single_copy,
+      void find_local_copy_preconditions_above(ReductionOpID redop,bool reading,
+                                         bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
                                          const ColorPoint &child_color,
                                          RegionNode *origin_node,
@@ -344,7 +346,8 @@ namespace Legion {
                                  VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
-                                 const FieldMask &mask, bool reading,
+                                 const FieldMask &mask, 
+                                 bool reading, bool restrict_out,
                                  const AddressSpaceID source,
                                  std::set<RtEvent> &applied_events);
     protected:
@@ -353,12 +356,12 @@ namespace Legion {
                                RegionNode *origin_node,
                                VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
-                               const unsigned index,
+                               const unsigned index, const bool restrict_out,
                                const FieldMask &copy_mask,
                                const AddressSpaceID source,
                                std::set<RtEvent> &applied_events);
-      void add_local_copy_user(const RegionUsage &usage, 
-                               ApEvent copy_term, bool base_user,
+      void add_local_copy_user(const RegionUsage &usage, ApEvent copy_term,
+                               bool base_user, bool restrict_out,
                                const ColorPoint &child_color,
                                RegionNode *origin_node,
                                VersionTracker *version_tracker,
@@ -471,13 +474,13 @@ namespace Legion {
       // These first two methods do two-phase updates for copies
       // These methods must be called while holding the lock
       // in non-exclusive and exclusive mode respectively
-      void find_version_updates(const FieldMask &user_mask,
-                                VersionTracker *version_tracker,
-                                FieldMask &write_skip_mask,
-                                FieldMask &filter_mask,
+      void find_copy_version_updates(const FieldMask &copy_mask,
+                                     VersionTracker *version_tracker,
+                                     FieldMask &write_skip_mask,
+                                     FieldMask &filter_mask,
                             LegionMap<VersionID,FieldMask>::aligned &advance,
                             LegionMap<VersionID,FieldMask>::aligned &add_only,
-                                bool is_reducing);
+                              bool is_reducing, bool restrict_out, bool base);
       void apply_version_updates(FieldMask &filter_mask,
                       const LegionMap<VersionID,FieldMask>::aligned &advance,
                       const LegionMap<VersionID,FieldMask>::aligned &add_only,
@@ -639,6 +642,28 @@ namespace Legion {
       LegionMap<VersionID,FieldMask,
                 PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
     protected:
+      // The scheme for tracking whether remote copies of the meta-data
+      // are valid is as follows:
+      //
+      // For readers:
+      //  - At the base view: must be at the current version number
+      //  - At an above view: must be at the current version number
+      //    minus the split mask
+      // These two cases allow us to find Read-After-Write (true) dependences
+      //
+      // For writers:
+      //  - They must have a valid lease tracked by 'remote_valid_mask'
+      //
+      // Mask invalidation is as follows:
+      //  - Writes that advance the version number invalidate the lease so
+      //    we can get the Write-After-Write (anti) dependences correct
+      //  - Any read invalidates the lease so that we can get the
+      //    Write-After-Read (anti) dependences correct
+      //
+      // Note that this scheme still permits as many reads to occur in
+      // parallel on different nodes, and writes to disjoint sub-regions
+      // to occur in parallel without unnecessary invalidations.
+
       // The logical owner node maintains a data structure to track which
       // remote copies of this view have valid field data, whenever the
       // set of users gets filtered for a field from current to previous
@@ -648,9 +673,6 @@ namespace Legion {
       // valid lease from the logical owner node. On the owner node it
       // tracks a summary of all the fields that have remote leases.
       FieldMask remote_valid_mask;
-      // These masks track whether we have sent the remote read requests
-      // for fields for the current and previous versions
-      FieldMask current_remote_read_requests, previous_remote_read_requests;
       // Remote nodes also have a data structure for deduplicating
       // requests to the logical owner for updates to particular fields
       LegionMap<RtEvent,FieldMask>::aligned remote_update_requests;
@@ -729,6 +751,7 @@ namespace Legion {
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
+                                           bool restrict_out,
                                            const FieldMask &copy_mask,
                                            VersionTracker *version_tracker,
                                            const UniqueID creator_op_id,
@@ -741,7 +764,8 @@ namespace Legion {
                                  VersionTracker *version_tracker,
                                  const UniqueID creator_op_id,
                                  const unsigned index,
-                                 const FieldMask &mask, bool reading,
+                                 const FieldMask &mask, 
+                                 bool reading, bool restrict_out,
                                  const AddressSpaceID source,
                                  std::set<RtEvent> &applied_events);
       virtual ApEvent find_user_precondition(const RegionUsage &user,
@@ -1152,10 +1176,10 @@ namespace Legion {
     public:
       // From VersionTracker
       virtual bool is_upper_bound_node(RegionTreeNode *node) const;
-      virtual void get_field_versions(RegionTreeNode *node,
+      virtual void get_field_versions(RegionTreeNode *node, bool split_prev,
                                       const FieldMask &needed_fields,
                                       FieldVersions &field_versions);
-      virtual void get_advance_versions(RegionTreeNode *node,
+      virtual void get_advance_versions(RegionTreeNode *node, bool base,
                                         const FieldMask &needed_fields,
                                         FieldVersions &field_versions);
       virtual void get_split_mask(RegionTreeNode *node, 

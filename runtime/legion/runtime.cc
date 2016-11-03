@@ -2016,11 +2016,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProcessorManager::add_mapper(MapperID mid, MapperManager *m, 
-                                      bool check, bool own)
+                                      bool check, bool own, bool skip_replay)
     //--------------------------------------------------------------------------
     {
       // Don't do this if we are doing replay execution
-      if (replay_execution)
+      if (!skip_replay && replay_execution)
         return;
       log_run.spew("Adding mapper %d on processor " IDFMT "", 
                           mid, local_proc.id);
@@ -8537,17 +8537,18 @@ namespace Legion {
       }
       else // This is the replay/debug path
       {
-        // This path is not quite ready yet
-        assert(false);
         if (legion_ldb_enabled)
         {
+          // This path is not quite ready yet
+          assert(false);
           for (std::map<Processor,ProcessorManager*>::const_iterator it = 
                 proc_managers.begin(); it != proc_managers.end(); it++)
           {
             Mapper *mapper = new Mapping::DebugMapper(mapper_runtime, 
                                             machine, it->first, replay_file);
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
-            it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
+            it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/, 
+                                    true/*skip replay*/);
           }
         }
         else
@@ -8558,7 +8559,8 @@ namespace Legion {
             Mapper *mapper = new Mapping::ReplayMapper(mapper_runtime, 
                                             machine, it->first, replay_file);
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
-            it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
+            it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/,
+                                    true/*skip replay*/);
           }
         }
       }

@@ -112,6 +112,9 @@ def regent(args, env = {}, **kwargs):
         'USE_RDIR': use_rdir,
     }
 
+    if cuda_dir is not None:
+        terra_env['CUDA_HOME'] = cuda_dir
+
     cmd = []
     if 'LAUNCHER' in os.environ:
         cmd = cmd + (os.environ['LAUNCHER'].split()

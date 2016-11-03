@@ -2972,7 +2972,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(finder != acquired->end());
 #endif
-              if (!finder->second.second)
+              // Permit this if we are doing replay mapping
+              if (!finder->second.second && (Runtime::replay_file == NULL))
               {
                 log_run.error("Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper made an illegal decision "
@@ -5634,14 +5635,14 @@ namespace Legion {
         // the all the way to the bottom so that the first reduction
         // point bumps the version number appropriately
         if (!IS_READ_ONLY(regions[idx]) && 
-            ((one_below != child_node) || IS_REDUCE(regions[idx])))
+            ((one_below != child_node) || proj_info.is_first_reduction()))
         {
           RegionTreePath advance_path;
           // If we're a reduction we go all the way to the bottom
           // otherwise if we're read-write we go to the level above
           // because our version_analysis call will do the advance
           // at the destination node
-          if (!IS_REDUCE(regions[idx]))
+          if (!proj_info.is_first_reduction())
           {
 #ifdef DEBUG_LEGION
             assert(one_below->get_depth() < child_node->get_depth()); 

@@ -2015,6 +2015,12 @@ namespace Legion {
       if ((req.tag & DefaultMapper::EXACT_REGION) != 0)
 	return result;
 
+      // Heuristically use the exact region if the target memory is either a GPU
+      // framebuffer or a zero copy memory.
+      if (target_memory.kind() == Memory::GPU_FB_MEM ||
+          target_memory.kind() == Memory::Z_COPY_MEM)
+        return result;
+
       // Simple heuristic here, if we are on a single node, we go all the
       // way to the root since the first-level partition is likely just
       // across processors in the node, however, if we are on multiple nodes

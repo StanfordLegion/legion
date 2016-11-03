@@ -970,7 +970,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::get_field_versions(RegionTreeNode *node,
+    void VersionInfo::get_field_versions(RegionTreeNode *node, bool split_prev,
                                          const FieldMask &needed_fields,
                                          FieldVersions &result_versions)
     //--------------------------------------------------------------------------
@@ -978,12 +978,52 @@ namespace Legion {
       const unsigned depth = node->get_depth();
 #ifdef DEBUG_LEGION
       assert(depth < field_versions.size());
+      assert(depth < split_masks.size());
 #endif
-      result_versions = field_versions[depth];
+      const FieldMask &split_mask = split_masks[depth];
+      const FieldVersions &local_versions = field_versions[depth];
+      if (!split_prev || !!split_mask)
+      {
+        // If we don't care about the split previous mask then we can
+        // just copy over what we need
+        for (FieldVersions::const_iterator it = local_versions.begin();
+              it != local_versions.end(); it++)
+        {
+          const FieldMask overlap = needed_fields & it->second;
+          if (!overlap)
+            continue;
+          result_versions[it->first] = overlap;
+        }
+      }
+      else
+      {
+        // We need to save any fields that are needed, and we want
+        // the previous version number for any split fields
+        for (FieldVersions::const_iterator it = local_versions.begin();
+              it != local_versions.end(); it++)
+        {
+          FieldMask overlap = needed_fields & it->second;
+          if (!overlap)
+            continue;
+          FieldMask split_overlap = overlap & split_mask;
+          if (!split_overlap)
+          {
+            result_versions[it->first] = overlap;
+            continue;
+          }
+#ifdef DEBUG_LEGION
+          assert(it->first > 0);
+#endif
+          result_versions[it->first - 1] = split_overlap;
+          overlap -= split_overlap;
+          if (!!overlap)
+            result_versions[it->first] = overlap;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::get_advance_versions(RegionTreeNode *node,
+    void VersionInfo::get_advance_versions(RegionTreeNode *node, bool base,
                                            const FieldMask &needed_fields,
                                            FieldVersions &result_versions)
     //--------------------------------------------------------------------------
@@ -993,29 +1033,15 @@ namespace Legion {
       assert(depth < split_masks.size());
       assert(depth < field_versions.size());
 #endif
-      FieldMask split_overlap = split_masks[depth] & needed_fields;
-      if (!!split_overlap)
+      const FieldVersions &local_versions = field_versions[depth];
+      if (base)
       {
-        // Intermediate node with split fields, we only need the
-        // split fields for the advance part
-        const FieldVersions &local_versions = field_versions[depth];
-        for (FieldVersions::const_iterator it = local_versions.begin();
-              it != local_versions.end(); it++)
-        {
-          FieldMask overlap = it->second & split_overlap;
-          if (!overlap)
-            continue;
-          result_versions[it->first+1] = overlap;
-          split_overlap -= overlap;
-          if (!split_overlap)
-            break;
-        }
-      }
-      else if (depth == (field_versions.size() - 1))
-      {
+        // Should be no split masks for base updates
+#ifdef DEBUG_LEGION
+        assert(!split_masks[depth]);
+#endif
         // Bottom node with no split fields so therefore we need all
         // the fields advanced
-        const FieldVersions &local_versions = field_versions[depth];
         for (FieldVersions::const_iterator it = local_versions.begin();
               it != local_versions.end(); it++)
         {
@@ -1025,8 +1051,19 @@ namespace Legion {
           result_versions[it->first+1] = overlap;
         }
       }
-      // Otherwise it was an intermediate level with no split mask
-      // so there are by definition no advance fields
+      else
+      {
+        // Above versions have already been advanced as reflected
+        // by split fields
+        for (FieldVersions::const_iterator it = local_versions.begin();
+              it != local_versions.end(); it++)
+        {
+          FieldMask overlap = needed_fields & it->second;
+          if (!overlap)
+            continue;
+          result_versions[it->first] = overlap;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1910,7 +1947,7 @@ namespace Legion {
           runtime->find_projection_function(req.projection) : NULL),
         projection_type(req.handle_type),
         projection_domain((req.handle_type != SINGULAR) ?
-            launch_domain : Domain::NO_DOMAIN)
+            launch_domain : Domain::NO_DOMAIN), first_reduction(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1936,6 +1973,7 @@ namespace Legion {
       projection_type = SINGULAR;
       projection_domain = Domain::NO_DOMAIN;
       projection_epochs.clear();
+      first_reduction = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1949,6 +1987,7 @@ namespace Legion {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
+      rez.serialize<bool>(first_reduction);
     }
 
     //--------------------------------------------------------------------------
@@ -1970,6 +2009,7 @@ namespace Legion {
         derez.deserialize(epoch_id);
         derez.deserialize(projection_epochs[epoch_id]);
       }
+      derez.deserialize<bool>(first_reduction);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2721,7 +2761,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
-                ProjectionFunction *proj, const Domain &proj_dom, bool disjoint)
+                           ProjectionFunction *proj, const Domain &proj_dom, 
+                           bool disjoint)
       : ChildState(m), redop(0), projection(proj), 
         projection_domain(proj_dom), rebuild_timeout(1)
     //--------------------------------------------------------------------------
@@ -6448,60 +6489,28 @@ namespace Legion {
         AutoLock s_lock(state_lock);
         if (!remote_valid_instances.empty())
         {
-          // Figure out which fields we need to request
-          FieldMask remaining_mask = req_mask;
-          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-                child_events.begin(); it != child_events.end(); it++)
-          {
-            FieldMask overlap = it->second & remaining_mask;
-            if (!overlap)
-              continue;
-            preconditions.insert(it->first);
-            remaining_mask -= overlap;
-            if (!remaining_mask)
-              return; 
-          }
+          // We always have to request these from scratch for
+          // disjoint closes in case we do several of them
           // If we still have remaining fields, we have to send requests to
           // all the other nodes asking for their data
-          if (!!remaining_mask)
-          {
-            std::set<RtEvent> local_preconditions;
-            RequestFunctor<CHILD_VERSION_REQUEST> functor(this, context, 
-                local_space, remaining_mask, local_preconditions);
-            remote_valid_instances.map(functor);
-            RtEvent ready_event = Runtime::merge_events(local_preconditions);
-            child_events[ready_event] = remaining_mask;
-            preconditions.insert(ready_event);
-          }
+          std::set<RtEvent> local_preconditions;
+          RequestFunctor<CHILD_VERSION_REQUEST> functor(this, context, 
+              local_space, req_mask, local_preconditions);
+          remote_valid_instances.map(functor);
+          RtEvent ready_event = Runtime::merge_events(local_preconditions);
+          preconditions.insert(ready_event);
         }
         // otherwise we're the only copy so there is nothing to do
       }
       else
       {
-        FieldMask remaining_mask = req_mask;
         // We are not the owner so figure out which fields we still need to
         // send a request for
-        AutoLock s_lock(state_lock);
-        for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-              child_events.begin(); it != child_events.end(); it++)
-        {
-          FieldMask overlap = it->second & remaining_mask;
-          if (!overlap)
-            continue;
-          preconditions.insert(it->first);
-          remaining_mask -= overlap;
-          if (!remaining_mask)
-            return;
-        }
-        if (!!remaining_mask)
-        {
-          RtUserEvent ready_event = Runtime::create_rt_user_event();
-          send_version_state_update_request(owner_space, context, local_space,
-              ready_event, remaining_mask, CHILD_VERSION_REQUEST);
-          // Save the event indicating when the fields will be ready
-          final_events[ready_event] = remaining_mask;
-          preconditions.insert(ready_event);
-        }
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        send_version_state_update_request(owner_space, context, local_space,
+            ready_event, req_mask, CHILD_VERSION_REQUEST);
+        // Save the event indicating when the fields will be ready
+        preconditions.insert(ready_event);
       }
     }
 
@@ -6549,7 +6558,6 @@ namespace Legion {
                 local_space, needed_fields, local_preconditions);
             remote_valid_instances.map(functor);
             RtEvent ready_event = Runtime::merge_events(local_preconditions);
-            child_events[ready_event] = needed_fields;
             preconditions.insert(ready_event);
           }
         }

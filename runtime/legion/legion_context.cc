@@ -3620,7 +3620,7 @@ namespace Legion {
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
-// Safe to cast to a single task here because this will never
+      // Safe to cast to a single task here because this will never
       // be called while inlining an index space task
 #ifdef DEBUG_LEGION
       SingleTask *single_task = dynamic_cast<SingleTask*>(owner_task);

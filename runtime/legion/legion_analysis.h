@@ -197,10 +197,10 @@ namespace Legion {
     class VersionTracker {
     public:
       virtual bool is_upper_bound_node(RegionTreeNode *node) const = 0;
-      virtual void get_field_versions(RegionTreeNode *node, 
+      virtual void get_field_versions(RegionTreeNode *node, bool split_prev, 
                                       const FieldMask &needed_fields,
                                       FieldVersions &field_versions) = 0;
-      virtual void get_advance_versions(RegionTreeNode *node,
+      virtual void get_advance_versions(RegionTreeNode *node, bool base,
                                         const FieldMask &needed_fields,
                                         FieldVersions &field_versions) = 0;
       virtual void get_split_mask(RegionTreeNode *node, 
@@ -260,10 +260,10 @@ namespace Legion {
       virtual void get_split_mask(RegionTreeNode *node, 
                                   const FieldMask &needed_fields,
                                   FieldMask &split);
-      virtual void get_field_versions(RegionTreeNode *node,
+      virtual void get_field_versions(RegionTreeNode *node, bool split_prev,
                                       const FieldMask &needed_fields,
                                       FieldVersions &field_versions);
-      virtual void get_advance_versions(RegionTreeNode *node,
+      virtual void get_advance_versions(RegionTreeNode *node, bool base,
                                         const FieldMask &needed_fields,
                                         FieldVersions &field_versions);
     public:
@@ -403,13 +403,15 @@ namespace Legion {
     public:
       ProjectionInfo(void)
         : projection(NULL), projection_type(SINGULAR),
-          projection_domain(Domain::NO_DOMAIN) { }
+          projection_domain(Domain::NO_DOMAIN), first_reduction(false) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
                      const Domain &launch_domain);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
       inline const LegionMap<ProjectionEpochID,FieldMask>::aligned&
         get_projection_epochs(void) const { return projection_epochs; }
+      inline bool is_first_reduction(void) const { return first_reduction; }
+      inline void set_first_reduction(void) { first_reduction = true; }
       void record_projection_epoch(ProjectionEpochID epoch,
                                    const FieldMask &epoch_mask);
       void clear(void);
@@ -425,6 +427,12 @@ namespace Legion {
       // Use this information to deduplicate between different points
       // trying to advance information for the same projection epoch
       LegionMap<ProjectionEpochID,FieldMask>::aligned projection_epochs;
+    protected:
+      // Track whether this is the first reduction in a reduction-only
+      // projection epoch which will require a special advance be done
+      // by the point tasks to ensure that the VersionState objects
+      // get registered with their parents
+      bool first_reduction;
     };
 
     /**
@@ -1231,7 +1239,6 @@ namespace Legion {
       // Fields which we have initial data for
       FieldMask initial_fields;
       // Track when we have valid data for initial and final fields
-      LegionMap<RtEvent,FieldMask>::aligned child_events;
       LegionMap<RtEvent,FieldMask>::aligned initial_events;
       LegionMap<RtEvent,FieldMask>::aligned final_events;
     protected:

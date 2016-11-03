@@ -2900,6 +2900,7 @@ namespace Legion {
       DeferMessageArgs args;
       args.manager = this;
       args.sender = message->sender;
+      args.kind = message->kind;
       args.size = message->size;
       args.message = malloc(args.size);
       memcpy(args.message, message->message, args.size);
@@ -2915,6 +2916,7 @@ namespace Legion {
       const DeferMessageArgs *margs = (const DeferMessageArgs*)args;
       Mapper::MapperMessage message;
       message.sender = margs->sender;
+      message.kind = margs->kind;
       message.message = margs->message;
       message.size = margs->size;
       message.broadcast = margs->broadcast;

@@ -602,8 +602,9 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
-      if (!finder->second.second || 
-          (previous_managers.find(result) != previous_managers.end()))
+      // Little hack: permit this if we are doing replay mapping
+      if ((Runtime::replay_file == NULL) && (!finder->second.second || 
+          (previous_managers.find(result) != previous_managers.end())))
       {
         // Not a fresh instance 
         log_run.error("Invalid mapper output from invocation of '%s' on "
