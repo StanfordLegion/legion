@@ -5090,7 +5090,7 @@ namespace Legion {
       if (!is_remote())
       {
         // Pass back our created and deleted operations
-        if (!top_level_task)
+        if (!top_level_task && (execution_context != NULL))
           execution_context->return_privilege_state(parent_ctx);
         // The future has already been set so just trigger it
         result.impl->complete_future();
