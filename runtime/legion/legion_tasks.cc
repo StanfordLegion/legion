@@ -5081,7 +5081,7 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       // Release any restrictions we might have had
-      if (execution_context->has_restrictions())
+      if ((execution_context != NULL) && execution_context->has_restrictions())
         execution_context->release_restrictions();
       // For remote cases we have to keep track of the events for
       // returning any created logical state, we can't commit until
@@ -5102,7 +5102,8 @@ namespace Legion {
         runtime->send_individual_remote_complete(orig_proc,rez);
       }
       // Invalidate any state that we had if we didn't already
-      execution_context->invalidate_region_tree_contexts();
+      if (execution_context != NULL)
+        execution_context->invalidate_region_tree_contexts();
       // See if we need to trigger that our children are complete
       // Note it is only safe to do this if we were not sent remotely
       bool need_commit = false;
