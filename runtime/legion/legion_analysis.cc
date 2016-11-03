@@ -6485,60 +6485,28 @@ namespace Legion {
         AutoLock s_lock(state_lock);
         if (!remote_valid_instances.empty())
         {
-          // Figure out which fields we need to request
-          FieldMask remaining_mask = req_mask;
-          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-                child_events.begin(); it != child_events.end(); it++)
-          {
-            FieldMask overlap = it->second & remaining_mask;
-            if (!overlap)
-              continue;
-            preconditions.insert(it->first);
-            remaining_mask -= overlap;
-            if (!remaining_mask)
-              return; 
-          }
+          // We always have to request these from scratch for
+          // disjoint closes in case we do several of them
           // If we still have remaining fields, we have to send requests to
           // all the other nodes asking for their data
-          if (!!remaining_mask)
-          {
-            std::set<RtEvent> local_preconditions;
-            RequestFunctor<CHILD_VERSION_REQUEST> functor(this, context, 
-                local_space, remaining_mask, local_preconditions);
-            remote_valid_instances.map(functor);
-            RtEvent ready_event = Runtime::merge_events(local_preconditions);
-            child_events[ready_event] = remaining_mask;
-            preconditions.insert(ready_event);
-          }
+          std::set<RtEvent> local_preconditions;
+          RequestFunctor<CHILD_VERSION_REQUEST> functor(this, context, 
+              local_space, req_mask, local_preconditions);
+          remote_valid_instances.map(functor);
+          RtEvent ready_event = Runtime::merge_events(local_preconditions);
+          preconditions.insert(ready_event);
         }
         // otherwise we're the only copy so there is nothing to do
       }
       else
       {
-        FieldMask remaining_mask = req_mask;
         // We are not the owner so figure out which fields we still need to
         // send a request for
-        AutoLock s_lock(state_lock);
-        for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-              child_events.begin(); it != child_events.end(); it++)
-        {
-          FieldMask overlap = it->second & remaining_mask;
-          if (!overlap)
-            continue;
-          preconditions.insert(it->first);
-          remaining_mask -= overlap;
-          if (!remaining_mask)
-            return;
-        }
-        if (!!remaining_mask)
-        {
-          RtUserEvent ready_event = Runtime::create_rt_user_event();
-          send_version_state_update_request(owner_space, context, local_space,
-              ready_event, remaining_mask, CHILD_VERSION_REQUEST);
-          // Save the event indicating when the fields will be ready
-          final_events[ready_event] = remaining_mask;
-          preconditions.insert(ready_event);
-        }
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        send_version_state_update_request(owner_space, context, local_space,
+            ready_event, req_mask, CHILD_VERSION_REQUEST);
+        // Save the event indicating when the fields will be ready
+        preconditions.insert(ready_event);
       }
     }
 
@@ -6586,7 +6554,6 @@ namespace Legion {
                 local_space, needed_fields, local_preconditions);
             remote_valid_instances.map(functor);
             RtEvent ready_event = Runtime::merge_events(local_preconditions);
-            child_events[ready_event] = needed_fields;
             preconditions.insert(ready_event);
           }
         }

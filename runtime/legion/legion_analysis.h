@@ -1237,7 +1237,6 @@ namespace Legion {
       // Fields which we have initial data for
       FieldMask initial_fields;
       // Track when we have valid data for initial and final fields
-      LegionMap<RtEvent,FieldMask>::aligned child_events;
       LegionMap<RtEvent,FieldMask>::aligned initial_events;
       LegionMap<RtEvent,FieldMask>::aligned final_events;
     protected:
