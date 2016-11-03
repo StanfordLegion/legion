@@ -21701,6 +21701,7 @@ namespace Legion {
         case LG_TOP_FINISH_TASK_ID:
           {
             TopFinishArgs *fargs = (TopFinishArgs*)args; 
+            fargs->ctx->invalidate_remote_contexts();
             fargs->ctx->invalidate_region_tree_contexts();
             if (fargs->ctx->remove_reference())
               delete fargs->ctx;

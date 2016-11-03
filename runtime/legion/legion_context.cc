@@ -2110,25 +2110,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!remote_instances.empty())
-      {
-        UniqueID local_uid = get_unique_id();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(local_uid);
-        }
-        for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-        {
-          runtime->send_remote_context_free(it->first, rez);
-        }
-        remote_instances.clear();
-      }
+        invalidate_remote_contexts();
       for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
-      {
         legion_delete(it->second);
-      }
       traces.clear();
       // Clean up any locks and barriers that the user
       // asked us to destroy
@@ -3838,6 +3823,24 @@ namespace Legion {
         owner_task->trigger_children_complete();
       if (need_commit)
         owner_task->trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::invalidate_remote_contexts(void)
+    //--------------------------------------------------------------------------
+    {
+      UniqueID local_uid = get_unique_id();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(local_uid);
+      }
+      for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
+            remote_instances.begin(); it != remote_instances.end(); it++)
+      {
+        runtime->send_remote_context_free(it->first, rez);
+      }
+      remote_instances.clear();
     }
 
     //--------------------------------------------------------------------------

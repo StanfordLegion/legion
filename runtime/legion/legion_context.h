@@ -550,6 +550,7 @@ namespace Legion {
       static void handle_version_owner_response(Deserializer &derez,
                                                 Runtime *runtime);
     public:
+      void invalidate_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
     public:
