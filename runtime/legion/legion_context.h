@@ -693,6 +693,8 @@ namespace Legion {
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
+      virtual void find_parent_version_info(unsigned index, unsigned depth, 
+                  const FieldMask &version_mask, VersionInfo &version_info);
     public:
       virtual void find_enclosing_local_fields(
         LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);

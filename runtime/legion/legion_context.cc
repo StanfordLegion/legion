@@ -4499,6 +4499,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteContext::find_parent_version_info(unsigned index, unsigned depth,
+                       const FieldMask &version_mask, VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(regions.size() == virtual_mapped.size()); 
+#endif
+      // If this isn't one of our original region requirements then 
+      // we don't have any versions that the child won't discover itself
+      // Same if the region was not virtually mapped
+      if ((index >= virtual_mapped.size()) || !virtual_mapped[index])
+        return;
+#ifdef DEBUG_LEGION
+      assert(index < version_infos.size());
+#endif
+      version_infos[index].clone_to_depth(depth, version_mask, version_info);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteContext::find_enclosing_local_fields(
              LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
     //--------------------------------------------------------------------------
