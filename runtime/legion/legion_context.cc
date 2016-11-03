@@ -4499,6 +4499,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteContext::find_enclosing_local_fields(
+             LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
+    //--------------------------------------------------------------------------
+    {
+      // No need to recurse here for our parent since we got
+      // all our parent fields when we were sent remotely
+      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+      for (unsigned idx = 0; idx < local_fields.size(); idx++)
+        infos.push_back(local_fields[idx]);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteContext::unpack_remote_context(Deserializer &derez,
                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------

@@ -330,7 +330,8 @@ namespace Legion {
       inline void begin_task_wait(bool from_runtime);
       inline void end_task_wait(void);
     public:
-      void find_enclosing_local_fields(
+      // Override by RemoteContext to avoid unnecessary recursion
+      virtual void find_enclosing_local_fields(
         LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       void perform_inlining(TaskContext *ctx, VariantImpl *variant); 
     public:
@@ -692,6 +693,9 @@ namespace Legion {
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
+    public:
+      virtual void find_enclosing_local_fields(
+        LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
     protected:
       UniqueID parent_context_uid;
       TaskContext *parent_ctx;
