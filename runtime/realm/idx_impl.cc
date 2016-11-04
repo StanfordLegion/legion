@@ -357,12 +357,14 @@ namespace Realm {
 	switch(get_dim()) {
 	case 1:
 	  {
+            /*
 	    std::vector<LegionRuntime::Layouts::DimKind> kind_vec;
 	    std::vector<size_t> size_vec;
 	    kind_vec.push_back(LegionRuntime::Layouts::DIM_X);
 	    size_vec.push_back(get_rect<1>().dim_size(0));
 	    LegionRuntime::Layouts::SplitDimLinearization<1> cl(get_rect<1>().lo, make_point(0), kind_vec, size_vec);
-	    //Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
+	    */
+            LegionRuntime::Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<1>(LegionRuntime::Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<1>());
 	    dl.serialize(linearization_bits);
@@ -371,6 +373,7 @@ namespace Realm {
 
 	case 2:
 	  {
+            /*
 	    std::vector<LegionRuntime::Layouts::DimKind> kind_vec;
 	    std::vector<size_t> size_vec;
 	    kind_vec.push_back(LegionRuntime::Layouts::DIM_X);
@@ -378,7 +381,8 @@ namespace Realm {
 	    size_vec.push_back(get_rect<2>().dim_size(0));
 	    size_vec.push_back(get_rect<2>().dim_size(1));
 	    LegionRuntime::Layouts::SplitDimLinearization<2> cl(get_rect<2>().lo, make_point(0), kind_vec, size_vec);
-	    //Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
+	    */
+            LegionRuntime::Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<2>(LegionRuntime::Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<2>());
 	    dl.serialize(linearization_bits);
@@ -387,6 +391,7 @@ namespace Realm {
 
 	case 3:
 	  {
+            /*
 	    std::vector<LegionRuntime::Layouts::DimKind> kind_vec;
 	    std::vector<size_t> size_vec;
 	    kind_vec.push_back(LegionRuntime::Layouts::DIM_X);
@@ -396,7 +401,8 @@ namespace Realm {
 	    size_vec.push_back(get_rect<3>().dim_size(1));
 	    size_vec.push_back(get_rect<3>().dim_size(2));
 	    LegionRuntime:: Layouts::SplitDimLinearization<3> cl(get_rect<3>().lo, make_point(0), kind_vec, size_vec);
-	    //Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
+	    */
+            LegionRuntime::Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<3>(LegionRuntime::Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<3>());
 	    dl.serialize(linearization_bits);

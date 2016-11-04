@@ -320,6 +320,8 @@ namespace LegionRuntime{
     public:
       // a pointer to the DmaRequest that contains this XferDes
       DmaRequest* dma_request;
+      // a boolean indicating if we have marked started
+      bool mark_started;
       // ID of the node that launches this XferDes
       gasnet_node_t launch_node;
       uint64_t /*bytes_submit, */bytes_read, bytes_write, bytes_total;
@@ -367,7 +369,7 @@ namespace LegionRuntime{
               const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
               uint64_t _max_req_size, int _priority,
               XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
-        : dma_request(_dma_request), launch_node(_launch_node),
+        : dma_request(_dma_request), mark_started(false), launch_node(_launch_node),
           bytes_read(0), bytes_write(0), bytes_total(0), pre_bytes_write(0), next_bytes_read(0),
           domain(_domain), src_buf(_src_buf), dst_buf(_dst_buf), oas_vec(_oas_vec),
           max_req_size(_max_req_size), priority(_priority),

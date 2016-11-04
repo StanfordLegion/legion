@@ -3039,6 +3039,64 @@ namespace LegionRuntime {
 
     bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
 
+    DomainLinearization create_ib_linearization(const Domain& dm)
+    {
+      std::vector<Layouts::DimKind> kind_vec;
+      std::vector<size_t> size_vec;
+      switch (dm.get_dim()) {
+      case 1:
+      {
+        /*
+        kind_vec.push_back(Layouts::DIM_X);
+        size_vec.push_back(dm.get_rect<1>().dim_size(0));
+        Layouts::SplitDimLinearization<1> cl(dm.get_rect<1>().lo,
+                                             make_point(0),
+                                             kind_vec,
+                                             size_vec);
+        */
+        Arrays::FortranArrayLinearization<1> cl(dm.get_rect<1>(), 0);
+        return DomainLinearization::from_mapping<1>(
+                   Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
+      }
+      case 2:
+      {
+        /*
+        kind_vec.push_back(Layouts::DIM_X);
+        kind_vec.push_back(Layouts::DIM_Y);
+        size_vec.push_back(dm.get_rect<2>().dim_size(0));
+        size_vec.push_back(dm.get_rect<2>().dim_size(1));
+        Layouts::SplitDimLinearization<2> cl(dm.get_rect<2>().lo,
+                                             make_point(0),
+                                             kind_vec,
+                                             size_vec);
+        */
+        Arrays::FortranArrayLinearization<2> cl(dm.get_rect<2>(), 0);
+        return DomainLinearization::from_mapping<2>(
+                   Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
+      }
+      case 3:
+      {
+        /*
+        kind_vec.push_back(Layouts::DIM_X);
+        kind_vec.push_back(Layouts::DIM_Y);
+        kind_vec.push_back(Layouts::DIM_Z);
+        size_vec.push_back(dm.get_rect<3>().dim_size(0));
+        size_vec.push_back(dm.get_rect<3>().dim_size(1));
+        size_vec.push_back(dm.get_rect<3>().dim_size(2));
+        Layouts::SplitDimLinearization<3> cl(dm.get_rect<3>().lo,
+                                             make_point(0),
+                                             kind_vec,
+                                             size_vec);
+        */
+        Arrays::FortranArrayLinearization<3> cl(dm.get_rect<3>(), 0);
+        return DomainLinearization::from_mapping<3>(
+                   Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
+      }
+      default:
+        assert(0);
+      }
+    }
+
     Buffer simple_create_intermediate_buffer(const IBInfo& ib_info, const Domain& domain,
                                              OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst,
                                              DomainLinearization linearization)
@@ -3068,7 +3126,13 @@ namespace LegionRuntime {
       assert(ib_size == ib_info.size);
       //off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
       //assert(ib_offset >= 0);
-      Buffer ib_buf(ib_info.offset, true, domain.get_volume(), ib_elmnt_size, ib_info.size, linearization, ib_info.memory);
+      // Create a new linearization order x->y in Domain
+      DomainLinearization dl;
+      if (domain.get_dim() == 0)
+        dl = linearization;
+      else
+        dl = create_ib_linearization(domain);
+      Buffer ib_buf(ib_info.offset, true, domain.get_volume(), ib_elmnt_size, ib_info.size, dl, ib_info.memory);
       return ib_buf;
     }
 
@@ -3151,7 +3215,7 @@ namespace LegionRuntime {
           assert(0);
         }
       } else {
-        if (src_ll_kind == Memory::REGDMA_MEM && dst_ll_kind == Memory::REGDMA_MEM)
+        if (is_cpu_mem(src_ll_kind) && dst_ll_kind == Memory::REGDMA_MEM)
           return XferDes::XFER_REMOTE_WRITE;
         else
           return XferDes::XFER_NONE;
@@ -3194,7 +3258,7 @@ namespace LegionRuntime {
     template<unsigned DIM>
     void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
     {
-      mark_started();
+      //mark_started();
       //std::vector<Memory> mem_path;
       //find_shortest_path(src_mem, dst_mem, mem_path);
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {

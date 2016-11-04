@@ -191,6 +191,8 @@ namespace LegionRuntime {
         coord_t src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
         coord_t dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
         todo = min(todo, min(src_in_block, dst_in_block));
+        if (todo == 0)
+          return false;
         bool scatter_src_ib = false, scatter_dst_ib = false;
         // make sure we have source data ready
         if (src_buf.is_ib) {
@@ -202,6 +204,8 @@ namespace LegionRuntime {
 	  src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
                                    src_buf.elmt_size, src_buf.block_size, src_idx);
         }
+        if (todo  == 0)
+          return false;
         // make sure there are enough space in destination
         if (dst_buf.is_ib) {
           dst_start = calc_mem_loc_ib(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
@@ -212,6 +216,8 @@ namespace LegionRuntime {
           dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
                                    dst_buf.elmt_size, dst_buf.block_size, dst_idx);
         }
+        if (todo == 0)
+          return false;
         if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
         ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
           return false; // case we don't have enough slots
@@ -359,7 +365,7 @@ namespace LegionRuntime {
 
       inline void XferDes::simple_update_bytes_read(int64_t offset, uint64_t size)
       {
-        //printf("update_read: offset = %ld, size = %lu, pre = %ld, next = %ld\n", offset, size, pre_xd_guid, next_xd_guid);
+        //printf("update_read[%lx]: offset = %ld, size = %lu, pre = %lx, next = %lx\n", guid, offset, size, pre_xd_guid, next_xd_guid);
         if (pre_xd_guid != XFERDES_NO_GUID) {
           bool update = false;
           if ((int64_t)(bytes_read % src_buf.buf_size) == offset) {
@@ -391,7 +397,7 @@ namespace LegionRuntime {
 
       inline void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size)
       {
-        //printf("update_write: offset = %ld, size = %lu, pre = %lx, next = %lx\n", offset, size, pre_xd_guid, next_xd_guid);
+        //printf("update_write[%lx]: offset = %ld, size = %lu, pre = %lx, next = %lx\n", guid, offset, size, pre_xd_guid, next_xd_guid);
         if (next_xd_guid != XFERDES_NO_GUID) {
           bool update = false;
           if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
@@ -2186,6 +2192,12 @@ namespace LegionRuntime {
             PriorityXferDesQueue::iterator it2;
             for (it2 = it->second->begin(); it2 != it->second->end(); it2++) {
               assert((*it2)->channel == it->first);
+              // If we haven't mark started and we are the first xd, mark start
+              if ((!(*it2)->mark_started)
+                  && ((*it2)->pre_xd_guid == XferDes::XFERDES_NO_GUID)) {
+                (*it2)->dma_request->mark_started();
+                (*it2)->mark_started = true;
+              }
               long nr_got = (*it2)->get_requests(requests, min(nr, max_nr));
               long nr_submitted = it->first->submit(requests, nr_got);
               nr -= nr_submitted;
