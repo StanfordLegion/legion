@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [[]]
+-- [["-ll:cpu", "4"]]
 
 -- FIXME: Something is wrong with SPMD
 -- [["-ll:cpu", "4", "-fflow-spmd", "4", "-fflow-spmd-shardsize", "4"]]
