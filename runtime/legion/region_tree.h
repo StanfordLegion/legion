@@ -469,6 +469,8 @@ namespace Legion {
       RegionNode*     get_node(LogicalRegion handle, bool need_check = true);
       PartitionNode*  get_node(LogicalPartition handle, bool need_check = true);
       RegionNode*     get_tree(RegionTreeID tid);
+      // Request but don't block
+      RtEvent request_node(IndexSpace space);
     public:
       bool has_node(IndexSpace space, bool local_only = false);
       bool has_node(IndexPartition part, bool local_only = false);
@@ -1008,18 +1010,24 @@ namespace Legion {
                                       AddressSpaceID source);
       static void handle_node_return(Deserializer &derez);
       static void handle_node_child_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
+          RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
       static void handle_node_child_response(Deserializer &derez);
       static void handle_notification(RegionTreeForest *context, 
                                       Deserializer &derez);
+      static void handle_node_children_request(
+          RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
+      static void handle_node_children_response(
+          RegionTreeForest *forest, Deserializer &derez);
     public:
       const IndexPartition handle;
       const Domain color_space;
       const AllocateMode mode;
       IndexSpaceNode *const parent;
+      const unsigned total_children;
     protected:
       bool disjoint;
       ApEvent disjoint_ready;
+      RtEvent all_children_request;
     protected:
       bool has_complete, complete;
     protected:

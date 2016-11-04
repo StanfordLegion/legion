@@ -601,38 +601,6 @@ namespace Legion {
       derez.deserialize(barrier.phase_barrier);
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::pack_point(Serializer &rez, 
-                                             const DomainPoint &p)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(p.dim);
-      if (p.dim == 0)
-        rez.serialize(p.point_data[0]);
-      else
-      {
-        for (int idx = 0; idx < p.dim; idx++)
-          rez.serialize(p.point_data[idx]);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::unpack_point(Deserializer &derez, 
-                                               DomainPoint &p)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(p.dim);
-      if (p.dim == 0)
-        derez.deserialize(p.point_data[0]);
-      else
-      {
-        for (int idx = 0; idx < p.dim; idx++)
-          derez.deserialize(p.point_data[idx]);
-      }
-    }
-
     /////////////////////////////////////////////////////////////
     // Task Operation 
     /////////////////////////////////////////////////////////////
@@ -7250,7 +7218,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < points; idx++)
         {
           DomainPoint point;
-          unpack_point(derez, point);
+          derez.deserialize(point);
           std::vector<LogicalRegion> &reqs = local_requirements[point];
           reqs.resize(regions.size());
           for (unsigned idx2 = 0; idx2 < regions.size(); idx2++)
@@ -7288,7 +7256,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < points; idx++)
         {
           DomainPoint p;
-          unpack_point(derez, p);
+          derez.deserialize(p);
           if (must_epoch == NULL)
           {
             Future f = future_map.impl->get_future(p);
@@ -7836,7 +7804,7 @@ namespace Legion {
         for (std::map<DomainPoint,TaskArgument>::const_iterator it = 
               non_empty_args.begin(); it != non_empty_args.end(); it++)
         {
-          pack_point(rez, it->first);
+          rez.serialize(it->first);
           size_t arg_size = it->second.get_size();
           rez.serialize(arg_size);
           rez.serialize(it->second.get_ptr(), arg_size);
@@ -7918,7 +7886,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < num_local_args; idx++)
           {
             DomainPoint dp;
-            unpack_point(derez, dp);
+            derez.deserialize(dp);
             size_t arg_size;
             derez.deserialize(arg_size);
             argument_map.set_point(dp, 
@@ -8349,7 +8317,7 @@ namespace Legion {
         for (std::vector<PointTask*>::const_iterator it = 
               points.begin(); it != points.end(); it++)
         {
-          pack_point(rez, (*it)->index_point);
+          rez.serialize((*it)->index_point);
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize((*it)->regions[idx].region);
         }
@@ -8387,7 +8355,7 @@ namespace Legion {
         for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator it =
               temporary_futures.begin(); it != temporary_futures.end(); it++)
         {
-          pack_point(rez, it->first);
+          rez.serialize(it->first);
           RezCheck z2(rez);
           rez.serialize(it->second.second);
           rez.serialize(it->second.first,it->second.second);

@@ -122,9 +122,6 @@ namespace Legion {
           Grant &grant, Deserializer &derez);
       static void unpack_phase_barrier(
           PhaseBarrier &barrier, Deserializer &derez);
-    public:
-      static void pack_point(Serializer &rez, const DomainPoint &p);
-      static void unpack_point(Deserializer &derez, DomainPoint &p);
     };
 
     /**

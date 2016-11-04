@@ -3994,6 +3994,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent RegionTreeForest::request_node(IndexSpace space)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/); 
+        std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
+          index_nodes.find(space);
+        if (finder != index_nodes.end())
+          return RtEvent::NO_RT_EVENT;
+      }
+      // Couldn't find it, so send a request to the owner node
+      AddressSpace owner = IndexSpaceNode::get_owner_space(space, runtime);
+      if (owner == runtime->address_space)
+      {
+        log_index.error("Unable to find entry for index space %x.", space.id);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
+      }
+      AutoLock l_lock(lookup_lock);
+      // Check to make sure we didn't loose the race
+      std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
+        index_nodes.find(space);
+      if (finder != index_nodes.end())
+        return RtEvent::NO_RT_EVENT;
+      // Still doesn't exists, see if we sent a request already
+      std::map<IndexSpace,RtEvent>::const_iterator wait_finder = 
+        index_space_requests.find(space);
+      if (wait_finder == index_space_requests.end())
+      {
+        RtUserEvent done = Runtime::create_rt_user_event();
+        index_space_requests[space] = done;
+        Serializer rez;
+        rez.serialize(space);
+        rez.serialize(done);
+        runtime->send_index_space_request(owner, rez);     
+        return done;
+      }
+      else
+        return wait_finder->second;
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeForest::has_node(IndexSpace space, bool local_only)
     //--------------------------------------------------------------------------
     {
@@ -6819,8 +6863,8 @@ namespace Legion {
                                  bool dis, AllocateMode m,
                                  RegionTreeForest *ctx)
       : IndexTreeNode(c, par->depth+1, ctx), handle(p), color_space(cspace),
-        mode(m), parent(par), disjoint(dis), 
-        disjoint_ready(RtEvent::NO_RT_EVENT), has_complete(false)
+        mode(m), parent(par), total_children(cspace.get_volume()), 
+        disjoint(dis), disjoint_ready(RtEvent::NO_RT_EVENT), has_complete(false)
     //--------------------------------------------------------------------------
     { 
     }
@@ -6831,8 +6875,8 @@ namespace Legion {
                                  RtEvent ready, AllocateMode m,
                                  RegionTreeForest *ctx)
       : IndexTreeNode(c, par->depth+1, ctx), handle(p), color_space(cspace),
-        mode(m), parent(par), disjoint(false), disjoint_ready(ready), 
-        has_complete(false)
+        mode(m), parent(par), total_children(cspace.get_volume()), 
+        disjoint(false), disjoint_ready(ready), has_complete(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -6841,7 +6885,7 @@ namespace Legion {
     IndexPartNode::IndexPartNode(const IndexPartNode &rhs)
       : IndexTreeNode(), handle(IndexPartition::NO_PART), 
         color_space(Domain::NO_DOMAIN), mode(NO_MEMORY), 
-        parent(NULL), disjoint(false), has_complete(false)
+        parent(NULL), total_children(0), disjoint(false), has_complete(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7802,19 +7846,78 @@ namespace Legion {
     void IndexPartNode::get_subspace_domains(std::set<Domain> &subspaces)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock, 1, false/*exclusive*/);
-      for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); it++)
+      // If we are a remote copy of this partition, we need to actually
+      // get all the sub-region domains if we don't already have them
+      RtEvent wait_on;
       {
-        if (it->second->has_component_domains())
+        AutoLock n_lock(node_lock, 1, false/*exclusive*/);
+        if (color_map.size() == total_children)
         {
-          const std::set<Domain> &components = 
-                                it->second->get_component_domains_blocking();
-          subspaces.insert(components.begin(), components.end());
+          for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
+                color_map.begin(); it != color_map.end(); it++)
+          {
+            if (it->second->has_component_domains())
+            {
+              const std::set<Domain> &components = 
+                                  it->second->get_component_domains_blocking();
+              subspaces.insert(components.begin(), components.end());
+            }
+            else
+              subspaces.insert(it->second->get_domain_blocking());
+          }
+          return;
         }
-        else
-          subspaces.insert(it->second->get_domain_blocking());
+        // Otherwise we fall through and request all the subregions
+        wait_on = all_children_request;
       }
+      // See if we have to send the request ourself
+      RtUserEvent request_event;
+      std::vector<ColorPoint> needed_points;
+      if (!wait_on.exists())
+      {
+        AutoLock n_lock(node_lock);
+        // See if we lost the race
+        if (!all_children_request.exists())
+        {
+          request_event = Runtime::create_rt_user_event();
+          all_children_request = request_event;
+          // Figure out which points we need
+          for (Domain::DomainPointIterator itr(color_space); 
+                itr; itr++)
+          {
+            ColorPoint p(itr.p);
+            if (color_map.find(p) == color_map.end())
+              needed_points.push_back(p);
+          }
+#ifdef DEBUG_LEGION
+          assert(!needed_points.empty());
+#endif
+        }
+        wait_on = all_children_request;
+      }
+      // Send the request if necessary
+      if (request_event.exists())
+      {
+        AddressSpaceID target = get_owner_space(); 
+#ifdef DEBUG_LEGION
+        assert(target != context->runtime->address_space);
+#endif
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(request_event);
+          rez.serialize<size_t>(needed_points.size());
+          for (std::vector<ColorPoint>::const_iterator it = 
+                needed_points.begin(); it != needed_points.end(); it++)
+            rez.serialize(*it);
+        }
+        context->runtime->send_index_partition_children_request(target, rez);
+      }
+      // Wait for all the children, then recurse 
+      wait_on.wait();
+      // Now we can call this and know that all the children are there
+      get_subspace_domains(subspaces);
     }
 
     //--------------------------------------------------------------------------
@@ -8258,6 +8361,60 @@ namespace Legion {
                           (part_kind == DISJOINT_KIND), mode);
       // Now we can trigger the done event
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_node_children_request(
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexPartition handle;
+      derez.deserialize(handle);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      size_t num_points;
+      derez.deserialize(num_points);
+      IndexPartNode *node = forest->get_node(handle);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(done_event);
+        rez.serialize(num_points);
+        for (unsigned idx = 0; idx < num_points; idx++)
+        {
+          ColorPoint child_color;
+          derez.deserialize(child_color);
+          IndexSpaceNode *child = node->get_child(child_color);
+          rez.serialize(child->handle);
+        }
+      }
+      forest->runtime->send_index_partition_children_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_node_children_response(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      size_t num_points;
+      derez.deserialize(num_points);
+      std::set<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < num_points; idx++)
+      {
+        IndexSpace handle;
+        derez.deserialize(handle);
+        RtEvent ready = forest->request_node(handle);
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      if (!ready_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////

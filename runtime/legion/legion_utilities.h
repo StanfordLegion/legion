@@ -403,6 +403,7 @@ namespace Legion {
       inline void serialize(const IntegerSet<IT,DT,BIDIR> &index_set);
       inline void serialize(const ColorPoint &point);
       inline void serialize(const Domain &domain);
+      inline void serialize(const DomainPoint &dp);
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -475,6 +476,7 @@ namespace Legion {
       inline void deserialize(IntegerSet<IT,DT,BIDIR> &index_set);
       inline void deserialize(ColorPoint &color);
       inline void deserialize(Domain &domain);
+      inline void deserialize(DomainPoint &dp);
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -1477,6 +1479,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void Serializer::serialize(const DomainPoint &dp)
+    //--------------------------------------------------------------------------
+    {
+      serialize(dp.dim);
+      if (dp.dim == 0)
+        serialize(dp.point_data[0]);
+      else
+      {
+        for (int idx = 0; idx < dp.dim; idx++)
+          serialize(dp.point_data[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     inline void Serializer::serialize(const void *src, size_t bytes)
     //--------------------------------------------------------------------------
     {
@@ -1665,6 +1681,20 @@ namespace Legion {
       {
         for (int i = 0; i < 2*dom.dim; i++)
           deserialize(dom.rect_data[i]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Deserializer::deserialize(DomainPoint &dp)
+    //--------------------------------------------------------------------------
+    {
+      deserialize(dp.dim);
+      if (dp.dim == 0)
+        deserialize(dp.point_data[0]);
+      else
+      {
+        for (int idx = 0; idx < dp.dim; idx++)
+          deserialize(dp.point_data[idx]);
       }
     }
       
