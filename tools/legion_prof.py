@@ -703,7 +703,6 @@ class Channel(object):
             else:
                 # Finishing this instance so restore its point
                 free_levels.add(point.thing.level)
-        print "sorted channels"
 
     def emit_svg(self, printer):
         assert self.last_time is not None

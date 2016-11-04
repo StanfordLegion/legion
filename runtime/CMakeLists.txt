@@ -206,6 +206,7 @@ list(APPEND HIGH_RUNTIME_SRC
   legion/legion_c.h            legion/legion_c.cc
   legion/legion_config.h
   legion/legion_constraint.h   legion/legion_constraint.cc
+  legion/legion_context.h      legion/legion_context.cc
   legion/legion_c_util.h
   legion/legion.h              legion/legion.cc
   legion/legion.inl
