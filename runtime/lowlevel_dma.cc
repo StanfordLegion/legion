@@ -3296,6 +3296,7 @@ namespace LegionRuntime {
             XferDesID xd_guid = sub_path[idx - 1];
             XferDesID pre_xd_guid = idx == 1 ? XferDes::XFERDES_NO_GUID : sub_path[idx - 2];
             XferDesID next_xd_guid = idx == sub_path.size() ? XferDes::XFERDES_NO_GUID : sub_path[idx];
+            bool mark_started = ((idx == 1) && (it == oas_by_inst->begin())) ? true : false;
             Buffer cur_buf;
             XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
             XferOrder::Type order = idx == 1 ? XferOrder::DST_FIFO : XferOrder::SRC_FIFO;
@@ -3329,9 +3330,11 @@ namespace LegionRuntime {
                   oasvec_src = oasvec;
                   oasvec.clear();
                 }
-                create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
-                                   pre_buf, cur_buf, new_domain, oasvec_src, 1024 * 1024/*max_req_size*/,
-                                   100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
+                create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
+                                   next_xd_guid, mark_started, pre_buf, cur_buf,
+                                   new_domain, oasvec_src,
+                                   1024 * 1024/*max_req_size*/, 100/*max_nr*/,
+                                   priority, order, kind, complete_fence, hdf_inst);
               } else {
                 if (idx != mem_path.size() - 1) {
                   cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
@@ -3341,9 +3344,11 @@ namespace LegionRuntime {
                   oasvec_src = oasvec;
                   oasvec.clear();
                 }
-                create_xfer_des<0>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
-                                   pre_buf, cur_buf, domain, oasvec_src, 1024 * 1024 /*max_req_size*/,
-                                   100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
+                create_xfer_des<0>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
+                                   next_xd_guid, mark_started, pre_buf, cur_buf,
+                                   domain, oasvec_src,
+                                   1024 * 1024 /*max_req_size*/, 100/*max_nr*/,
+                                   priority, order, kind, complete_fence, hdf_inst);
               }
             }
             else {
@@ -3355,9 +3360,11 @@ namespace LegionRuntime {
                 oasvec_src = oasvec;
                 oasvec.clear();
               }
-              create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid, next_xd_guid,
-                                   pre_buf, cur_buf, domain, oasvec_src, 1024 * 1024/*max_req_size*/,
-                                   100/*max_nr*/, priority, order, kind, complete_fence, hdf_inst);
+              create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
+                                   next_xd_guid, mark_started, pre_buf, cur_buf,
+                                   domain, oasvec_src,
+                                   1024 * 1024/*max_req_size*/, 100/*max_nr*/,
+                                   priority, order, kind, complete_fence, hdf_inst);
             }
             pre_buf = cur_buf;
             oasvec = oasvec_dst;

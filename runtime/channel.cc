@@ -427,14 +427,25 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
-      MemcpyXferDes<DIM>::MemcpyXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
-                                        XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-                                        const Buffer& _src_buf, const Buffer& _dst_buf,
-                                        const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                        uint64_t _max_req_size, long max_nr, int _priority,
-                                        XferOrder::Type _order, XferDesFence* _complete_fence)
-        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, XferDes::XFER_MEM_CPY, _complete_fence)
+      MemcpyXferDes<DIM>::MemcpyXferDes(DmaRequest* _dma_request,
+                                        gasnet_node_t _launch_node,
+                                        XferDesID _guid,
+                                        XferDesID _pre_xd_guid,
+                                        XferDesID _next_xd_guid,
+                                        bool mark_started,
+                                        const Buffer& _src_buf,
+                                        const Buffer& _dst_buf,
+                                        const Domain& _domain,
+                                        const std::vector<OffsetsAndSize>& _oas_vec,
+                                        uint64_t _max_req_size,
+                                        long max_nr,
+                                        int _priority,
+                                        XferOrder::Type _order,
+                                        XferDesFence* _complete_fence)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
+                  _next_xd_guid, mark_started, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority, _order,
+                  XferDes::XFER_MEM_CPY, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -534,14 +545,26 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
-      GASNetXferDes<DIM>::GASNetXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
-                                        XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-                                        const Buffer& _src_buf, const Buffer& _dst_buf,
-                                        const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                        uint64_t _max_req_size, long max_nr, int _priority,
-                                        XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
-        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _complete_fence)
+      GASNetXferDes<DIM>::GASNetXferDes(DmaRequest* _dma_request,
+                                        gasnet_node_t _launch_node,
+                                        XferDesID _guid,
+                                        XferDesID _pre_xd_guid,
+                                        XferDesID _next_xd_guid,
+                                        bool mark_started,
+                                        const Buffer& _src_buf,
+                                        const Buffer& _dst_buf,
+                                        const Domain& _domain,
+                                        const std::vector<OffsetsAndSize>& _oas_vec,
+                                        uint64_t _max_req_size,
+                                        long max_nr,
+                                        int _priority,
+                                        XferOrder::Type _order,
+                                        XferKind _kind,
+                                        XferDesFence* _complete_fence)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
+                  _next_xd_guid, mark_started, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority, _order,
+                  _kind, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -707,14 +730,25 @@ namespace LegionRuntime {
       }
 
       template<unsigned DIM>
-      RemoteWriteXferDes<DIM>::RemoteWriteXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
-                                                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-                                                  const Buffer& _src_buf, const Buffer& _dst_buf,
-                                                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                                  uint64_t _max_req_size, long max_nr, int _priority,
-                                                  XferOrder::Type _order, XferDesFence* _complete_fence)
-        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, XferDes::XFER_REMOTE_WRITE, _complete_fence)
+      RemoteWriteXferDes<DIM>::RemoteWriteXferDes(DmaRequest* _dma_request,
+                                                  gasnet_node_t _launch_node,
+                                                  XferDesID _guid,
+                                                  XferDesID _pre_xd_guid,
+                                                  XferDesID _next_xd_guid,
+                                                  bool mark_started,
+                                                  const Buffer& _src_buf,
+                                                  const Buffer& _dst_buf,
+                                                  const Domain& _domain,
+                                                  const std::vector<OffsetsAndSize>& _oas_vec,
+                                                  uint64_t _max_req_size,
+                                                  long max_nr,
+                                                  int _priority,
+                                                  XferOrder::Type _order,
+                                                  XferDesFence* _complete_fence)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
+                  _next_xd_guid, mark_started, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority, _order,
+                  XferDes::XFER_REMOTE_WRITE, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -828,14 +862,26 @@ namespace LegionRuntime {
 
 #ifdef USE_DISK
       template<unsigned DIM>
-      DiskXferDes<DIM>::DiskXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
-                                    XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-                                    const Buffer& _src_buf, const Buffer& _dst_buf,
-                                    const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                    uint64_t _max_req_size, long max_nr, int _priority,
-                                    XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
-        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _complete_fence)
+      DiskXferDes<DIM>::DiskXferDes(DmaRequest* _dma_request,
+                                    gasnet_node_t _launch_node,
+                                    XferDesID _guid,
+                                    XferDesID _pre_xd_guid,
+                                    XferDesID _next_xd_guid,
+                                    bool mark_started,
+                                    const Buffer& _src_buf,
+                                    const Buffer& _dst_buf,
+                                    const Domain& _domain,
+                                    const std::vector<OffsetsAndSize>& _oas_vec,
+                                    uint64_t _max_req_size,
+                                    long max_nr,
+                                    int _priority,
+                                    XferOrder::Type _order,
+                                    XferKind _kind,
+                                    XferDesFence* _complete_fence)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
+                  _next_xd_guid, mark_started, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority,
+                  _order, _kind, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -1008,14 +1054,26 @@ namespace LegionRuntime {
 #endif /*USE_DISK*/
 #ifdef USE_CUDA
       template<unsigned DIM>
-      GPUXferDes<DIM>::GPUXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
-                                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-                                  const Buffer& _src_buf, const Buffer& _dst_buf,
-                                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                  uint64_t _max_req_size, long max_nr, int _priority,
-                                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
-      : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _complete_fence)
+      GPUXferDes<DIM>::GPUXferDes(DmaRequest* _dma_request,
+                                  gasnet_node_t _launch_node,
+                                  XferDesID _guid,
+                                  XferDesID _pre_xd_guid,
+                                  XferDesID _next_xd_guid,
+                                  bool mark_started,
+                                  const Buffer& _src_buf,
+                                  const Buffer& _dst_buf,
+                                  const Domain& _domain,
+                                  const std::vector<OffsetsAndSize>& _oas_vec,
+                                  uint64_t _max_req_size,
+                                  long max_nr,
+                                  int _priority,
+                                  XferOrder::Type _order,
+                                  XferKind _kind,
+                                  XferDesFence* _complete_fence)
+      : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
+                _next_xd_guid, mark_started, _src_buf, _dst_buf,
+                _domain, _oas_vec, _max_req_size, _priority,
+                _order, _kind, _complete_fence)
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -1265,14 +1323,27 @@ namespace LegionRuntime {
 
 #ifdef USE_HDF
       template<unsigned DIM>
-      HDFXferDes<DIM>::HDFXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
-                                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-                                  RegionInstance inst, const Buffer& _src_buf, const Buffer& _dst_buf,
-                                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                                  uint64_t _max_req_size, long max_nr, int _priority,
-                                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
-        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid, _next_xd_guid, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority, _order, _kind, _complete_fence)
+      HDFXferDes<DIM>::HDFXferDes(DmaRequest* _dma_request,
+                                  gasnet_node_t _launch_node,
+                                  XferDesID _guid,
+                                  XferDesID _pre_xd_guid,
+                                  XferDesID _next_xd_guid,
+                                  bool mark_started,
+                                  RegionInstance inst,
+                                  const Buffer& _src_buf,
+                                  const Buffer& _dst_buf,
+                                  const Domain& _domain,
+                                  const std::vector<OffsetsAndSize>& _oas_vec,
+                                  uint64_t _max_req_size,
+                                  long max_nr,
+                                  int _priority,
+                                  XferOrder::Type _order,
+                                  XferKind _kind,
+                                  XferDesFence* _complete_fence)
+        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
+                  _next_xd_guid, mark_started, _src_buf, _dst_buf,
+                  _domain, _oas_vec, _max_req_size, _priority,
+                  _order, _kind, _complete_fence)
       {
         MemoryImpl* src_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
@@ -2124,28 +2195,28 @@ namespace LegionRuntime {
         case 0:
           create_xfer_des<0>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             src_buf, dst_buf, payload->domain, oas_vec,
+                             false/*mark_started*/, src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
                              payload->order, payload->kind, args.fence, args.inst);
           break;
         case 1:
           create_xfer_des<1>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             src_buf, dst_buf, payload->domain, oas_vec,
+                             false/*mark_started*/, src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
                              payload->order, payload->kind, args.fence, args.inst);
           break;
         case 2:
           create_xfer_des<2>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             src_buf, dst_buf, payload->domain, oas_vec,
+                             false/*mark_started*/, src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
                              payload->order, payload->kind, args.fence, args.inst);
           break;
         case 3:
           create_xfer_des<3>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             src_buf, dst_buf, payload->domain, oas_vec,
+                             false/*mark_started*/, src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
                              payload->order, payload->kind, args.fence, args.inst);
           break;
@@ -2193,10 +2264,9 @@ namespace LegionRuntime {
             for (it2 = it->second->begin(); it2 != it->second->end(); it2++) {
               assert((*it2)->channel == it->first);
               // If we haven't mark started and we are the first xd, mark start
-              if ((!(*it2)->mark_started)
-                  && ((*it2)->pre_xd_guid == XferDes::XFERDES_NO_GUID)) {
+              if ((*it2)->mark_start) {
                 (*it2)->dma_request->mark_started();
-                (*it2)->mark_started = true;
+                (*it2)->mark_start = false;
               }
               long nr_got = (*it2)->get_requests(requests, min(nr, max_nr));
               long nr_submitted = it->first->submit(requests, nr_got);
@@ -2353,13 +2423,23 @@ namespace LegionRuntime {
 
 
       template<unsigned DIM>
-      void create_xfer_des(DmaRequest* _dma_request, gasnet_node_t _launch_node,
-                           XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-                           const Buffer& _src_buf, const Buffer& _dst_buf,
-                           const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                           uint64_t _max_req_size, long max_nr, int _priority,
-                           XferOrder::Type _order, XferDes::XferKind _kind,
-                           XferDesFence* _complete_fence, RegionInstance inst)
+      void create_xfer_des(DmaRequest* _dma_request,
+                           gasnet_node_t _launch_node,
+                           XferDesID _guid,
+                           XferDesID _pre_xd_guid,
+                           XferDesID _next_xd_guid,
+                           bool mark_started,
+                           const Buffer& _src_buf,
+                           const Buffer& _dst_buf,
+                           const Domain& _domain,
+                           const std::vector<OffsetsAndSize>& _oas_vec,
+                           uint64_t _max_req_size,
+                           long max_nr,
+                           int _priority,
+                           XferOrder::Type _order,
+                           XferDes::XferKind _kind,
+                           XferDesFence* _complete_fence,
+                           RegionInstance inst)
       {
         if (ID(_src_buf.memory).memory.owner_node == gasnet_mynode()) {
           size_t total_field_size = 0;
@@ -2373,6 +2453,7 @@ namespace LegionRuntime {
           case XferDes::XFER_MEM_CPY:
             xd = new MemcpyXferDes<DIM>(_dma_request, _launch_node,
                                         _guid, _pre_xd_guid, _next_xd_guid,
+                                        mark_started,
                                         _src_buf, _dst_buf, _domain, _oas_vec,
                                         _max_req_size, max_nr, _priority,
                                         _order, _complete_fence);
@@ -2381,6 +2462,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GASNET_WRITE:
             xd = new GASNetXferDes<DIM>(_dma_request, _launch_node,
                                         _guid, _pre_xd_guid, _next_xd_guid,
+                                        mark_started,
                                         _src_buf, _dst_buf, _domain, _oas_vec,
                                         _max_req_size, max_nr, _priority,
                                         _order, _kind, _complete_fence);
@@ -2388,6 +2470,7 @@ namespace LegionRuntime {
           case XferDes::XFER_REMOTE_WRITE:
             xd = new RemoteWriteXferDes<DIM>(_dma_request, _launch_node,
                                              _guid, _pre_xd_guid, _next_xd_guid,
+                                             mark_started,
                                              _src_buf, _dst_buf, _domain, _oas_vec,
                                              _max_req_size, max_nr, _priority,
                                              _order, _complete_fence);
@@ -2397,6 +2480,7 @@ namespace LegionRuntime {
           case XferDes::XFER_DISK_WRITE:
             xd = new DiskXferDes<DIM>(_dma_request, _launch_node,
                                       _guid, _pre_xd_guid, _next_xd_guid,
+                                      mark_started,
                                       _src_buf, _dst_buf, _domain, _oas_vec,
                                       _max_req_size, max_nr, _priority,
                                       _order, _kind, _complete_fence);
@@ -2409,6 +2493,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_PEER_FB:
             xd = new GPUXferDes<DIM>(_dma_request, _launch_node,
                                      _guid, _pre_xd_guid, _next_xd_guid,
+                                     mark_started,
                                      _src_buf, _dst_buf, _domain, _oas_vec,
                                      _max_req_size, max_nr, _priority,
                                      _order, _kind, _complete_fence);
@@ -2419,6 +2504,7 @@ namespace LegionRuntime {
           case XferDes::XFER_HDF_WRITE:
             xd = new HDFXferDes<DIM>(_dma_request, _launch_node,
                                      _guid, _pre_xd_guid, _next_xd_guid,
+                                     mark_started,
                                      inst, _src_buf, _dst_buf, _domain, _oas_vec,
                                      _max_req_size, max_nr, _priority,
                                      _order, _kind, _complete_fence);
