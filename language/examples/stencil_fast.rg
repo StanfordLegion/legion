@@ -436,13 +436,13 @@ where reads(private.{input, output}) do
   var expect_out = init
   for i in interior do
     if private[i].input ~= expect_in then
-      c.printf("input (%lld,%lld): %.0f should be %lld\n",
+      c.printf("input (%lld,%lld): %.3f should be %lld\n",
                i.x, i.y, private[i].input, expect_in)
     end
   end
   for i in interior do
     if private[i].output ~= expect_out then
-      c.printf("output (%lld,%lld): %.0f should be %lld\n",
+      c.printf("output (%lld,%lld): %.3f should be %lld\n",
                i.x, i.y, private[i].output, expect_out)
     end
   end
