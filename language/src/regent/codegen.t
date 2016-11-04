@@ -2091,7 +2091,8 @@ local function expr_call_setup_task_args(
     var [size] = terralib.sizeof(params_struct_type)
   end)
 
-  for i, arg in ipairs(args) do
+  for i = 1, #args do
+    local arg = args[i]
     local arg_type = arg_types[i]
     if not std.is_future(arg_type) then
       local param_type = param_types[i] -- arg has already been cast to param_type
@@ -7951,7 +7952,8 @@ function codegen.top_task(cx, node)
       var [future_count] = c.legion_task_get_futures_size([c_task])
       var [future_i] = 0
     end)
-    for i, param in ipairs(params) do
+    for i = 1, #params do
+      local param = params[i]
       local param_type = node.params[i].param_type
       local param_symbol = param:getsymbol()
 
