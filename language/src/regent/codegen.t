@@ -2970,19 +2970,30 @@ end
 
 function codegen.expr_isnull(cx, node)
   local pointer = codegen.expr(cx, node.pointer):read(cx)
+  local index_type = std.as_read(node.pointer.expr_type).index_type
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
     [pointer.actions];
     [emit_debuginfo(node)]
   end
 
-  return values.value(
-    node,
-    expr.once_only(
-      actions,
-      `([expr_type](c.legion_ptr_is_null([pointer.value].__ptr))),
-      expr_type),
-    expr_type)
+  if index_type:is_opaque() then
+    return values.value(
+      node,
+      expr.once_only(
+        actions,
+        `([expr_type](c.legion_ptr_is_null([pointer.value].__ptr))),
+        expr_type),
+      expr_type)
+  else
+    return values.value(
+      node,
+      expr.once_only(
+        actions,
+        `([expr_type]([index_type]([pointer.value]) == [index_type:nil_index()])),
+        expr_type),
+      expr_type)
+  end
 end
 
 function codegen.expr_new(cx, node)
@@ -3038,7 +3049,7 @@ function codegen.expr_dynamic_cast(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)].__ptr)
+  local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)])
 
   local result
   local regions = expr_type:bounds()
@@ -3046,28 +3057,62 @@ function codegen.expr_dynamic_cast(cx, node)
     local region = regions[1]
     assert(cx:has_region(region))
     local lr = `([cx:region(region).logical_region].impl)
-    result = `(
-      [expr_type]({
-          __ptr = (c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input], [lr]))
-      }))
+    if expr_type.index_type:is_opaque() then
+      result = `(
+        [expr_type]({
+          __ptr = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
+        }))
+    else
+      result = `(
+        [expr_type]({
+            __ptr = [expr_type.index_type](
+              c.legion_domain_point_safe_cast([cx.runtime], [cx.context], [input], [lr]))
+        }))
+    end
   else
     result = terralib.newsymbol(expr_type)
-    local cases = quote
-      [result] = [expr_type]({ __ptr = c.legion_ptr_nil(), __index = 0 })
-    end
-    for i = #regions, 1, -1 do
-      local region = regions[i]
-      assert(cx:has_region(region))
-      local lr = `([cx:region(region).logical_region].impl)
+    local cases
+    if expr_type.index_type:is_opaque() then
       cases = quote
-        var temp = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input], [lr])
-        if not c.legion_ptr_is_null(temp) then
-          result = [expr_type]({
-            __ptr = temp,
-            __index = [i],
-          })
-        else
-          [cases]
+        [result] = [expr_type]({ __ptr = c.legion_ptr_nil(), __index = 0 })
+      end
+      for i = #regions, 1, -1 do
+        local region = regions[i]
+        assert(cx:has_region(region))
+        local lr = `([cx:region(region).logical_region].impl)
+        cases = quote
+          var temp = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
+          if not c.legion_ptr_is_null(temp) then
+            result = [expr_type]({
+              __ptr = temp,
+              __index = [i],
+            })
+          else
+            [cases]
+          end
+        end
+      end
+    else
+      cases = quote
+        [result] = [expr_type]({
+          __ptr = [expr_type.index_type:nil_index()],
+          __index = 0
+        })
+      end
+      for i = #regions, 1, -1 do
+        local region = regions[i]
+        assert(cx:has_region(region))
+        local lr = `([cx:region(region).logical_region].impl)
+        cases = quote
+          var temp = c.legion_domain_point_safe_cast([cx.runtime], [cx.context], [input], [lr])
+          if temp.dim ~= -1 then
+            result = [expr_type]({
+              __ptr = [expr_type.index_type](temp),
+              __index = [i],
+            })
+          else
+            [cases]
+          end
         end
       end
     end

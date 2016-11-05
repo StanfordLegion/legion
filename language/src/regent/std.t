@@ -2354,7 +2354,9 @@ function std.index_type(base_type, displayname)
 
   function st.metamethods.__cast(from, to, expr)
     if std.is_index_type(to) then
-      if to:is_opaque() and std.validate_implicit_cast(from, int) then
+      if std.type_eq(from, c.legion_domain_point_t) then
+        return `([to.from_domain_point]([expr]))
+      elseif to:is_opaque() and std.validate_implicit_cast(from, int) then
         return `([to]{ __ptr = c.legion_ptr_t { value = [expr] } })
       elseif not to:is_opaque() and std.validate_implicit_cast(from, to.base_type) then
         return `([to]{ __ptr = [expr] })
@@ -2392,6 +2394,10 @@ function std.index_type(base_type, displayname)
 
   function st:zero()
     return st:const(0)
+  end
+
+  function st:nil_index()
+    return st:const(-(2^31 - 1))
   end
 
   local function make_point(expr)
@@ -2453,15 +2459,22 @@ function std.index_type(base_type, displayname)
     end
     local error_message =
       "from_domain_point (" .. tostring(st) .. "): dimensionality mismatch"
-
+    local nil_case = quote end
+    if st.dim >= 1 then
+      nil_case = quote
+        if [pt_expr].dim == -1 then return [st:nil_index()] end
+      end
+    end
     if fields then
       return quote
+        [nil_case]
         std.assert([dimensionality_match_cond], [error_message])
         return st { __ptr = [st.impl_type] {
           [data.mapi(function(i) return `([pt_expr].point_data[ [i-1] ]) end, st.fields)] } }
       end
     else
       return quote
+        [nil_case]
         std.assert([dimensionality_match_cond], [error_message])
         return st { __ptr = [st.impl_type]([pt_expr].point_data[0]) }
       end
