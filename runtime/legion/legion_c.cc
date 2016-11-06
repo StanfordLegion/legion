@@ -1715,6 +1715,8 @@ private:
   struct Args {
     IndexPartition projection;
     LogicalRegion handle;
+    bool is_source_dense;
+    int target_dim;
     FieldID fid;
   };
 };
@@ -1744,42 +1746,61 @@ PartitionByPreimageShim::launch(HighLevelRuntime *runtime,
   args.handle = handle;
   args.projection = projection;
   args.fid = fid;
+  args.target_dim =
+    runtime->get_index_space_domain(
+      runtime->get_parent_index_space(projection)).dim;
+
   TaskArgument targs(&args, sizeof(args));
   IndexLauncher task(task_id, color_space, targs, ArgumentMap());
-  task.add_region_requirement(
-    RegionRequirement(parent, READ_ONLY, EXCLUSIVE, parent)
-    .add_field(fid));
+  RegionRequirement req(parent, READ_ONLY, EXCLUSIVE, parent);
+  // TODO: If the compiler chooses a weird ordering for field ids of index types,
+  //       we're in trouble. Index types better not be field sliced.
+  int num_fields = args.target_dim;
+  if (num_fields == 0) num_fields = 1;
+  for (int i = 0; i < num_fields; ++i) req.add_field(fid + i);
+  task.add_region_requirement(req);
   FutureMap fmap = runtime->execute_index_space(ctx, task);
 
-  PointColoring coloring;
-  for(Domain::DomainPointIterator c(color_space); c; c++) {
-    Future f = fmap.get_future(c.p);
-    const char* buffer = reinterpret_cast<const char*>(f.get_untyped_pointer());
-    size_t size = *reinterpret_cast<const size_t*>(buffer);
-    const ptr_t* points =
-      reinterpret_cast<const ptr_t*>(buffer + sizeof(size_t));
-    for (size_t idx = 0; idx < size;)
-    {
-      ptr_t point = points[idx];
-      if (point.value >= 0) {
-        coloring[upgrade_point(c.p)].ranges.insert(
-          std::pair<ptr_t, ptr_t>(point,
-                                  ptr_t(point.value +
-                                        points[idx + 1].value - 1)));
-        idx += 2;
-      }
-      else {
-        point.value = -point.value - 1;
-        coloring[upgrade_point(c.p)].points.insert(point);
-        idx++;
+  args.is_source_dense =
+    runtime->get_index_space_domain(ctx, handle.get_index_space()).dim > 0;
+
+  IndexPartition ip;
+
+  if (!args.is_source_dense) {
+    PointColoring coloring;
+    for(Domain::DomainPointIterator c(color_space); c; c++) {
+      Future f = fmap.get_future(c.p);
+      const char* buffer =
+        reinterpret_cast<const char*>(f.get_untyped_pointer());
+      size_t size = *reinterpret_cast<const size_t*>(buffer);
+      const ptr_t* points =
+        reinterpret_cast<const ptr_t*>(buffer + sizeof(size_t));
+      for (size_t idx = 0; idx < size;)
+      {
+        ptr_t point = points[idx];
+        if (point.value >= 0) {
+          coloring[upgrade_point(c.p)].ranges.insert(
+            std::pair<ptr_t, ptr_t>(point,
+                                    ptr_t(point.value +
+                                          points[idx + 1].value - 1)));
+          idx += 2;
+        }
+        else {
+          point.value = -point.value - 1;
+          coloring[upgrade_point(c.p)].points.insert(point);
+          idx++;
+        }
       }
     }
+    ip =
+      runtime->create_index_partition(
+        ctx, handle.get_index_space(), color_space, coloring,
+        part_kind, color, allocable);
+  }
+  else { // args.is_source_dense
+    assert(0);
   }
 
-  IndexPartition ip =
-    runtime->create_index_partition(
-      ctx, handle.get_index_space(), color_space, coloring,
-      part_kind, color, allocable);
   return ip;
 }
 
@@ -1791,39 +1812,74 @@ PartitionByPreimageShim::task(const Task *task,
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
-  LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
-    regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
   DomainPoint c = task->index_point;
   IndexSpace target = runtime->get_index_subspace(ctx, args.projection, c);
 
   STLVectorSerializer<ptr_t> result;
-  std::set<ptr_t> points;
-  for (IndexIterator it(runtime, ctx, target); it.has_next();) {
-    size_t count = 0;
-    ptr_t start = it.next_span(count);
-    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-      points.insert(p);
+  if (args.target_dim == 0) {
+    LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
+      regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
+    std::set<ptr_t> points;
+    for (IndexIterator it(runtime, ctx, target); it.has_next();) {
+      size_t count = 0;
+      ptr_t start = it.next_span(count);
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+        points.insert(p);
+      }
+    }
+
+    for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
+      size_t count = 0;
+      ptr_t start = it.next_span(count);
+      ptr_t run_size = 0;
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+        if (points.count(accessor.read(p))) {
+          if (run_size.value == 0) result.ref().push_back(p);
+          run_size.value++;
+        }
+        else if (run_size.value != 0) {
+          if (run_size.value == 1)
+            result.ref().back().value = -result.ref().back().value - 1;
+          else
+            result.ref().push_back(run_size);
+          run_size.value = 0;
+        }
+      }
+      if (run_size.value != 0) result.ref().push_back(run_size);
     }
   }
+  else {
+    Domain domain = runtime->get_index_space_domain(ctx, target);
 
-  for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
-    size_t count = 0;
-    ptr_t start = it.next_span(count);
-    ptr_t run_size = 0;
-    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-      if (points.count(accessor.read(p))) {
-        if (run_size.value == 0) result.ref().push_back(p);
-        run_size.value++;
+    LegionRuntime::Accessor::RegionAccessor<SOA, int>
+      accessors[args.target_dim];
+    for (int i = 0; i < args.target_dim; ++i)
+      accessors[i] =
+        regions[0].get_field_accessor(args.fid + i)
+                  .typeify<int>().convert<SOA>();
+
+    DomainPoint point; point.dim = args.target_dim;
+    for (IndexIterator it(runtime, ctx, args.handle); it.has_next();) {
+      size_t count = 0;
+      ptr_t start = it.next_span(count);
+      ptr_t run_size = 0;
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+        for (int i = 0; i < args.target_dim; ++i)
+          point.point_data[i] = accessors[i].read(p);
+        if (domain.contains(point)) {
+          if (run_size.value == 0) result.ref().push_back(p);
+          run_size.value++;
+        }
+        else if (run_size.value != 0) {
+          if (run_size.value == 1)
+            result.ref().back().value = -result.ref().back().value - 1;
+          else
+            result.ref().push_back(run_size);
+          run_size.value = 0;
+        }
       }
-      else if (run_size.value != 0) {
-        if (run_size.value == 1)
-          result.ref().back().value = -result.ref().back().value - 1;
-        else
-          result.ref().push_back(run_size);
-        run_size.value = 0;
-      }
+      if (run_size.value != 0) result.ref().push_back(run_size);
     }
-    if (run_size.value != 0) result.ref().push_back(run_size);
   }
   return result;
 }
