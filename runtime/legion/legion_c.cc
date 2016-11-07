@@ -1927,7 +1927,35 @@ PartitionByPreimageShim::task(const Task *task,
       for (int i = 0; i < args.source_dim; ++i) result.ref().push_back(hi[i]);
     }
     else {
-      assert(0);
+      Domain target_domain = runtime->get_index_space_domain(ctx, target);
+
+      // FIXME: A raw pointer should have been used here...
+      LegionRuntime::Accessor::RegionAccessor<AccessorType::Generic, int>
+        accessors[args.target_dim];
+      for (int i = 0; i < args.target_dim; ++i)
+        accessors[i] =
+          regions[0].get_field_accessor(args.fid + i).typeify<int>();
+
+      Domain domain =
+        runtime->get_index_space_domain(ctx, args.handle.get_index_space());
+      DomainPoint lo, hi;
+      lo.dim = args.source_dim;
+      hi.dim = args.source_dim;
+      for (int i = 0; i < args.source_dim; ++i) {
+        lo[i] = domain.rect_data[args.source_dim + i];
+        hi[i] = domain.rect_data[i];
+      }
+      DomainPoint point; point.dim = args.target_dim;
+      for (Domain::DomainPointIterator it(domain); it; it++) {
+        for (int i = 0; i < args.target_dim; ++i)
+          point.point_data[i] = accessors[i].read(it.p);
+        if (target_domain.contains(point)) {
+          if (it.p < lo) lo = it.p;
+          if (hi < it.p) hi = it.p;
+        }
+      }
+      for (int i = 0; i < args.source_dim; ++i) result.ref().push_back(lo[i]);
+      for (int i = 0; i < args.source_dim; ++i) result.ref().push_back(hi[i]);
     }
   }
   return result;
