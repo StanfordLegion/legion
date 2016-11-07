@@ -1863,7 +1863,7 @@ PartitionByPreimageShim::task(const Task *task,
       Domain domain = runtime->get_index_space_domain(ctx, target);
 
       LegionRuntime::Accessor::RegionAccessor<SOA, int>
-        accessors[args.target_dim];
+        accessors[MAX_POINT_DIM];
       for (int i = 0; i < args.target_dim; ++i)
         accessors[i] =
           regions[0].get_field_accessor(args.fid + i)
@@ -1931,7 +1931,7 @@ PartitionByPreimageShim::task(const Task *task,
 
       // FIXME: A raw pointer should have been used here...
       LegionRuntime::Accessor::RegionAccessor<AccessorType::Generic, int>
-        accessors[args.target_dim];
+        accessors[MAX_POINT_DIM];
       for (int i = 0; i < args.target_dim; ++i)
         accessors[i] =
           regions[0].get_field_accessor(args.fid + i).typeify<int>();
