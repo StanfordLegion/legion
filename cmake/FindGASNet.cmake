@@ -67,6 +67,8 @@ gasnet-cxx:
 	@echo $(GASNET_CXX)
 gasnet-cxxflags:
 	@echo $(GASNET_CXXCPPFLAGS) $(GASNET_CXXFLAGS) $(GASNETTOOLS_CPPFLAGS) $(GASNETTOOLS_CXXFLAGS)
+gasnet-ld:
+	@echo $(GASNET_LD)
 gasnet-ldflags:
 	@echo $(GASNET_LDFLAGS) $(GASNETTOOLS_LDFLAGS)
 gasnet-libs:
@@ -85,6 +87,11 @@ gasnet-libs:
     execute_process(
       COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-cxxflags
       OUTPUT_VARIABLE _GASNet_CXXFLAGS
+      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+    )
+    execute_process(
+      COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-ld
+      OUTPUT_VARIABLE _GASNet_LD
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
     )
     execute_process(
@@ -145,6 +152,11 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
     endif()
     mark_as_advanced(GASNet_${L}_LIBRARY)
   endforeach()
+  if(COMPONENT_NAME MATCHES "^mpi-.*" AND NOT (_GASNet_LD STREQUAL CMAKE_C_COMPILER))
+    set(MPI_C_COMPILER ${_GASNet_LD})
+    find_package(MPI REQUIRED COMPONENTS C)
+    list(APPEND COMPONENT_DEPS ${MPI_C_LIBRARIES})
+  endif()
   add_library(GASNet::${COMPONENT_NAME} UNKNOWN IMPORTED)
   set_target_properties(GASNet::${COMPONENT_NAME} PROPERTIES
     IMPORTED_LOCATION "${COMPONENT_LIB}"
