@@ -28,7 +28,9 @@
 
 // Apple can go screw itself
 #ifndef __MACH__
+#if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
+#endif
 #else
 #ifdef __SSE2__
 #include <emmintrin.h>
