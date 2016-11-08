@@ -94,6 +94,8 @@ gasnet-libs:
       OUTPUT_VARIABLE _GASNet_LD
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
     )
+    # Strip any arguments from _GASNet_LD
+    string(REGEX REPLACE "^([^ ]+).*" "\\1" _GASNet_LD "${_GASNet_LD}")
     execute_process(
       COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-ldflags
       OUTPUT_VARIABLE _GASNet_LDFLAGS
