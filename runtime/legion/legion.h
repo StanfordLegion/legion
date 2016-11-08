@@ -950,7 +950,7 @@ namespace Legion {
        * @param silence_warnings silence any warnings for this blocking call
        * @return the value of the future cast as the template type
        */
-      template<typename T> inline T get_result(bool silence_warnings = false);
+      template<typename T> inline T get_result(bool silence_warnings = false) const;
       /**
        * Block until the future completes.
        * @param silence_warnings silence any warnings for this blocking call
@@ -1009,7 +1009,7 @@ namespace Legion {
 						const void *buffer,
 						size_t bytes);
     private:
-      void* get_untyped_result(bool silence_warnings); 
+      void* get_untyped_result(bool silence_warnings) const; 
     };
 
     /**

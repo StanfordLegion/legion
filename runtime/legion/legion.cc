@@ -1675,7 +1675,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* Future::get_untyped_result(bool silence_warnings)
+    void* Future::get_untyped_result(bool silence_warnings) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)

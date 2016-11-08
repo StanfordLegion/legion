@@ -1361,7 +1361,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T Future::get_result(bool silence_warnings)
+    inline T Future::get_result(bool silence_warnings) const
     //--------------------------------------------------------------------------
     {
       // Unpack the value using LegionSerialization in case
