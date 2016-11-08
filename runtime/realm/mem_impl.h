@@ -323,6 +323,8 @@ namespace Realm {
     public:
       std::vector<int> file_vec;
       pthread_mutex_t vector_lock;
+      off_t next_offset;
+      std::map<off_t, int> offset_map;
     };
 
     class RemoteMemory : public MemoryImpl {
