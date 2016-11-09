@@ -1093,36 +1093,27 @@ namespace Realm {
 	   ((unsigned *)(data))[6], ((unsigned *)(data))[7]);
 #endif
 
-    switch(impl->kind) {
-    case MemoryImpl::MKIND_SYSMEM:
-      {
-	LocalCPUMemory *cpumem = (LocalCPUMemory *)impl;
-	if(cpumem->registered) {
-	  if(data == (cpumem->base + args.offset)) {
-	    // copy is in right spot - yay!
-	  } else {
-	    printf("%d: received remote write to registered memory in wrong spot: %p != %p+%zd = %p\n",
-		   gasnet_mynode(), data, cpumem->base, (ssize_t)args.offset, cpumem->base + args.offset);
-	    impl->put_bytes(args.offset, data, datalen);
-	  }
+    // determine if the active message already wrote the data to the
+    //  right place in a registered memory
+    bool was_written_directly = false;
+    if(impl->kind == MemoryImpl::MKIND_SYSMEM) {
+      LocalCPUMemory *cpumem = (LocalCPUMemory *)impl;
+      if(cpumem->registered) {
+	if(data == (cpumem->base + args.offset)) {
+	  // copy is in right spot - yay!
+	  was_written_directly = true;
 	} else {
-	  impl->put_bytes(args.offset, data, datalen);
+	  log_copy.error() << "received remote write to registered memory in wrong spot: "
+			   << data << " != "
+			   << ((void *)(cpumem->base)) << "+" << args.offset
+			   << " = " << ((void *)(cpumem->base + args.offset));
 	}
-	    
-	break;
       }
-
-    case MemoryImpl::MKIND_ZEROCOPY:
-    case MemoryImpl::MKIND_GPUFB:
-      {
-	impl->put_bytes(args.offset, data, datalen);
-	
-	break;
-      }
-
-    default:
-      assert(0);
     }
+
+    // if it wasn't directly written, we have to copy it
+    if(!was_written_directly)
+      impl->put_bytes(args.offset, data, datalen);
 
     // track the sequence ID to know when the full RDMA is done
     if(args.sequence_id > 0) {
