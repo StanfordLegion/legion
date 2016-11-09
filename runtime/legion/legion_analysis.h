@@ -1236,8 +1236,6 @@ namespace Legion {
     protected:
       // Fields which we have applied updates to
       FieldMask update_fields;
-      // Fields which we have initial data for
-      FieldMask initial_fields;
       // Track when we have valid data for initial and final fields
       LegionMap<RtEvent,FieldMask>::aligned initial_events;
       LegionMap<RtEvent,FieldMask>::aligned final_events;

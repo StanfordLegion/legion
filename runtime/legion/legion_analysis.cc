@@ -6110,7 +6110,6 @@ namespace Legion {
         }
       }
       update_fields |= user_mask;
-      initial_fields |= user_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -6297,7 +6296,6 @@ namespace Legion {
       if (!is_owner() && !update_fields)
         send_valid_notification(applied_conditions);
       update_fields |= merge_mask;
-      initial_fields |= merge_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -6523,14 +6521,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(context != NULL);
 #endif
-      FieldMask needed_fields;
-      {
-        AutoLock s_lock(state_lock,1,false/*exclusive*/);
-        // See if we have initial data
-        needed_fields = request_mask - initial_fields;
-      }
-      if (!needed_fields)
-        return;
+      FieldMask needed_fields = request_mask;
       if (is_owner())
       {
         // We're the owner, if we have remote copies then send a 
@@ -7540,8 +7531,6 @@ namespace Legion {
               }
             }
           }
-          // This was not a child request so update the initial fields
-          initial_fields |= update;
         }
       }
       if (!pending_views.empty())
