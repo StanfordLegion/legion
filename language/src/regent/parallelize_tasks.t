@@ -343,10 +343,6 @@ local function extract_constant_offsets(n)
   for idx = 1, #n.fields do
     if n.fields[idx].value:is(ast.typed.expr.Constant) then
       offsets:insert(n.fields[idx].value.value)
-    elseif n.fields[idx].value:is(ast.typed.expr.Unary) and
-           n.fields[idx].value.op == "-" and
-           n.fields[idx].value.rhs:is(ast.typed.expr.Constant) then
-      offsets:insert(-n.fields[idx].value.rhs.value)
     else
       assert(false)
     end
@@ -1753,6 +1749,48 @@ function normalize_accesses.expr(normalizer_cx)
   end
 end
 
+local function simplify_expression(node, minus)
+  if node:is(ast.typed.expr.Binary) then
+    assert(not minus or node.op ~= "%")
+    local lhs = simplify_expression(node.lhs, minus)
+    local op = node.op
+    local rhs
+    if op == "-" then
+      op = "+"
+      rhs = simplify_expression(node.rhs, not minus)
+    else
+      rhs = simplify_expression(node.rhs, minus)
+    end
+    return node {
+      op = op,
+      lhs = lhs,
+      rhs = rhs,
+    }
+  elseif node:is(ast.typed.expr.Unary) then
+    if node.op == "-" then
+      return simplify_expression(node.rhs, not minus)
+    else
+      return node { rhs = simplify_expression(node.rhs, minus) }
+    end
+  elseif node:is(ast.typed.expr.Constant) then
+    if not minus then return node
+    else return node { value = -node.value } end
+  elseif node:is(ast.typed.expr.Cast) then
+    return node { arg = simplify_expression(node.arg, minus) }
+  elseif node:is(ast.typed.expr.Ctor) then
+    return node {
+      fields = node.fields:map(function(field)
+        return simplify_expression(field, minus)
+      end)
+    }
+  elseif node:is(ast.typed.expr.CtorListField) or
+         node:is(ast.typed.expr.CtorRecField) then
+    return node { value = simplify_expression(node.value, minus) }
+  else
+    return node
+  end
+end
+
 local function lift_all_accesses(task_cx, normalizer_cx, accesses, stat)
   if #accesses == 0 then return stat end
   local stats = terralib.newlist()
@@ -1763,7 +1801,7 @@ local function lift_all_accesses(task_cx, normalizer_cx, accesses, stat)
     -- Make stencil metadata for later steps
     local normalized =
       ast.map_node_continuation(normalize_accesses.expr(normalizer_cx), access)
-    local index_access = extract_index_access_expr(normalized)
+    local index_access = extract_index_access_expr(normalized, false)
     local index_expr = index_access.index
 		if index_expr:is(ast.typed.expr.Cast) then
 		  index_expr = index_expr.arg
@@ -1774,7 +1812,7 @@ local function lift_all_accesses(task_cx, normalizer_cx, accesses, stat)
       local field_path = access.expr_type.field_path
       local stencil = Stencil {
         region = region_symbol,
-        index = index_expr,
+        index = simplify_expression(index_expr),
         range = loop_var:gettype().bounds_symbols[1],
         fields = { [field_path:hash()] = field_path },
       }
@@ -2029,7 +2067,7 @@ function stencil_analysis.join_stencil(s1, s2)
     elseif s1:is(ast.typed.expr.Binary) then
       if s1.op ~= s2.op then return nil
       elseif s1.op == "%" then
-        return arg_join(stencil_analysis.join_stencil(s1.rhs, s2.rhs) and
+        return arg_join(stencil_analysis.stencils_compatible(s1.rhs, s2.rhs) and
                         stencil_analysis.join_stencil(s1.lhs, s2.lhs),
                         s1, s2, "lhs")
       elseif s1.op == "+" then
@@ -2109,15 +2147,19 @@ function stencil_analysis.stencils_compatible(s1, s2)
              stencil_analysis.stencils_compatible(s1.lhs, s2.lhs) and
              stencil_analysis.stencils_compatible(s1.rhs, s2.rhs)
     elseif s1:is(ast.typed.expr.Ctor) then
-      local o1 = extract_constant_offsets(s1)
-      local o2 = extract_constant_offsets(s2)
-      if #o1 ~= #o2 then return false end
-      for idx = 1, #o1 do
-        if o1[idx] ~= o2[idx] then return false end
+      if #s1.fields ~= #s2.fields then return false end
+      for idx = 1, #s1.fields do
+        if not stencil_analysis.stencils_compatible(
+            s1.fields[idx].value, s2.fields[idx].value) then
+          return false
+        end
       end
       return true
     elseif s1:is(ast.typed.expr.Constant) then
       return s1.value == s2.value
+    elseif s1:is(ast.typed.expr.Cast) then
+      if not std.type_eq(s1.fn.value, s2.fn.value) then return false end
+      return stencil_analysis.stencils_compatible(s1.arg, s2.arg)
     else
       return false
     end
