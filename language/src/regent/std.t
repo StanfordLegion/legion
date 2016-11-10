@@ -32,6 +32,7 @@ std.c = c
 std.file_read_only = c.LEGION_FILE_READ_ONLY
 std.file_read_write = c.LEGION_FILE_READ_WRITE
 std.file_create = c.LEGION_FILE_CREATE
+std.check_cuda_available = cudahelper.check_cuda_available
 
 -- #####################################
 -- ## Utilities
