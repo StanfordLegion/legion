@@ -5937,6 +5937,10 @@ namespace Legion {
       RezCheck z(rez);
       pack_single_task(rez, runtime->find_address_space(target));
       rez.serialize(point_termination); 
+#ifdef DEBUG_LEGION
+      assert(is_locally_mapped()); // should be locally mapped if we're here
+#endif
+      pack_version_infos(rez, version_infos, virtual_mapped);
       // Return false since point tasks should always be deactivated
       // once they are sent to a remote node
       return false;
@@ -5951,6 +5955,7 @@ namespace Legion {
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
       derez.deserialize(point_termination);
+      unpack_version_infos(derez, version_infos, ready_events);
       set_current_proc(current);
       // Get the context information from our slice owner
       parent_ctx = slice_owner->get_context();
