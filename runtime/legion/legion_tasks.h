@@ -207,8 +207,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void) = 0;
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
-      virtual void resolve_true(void);
-      virtual void resolve_false(void) = 0;
+      virtual void resolve_true(bool misspeculated);
+      virtual void resolve_false(bool misspeculated) = 0;
       virtual bool speculate(bool &value);
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
@@ -414,7 +414,7 @@ namespace Legion {
       virtual void deactivate(void) = 0;
       virtual bool is_top_level_task(void) const { return false; }
     public:
-      virtual void resolve_false(void) = 0;
+      virtual void resolve_false(bool misspeculated) = 0;
       virtual void launch_task(void);
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
@@ -501,7 +501,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
-      virtual void resolve_false(void) = 0;
+      virtual void resolve_false(bool misspeculated) = 0;
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
@@ -604,7 +604,7 @@ namespace Legion {
                                        get_acquired_instances_ref(void);
       virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
-      virtual void resolve_false(void);
+      virtual void resolve_false(bool misspeculated);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
@@ -709,7 +709,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
-      virtual void resolve_false(void);
+      virtual void resolve_false(bool misspeculated);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
@@ -823,7 +823,7 @@ namespace Legion {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
-      virtual void resolve_false(void);
+      virtual void resolve_false(bool misspeculated);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
@@ -942,7 +942,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
-      virtual void resolve_false(void);
+      virtual void resolve_false(bool misspeculated);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);

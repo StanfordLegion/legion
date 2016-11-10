@@ -615,8 +615,8 @@ namespace Legion {
       // Call this method for inheriting classes 
       // to indicate when they should map
       virtual bool speculate(bool &value) = 0;
-      virtual void resolve_true(void) = 0;
-      virtual void resolve_false(void) = 0;
+      virtual void resolve_true(bool misspeculated) = 0;
+      virtual void resolve_false(bool misspeculated) = 0;
     public:
       virtual void notify_predicate_value(GenerationID gen, bool value);
     protected:
@@ -755,8 +755,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual void resolve_true(void);
-      virtual void resolve_false(void);
+      virtual void resolve_true(bool misspeculated);
+      virtual void resolve_false(bool misspeculated);
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
@@ -1349,8 +1349,8 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void resolve_true(void);
-      virtual void resolve_false(void);
+      virtual void resolve_true(bool misspeculated);
+      virtual void resolve_false(bool misspeculated);
       virtual bool speculate(bool &value);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -1418,8 +1418,8 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void resolve_true(void);
-      virtual void resolve_false(void);
+      virtual void resolve_true(bool misspeculated);
+      virtual void resolve_false(bool misspeculated);
       virtual bool speculate(bool &value);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -2163,8 +2163,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
-      virtual void resolve_true(void);
-      virtual void resolve_false(void);
+      virtual void resolve_true(bool misspeculated);
+      virtual void resolve_false(bool misspeculated);
       virtual bool speculate(bool &value);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);

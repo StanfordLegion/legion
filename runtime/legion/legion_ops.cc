@@ -1618,9 +1618,9 @@ namespace Legion {
                (speculation_state == RESOLVE_FALSE_STATE));
 #endif
         if (speculation_state == RESOLVE_TRUE_STATE)
-          resolve_true();
+          resolve_true(false/*misspeculated*/);
         else
-          resolve_false();
+          resolve_false(false/*misspecualted*/);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -1699,9 +1699,9 @@ namespace Legion {
       if (need_trigger)
         Runtime::trigger_event(predicate_waiter);
       if (continue_true)
-        resolve_true();
+        resolve_true(false/*misspeculated*/);
       if (continue_false)
-        resolve_false();
+        resolve_false(false/*misspeculated*/);
       if (need_resolution)
         resolve_speculation(); 
     }
@@ -1736,7 +1736,7 @@ namespace Legion {
     {
       bool continue_true = false;
       bool continue_false = false;
-      bool need_mispredict = false;
+      bool misspeculated = false;
       bool restart = false;
       bool need_resolve = false;
       bool need_trigger = false;
@@ -1774,7 +1774,7 @@ namespace Legion {
               {
                 // We guessed wrong
                 speculation_state = RESOLVE_FALSE_STATE;
-                need_mispredict = true;
+                misspeculated = true;
                 restart = false;
               }
               break;
@@ -1784,7 +1784,7 @@ namespace Legion {
               if (value)
               {
                 speculation_state = RESOLVE_TRUE_STATE;
-                need_mispredict = true;
+                misspeculated = true;
                 restart = true;
               }
               else
@@ -1801,10 +1801,10 @@ namespace Legion {
       if (need_trigger)
         Runtime::trigger_event(predicate_waiter);
       if (continue_true)
-        resolve_true();
+        resolve_true(misspeculated);
       if (continue_false)
-        resolve_false();
-      if (need_mispredict)
+        resolve_false(misspeculated);
+      if (misspeculated)
         quash_operation(get_generation(), restart);
       if (need_resolve)
         resolve_speculation();
@@ -3205,7 +3205,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::resolve_true(void)
+    void CopyOp::resolve_true(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       // Do our versioning analysis and then add it to the ready queue
@@ -3240,19 +3240,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::resolve_false(void)
+    void CopyOp::resolve_false(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       // Mark that this operation has completed both
       // execution and mapping indicating that we are done
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        src_versions[idx].apply_mapping(map_applied_conditions,
-                                        true/*copy through*/);
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        dst_versions[idx].apply_mapping(map_applied_conditions,
-                                        true/*copy through*/);
+      // Only need to copy version info if we mis-speculated
+      if (misspeculated)
+      {
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+          src_versions[idx].apply_mapping(map_applied_conditions,
+                                          true/*copy through*/);
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+          dst_versions[idx].apply_mapping(map_applied_conditions,
+                                          true/*copy through*/);
+      }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -6758,7 +6762,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::resolve_true(void)
+    void AcquireOp::resolve_true(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> preconditions;  
@@ -6774,13 +6778,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::resolve_false(void)
+    void AcquireOp::resolve_false(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       // Clean up this operation
       complete_execution();
-      version_info.apply_mapping(map_applied_conditions,
-                                 true/*copy through*/);
+      if (misspeculated)
+        version_info.apply_mapping(map_applied_conditions,
+                                   true/*copy through*/);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -7336,7 +7341,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::resolve_true(void)
+    void ReleaseOp::resolve_true(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> preconditions;
@@ -7352,13 +7357,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::resolve_false(void)
+    void ReleaseOp::resolve_false(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       // Clean up this operation
       complete_execution();
-      version_info.apply_mapping(map_applied_conditions,
-                                 true/*copy through*/);
+      if (misspeculated)
+        version_info.apply_mapping(map_applied_conditions,
+                                   true/*copy through*/);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -10645,7 +10651,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::resolve_true(void)
+    void FillOp::resolve_true(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> preconditions;
@@ -10661,15 +10667,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::resolve_false(void)
+    void FillOp::resolve_false(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       // Mark that this operation has completed both
       // execution and mapping indicating that we are done
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
-      version_info.apply_mapping(map_applied_conditions,
-                                 true/*copy through*/);
+      if (misspeculated)
+        version_info.apply_mapping(map_applied_conditions,
+                                   true/*copy through*/);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else

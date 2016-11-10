@@ -9752,8 +9752,9 @@ namespace Legion {
 	  // Catch unknown fields here for now
 	  if (finder == fields.end())
 	  {
-	    log_run.fatal() << "ERROR: unknown field ID " << fid << " requested during instance creation";
-	    assert(0);
+	    log_run.fatal() << "ERROR: unknown field ID " << fid 
+                            << " requested during instance creation";
+	    assert(false);
 	  }
           field_sizes[idx] = 
             std::pair<FieldID,size_t>(fid, finder->second.field_size);

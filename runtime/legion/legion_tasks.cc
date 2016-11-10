@@ -1026,7 +1026,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::resolve_true(void)
+    void TaskOp::resolve_true(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       // Tasks always go on the task ready queue
@@ -4778,7 +4778,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::resolve_false(void)
+    void IndividualTask::resolve_false(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       bool trigger = true;
@@ -4819,12 +4819,18 @@ namespace Legion {
       if (trigger)
         complete_execution();
       // "mapping" does not change the physical state
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (misspeculated)
       {
-	VersionInfo &version_info = version_infos[idx];
-	version_info.apply_mapping(map_applied_conditions,
-				   true /*copy through*/);
-      }   
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          // We don't mutate anything here so no need to do anything
+          if (IS_NO_ACCESS(regions[idx]) || IS_READ_ONLY(regions[idx]))
+            continue;
+          VersionInfo &version_info = version_infos[idx];
+          version_info.apply_mapping(map_applied_conditions,
+                                     true /*copy through*/);
+        }   
+      }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -5666,7 +5672,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::resolve_false(void)
+    void PointTask::resolve_false(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6617,7 +6623,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::resolve_false(void)
+    void IndexTask::resolve_false(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       bool trigger = true;
@@ -6708,7 +6714,8 @@ namespace Legion {
       // Then clean up this task execution
       if (trigger)
         complete_execution();
-      assert(0 && "TODO: advance mapping states if you care");
+      if (misspeculated)
+        assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
       trigger_children_complete();
     }
@@ -7476,7 +7483,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::resolve_false(void)
+    void SliceTask::resolve_false(bool misspeculated)
     //--------------------------------------------------------------------------
     {
       // should never be called
