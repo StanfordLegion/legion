@@ -3670,22 +3670,18 @@ function codegen.expr_image(cx, node)
   local region_parent =
     cx:region(cx:region(region_type).root_region_type).logical_region
 
-  local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
+  local function is_index_type(ty)
+    return std.is_bounded_type(ty) and std.is_index_type(ty.index_type)
+  end
+  local field_paths, field_types =
+    std.flatten_struct_fields(region_type:fspace(), is_index_type)
   local fields_i = data.filteri(
     function(field) return field:starts_with(node.region.fields[1]) end,
     field_paths)
-  local field_path
-  if #fields_i ~= 1 then
-    assert(#fields_i == 2)
-    -- Hack: This will fail if the index type ever becomes in64.
-    local match = data.filter(
-      function(i) return std.type_eq(field_types[i], int64) end,
-      fields_i)
-    assert(#match == 1)
-    field_path = field_paths[match[1]]
-  else
-    field_path = field_paths[fields_i[1]]
-  end
+  assert(#fields_i == 1)
+  local index_fields =
+    std.flatten_struct_fields(field_types[fields_i[1]])
+  local field_path = field_paths[fields_i[1]] .. index_fields[1]
 
   local field_id = cx:region(region_type):field_id(field_path)
 

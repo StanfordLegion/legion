@@ -1558,7 +1558,8 @@ legion_index_partition_create_by_field(legion_runtime_t runtime_,
 #if USE_LEGION_PARTAPI_SHIM
 class PartitionByImageShim {
 public:
-  static TaskID register_task();
+  static TaskID register_task_unstructured();
+  static TaskID register_task_structured();
   static IndexPartition launch(HighLevelRuntime *runtime,
                                Context ctx,
                                IndexSpace handle,
@@ -1569,25 +1570,42 @@ public:
                                PartitionKind part_kind = COMPUTE_KIND,
                                int color = AUTO_GENERATE_ID,
                                bool allocable = false);
-  static STLSetSerializer<ptr_t> task(const Task *task,
+  static STLSetSerializer<ptr_t> unstructured(const Task *task,
+                                     const std::vector<PhysicalRegion> &regions,
+                                      Context ctx, HighLevelRuntime *runtime);
+  static STLVectorSerializer<long long> structured(const Task *task,
                                      const std::vector<PhysicalRegion> &regions,
                                       Context ctx, HighLevelRuntime *runtime);
 private:
-  static const TaskID task_id = 590467; // a "unique" number
+  static const TaskID task_id_unstructured = 590467; // a "unique" number
+  static const TaskID task_id_structured   = 591596; // a "unique" number
   struct Args {
     LogicalPartition projection;
+    IndexSpace handle;
     FieldID fid;
+    int source_dim;
+    int target_dim;
   };
 };
 
 Processor::TaskFuncID
-PartitionByImageShim::register_task()
+PartitionByImageShim::register_task_unstructured()
 {
   return
-    HighLevelRuntime::register_legion_task<STLSetSerializer<ptr_t>, task>(
-    task_id, Processor::LOC_PROC, true, false,
+    HighLevelRuntime::register_legion_task<STLSetSerializer<ptr_t>, unstructured>(
+    task_id_unstructured, Processor::LOC_PROC, true, false,
     AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByImageShim::task");
+    "PartitionByImageShim::unstructured");
+}
+
+Processor::TaskFuncID
+PartitionByImageShim::register_task_structured()
+{
+  return
+    HighLevelRuntime::register_legion_task<STLVectorSerializer<long long>, structured>(
+    task_id_structured, Processor::LOC_PROC, true, false,
+    AUTO_GENERATE_ID, TaskConfigOptions(),
+    "PartitionByImageShim::structured");
 }
 
 IndexPartition
@@ -1604,57 +1622,183 @@ PartitionByImageShim::launch(HighLevelRuntime *runtime,
 {
   Args args;
   args.projection = projection;
+  args.handle = handle;
   args.fid = fid;
+  args.source_dim =
+    runtime->get_index_space_domain(ctx, parent.get_index_space()).dim;
+  args.target_dim = runtime->get_index_space_domain(ctx, handle).dim;
   TaskArgument targs(&args, sizeof(args));
-  IndexLauncher task(task_id, color_space, targs, ArgumentMap());
-  task.add_region_requirement(
-    RegionRequirement(projection, 0, READ_ONLY, EXCLUSIVE, parent)
-    .add_field(fid));
-  FutureMap fmap = runtime->execute_index_space(ctx, task);
 
-  PointColoring coloring;
-  for(Domain::DomainPointIterator c(color_space); c; c++) {
-    Future f = fmap.get_future(c.p);
-    STLSetSerializer<ptr_t>::deserialize(
-      coloring[upgrade_point(c.p)].points, f.get_untyped_pointer());
-  }
+  IndexPartition ip;
+  if (args.target_dim == 0) {
+    IndexLauncher task(task_id_unstructured, color_space, targs, ArgumentMap());
+    task.add_region_requirement(
+      RegionRequirement(projection, 0, READ_ONLY, EXCLUSIVE, parent)
+      .add_field(fid));
+    FutureMap fmap = runtime->execute_index_space(ctx, task);
+    PointColoring coloring;
+    for(Domain::DomainPointIterator c(color_space); c; c++) {
+      Future f = fmap.get_future(c.p);
+      STLSetSerializer<ptr_t>::deserialize(
+        coloring[upgrade_point(c.p)].points, f.get_untyped_pointer());
+    }
 
-  IndexPartition ip =
-    runtime->create_index_partition(
+    ip = runtime->create_index_partition(
       ctx, handle, color_space, coloring,
       part_kind, color, allocable);
+  }
+  else { // args.target_dim != 0
+    IndexLauncher task(task_id_structured, color_space, targs, ArgumentMap());
+    RegionRequirement req(projection, 0, READ_ONLY, EXCLUSIVE, parent);
+    // TODO: If the compiler chooses a weird ordering for field ids of index types,
+    //       we're in trouble. Index types better not be field sliced.
+    int num_fields = args.target_dim;
+    if (num_fields == 0) num_fields = 1;
+    for (int i = 0; i < num_fields; ++i) req.add_field(fid + i);
+    task.add_region_requirement(req);
+    FutureMap fmap = runtime->execute_index_space(ctx, task);
+    DomainPointColoring coloring;
+
+    for(Domain::DomainPointIterator c(color_space); c; c++) {
+      Future f = fmap.get_future(c.p);
+      const long long* buffer =
+        reinterpret_cast<const long long*>(f.get_untyped_pointer());
+      long long size = *buffer++;
+      assert(size == 2 * args.target_dim);
+      Domain domain; domain.dim = args.target_dim;
+      memcpy(domain.rect_data, buffer, 2 * args.target_dim * sizeof(long long));
+      coloring[upgrade_point(c.p)] = domain;
+    }
+
+    ip = runtime->create_index_partition(
+      ctx, handle, color_space, coloring,
+      part_kind, color);
+  }
 
   return ip;
 }
 
 STLSetSerializer<ptr_t>
-PartitionByImageShim::task(const Task *task,
-                           const std::vector<PhysicalRegion> &regions,
-                           Context ctx, HighLevelRuntime *runtime)
+PartitionByImageShim::unstructured(const Task *task,
+                                   const std::vector<PhysicalRegion> &regions,
+                                   Context ctx, HighLevelRuntime *runtime)
 {
+  using namespace LegionRuntime::Accessor;
+
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
-  LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
-    regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
   DomainPoint c = task->index_point;
   LogicalRegion r =
     runtime->get_logical_subregion_by_color(ctx, args.projection, c);
 
   STLSetSerializer<ptr_t> points;
-  for (IndexIterator it(runtime, ctx, r); it.has_next();) {
-    size_t count = 0;
-    ptr_t start = it.next_span(count);
-    for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-      points.ref().insert(accessor.read(p));
+  if (args.source_dim == 0) {
+    RegionAccessor<SOA, ptr_t> accessor =
+      regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
+    for (IndexIterator it(runtime, ctx, r); it.has_next();) {
+      size_t count = 0;
+      ptr_t start = it.next_span(count);
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+        points.ref().insert(accessor.read(p));
+      }
+    }
+  }
+  else { // args.source_dim != 0
+    // FIXME: A raw pointer should have been used here...
+    RegionAccessor<AccessorType::Generic, ptr_t> accessor =
+      regions[0].get_field_accessor(args.fid).typeify<ptr_t>();
+    Domain domain =
+      runtime->get_index_space_domain(ctx, r.get_index_space());
+    for (Domain::DomainPointIterator it(domain); it; it++) {
+      points.ref().insert(accessor.read(it.p));
     }
   }
 
   return points;
 }
 
-static TaskID __attribute__((unused)) force_PartitionByImageShim_static_initialize =
-  PartitionByImageShim::register_task();
+STLVectorSerializer<long long>
+PartitionByImageShim::structured(const Task *task,
+                                 const std::vector<PhysicalRegion> &regions,
+                                 Context ctx, HighLevelRuntime *runtime)
+{
+  using namespace LegionRuntime::Accessor;
+
+  assert(task->arglen == sizeof(Args));
+  Args &args = *(Args *)task->args;
+
+  DomainPoint c = task->index_point;
+  LogicalRegion r =
+    runtime->get_logical_subregion_by_color(ctx, args.projection, c);
+  Domain target_domain =
+    runtime->get_index_space_domain(ctx, args.handle);
+
+  STLVectorSerializer<long long> result;
+  if (args.source_dim == 0) {
+    RegionAccessor<SOA, int> accessors[MAX_POINT_DIM];
+    for (int i = 0; i < args.target_dim; ++i)
+      accessors[i] =
+        regions[0].get_field_accessor(args.fid + i)
+                  .typeify<int>().convert<SOA>();
+
+    DomainPoint lo, hi;
+    lo.dim = args.target_dim;
+    hi.dim = args.target_dim;
+    for (int i = 0; i < args.target_dim; ++i) {
+      lo[i] = target_domain.rect_data[args.target_dim + i];
+      hi[i] = target_domain.rect_data[i];
+    }
+    DomainPoint point; point.dim = args.target_dim;
+    for (IndexIterator it(runtime, ctx, r); it.has_next();) {
+      size_t count = 0;
+      ptr_t start = it.next_span(count);
+      for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
+        for (int i = 0; i < args.target_dim; ++i)
+          point.point_data[i] = accessors[i].read(p);
+        if (point < lo) lo = point;
+        if (hi < point) hi = point;
+      }
+    }
+    for (int i = 0; i < args.target_dim; ++i) result.ref().push_back(lo[i]);
+    for (int i = 0; i < args.target_dim; ++i) result.ref().push_back(hi[i]);
+  }
+  else { // args.source_dim != 0
+    // FIXME: A raw pointer should have been used here...
+    RegionAccessor<AccessorType::Generic, int> accessors[MAX_POINT_DIM];
+    for (int i = 0; i < args.target_dim; ++i)
+      accessors[i] =
+        regions[0].get_field_accessor(args.fid + i).typeify<int>();
+
+    Domain domain = runtime->get_index_space_domain(ctx, r.get_index_space());
+    DomainPoint lo, hi;
+    lo.dim = args.target_dim;
+    hi.dim = args.target_dim;
+    for (int i = 0; i < args.target_dim; ++i) {
+      lo[i] = target_domain.rect_data[args.target_dim + i];
+      hi[i] = target_domain.rect_data[i];
+    }
+    DomainPoint point; point.dim = args.target_dim;
+    for (Domain::DomainPointIterator it(domain); it; it++) {
+      for (int i = 0; i < args.target_dim; ++i)
+        point.point_data[i] = accessors[i].read(it.p);
+      if (point < lo) lo = point;
+      if (hi < point) hi = point;
+    }
+    for (int i = 0; i < args.target_dim; ++i) result.ref().push_back(lo[i]);
+    for (int i = 0; i < args.target_dim; ++i) result.ref().push_back(hi[i]);
+  }
+
+  return result;
+}
+
+static TaskID __attribute__((unused))
+force_PartitionByImageShim_static_initialize_unstructured =
+  PartitionByImageShim::register_task_unstructured();
+
+static TaskID __attribute__((unused))
+force_PartitionByImageShim_static_initialize_structured =
+  PartitionByImageShim::register_task_structured();
 #endif
 
 legion_index_partition_t
@@ -1819,6 +1963,8 @@ PartitionByPreimageShim::task(const Task *task,
                               const std::vector<PhysicalRegion> &regions,
                               Context ctx, HighLevelRuntime *runtime)
 {
+  using namespace LegionRuntime::Accessor;
+
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
@@ -1828,7 +1974,7 @@ PartitionByPreimageShim::task(const Task *task,
   STLVectorSerializer<long long> result;
   if (args.source_dim == 0) {
     if (args.target_dim == 0) {
-      LegionRuntime::Accessor::RegionAccessor<SOA, ptr_t> accessor =
+      RegionAccessor<SOA, ptr_t> accessor =
         regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
       std::set<ptr_t> points;
       for (IndexIterator it(runtime, ctx, target); it.has_next();) {
@@ -1862,8 +2008,7 @@ PartitionByPreimageShim::task(const Task *task,
     else {
       Domain domain = runtime->get_index_space_domain(ctx, target);
 
-      LegionRuntime::Accessor::RegionAccessor<SOA, int>
-        accessors[MAX_POINT_DIM];
+      RegionAccessor<SOA, int> accessors[MAX_POINT_DIM];
       for (int i = 0; i < args.target_dim; ++i)
         accessors[i] =
           regions[0].get_field_accessor(args.fid + i)
@@ -1894,7 +2039,6 @@ PartitionByPreimageShim::task(const Task *task,
     }
   }
   else { // args.source_dim != 0
-    using namespace LegionRuntime::Accessor;
     if (args.target_dim == 0) {
       std::set<ptr_t> points;
       for (IndexIterator it(runtime, ctx, target); it.has_next();) {
@@ -1930,8 +2074,7 @@ PartitionByPreimageShim::task(const Task *task,
       Domain target_domain = runtime->get_index_space_domain(ctx, target);
 
       // FIXME: A raw pointer should have been used here...
-      LegionRuntime::Accessor::RegionAccessor<AccessorType::Generic, int>
-        accessors[MAX_POINT_DIM];
+      RegionAccessor<AccessorType::Generic, int> accessors[MAX_POINT_DIM];
       for (int i = 0; i < args.target_dim; ++i)
         accessors[i] =
           regions[0].get_field_accessor(args.fid + i).typeify<int>();
