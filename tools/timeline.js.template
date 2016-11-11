@@ -3,7 +3,6 @@ var profilingData = {
   visibility: [],
 };
 
-var maxZoom = 10000.0
 var margin_left = 300;
 var margin_right = 50;
 var margin_bottom = 50;
@@ -19,7 +18,11 @@ var baseThickness = height / max_level;
 height = max_level * thickness;
 var min_feature_width = 3; // width in pixels of the smallest thing we want people to be able to see
 var min_gap_width = 1; // width in pixels of the smallest gap we want to show
-var filteredData;;
+var filteredData;
+
+// store the indices of the current zoom level
+var indices = {};
+var indicesInit = {};
 
 var mouseX = 0;
 var rangeZoom = true;
@@ -169,7 +172,7 @@ function mouseUpHandler() {
   if (rangeZoom && selectWidth > 10) {
     var x = select_block.attr("x");
     showLoaderIcon();
-    adjustZoom(Math.min(svgWidth / selectWidth, maxZoom), false);
+    adjustZoom(svgWidth / selectWidth, false);
     $("#timeline").scrollLeft(x / prevZoom * zoom);
     hideLoaderIcon();
   }
@@ -223,9 +226,11 @@ function drawLoaderIcon() {
       repeatCount: "indefinite"
     });
 }
+
 function showLoaderIcon() {
   loaderSvg.select("g").attr("visibility", "visible");
 }
+
 function hideLoaderIcon() {
   loaderSvg.select("g").attr("visibility", "hidden");
 }
@@ -506,6 +511,43 @@ function updateURL(zoom, scale) {
     url += "&search=" + searchRegex[currentPos].source;
   window.history.replaceState("", "", url);
 }
+// timeField should be 'end' for the left hand side and
+// 'start' for the right hand side
+function binarySearch(data, level, time, useStart) {
+  var low = indices[level].start;
+  var high = indices[level].end;
+  while (true) {
+
+    // ugh is there a way to do integer division in javascrtipt?
+    var mid = Math.floor((high - low) / 2) + low; 
+
+    // In this case, we haven't found it. This is as close
+    // as we were able to get.
+    if (low == high || low == mid) {
+      return low;
+    } else if (high == mid) {
+      return high;
+    }
+    var midTime;
+    if (useStart) {
+      midTime = data[level][mid].start;
+    } else {
+      midTime = data[level][mid].end;
+    }
+
+    if (midTime > time) {
+      // need to look below
+      high = mid;
+    } else if (midTime < time) {
+      // need to look above
+      low = mid;
+    } else {
+      // Exact Match
+      return mid;
+    }
+  }
+}
+
 
 function filterOnlyVisibleData(profilingData, zoom, scale) {
   updateURL(zoom, scale);
@@ -518,8 +560,12 @@ function filterOnlyVisibleData(profilingData, zoom, scale) {
   var min_gap_time = min_gap_width / f;
   for (var level in items) {
     // gap merging below assumes intervals are sorted - do that first
-    items[level].sort(function(a,b) { return a.start - b.start; });
-    for (var i = 0; i < items[level].length; ++i) {
+    //items[level].sort(function(a,b) { return a.start - b.start; });
+
+    // We will use binary search to limit the following section
+    //var startIndex = binarySearch(items, level, windowStart/f, false);
+    //var endIndex = binarySearch(items, level, windowEnd/f, true);
+    for (var i = 0; i < indices[level].end; ++i) {
       var d = items[level][i];
       var start = d.start;
       var end = d.end;
@@ -578,6 +624,7 @@ function filterOnlyVisibleData(profilingData, zoom, scale) {
 function adjustZoom(newZoom, scroll) {
   var prevZoom = zoom;
   zoom = Math.round(newZoom * 10) / 10;
+
   var svg = d3.select("#timeline").select("svg");
 
   svg.attr("width", zoom * width)
@@ -585,9 +632,6 @@ function adjustZoom(newZoom, scroll) {
 
   var timelineGroup = svg.select("g#timeline");
   timelineGroup.selectAll("rect").remove();
-
-  filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
-  drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
   //svg.select("g#timeline")
   //  .attr("transform", "scale(" + zoom + ", 1.0)");
 
@@ -601,6 +645,9 @@ function adjustZoom(newZoom, scroll) {
     var pos = ($("#timeline").scrollLeft() + paneWidth / 2) / prevZoom;
     // this will trigger a scroll event which in turn redraws the timeline
     $("#timeline").scrollLeft(pos * zoom - width / 2);
+  } else {
+    filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+    drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
   }
 }
 
@@ -764,8 +811,7 @@ function defaultKeydown(e) {
   showLoaderIcon();
   if (commandType == Command.zix) {
     var inc = 4.0;
-    if (zoom + inc <= maxZoom)
-      adjustZoom(zoom + inc, true);
+    adjustZoom(zoom + inc, true);
   }
   else if (commandType == Command.zox) {
     var dec = 4.0;
@@ -865,13 +911,14 @@ var timeline_loader = function(operation_data) {
 
   d3.tsv(%s,
     function(d, i) {
+        var level = +d.level;
         var start = +d.start;
         var end = +d.end;
         var total = end - start;
         if (total > 10) {
             return {
                 id: i,
-                level: d.level,
+                level: level,
                 start: start,
                 end: end,
                 color: d.color,
@@ -895,6 +942,13 @@ var timeline_loader = function(operation_data) {
         } else {
           profilingData.items[d.level] = [d];
         }
+      }
+
+      for (var level in profilingData.items) {
+        indices[level] = {
+          start: 0,
+          end: profilingData.items[level].length
+        };
       }
 
       $("#timeline").scrollLeft(0);
