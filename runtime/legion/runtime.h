@@ -1167,7 +1167,11 @@ namespace Legion {
       Processor::Kind get_processor_kind(bool warn) const;
     public:
       void send_variant_response(AddressSpaceID source, RtUserEvent done_event);
+      void broadcast_variant(RtUserEvent done, AddressSpaceID origin,
+                             AddressSpaceID local);
     public:
+      static void handle_variant_broadcast(Runtime *runtime, 
+                                           Deserializer &derez);
       static AddressSpaceID get_owner_space(VariantID vid, Runtime *runtime);
       static void handle_variant_response(Runtime *runtime, 
                                           Deserializer &derez);
@@ -2096,6 +2100,7 @@ namespace Legion {
       void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_variant_request(AddressSpaceID target, Serializer &rez);
       void send_variant_response(AddressSpaceID target, Serializer &rez);
+      void send_variant_broadcast(AddressSpaceID target, Serializer &rez);
       void send_constraint_request(AddressSpaceID target, Serializer &rez);
       void send_constraint_response(AddressSpaceID target, Serializer &rez);
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
@@ -2259,6 +2264,7 @@ namespace Legion {
       void handle_acquire_response(Deserializer &derez);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
       void handle_variant_response(Deserializer &derez);
+      void handle_variant_broadcast(Deserializer &derez);
       void handle_constraint_request(Deserializer &derez,AddressSpaceID source);
       void handle_constraint_response(Deserializer &derez,AddressSpaceID src);
       void handle_constraint_release(Deserializer &derez);

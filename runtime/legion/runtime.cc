@@ -5679,6 +5679,11 @@ namespace Legion {
               runtime->handle_variant_response(derez);
               break;
             }
+          case SEND_VARIANT_BROADCAST:
+            {
+              runtime->handle_variant_broadcast(derez);
+              break;
+            }
           case SEND_CONSTRAINT_REQUEST:
             {
               runtime->handle_constraint_request(derez, remote_address_space);
@@ -5929,10 +5934,7 @@ namespace Legion {
       // Figure out who we have to send messages to
       std::vector<AddressSpaceID> targets;
       const AddressSpaceID local_space = runtime->address_space;
-      // shift up by 1 for 1-based indexing
-      // do the math
-      // shift back down by 1
-      AddressSpaceID start = local_space * radix + 1;
+      const AddressSpaceID start = local_space * radix + 1;
       for (unsigned idx = 0; idx < radix; idx++)
       {
         AddressSpaceID next = start+idx;
@@ -7115,6 +7117,68 @@ namespace Legion {
         layout_constraints.serialize(rez);
       }
       runtime->send_variant_response(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void VariantImpl::broadcast_variant(RtUserEvent done, AddressSpaceID origin,
+                                        AddressSpaceID local)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<AddressSpaceID> targets;
+      std::vector<AddressSpaceID> locals;
+      const AddressSpaceID start = local * Runtime::legion_collective_radix + 1;
+      for (unsigned idx = 0; idx < Runtime::legion_collective_radix; idx++)
+      {
+        AddressSpaceID next = start+idx;
+        if (next >= runtime->total_address_spaces)
+          break;
+        locals.push_back(next);
+        // Convert from relative to actual address space
+        AddressSpaceID actual = (origin + next) % runtime->total_address_spaces;
+        targets.push_back(actual);
+      }
+      if (!targets.empty())
+      {
+        std::set<RtEvent> local_done;
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          RtUserEvent next_done = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(owner->task_id);
+            rez.serialize(vid);
+            rez.serialize(next_done);
+            rez.serialize(origin);
+            rez.serialize(locals[idx]);
+          }
+          runtime->send_variant_broadcast(targets[idx], rez);
+          local_done.insert(next_done);
+        }
+        Runtime::trigger_event(done, Runtime::merge_events(local_done));
+      }
+      else
+        Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VariantImpl::handle_variant_broadcast(Runtime *runtime,
+                                                          Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      TaskID tid;
+      derez.deserialize(tid);
+      VariantID vid;
+      derez.deserialize(vid);
+      RtUserEvent done;
+      derez.deserialize(done);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      AddressSpaceID local;
+      derez.deserialize(local);
+      VariantImpl *impl = runtime->find_variant_impl(tid, vid);
+      impl->broadcast_variant(done, origin, local);
     }
 
     //--------------------------------------------------------------------------
@@ -14844,6 +14908,13 @@ namespace Legion {
       VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
                                                   registrar, ret, realm,
                                                   user_data, user_data_size);
+      // If this is a global registration we need to broadcast the variant
+      if (registrar.global_registration && (total_address_spaces > 1))
+      {
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        impl->broadcast_variant(done_event, address_space, 0);
+        done_event.wait();
+      }
       if (legion_spy_enabled)
         LegionSpy::log_task_variant(registrar.task_id, vid, 
                                     impl->is_inner(), impl->is_leaf(),
@@ -16172,6 +16243,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_variant_broadcast(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VARIANT_BROADCAST,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_constraint_request(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -17136,6 +17215,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VariantImpl::handle_variant_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_variant_broadcast(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      VariantImpl::handle_variant_broadcast(this, derez);
     }
 
     //--------------------------------------------------------------------------

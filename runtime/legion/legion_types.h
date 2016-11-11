@@ -637,6 +637,7 @@ namespace Legion {
       SEND_ACQUIRE_RESPONSE,
       SEND_VARIANT_REQUEST,
       SEND_VARIANT_RESPONSE,
+      SEND_VARIANT_BROADCAST,
       SEND_CONSTRAINT_REQUEST,
       SEND_CONSTRAINT_RESPONSE,
       SEND_CONSTRAINT_RELEASE,
@@ -756,6 +757,7 @@ namespace Legion {
         "Send Acquire Response",                                      \
         "Send Task Variant Request",                                  \
         "Send Task Variant Response",                                 \
+        "Send Task Variant Broadcast",                                \
         "Send Constraint Request",                                    \
         "Send Constraint Response",                                   \
         "Send Constraint Release",                                    \
