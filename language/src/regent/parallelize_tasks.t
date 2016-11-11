@@ -107,6 +107,15 @@ local function get_ghost_rect_body(res, sz, root, r, s, polarity, f)
   end
 end
 
+local terra is_zero(p : c.legion_domain_point_t)
+  var dim = p.dim
+  if dim == 0 then dim = 1 end
+  for i = 0, dim do
+    if p.point_data[i] ~= 0 then return false end
+  end
+  return true
+end
+
 -- If all stencil accesses fall into the private region,
 -- we do not need to calculate the size of the ghost region
 local function clear_unnecessary_polarity(root, r, polarity, f)
@@ -650,7 +659,6 @@ function parallel_task_context.new_task_scope(params)
   local region_params = {}
   local region_param_map = {}
   local region_param_indices = terralib.newlist()
-  local index_type
   for idx = 1, #params do
     if std.is_region(params[idx].param_type) then
       local symbol = params[idx].symbol
@@ -665,9 +673,6 @@ function parallel_task_context.new_task_scope(params)
       }
       region_param_map[symbol] = region_params[idx]
       region_param_indices:insert(idx)
-      assert(index_type == nil or
-             index_type == symbol:gettype():ispace().index_type)
-      index_type = symbol:gettype():ispace().index_type
     end
   end
 
@@ -675,7 +680,7 @@ function parallel_task_context.new_task_scope(params)
   cx.region_params = region_params
   cx.region_param_map = region_param_map
   cx.region_param_indices = region_param_indices
-  cx.task_point_symbol = get_new_tmp_var(index_type, "__point")
+  cx.task_point_symbol = get_new_tmp_var(c.legion_domain_point_t, "__point")
   cx.field_accesses = {}
   cx.field_access_stats = {}
   cx.stencils = terralib.newlist()
@@ -2363,9 +2368,8 @@ function parallelize_tasks.top_task_body(task_cx, node)
           mk_expr_id(red_var, std.rawref(&red_var:gettype()))
         stats:insert(mk_stat_var(red_var, stat.types[red_decl_index]))
 
-        local cond = mk_expr_binary(
-          "==", mk_expr_id(task_cx:get_task_point_symbol()),
-          mk_expr_zeros(task_cx:get_task_point_symbol():gettype()))
+        local cond = mk_expr_call(is_zero,
+          mk_expr_id(task_cx:get_task_point_symbol()))
         local if_stat = mk_stat_if(
           cond, mk_stat_assignment(
             red_var_expr, stat.values[red_decl_index]))
