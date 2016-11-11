@@ -7127,7 +7127,7 @@ namespace Legion {
       std::vector<AddressSpaceID> targets;
       std::vector<AddressSpaceID> locals;
       const AddressSpaceID start = local * Runtime::legion_collective_radix + 1;
-      for (unsigned idx = 0; idx < Runtime::legion_collective_radix; idx++)
+      for (int idx = 0; idx < Runtime::legion_collective_radix; idx++)
       {
         AddressSpaceID next = start+idx;
         if (next >= runtime->total_address_spaces)
