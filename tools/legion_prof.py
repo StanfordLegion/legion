@@ -2051,15 +2051,24 @@ class State(object):
                 return potential_dir
             i += 1
 
-    def emit_interactive_visualization(self, output_prefix, show_procs,
-                                       show_channels, show_instances):
+    def emit_interactive_visualization(self, output_dirname, show_procs,
+                                       show_channels, show_instances, force):
         self.assign_colors()
 
         html_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
                 "legion_prof.html.template")
         js_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
                 "timeline.js.template")
-        output_dirname = self.find_unique_dirname(output_prefix)
+
+        # the output directory will either be overwritten, or we will find
+        # a new unique name to create new logs
+
+        if force:
+            if (os.path.exists(output_dirname)):
+                shutil.rmtree(output_dirname)
+        else:
+            output_dirname = self.find_unique_dirname(output_dirname)
+
         data_tsv_file_name = os.path.join(output_dirname, "legion_prof_data.tsv")
         processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
         html_file_name = os.path.join(output_dirname, "index.html")
@@ -2134,12 +2143,13 @@ def usage():
     print '  -c : include channels in visualization'
     print '  -s : print statistics'
     print '  -v : print verbose profiling information'
-    print '  -o <out_file> : give a prefix for the output file'
+    print '  -o <out_dirname> : give the directory for the output'
+    print '  -f : force the creation of a new directory for legion_prof timelines (OVERWRITES OLD DIRECTORY)'
     print '  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL)
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'pcivm:o:sCST')
+    opts, args = getopt(sys.argv[1:],'pcivfm:o:sCST')
     opts = dict(opts)
     if len(args) == 0:
       usage()
@@ -2151,7 +2161,8 @@ def main():
     show_channels = False
     show_instances = False
     show_copy_matrix = False
-    output_prefix = 'legion_prof'
+    force = False
+    output_dirname = 'legion_prof'
     copy_output_prefix = 'legion_prof_copy'
     print_stats = False
     verbose = False
@@ -2169,12 +2180,14 @@ def main():
         print_stats = True
     if '-v' in opts:
         verbose = True
+    if '-f' in opts:
+        force = True
     if '-m' in opts:
         global US_PER_PIXEL
         US_PER_PIXEL = int(opts['-m'])
     if '-o' in opts:
-        output_prefix = opts['-o']
-        copy_output_prefix = output_prefix + "_copy"
+        output_dirname = opts['-o']
+        copy_output_prefix = output_dirname + "_copy"
     if '-C' in opts:
         show_copy_matrix = True
     if '-S' in opts:
@@ -2203,12 +2216,12 @@ def main():
         state.print_stats(verbose) 
     else:
         if not interactive_timeline:
-            state.emit_visualization(output_prefix, show_procs, 
+            state.emit_visualization(output_dirname, show_procs, 
                                      show_channels, show_instances) 
 
         if interactive_timeline:
-            state.emit_interactive_visualization(output_prefix, show_procs,
-                                 show_channels, show_instances)
+            state.emit_interactive_visualization(output_dirname, show_procs,
+                                 show_channels, show_instances, force)
         if show_copy_matrix:
             state.show_copy_matrix(copy_output_prefix)
 
