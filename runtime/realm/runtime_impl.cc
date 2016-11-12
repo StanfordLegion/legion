@@ -798,11 +798,6 @@ namespace Realm {
 		     *core_reservations,
 		     *argc, (const char **)*argv);
 
-#ifdef USE_GASNET
-      // this needs to happen after init_endpoints
-      gasnet_coll_init(0, 0, 0, 0, 0);
-#endif
-
 #ifndef USE_GASNET
       // network initialization is also responsible for setting the "zero_time"
       //  for relative timing - no synchronization necessary in non-gasnet case
@@ -868,6 +863,11 @@ namespace Realm {
       start_handler_threads(active_msg_handler_threads,
 			    *core_reservations,
 			    stack_size_in_mb << 20);
+
+#ifdef USE_GASNET
+      // this needs to happen after init_endpoints
+      gasnet_coll_init(0, 0, 0, 0, 0);
+#endif
 
       LegionRuntime::LowLevel::create_builtin_dma_channels(this);
 
