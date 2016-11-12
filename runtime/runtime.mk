@@ -78,6 +78,12 @@ ifeq ($(shell uname -n),n0003)
 CONDUIT=ibv
 GPU_ARCH=fermi
 endif
+ifeq ($(findstring xs,$(shell uname -n)), xs)
+GPU_ARCH=k80
+GASNET=/home/stanford/aaiken/users/zhihao/tools/gasnet/release/
+CONDUIT=ibv#not sure if this is true
+CUDA=${CUDA_HOME}
+endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
 GASNET=/nics/d/home/sequoia/gasnet-1.20.2-openmpi
 MPI=/sw/kfs/openmpi/1.6.1/centos6.2_intel2011_sp1.11.339
