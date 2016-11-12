@@ -802,8 +802,8 @@ function caller_context:pop_scope()
   self.__param_stack[#self.__param_stack] = nil
 end
 
-function caller_context:add_region_decl(symbol, stat)
-  self.__region_decls[symbol] = stat
+function caller_context:add_region_decl(region_type, stat)
+  self.__region_decls[region_type] = stat
 end
 
 function caller_context:add_bounds_symbol(region_symbol, bounds_symbol)
@@ -824,11 +824,8 @@ function caller_context:add_call(expr)
   local param = self.__param_stack[#self.__param_stack]
   for idx = 1, #expr.args do
     if std.is_region(std.as_read(expr.args[idx].expr_type)) then
-      -- TODO: Arguments can be some_partition[some_index].
-      --       Normalization required.
-      assert(expr.args[idx]:is(ast.typed.expr.ID))
-      local region_symbol = expr.args[idx].value
-      local decl = self.__region_decls[region_symbol]
+      local decl = self.__region_decls[std.as_read(expr.args[idx].expr_type)]
+      assert(decl ~= nil)
       if self.__call_exprs_by_region_decl[decl] == nil then
         self.__call_exprs_by_region_decl[decl] = data.newmap()
       end
@@ -1409,7 +1406,7 @@ local function collect_calls(cx, parallelizable)
         for idx = 1, #node.symbols do
           local symbol_type = node.symbols[idx]:gettype()
           if std.is_region(symbol_type) then
-            cx:add_region_decl(node.symbols[idx], node)
+            cx:add_region_decl(symbol_type, node)
             -- Reserve symbols for metadata
             local base_name = (node.symbols[idx]:hasname() and node.symbols[idx]:getname()) or ""
             local bounds_symbol = get_new_tmp_var(
