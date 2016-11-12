@@ -1234,8 +1234,8 @@ namespace Legion {
     protected:
       bool sparse;
       union {
-        typename Internal::LegionSet<IT>::aligned* sparse;
-        DenseSet*                                  dense;
+        typename std::set<IT>* sparse;
+        DenseSet*              dense;
       } set_ptr;
     };
 
@@ -8274,7 +8274,7 @@ namespace Legion {
       : sparse(true)
     //-------------------------------------------------------------------------
     {
-      set_ptr.sparse = new typename Internal::LegionSet<IT>::aligned();
+      set_ptr.sparse = new typename std::set<IT>();
     }
 
     //-------------------------------------------------------------------------
@@ -8285,7 +8285,7 @@ namespace Legion {
     {
       if (rhs.sparse)
       {
-        set_ptr.sparse = new typename Internal::LegionSet<IT>::aligned();
+        set_ptr.sparse = new typename std::set<IT>();
         *(set_ptr.sparse) = *(rhs.set_ptr.sparse);
       }
       else
@@ -8320,7 +8320,7 @@ namespace Legion {
         if (!sparse)
         {
           Internal::legion_delete(set_ptr.dense);
-          set_ptr.sparse = new typename Internal::LegionSet<IT>::aligned();
+          set_ptr.sparse = new typename std::set<IT>();
         }
         else
           set_ptr.sparse->clear();
@@ -8365,7 +8365,7 @@ namespace Legion {
                           (sizeof(IT) + STL_SET_NODE_SIZE)))
         {
           DenseSet *dense_set = Internal::legion_new<DenseSet>();
-          for (typename Internal::LegionSet<IT>::aligned::const_iterator it = 
+          for (typename std::set<IT>::const_iterator it = 
                 set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
           {
             dense_set->set.set_bit(*it);
@@ -8394,8 +8394,7 @@ namespace Legion {
           IT count = DT::pop_count(set_ptr.dense->set);
           if ((count * (sizeof(IT) + STL_SET_NODE_SIZE)) < sizeof(DT))
           {
-            typename Internal::LegionSet<IT>::aligned *sparse_set = 
-              new typename Internal::LegionSet<IT>::aligned();
+            typename std::set<IT> *sparse_set = new typename std::set<IT>();
             for (IT idx = 0; idx < DT::ELEMENTS; idx++)
             {
               if (set_ptr.dense->set[idx])
@@ -8453,8 +8452,7 @@ namespace Legion {
         return find_first_set();
       if (sparse)
       {
-        typename Internal::LegionSet<IT>::aligned::const_iterator it = 
-          set_ptr.sparse->begin();
+        typename std::set<IT>::const_iterator it = set_ptr.sparse->begin();
         while (index > 0)
         {
           it++;
@@ -8473,7 +8471,7 @@ namespace Legion {
     {
       if (sparse)
       {
-        for (typename Internal::LegionSet<IT>::aligned::const_iterator it = 
+        for (typename std::set<IT>::const_iterator it = 
               set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
         {
           functor.apply(*it);
@@ -8505,7 +8503,7 @@ namespace Legion {
       if (sparse)
       {
         rez.serialize<size_t>(set_ptr.sparse->size());
-        for (typename Internal::LegionSet<IT>::aligned::const_iterator it = 
+        for (typename std::set<IT>::const_iterator it = 
               set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
         {
           rez.serialize(*it);
@@ -8528,7 +8526,7 @@ namespace Legion {
         if (!sparse)
         {
           Internal::legion_delete(set_ptr.dense);
-          set_ptr.sparse = new typename Internal::LegionSet<IT>();
+          set_ptr.sparse = new typename std::set<IT>();
         }
         else
           set_ptr.sparse->clear();
@@ -8704,7 +8702,7 @@ namespace Legion {
       if (!sparse)
       {
 	delete set_ptr.dense;
-	set_ptr.sparse = new typename Internal::LegionSet<IT>::aligned();
+	set_ptr.sparse = new typename std::set<IT>();
 	sparse = true;
       } else
 	set_ptr.sparse->clear();
