@@ -298,6 +298,8 @@ function drawTimeline(targetSvg, data, zoom, scale, thickness) {
         //return (d.end - d.start) * scale * zoom;
       }
     })
+    .attr("stroke", "black")
+    .attr("stroke-width", "0.5")
     .attr("height", thickness)
     .style("opacity", function(d) {
       if (!searchEnabled ||
