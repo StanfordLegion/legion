@@ -7924,7 +7924,8 @@ namespace Legion {
         unique_index_tree_id((unique == 0) ? runtime_stride : unique),
         unique_region_tree_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
-        unique_field_id((unique == 0) ? runtime_stride : unique),
+        unique_field_id(MAX_APPLICATION_FIELD_ID + 
+                        ((unique == 0) ? runtime_stride : unique)),
         unique_variant_id((unique == 0) ? runtime_stride : unique),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
@@ -14741,6 +14742,16 @@ namespace Legion {
 #endif
       if (fid == AUTO_GENERATE_ID)
         fid = get_unique_field_id();
+#ifdef DEBUG_LEGION
+      else if (fid >= MAX_APPLICATION_FIELD_ID)
+      {
+        log_task.error("Task %s (ID %lld) attempted to allocate a field with "
+                       "ID %d which exceeds the MAX_APPLICATION_FIELD_ID bound "
+                       "set in legion_config.h", ctx->get_task_name(),
+                       ctx->get_unique_id(), fid);
+        assert(false);
+      }
+#endif
 
       if (legion_spy_enabled)
         LegionSpy::log_field_creation(space.id, fid, field_size);
@@ -14818,6 +14829,16 @@ namespace Legion {
       {
         if (resulting_fields[idx] == AUTO_GENERATE_ID)
           resulting_fields[idx] = get_unique_field_id();
+#ifdef DEBUG_LEGION
+        else if (resulting_fields[idx] >= MAX_APPLICATION_FIELD_ID)
+        {
+          log_task.error("Task %s (ID %lld) attempted to allocate a field with "
+                         "ID %d which exceeds the MAX_APPLICATION_FIELD_ID "
+                         "bound set in legion_config.h", ctx->get_task_name(),
+                         ctx->get_unique_id(), resulting_fields[idx]);
+          assert(false);
+        }
+#endif
 
         if (legion_spy_enabled)
           LegionSpy::log_field_creation(space.id, 

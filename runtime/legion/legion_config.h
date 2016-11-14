@@ -69,6 +69,10 @@
 #ifndef MAX_APPLICATION_TASK_ID
 #define MAX_APPLICATION_TASK_ID         (1<<20)
 #endif
+// Maximum ID for an application field ID
+#ifndef MAX_APPLICATION_FIELD_ID
+#define MAX_APPLICATION_FIELD_ID        (1<<20)
+#endif
 // Maximum ID for an application mapper ID
 #ifndef MAX_APPLICATION_MAPPER_ID
 #define MAX_APPLICATION_MAPPER_ID       (1<<20)
