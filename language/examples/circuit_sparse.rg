@@ -706,12 +706,9 @@ terra create_colorings(conf : Config)
   return coloring
 end
 
--- Inline this task for now so when we do multi-node runs
--- we don't get segfaults from colorings not being serialized
--- and deserialized properly
-__demand(__inline)
-task create_ghost_node_map(conf         : Config,
-                           ghost_ranges : region(ghost_range))
+task create_ghost_partition(conf         : Config,
+                            all_shared   : region(node),
+                            ghost_ranges : region(ghost_range))
 where
   reads(ghost_ranges)
 do
@@ -730,7 +727,7 @@ do
     idx += 1
   end
 
-  return ghost_node_map
+  return partition(aliased, all_shared, ghost_node_map)
 end
 
 task toplevel()
@@ -800,8 +797,7 @@ task toplevel()
     end
   end
 
-  var ghost_node_map = create_ghost_node_map(conf, ghost_ranges)
-  var rp_ghost = partition(aliased, all_shared, ghost_node_map)
+  var rp_ghost = create_ghost_partition(conf, all_shared, ghost_ranges)
 
   --var last_shared = region(ispace(ptr, num_pieces * num_pieces), int)
   --new(ptr(int, last_shared), num_pieces * num_pieces)
