@@ -179,6 +179,87 @@ namespace Realm {
 	    if(remote) {
 	      RemoteMemory *mem = new RemoteMemory(m, size, kind, regbase);
 	      get_runtime()->nodes[id.memory.owner_node].memories[id.memory.mem_idx] = mem;
+
+#ifndef REALM_SKIP_INTERNODE_AFFINITIES
+	      {
+		// manufacture affinities for remote writes
+		// acceptable local sources: SYSTEM, Z_COPY, REGDMA (bonus)
+		// acceptable remote targets: SYSTEM, Z_COPY, GPU_FB, DISK, HDF, FILE, REGDMA (bonus)
+		int bw = 6;
+		int latency = 1000;
+		bool tgt_ok = false;
+		switch(kind) {
+		case Memory::SYSTEM_MEM:
+		case Memory::Z_COPY_MEM:
+		case Memory::GPU_FB_MEM:
+		case Memory::DISK_MEM:
+		case Memory::HDF_MEM:
+		case Memory::FILE_MEM:
+		  {
+		    tgt_ok = true;
+		    break;
+		  }
+
+		case Memory::REGDMA_MEM:
+		  {
+		    bw += 1;
+		    latency -= 100;
+		    tgt_ok = true;
+		    break;
+		  }
+
+		default:
+		  {
+		    tgt_ok = false;
+		  }
+		}
+
+		if(tgt_ok) {
+		  // iterate over local memories and check their kinds
+		  Node *n = &(get_runtime()->nodes[gasnet_mynode()]);
+		  for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
+		      it != n->memories.end();
+		      ++it) {		    
+		    Machine::MemoryMemoryAffinity mma;
+		    mma.m1 = (*it)->me;
+		    mma.m2 = m;
+		    mma.bandwidth = bw;
+		    mma.latency = latency;
+		    bool src_ok = false;
+
+		    switch((*it)->get_kind()) {
+		    case Memory::SYSTEM_MEM:
+		    case Memory::Z_COPY_MEM:
+		      {
+			src_ok = true;
+			break;
+		      }
+
+		    case Memory::REGDMA_MEM:
+		      {
+			mma.bandwidth += 1;
+			mma.latency -= 100;
+			src_ok = true;
+			break;
+		      }
+
+		    default:
+		      {
+			src_ok = false;
+			break;
+		      }
+		    }
+
+		    if(src_ok) {
+		      log_annc.debug() << "adding inter-node affinity "
+				       << mma.m1 << " <-> " << mma.m2
+				       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
+		      mem_mem_affinities.push_back(mma);
+		    }
+		  }
+		}
+	      }
+#endif
 	    }
 	  }
 	  break;
