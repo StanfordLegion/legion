@@ -28,6 +28,9 @@
 
 #include "lowlevel_impl.h"
 
+#include "realm/timers.h"
+#include "realm/logging.h"
+
 #define NO_DEBUG_AMREQUESTS
 
 enum { MSGID_LONG_EXTENSION = 253,
@@ -39,6 +42,7 @@ static int payload_count = 0;
 #endif
 
 LegionRuntime::Logger::Category log_amsg("activemsg");
+LegionRuntime::Logger::Category log_spill("spill");
 
 #ifdef ACTIVE_MESSAGE_TRACE
 LegionRuntime::Logger::Category log_amsg_trace("amtrace");
@@ -227,6 +231,15 @@ public:
   // releasing memory will take the lock itself
   void release_srcptr(void *srcptr);
 
+  // attempt to allocate spill memory (may block, and then return false, if limit is hit)
+  bool alloc_spill_memory(size_t size_needed, int msgtype, Lock& held_lock,
+			  bool first_try);
+
+  // release spilled memory (usually by moving it into actual srcdatapool)
+  void release_spill_memory(size_t size_released, int msgtype, Lock& held_lock);
+
+  void print_spill_data(Realm::Logger::LoggingLevel level = Realm::Logger::LEVEL_WARNING);
+
   static void release_srcptr_handler(gasnet_token_t token, gasnet_handlerarg_t arg0, gasnet_handlerarg_t arg1);
 
 protected:
@@ -234,15 +247,37 @@ protected:
 
   friend class SrcDataPool::Lock;
   gasnet_hsl_t mutex;
+  gasnett_cond_t condvar;
   size_t total_size;
   std::map<char *, size_t> free_list;
   std::queue<OutgoingMessage *> pending_allocations;
   // debug
   std::map<char *, size_t> in_use;
   std::map<void *, off_t> alloc_counts;
+
+  size_t current_spill_bytes, peak_spill_bytes, current_spill_threshold;
+#define TRACK_PER_MESSAGE_SPILLING
+#ifdef TRACK_PER_MESSAGE_SPILLING
+  size_t current_permsg_spill_bytes[256], peak_permsg_spill_bytes[256];
+  size_t total_permsg_spill_bytes[256];
+#endif
+  int current_suspended_spillers, total_suspended_spillers;
+  double total_suspended_time;
+public:
+  static size_t max_spill_bytes;
+  static size_t print_spill_threshold, print_spill_step;
 };
 
 static SrcDataPool *srcdatapool = 0;
+
+size_t SrcDataPool::max_spill_bytes = 0;  // default = no limit
+size_t SrcDataPool::print_spill_threshold = 1 << 30;  // default = 1 GB
+size_t SrcDataPool::print_spill_step = 1 << 30;       // default = 1 GB
+
+// certain threads are exempt from the max spillage due to deadlock concerns
+namespace ThreadLocal {
+  __thread bool always_allow_spilling = false;
+};
 
 // wrapper so we don't have to expose SrcDataPool implementation
 void release_srcptr(void *srcptr)
@@ -254,8 +289,19 @@ void release_srcptr(void *srcptr)
 SrcDataPool::SrcDataPool(void *base, size_t size)
 {
   gasnet_hsl_init(&mutex);
+  gasnett_cond_init(&condvar);
   free_list[(char *)base] = size;
   total_size = size;
+
+  current_spill_bytes = peak_spill_bytes = 0;
+#ifdef TRACK_PER_MESSAGE_SPILLING
+  for(int i = 0; i < 256; i++)
+    current_permsg_spill_bytes[i] = peak_permsg_spill_bytes[i] = total_permsg_spill_bytes[i] = 0;
+#endif
+  current_spill_threshold = print_spill_threshold;
+
+  current_suspended_spillers = total_suspended_spillers = 0;
+  total_suspended_time = 0;
 }
 
 SrcDataPool::~SrcDataPool(void)
@@ -459,6 +505,105 @@ void SrcDataPool::release_srcptr(void *srcptr)
     }
 }
 
+bool SrcDataPool::alloc_spill_memory(size_t size_needed, int msgtype, Lock& held_lock,
+				     bool first_try)
+{
+  size_t new_spill_bytes = current_spill_bytes + size_needed;
+
+  // case 1: it fits, so add to total and see if we need to print stuff
+  if((max_spill_bytes == 0) || ThreadLocal::always_allow_spilling ||
+     (new_spill_bytes <= max_spill_bytes)) {
+    current_spill_bytes = new_spill_bytes;
+    if(new_spill_bytes > peak_spill_bytes) {
+      peak_spill_bytes = new_spill_bytes;
+      if(peak_spill_bytes >= current_spill_threshold) {
+	current_spill_threshold += print_spill_step;
+	print_spill_data();
+      }
+    }
+#ifdef TRACK_PER_MESSAGE_SPILLING
+    size_t new_permsg_spill_bytes = current_permsg_spill_bytes[msgtype] + size_needed;
+    current_permsg_spill_bytes[msgtype] = new_permsg_spill_bytes;
+    if(new_permsg_spill_bytes > peak_permsg_spill_bytes[msgtype])
+      peak_permsg_spill_bytes[msgtype] = new_permsg_spill_bytes;
+#endif
+    return true;
+  }
+  
+  // case 2: we've hit the max allowable spill amount, so stall until room is available
+
+  // sanity-check: would this ever fit?
+  assert(size_needed <= max_spill_bytes);
+
+  log_spill.debug() << "max spill amount reached - suspension required ("
+		    << current_spill_bytes << " + " << size_needed << " > " << max_spill_bytes;
+
+  // if this is the first try for this message, increase the total waiter count and complain
+  current_suspended_spillers++;
+  if(first_try) {
+    total_suspended_spillers++;
+    if(total_suspended_spillers == 1)
+      print_spill_data();
+  }
+
+  double t1 = Realm::Clock::current_time();
+
+  // sleep until the message would fit, although we won't try to allocate on this pass
+  //  (this allows the caller to try the srcdatapool again first)
+  while((current_spill_bytes + size_needed) > max_spill_bytes) {
+    gasnett_cond_wait(&condvar, &mutex.lock);
+    log_spill.debug() << "awake - rechecking: "
+		      << current_spill_bytes << " + " << size_needed << " > " << max_spill_bytes << "?";
+  }
+
+  current_suspended_spillers--;
+
+  double t2 = Realm::Clock::current_time();
+  double delta = t2 - t1;
+
+  log_spill.debug() << "spill suspension complete: " << delta << " seconds";
+  total_suspended_time += delta;
+
+  return false; // allocation failed, should now be retried
+}
+
+void SrcDataPool::release_spill_memory(size_t size_released, int msgtype, Lock& held_lock)
+{
+  current_spill_bytes -= size_released;
+
+#ifdef TRACK_PER_MESSAGE_SPILLING
+  current_permsg_spill_bytes[msgtype] -= size_released;
+#endif
+
+  // if there are any threads blocked on spilling data, wake them
+  if(current_suspended_spillers > 0) {
+    log_spill.debug() << "waking " << current_suspended_spillers << " suspended spillers";
+    gasnett_cond_broadcast(&condvar);
+  }
+}
+
+void SrcDataPool::print_spill_data(Realm::Logger::LoggingLevel level)
+{
+  Realm::LoggerMessage msg = log_spill.newmsg(level);
+
+  msg << "current spill usage = "
+      << current_spill_bytes << " bytes, peak = " << peak_spill_bytes;
+#ifdef TRACK_PER_MESSAGE_SPILLING
+  for(int i = 0; i < 256; i++)
+    if(total_permsg_spill_bytes[i] > 0)
+      msg << "\n"
+	  << "  MSG " << i << ": "
+	  << "cur=" << current_permsg_spill_bytes[i]
+	  << " peak=" << peak_permsg_spill_bytes[i]
+	  << " total=" << total_permsg_spill_bytes[i];
+#endif
+  if(total_suspended_spillers > 0)
+    msg << "\n"
+	<< "   suspensions=" << total_suspended_spillers
+	<< " avg time=" << (total_suspended_time / total_suspended_spillers);
+}
+
+#if 0
 #ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
 size_t current_total_spill_bytes, peak_total_spill_bytes;
 size_t current_spill_threshold;
@@ -486,6 +631,7 @@ void init_spill_tracking(void)
     total_spill_bytes[i] = 0;
   }
 }
+#endif
 
 void print_spill_data(void)
 {
@@ -551,9 +697,12 @@ OutgoingMessage::~OutgoingMessage(void)
       printf("%d: freeing payload %x = [%p, %p)\n",
 	     gasnet_mynode(), payload_num, payload, ((char *)payload) + payload_size);
 #endif
-#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
-      record_spill_free(msgid, payload_size);
-#endif
+      {
+	// TODO: find way to avoid taking lock here?
+	SrcDataPool::Lock held_lock(*srcdatapool);
+	srcdatapool->release_spill_memory(payload_size, msgid, held_lock);
+      }
+      //record_spill_free(msgid, payload_size);
       deferred_free(payload);
     }
   }
@@ -825,6 +974,9 @@ extern void enqueue_incoming(gasnet_node_t sender, IncomingMessage *msg)
 
 void IncomingMessageManager::handler_thread_loop(void)
 {
+  // messages enqueued in response to incoming messages can never be stalled
+  ThreadLocal::always_allow_spilling = true;
+
   while (true) {
     int sender = -1;
     IncomingMessage *current_msg = get_messages(sender);
@@ -1148,6 +1300,22 @@ public:
 
   bool enqueue_message(OutgoingMessage *hdr, bool in_order)
   {
+    // BEFORE we take the message manager's mutex, we reserve the ability to
+    //  allocate spill data
+    if((hdr->payload_size > 0) &&
+       ((hdr->payload_mode == PAYLOAD_COPY) ||
+	(hdr->payload_mode == PAYLOAD_FREE))) {
+      SrcDataPool::Lock held_lock(*srcdatapool);
+      bool first_try = true;
+      while(!srcdatapool->alloc_spill_memory(hdr->payload_size,
+					     hdr->msgid,
+					     held_lock,
+					     first_try)) {
+	log_spill.debug() << "spill reservation failed - retrying...";
+	first_try = false;
+      }
+    }
+
     // need to hold the mutex in order to push onto one of the queues
     gasnet_hsl_lock(&mutex);
 
@@ -1782,8 +1950,14 @@ void OutgoingMessage::reserve_srcdata(void)
 
       srcptr = srcdatapool->alloc_srcptr(payload_size, held_lock);
       log_sdp.info("got %p (%d)", srcptr, payload_mode);
-
+	
       if(srcptr != 0) {
+	// if we had reserved spill space, we can give it back now
+	if((payload_mode == PAYLOAD_COPY) || (payload_mode == PAYLOAD_FREE)) {
+	  log_spill.debug() << "returning " << payload_size << " unneeded bytes of spill";
+	  srcdatapool->release_spill_memory(payload_size, msgid, held_lock);
+	}
+
 	// allocation succeeded - update state, but do copy below, after
 	//  we've released the lock
 	payload_mode = PAYLOAD_SRCPTR;
@@ -1791,14 +1965,8 @@ void OutgoingMessage::reserve_srcdata(void)
       } else {
 	// if the allocation fails, we have to queue ourselves up
 
-#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
-	if((payload_mode == PAYLOAD_COPY) || (payload_mode == PAYLOAD_FREE)) {
- 	  // some dynamic memory is being tied up for this, so count it
-	  record_spill_alloc(msgid, payload_size);
-        }
-#endif
-
 	// if we've been instructed to copy the data, that has to happen now
+	// SJT: try to figure out/remember why this has to be done with lock held?
 	if(payload_mode == PAYLOAD_COPY) {
 	  void *copy_ptr = malloc(payload_size);
 	  assert(copy_ptr != 0);
@@ -1820,13 +1988,6 @@ void OutgoingMessage::reserve_srcdata(void)
       payload_src = 0;
     }
   } else {
-#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
-    if((payload_mode == PAYLOAD_COPY) || (payload_mode == PAYLOAD_FREE)) {
-      // some dynamic memory is being tied up for this, so count it
-      record_spill_alloc(msgid, payload_size);
-    }
-#endif
-
     // no srcdatapool needed, but might still have to copy
     if(payload_src->get_contig_pointer() &&
        (payload_mode != PAYLOAD_COPY)) {
@@ -1851,11 +2012,20 @@ void OutgoingMessage::assign_srcdata_pointer(void *ptr)
   assert(payload_mode == PAYLOAD_PENDING);
   assert(payload_src != 0);
   payload_src->copy_data(ptr);
+
+  bool was_using_spill = (payload_src->get_payload_mode() == PAYLOAD_FREE);
+
   delete payload_src;
   payload_src = 0;
 
   payload = ptr;
   payload_mode = PAYLOAD_SRCPTR;
+
+  if(was_using_spill) {
+    // TODO: find way to avoid taking lock here?
+    SrcDataPool::Lock held_lock(*srcdatapool);
+    srcdatapool->release_spill_memory(payload_size, msgid, held_lock);
+  }
 }
 
 class EndpointManager {
@@ -2100,8 +2270,23 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
       continue;
     }
 
-    if(!strcmp(argv[1], "-ll:maxsend")) {
+    if(!strcmp(argv[i], "-ll:maxsend")) {
       max_msgs_to_send = atoi(argv[++i]);
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-ll:spillwarn")) {
+      SrcDataPool::print_spill_threshold = ((size_t)atoi(argv[++i])) << 20; // convert MB to bytes
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-ll:spillstep")) {
+      SrcDataPool::print_spill_step = ((size_t)atoi(argv[++i])) << 20; // convert MB to bytes
+      continue;
+    }
+
+    if(!strcmp(argv[i], "-ll:spillstall")) {
+      SrcDataPool::max_spill_bytes = ((size_t)atoi(argv[++i])) << 20; // convert MB to bytes
       continue;
     }
   }
@@ -2192,10 +2377,6 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   endpoint_manager = new EndpointManager(gasnet_nodes(), crs);
 
   init_deferred_frees();
-
-#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
-  init_spill_tracking();
-#endif
 }
 
 // do a little bit of polling to try to move messages along, but return
@@ -2315,9 +2496,8 @@ void stop_activemsg_threads(void)
   detailed_message_timing.dump_detailed_timing_data();
 #endif
 
-#ifdef TRACK_ACTIVEMSG_SPILL_ALLOCS
-  print_spill_data();
-#endif
+  // print final spill stats at a low logging level
+  srcdatapool->print_spill_data(Realm::Logger::LEVEL_INFO);
 }
 	
 void enqueue_message(gasnet_node_t target, int msgid,
