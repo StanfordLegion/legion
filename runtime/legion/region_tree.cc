@@ -10658,10 +10658,6 @@ namespace Legion {
       { 
         // If we've arrived add ourselves as a user
         register_local_user(state, user, trace_info);
-        // If this is a reduction, record that we have an outstanding 
-        // reduction at this node in the region tree
-        if ((user.usage.redop > 0) && !proj_info.is_projecting())
-          record_logical_reduction(state, user.usage.redop, user.field_mask);
         // Finish dependence analysis for any advance operations
         // Do this before updating the dirty and reduction fields at this level
         if (!advances.empty())
@@ -10755,16 +10751,16 @@ namespace Legion {
           if (IS_WRITE(user.usage))
             state.update_projection_epochs(user.field_mask, proj_info);
         }
+        else if (user.usage.redop > 0)
+        {
+          // Not projecting and doing a reduction of some kind so record it
+          record_logical_reduction(state, user.usage.redop, user.field_mask);
+        }
         else if (IS_WRITE(user.usage))
         {
           // If we're not projecting and writing, indicating that
           // we have written this logical region
           state.dirty_fields |= user.field_mask;
-        }
-        else if (IS_REDUCE(user.usage))
-        {
-          // Not projecting and not writing, see if we are doing a reduction
-          state.reduction_fields |= user.field_mask;
         }
       }
       else 
