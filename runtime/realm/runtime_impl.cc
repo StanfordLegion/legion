@@ -658,7 +658,10 @@ namespace Realm {
       cp.add_option_int("-ll:numlmbs", dummy)
 	.add_option_int("-ll:lmbsize", dummy)
 	.add_option_int("-ll:forcelong", dummy)
-	.add_option_int("-ll:sdpsize", dummy);
+	.add_option_int("-ll:sdpsize", dummy)
+	.add_option_int("-ll:spillwarn", dummy)
+	.add_option_int("-ll:spillstep", dummy)
+	.add_option_int("-ll:spillstall", dummy);
 
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
