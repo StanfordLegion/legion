@@ -1991,8 +1991,9 @@ static void *bytedup(const void *data, size_t datalen)
           // don't migrate a barrier more than once though (i.e. only if it's on the creator node still)
 	  // also, do not migrate a barrier if we have any local involvement in future generations
 	  //  (either arrivals or waiters)
+	  // finally (hah!), do not migrate barriers using reduction ops
 	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
-	     generations.empty() &&
+	     generations.empty() && (redop == 0) &&
              (ID(me).barrier.creator_node == gasnet_mynode())) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
 	    migration_target = remote_notifications[0].node;
