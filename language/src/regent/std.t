@@ -357,7 +357,7 @@ end
 
 function std.check_constraint(cx, constraint)
   local lhs = constraint.lhs
-  if lhs == wild then
+  if lhs == std.wild then
     return true
   elseif std.is_symbol(lhs) then
     lhs = lhs:gettype()
@@ -366,7 +366,7 @@ function std.check_constraint(cx, constraint)
   assert(std.type_supports_constraints(lhs))
 
   local rhs = constraint.rhs
-  if rhs == wild then
+  if rhs == std.wild then
     return true
   elseif std.is_symbol(rhs) then
     rhs = rhs:gettype()
@@ -799,10 +799,14 @@ function std.type_eq(a, b, mapping)
   elseif mapping[a] == b or mapping[b] == a then
     return true
   elseif std.is_symbol(a) and std.is_symbol(b) then
-    if a == wild or b == wild then
+    if a == std.wild or b == std.wild then
       return true
     end
     return std.type_eq(a:gettype(), b:gettype(), mapping)
+  elseif a == std.wild_type and std.is_region(b) then
+    return true
+  elseif b == std.wild_type and std.is_region(a) then
+    return true
   elseif std.is_bounded_type(a) and std.is_bounded_type(b) then
     if not std.type_eq(a.index_type, b.index_type, mapping) then
       return false
@@ -810,8 +814,11 @@ function std.type_eq(a, b, mapping)
     if not std.type_eq(a.points_to_type, b.points_to_type, mapping) then
       return false
     end
-    local a_bounds = a:bounds()
-    local b_bounds = b:bounds()
+    -- FIXME: pass in bounds properly for type_eq
+    local a_bounds, a_error_message = a:bounds()
+    if a_bounds == nil then report.error({ span = ast.trivial_span() }, a_error_message) end
+    local b_bounds, b_error_message = b:bounds()
+    if b_bounds == nil then report.error({ span = ast.trivial_span() }, b_error_message) end
     if #a_bounds ~= #b_bounds then
       return false
     end
@@ -2134,7 +2141,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
         bound = std.as_read(bound)
       end
       if not (terralib.types.istype(bound) and
-              (std.is_ispace(bound) or std.is_region(bound)))
+              (bound == std.wild_type or std.is_ispace(bound) or std.is_region(bound)))
       then
         --report.error(nil, tostring(self.index_type) ..
         --            " expected an ispace or region as argument " ..
@@ -2659,7 +2666,8 @@ function std.region(ispace_symbol, fspace_type)
   return st
 end
 
-std.wild = std.newsymbol(std.untyped, "wild")
+std.wild_type = terralib.types.newstruct("wild_type")
+std.wild = std.newsymbol(std.wild_type, "wild")
 
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}
