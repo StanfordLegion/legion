@@ -31,6 +31,7 @@ using namespace LegionRuntime::Accessor;
 namespace TestConfig {
   int tasks_per_processor = 256;
   int launching_processors = 1;
+  int task_argument_size = 0;
   bool remote_tasks = false;
   bool with_profiling = false;
 };
@@ -75,7 +76,6 @@ void dummy_task(const void *args, size_t arglen,
 
   RegionAccessor<AccessorType::Affine<1>, TestTaskData> ra = ta.instance.get_accessor().typeify<TestTaskData>().convert<AccessorType::Affine<1> >();
   TestTaskData& mydata = ra[0];
-  log_app.print() << p << " -> " << (void *)&mydata;
 
   if(task_type == FIRST_TASK) {
     double t = Clock::current_time();
@@ -139,6 +139,12 @@ void task_launcher(const void *args, size_t arglen,
     prs.add_request(p, PROFILER_TASK).add_measurement<OperationTimeline>();
   }
 
+  // allocate some space for our test arguments
+  int argsize = sizeof(TestTaskArgs);
+  if(TestConfig::task_argument_size > argsize)
+    argsize = TestConfig::task_argument_size;
+  TestTaskArgs *tta = (TestTaskArgs *)(alloca(argsize));
+
   // time how long this takes us
   double t1 = Clock::current_time();
   int total_tasks = 0;
@@ -147,12 +153,11 @@ void task_launcher(const void *args, size_t arglen,
 		 (i == (TestConfig::tasks_per_processor - 1)) ? LAST_TASK :
 		 MIDDLE_TASK);
     for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it) {
-      TestTaskArgs tta;
-      tta.which_task = which;
-      tta.instance = la.instances[*it];
-      assert(tta.instance.exists());
-      tta.finish_barrier = la.finish_barrier;
-      (*it).spawn(DUMMY_TASK, &tta, sizeof(tta), prs, la.start_barrier, which);
+      tta->which_task = which;
+      tta->instance = la.instances[*it];
+      assert(tta->instance.exists());
+      tta->finish_barrier = la.finish_barrier;
+      (*it).spawn(DUMMY_TASK, tta, argsize, prs, la.start_barrier, which);
       total_tasks++;
     }
   }
@@ -252,6 +257,7 @@ int main(int argc, char **argv)
   CommandLineParser cp;
   cp.add_option_int("-tpp", TestConfig::tasks_per_processor)
     .add_option_int("-lp", TestConfig::launching_processors)
+    .add_option_int("-args", TestConfig::task_argument_size)
     .add_option_bool("-remote", TestConfig::remote_tasks)
     .add_option_bool("-prof", TestConfig::with_profiling);
   ok = cp.parse_command_line(argc, (const char **)argv);
