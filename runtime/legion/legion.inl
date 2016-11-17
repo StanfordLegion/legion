@@ -827,6 +827,7 @@ namespace Legion {
     inline void TaskLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -834,6 +835,7 @@ namespace Legion {
     inline void TaskLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
     }
 
@@ -919,6 +921,7 @@ namespace Legion {
     inline void IndexLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -926,6 +929,7 @@ namespace Legion {
     inline void IndexLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
     }
 
@@ -1017,6 +1021,7 @@ namespace Legion {
     inline void CopyLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -1024,6 +1029,7 @@ namespace Legion {
     inline void CopyLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
     }
 
@@ -1060,6 +1066,7 @@ namespace Legion {
     inline void AcquireLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -1067,6 +1074,7 @@ namespace Legion {
     inline void AcquireLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
     }
 
@@ -1104,6 +1112,7 @@ namespace Legion {
     inline void ReleaseLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -1111,6 +1120,7 @@ namespace Legion {
     inline void ReleaseLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
     }
 
@@ -1162,6 +1172,7 @@ namespace Legion {
     inline void FillLauncher::add_wait_barrier(PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
+      assert(pb.exists());
       wait_barriers.push_back(pb);
     }
 
@@ -1169,6 +1180,7 @@ namespace Legion {
     inline void FillLauncher::add_arrival_barrier(PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
+      assert(pb.exists());
       arrive_barriers.push_back(pb);
     }
 
