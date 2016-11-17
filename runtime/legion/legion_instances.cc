@@ -19,6 +19,7 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
+#include "legion_context.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -558,8 +559,9 @@ namespace Legion {
 #ifdef DEBUG_HIGH_LEVEL
       assert(constraints->memory_constraint.has_kind);
 #endif
-      LegionSpy::log_instance_memory_constraint(instance.id,
-          constraints->memory_constraint.kind);
+      if (constraints->memory_constraint.is_valid())
+        LegionSpy::log_instance_memory_constraint(instance.id,
+            constraints->memory_constraint.kind);
       LegionSpy::log_instance_field_constraint(instance.id,
           constraints->field_constraint.contiguous, 
           constraints->field_constraint.inorder,
@@ -679,28 +681,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::register_active_context(SingleTask *context)
+    void PhysicalManager::register_active_context(InnerContext *context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner()); // should always be on the owner node
 #endif
-      // Save the context to be notified when we deleted
-      GenerationID gen = context->get_generation();
+      context->add_reference();
       AutoLock gc(gc_lock);
-      // Perfectly alright to overwrite earlier generations
-      active_contexts[context] = gen;
+#ifdef DEBUG_LEGION
+      assert(active_contexts.find(context) == active_contexts.end());
+#endif
+      active_contexts.insert(context);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::unregister_active_context(SingleTask *context)
+    void PhysicalManager::unregister_active_context(InnerContext *context)
     //--------------------------------------------------------------------------
     {
-      AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(active_contexts.find(context) != active_contexts.end());
+      assert(is_owner()); // should always be on the owner node
 #endif
-      active_contexts.erase(context);
+      {
+        AutoLock gc(gc_lock);
+        std::set<InnerContext*>::iterator finder = 
+          active_contexts.find(context);
+        // We could already have removed this context if this
+        // physical instance was deleted
+        if (finder == active_contexts.end())
+          return;
+        active_contexts.erase(finder);
+      }
+      if (context->remove_reference())
+        delete context;
     }
 
     //--------------------------------------------------------------------------
@@ -915,7 +928,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::perform_deletion(RtEvent deferred_event) const
+    void PhysicalManager::perform_deletion(RtEvent deferred_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -932,13 +945,23 @@ namespace Legion {
         instance.destroy(deferred_event);
 #endif
       // Notify any contexts of our deletion
-      // No need to hold the lock, there should be no more contexts
-      // being added since we are being deleted
-      for (std::map<SingleTask*,GenerationID>::const_iterator it = 
-            active_contexts.begin(); it != active_contexts.end(); it++)
+      // Grab a copy of this in case we get any removal calls
+      // while we are doing the deletion. We know that there
+      // will be no more additions because we are being deleted
+      std::set<InnerContext*> copy_active_contexts;
       {
-        it->first->notify_instance_deletion(
-            const_cast<PhysicalManager*>(this), it->second);
+        AutoLock gc(gc_lock);
+        if (active_contexts.empty())
+          return;
+        copy_active_contexts = active_contexts;
+        active_contexts.clear();
+      }
+      for (std::set<InnerContext*>::const_iterator it = 
+           copy_active_contexts.begin(); it != copy_active_contexts.end(); it++)
+      {
+        (*it)->notify_instance_deletion(const_cast<PhysicalManager*>(this));
+        if ((*it)->remove_reference())
+          delete (*it);
       }
     }
 
@@ -980,10 +1003,12 @@ namespace Legion {
                                      const Domain &instance_domain, bool own,
                                      RegionNode *node, LayoutDescription *desc, 
                                      const PointerConstraint &constraint,
-                                     bool register_now, ApEvent u_event) 
+                                     bool register_now, ApEvent u_event,
+                                     Reservation read_only_reservation) 
       : PhysicalManager(ctx, mem, desc, constraint, encode_instance_did(did), 
                         owner_space, local_space, node, inst, instance_domain, 
-                        own, register_now),use_event(u_event)
+                        own, register_now),use_event(u_event),
+                        read_only_mapping_reservation(read_only_reservation)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -995,7 +1020,7 @@ namespace Legion {
       // Add a reference to the layout
       layout->add_reference();
 #ifdef LEGION_GC
-      log_garbage.info("GC Instance Manager %ld %d " IDFMT " " IDFMT " ",
+      log_garbage.info("GC Instance Manager %lld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
       if (Runtime::legion_spy_enabled)
@@ -1022,11 +1047,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
       if (layout->remove_reference())
         delete layout;
+      // If we are the owner, we get to destroy the read only reservation
+      if (is_owner())
+        read_only_mapping_reservation.destroy_reservation();
+      read_only_mapping_reservation = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -1081,8 +1110,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* InstanceManager::create_instance_top_view(SingleTask *own_ctx,
-                                                   AddressSpaceID logical_owner)
+    InstanceView* InstanceManager::create_instance_top_view(
+                            InnerContext *own_ctx, AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1211,6 +1240,7 @@ namespace Legion {
         rez.serialize(use_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
+        rez.serialize(read_only_mapping_reservation);
       }
       context->runtime->send_instance_manager(target, rez);
       update_remote_instances(target);
@@ -1242,6 +1272,8 @@ namespace Legion {
                                                             target_node);
       PointerConstraint pointer_constraint;
       pointer_constraint.deserialize(derez);
+      Reservation read_only_reservation;
+      derez.deserialize(read_only_reservation);
       MemoryManager *memory = runtime->find_memory_manager(mem);
       void *location;
       InstanceManager *man = NULL;
@@ -1251,13 +1283,15 @@ namespace Legion {
                                              memory, inst, inst_domain, 
                                              false/*owns*/, target_node, layout,
                                              pointer_constraint,
-                                             false/*reg now*/, use_event);
+                                             false/*reg now*/, use_event,
+                                             read_only_reservation);
       else
         man = legion_new<InstanceManager>(runtime->forest, did, owner_space,
                                     runtime->address_space, memory, inst,
                                     inst_domain, false/*owns*/,
                                     target_node, layout, pointer_constraint, 
-                                    false/*reg now*/, use_event);
+                                    false/*reg now*/, use_event,
+                                    read_only_reservation);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1285,7 +1319,8 @@ namespace Legion {
                                        const ReductionOp *o, bool register_now)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
         local_space, node, inst, inst_domain, own_dom, register_now),
-        op(o), redop(red), logical_field(f)
+        op(o), redop(red), logical_field(f), 
+        manager_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {  
       if (Runtime::legion_spy_enabled)
@@ -1300,6 +1335,8 @@ namespace Legion {
     ReductionManager::~ReductionManager(void)
     //--------------------------------------------------------------------------
     {
+      manager_lock.destroy_reservation();
+      manager_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -1454,7 +1491,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* ReductionManager::create_instance_top_view(
-                              SingleTask *own_ctx, AddressSpaceID logical_owner)
+                            InnerContext *own_ctx, AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1505,7 +1542,7 @@ namespace Legion {
         memory_manager->register_remote_instance(this);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC List Reduction Manager %ld %d " IDFMT " " IDFMT " ",
+      log_garbage.info("GC List Reduction Manager %lld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
     }
@@ -1529,7 +1566,7 @@ namespace Legion {
       // Free up our pointer space
       ptr_space.get_index_space().destroy();
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -1666,7 +1703,7 @@ namespace Legion {
         memory_manager->register_remote_instance(this);
       }
 #ifdef LEGION_GC
-      log_garbage.info("GC Fold Reduction Manager %ld %d " IDFMT " " IDFMT " ",
+      log_garbage.info("GC Fold Reduction Manager %lld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
 #endif
     }
@@ -1688,7 +1725,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
-      log_garbage.info("GC Deletion %ld %d", 
+      log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
@@ -1906,8 +1943,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceView* VirtualManager::create_instance_top_view(SingleTask *context,
-                                                   AddressSpaceID logical_owner)
+    InstanceView* VirtualManager::create_instance_top_view(
+                            InnerContext *context, AddressSpaceID logical_owner)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2021,14 +2058,16 @@ namespace Legion {
         case NO_SPECIALIZE:
         case NORMAL_SPECIALIZE:
           {
-            
             // Now we can make the manager
+            Reservation read_only_reservation = 
+              Reservation::create_reservation();
             result = legion_new<InstanceManager>(forest, did, local_space,
                                                  local_space, memory_manager,
                                                  instance, instance_domain, 
                                                  own_domain, ancestor, layout, 
                                                  pointer_constraint, 
-                                                 true/*register now*/, ready);
+                                                 true/*register now*/, ready,
+                                                 read_only_reservation);
             break;
           }
         case REDUCTION_FOLD_SPECIALIZE:

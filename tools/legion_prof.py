@@ -20,6 +20,7 @@ import string, re
 from math import sqrt, log
 from getopt import getopt
 from cgi import escape
+from operator import itemgetter
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
 task_info_pat = re.compile(prefix + r'Prof Task Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
@@ -137,8 +138,8 @@ def read_time(string):
 class TimeRange(object):
     def __init__(self, start_time, stop_time):
         assert start_time <= stop_time
-        self.start_time = start_time
-        self.stop_time = stop_time
+        self.start_time = long(start_time)
+        self.stop_time = long(stop_time)
         self.subranges = list()
 
     def __cmp__(self, other):
@@ -689,9 +690,10 @@ class Channel(object):
             self.time_points.append(TimePoint(copy.start, copy, True))
             self.time_points.append(TimePoint(copy.stop, copy, False))
         # Keep track of which levels are free
+        self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
         # Iterate over all the points in sorted order
-        for point in sorted(self.time_points,key=lambda p: p.time_key):
+        for point in self.time_points:
             if point.first:
                 if len(free_levels) > 0:
                     point.thing.level = free_levels.pop()
@@ -720,17 +722,28 @@ class Channel(object):
     def emit_tsv(self, tsv_file, base_level):
         max_levels = self.max_live_copies + 1
         if max_levels > 1:
+            # iterate over tasks in start time order
             max_levels = max(4, max_levels)
-            for copy in self.copies:
-                assert copy.level is not None
-                assert copy.start is not None
-                assert copy.stop is not None
-                copy_name = repr(copy)
-                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
-                        (base_level + (max_levels - copy.level),
-                         copy.start, copy.stop,
-                         copy.get_color(), copy_name))
+            for point in self.time_points:
+                if point.first:
+                    point.thing.emit_tsv(tsv_file, base_level,\
+                                max_levels, point.thing.level)
+
         return base_level + max_levels
+
+        # max_levels = self.max_live_copies + 1
+        # if max_levels > 1:
+        #     max_levels = max(4, max_levels)
+        #     for copy in self.copies:
+        #         assert copy.level is not None
+        #         assert copy.start is not None
+        #         assert copy.stop is not None
+        #         copy_name = repr(copy)
+        #         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+        #                 (base_level + (max_levels - copy.level),
+        #                  copy.start, copy.stop,
+        #                  copy.get_color(), copy_name))
+        # return base_level + max_levels
 
     def print_stats(self):
         assert self.last_time is not None 
@@ -1023,6 +1036,16 @@ class Copy(object):
 
     def __repr__(self):
         return 'Copy size='+str(self.size) + '\t' + str(self.op.op_id)
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        copy_name = repr(self)
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                (base_level + (max_levels - self.level),
+                self.start, self.stop,
+                self.get_color(), copy_name))
+        
+
+
 class Fill(object):
     def __init__(self, dst, op):
         self.dst = dst
@@ -1037,6 +1060,13 @@ class Fill(object):
 
     def __repr__(self):
         return 'Fill\t' + str(self.op.op_id)
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        fill_name = repr(self)
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                (base_level + (max_levels - self.level),
+                self.start, self.stop,
+                self.get_color(), fill_name))
 
 class Instance(object):
     def __init__(self, inst_id, op):
@@ -1442,14 +1472,15 @@ class State(object):
                                             read_time(m.group('ready')),
                                             read_time(m.group('end')))
                     continue
-                m = kind_pat.match(line)
-                if m is not None:
-                    self.log_kind(int(m.group('tid')), m.group('name'), 1)
-                    continue
+                # Put this one first for maximal munch
                 m = kind_pat_over.match(line)
                 if m is not None:
                     self.log_kind(int(m.group('tid')),
                                   m.group('name'), int(m.group('over')))
+                    continue
+                m = kind_pat.match(line)
+                if m is not None:
+                    self.log_kind(int(m.group('tid')), m.group('name'), 1)
                     continue
                 m = variant_pat.match(line)
                 if m is not None:
@@ -2020,15 +2051,24 @@ class State(object):
                 return potential_dir
             i += 1
 
-    def emit_interactive_visualization(self, output_prefix, show_procs,
-                                       show_channels, show_instances):
+    def emit_interactive_visualization(self, output_dirname, show_procs,
+                                       show_channels, show_instances, force):
         self.assign_colors()
 
         html_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
                 "legion_prof.html.template")
         js_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
                 "timeline.js.template")
-        output_dirname = self.find_unique_dirname(output_prefix)
+
+        # the output directory will either be overwritten, or we will find
+        # a new unique name to create new logs
+
+        if force:
+            if (os.path.exists(output_dirname)):
+                shutil.rmtree(output_dirname)
+        else:
+            output_dirname = self.find_unique_dirname(output_dirname)
+
         data_tsv_file_name = os.path.join(output_dirname, "legion_prof_data.tsv")
         processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
         html_file_name = os.path.join(output_dirname, "index.html")
@@ -2051,12 +2091,14 @@ class State(object):
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
                 if len(proc.tasks) > 0:
+                    data_tsv_file.write("proc_id " + str(p) + "\n")
                     base_level = proc.emit_tsv(data_tsv_file, base_level)
                     processor_levels[proc] = base_level
                     last_time = max(last_time, proc.full_range.stop_time)
         if show_channels:
             for c,channel in sorted(self.channels.iteritems()):
                 if len(channel.copies) > 0:
+                    data_tsv_file.write("chan_id " + str(p) + "\n")
                     base_level = channel.emit_tsv(data_tsv_file, base_level)
                     channel_levels[channel] = base_level
                     last_time = max(last_time, channel.last_time)
@@ -2101,12 +2143,13 @@ def usage():
     print '  -c : include channels in visualization'
     print '  -s : print statistics'
     print '  -v : print verbose profiling information'
-    print '  -o <out_file> : give a prefix for the output file'
+    print '  -o <out_dirname> : give the directory for the output'
+    print '  -f : force the creation of a new directory for legion_prof timelines (OVERWRITES OLD DIRECTORY)'
     print '  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL)
     sys.exit(1)
 
 def main():
-    opts, args = getopt(sys.argv[1:],'pcivm:o:sCST')
+    opts, args = getopt(sys.argv[1:],'pcivfm:o:sCST')
     opts = dict(opts)
     if len(args) == 0:
       usage()
@@ -2118,7 +2161,8 @@ def main():
     show_channels = False
     show_instances = False
     show_copy_matrix = False
-    output_prefix = 'legion_prof'
+    force = False
+    output_dirname = 'legion_prof'
     copy_output_prefix = 'legion_prof_copy'
     print_stats = False
     verbose = False
@@ -2136,12 +2180,14 @@ def main():
         print_stats = True
     if '-v' in opts:
         verbose = True
+    if '-f' in opts:
+        force = True
     if '-m' in opts:
         global US_PER_PIXEL
         US_PER_PIXEL = int(opts['-m'])
     if '-o' in opts:
-        output_prefix = opts['-o']
-        copy_output_prefix = output_prefix + "_copy"
+        output_dirname = opts['-o']
+        copy_output_prefix = output_dirname + "_copy"
     if '-C' in opts:
         show_copy_matrix = True
     if '-S' in opts:
@@ -2170,12 +2216,12 @@ def main():
         state.print_stats(verbose) 
     else:
         if not interactive_timeline:
-            state.emit_visualization(output_prefix, show_procs, 
+            state.emit_visualization(output_dirname, show_procs, 
                                      show_channels, show_instances) 
 
         if interactive_timeline:
-            state.emit_interactive_visualization(output_prefix, show_procs,
-                                 show_channels, show_instances)
+            state.emit_interactive_visualization(output_dirname, show_procs,
+                                 show_channels, show_instances, force)
         if show_copy_matrix:
             state.show_copy_matrix(copy_output_prefix)
 

@@ -36,6 +36,16 @@ namespace Legion {
 
       extern LegionRuntime::Logger::Category log_spy;
 
+      // One time logger calls to record what gets logged
+      static inline void log_legion_spy_config(void)
+      {
+#ifdef LEGION_SPY
+        log_spy.print("Legion Spy Detailed Logging");
+#else
+        log_spy.print("Legion Spy Logging");
+#endif
+      }
+
       // Logger calls for the machine architecture
       static inline void log_processor_kind(unsigned kind, const char *name)
       {
@@ -127,10 +137,10 @@ namespace Legion {
       }
 
       static inline void log_field_creation(unsigned unique_id, 
-                                            unsigned field_id)
+                                unsigned field_id, size_t size)
       {
-        log_spy.print("Field Creation %u %u", 
-		      unique_id, field_id);
+        log_spy.print("Field Creation %u %u %ld", 
+		      unique_id, field_id, long(size));
       }
 
       static inline void log_field_name(unsigned unique_id,
@@ -256,12 +266,24 @@ namespace Legion {
 		      read_only_close_op ? 1 : 0);
       }
 
-      static inline void log_close_op_creator(UniqueID close_op_id,
-                                              UniqueID creator_op_id,
-                                              int idx)
+      static inline void log_open_operation(UniqueID context,
+                                            UniqueID unique_id)
       {
-        log_spy.print("Close Operation Creator %llu %llu %d",
-		      close_op_id, creator_op_id, idx);
+        log_spy.print("Open Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_advance_operation(UniqueID context,
+                                               UniqueID unique_id)
+      {
+        log_spy.print("Advance Operation %llu %llu", context, unique_id);
+      }
+
+      static inline void log_internal_op_creator(UniqueID internal_op_id,
+                                                 UniqueID creator_op_id,
+                                                 int idx)
+      {
+        log_spy.print("Internal Operation Creator %llu %llu %d",
+		      internal_op_id, creator_op_id, idx);
       }
 
       static inline void log_fence_operation(UniqueID context,
@@ -269,6 +291,13 @@ namespace Legion {
       {
         log_spy.print("Fence Operation %llu %llu",
 		      context, unique_id);
+      }
+
+      static inline void log_trace_operation(UniqueID context,
+                                             UniqueID unique_id)
+      {
+        log_spy.print("Trace Operation %llu %llu",
+                      context, unique_id);
       }
 
       static inline void log_copy_operation(UniqueID context,
@@ -311,6 +340,29 @@ namespace Legion {
       {
         log_spy.print("Detach Operation %llu %llu",
                       context, detach);
+      }
+
+      static inline void log_dynamic_collective(UniqueID context, 
+                                                UniqueID collective)
+      {
+        log_spy.print("Dynamic Collective %llu %llu", context, collective);
+      }
+
+      static inline void log_timing_operation(UniqueID context, UniqueID timing)
+      {
+        log_spy.print("Timing Operation %llu %llu", context, timing);
+      }
+
+      static inline void log_predicate_operation(UniqueID context, 
+                                                 UniqueID pred_op)
+      {
+        log_spy.print("Predicate Operation %llu %llu", context, pred_op);
+      }
+
+      static inline void log_must_epoch_operation(UniqueID context,
+                                                  UniqueID must_op)
+      {
+        log_spy.print("Must Epoch Operation %llu %llu", context, must_op);
       }
 
       static inline void log_dependent_partition_operation(UniqueID context,
@@ -405,6 +457,56 @@ namespace Legion {
           log_spy.print("Logical Requirement Field %llu %u %u", 
 			unique_id, index, *it);
         }
+      }
+
+      static inline void log_projection_function(ProjectionID pid,
+                                                 int depth)
+      {
+        log_spy.print("Projection Function %u %d", pid, depth);
+      }
+
+      static inline void log_requirement_projection(UniqueID unique_id,
+                                      unsigned index, ProjectionID pid)
+      {
+        log_spy.print("Logical Requirement Projection %llu %u %u", 
+                      unique_id, index, pid);
+      }
+
+      template<int DIM>
+      static inline void log_launch_index_space_rect(UniqueID unique_id,
+                                                     long long int *lower, 
+                                                     long long int *higher)
+      {
+        log_spy.print("Index Launch Rect %llu %d "
+                      "%lld %lld %lld %lld %lld %lld",
+		      unique_id, DIM, lower[0],
+		      DIM < 2 ? 0 : lower[1], 
+		      DIM < 3 ? 0 : lower[2], higher[0],
+		      DIM < 2 ? 0 : higher[1],
+		      DIM < 3 ? 0 : higher[2]);
+      }
+
+      // Logger calls for futures
+      static inline void log_future_creation(UniqueID creator_id,
+                                             ApEvent future_event, 
+                                             const DomainPoint &point)
+      {
+        log_spy.print("Future Creation %llu " IDFMT " %u %d %d %d",
+                      creator_id, future_event.id, point.dim,
+                      (int)point.point_data[0], (int)point.point_data[1],
+                      (int)point.point_data[2]);
+      }
+
+      static inline void log_future_use(UniqueID user_id, 
+                                        ApEvent future_event)
+      {
+        log_spy.print("Future Usage %llu " IDFMT "", user_id, future_event.id);
+      }
+
+      static inline void log_predicate_use(UniqueID pred_id,
+                                           UniqueID previous_predicate)
+      {
+        log_spy.print("Predicate Use %llu %llu", pred_id, previous_predicate);
       }
 
       // Logger call for physical instances
@@ -586,6 +688,20 @@ namespace Legion {
         free(buffer);
       }
 
+      static inline void log_phase_barrier_arrival(UniqueID unique_id,
+                                                   ApBarrier barrier)
+      {
+        log_spy.print("Phase Barrier Arrive %llu " IDFMT "",
+                      unique_id, barrier.id);
+      }
+
+      static inline void log_phase_barrier_wait(UniqueID unique_id,
+                                                ApEvent previous)
+      {
+        log_spy.print("Phase Barrier Wait %llu " IDFMT "",
+                      unique_id, previous.id);
+      }
+
       // The calls above this ifdef record the basic information about
       // the execution of an application. It is sufficient to show how
       // an application executed, but is insufficient to actually 
@@ -601,6 +717,13 @@ namespace Legion {
         log_spy.print("Mapping Dependence %llu %llu %u %llu %u %d", 
 		      context, prev_id, prev_idx,
 		      next_id, next_idx, dep_type);
+      }
+
+      // Logger call for disjoint close operations
+      static inline void log_disjoint_close_field(UniqueID close_id,
+                                                  FieldID fid)
+      {
+        log_spy.print("Disjoint Close Field %llu %d", close_id, fid);
       }
 
       // Logger calls for realm events
@@ -692,11 +815,6 @@ namespace Legion {
         log_spy.print("Fill Intersect " IDFMT " %d " IDFMT " %d %d",
 		      post.id,
 		      is_region, index, field, tree_id);
-      }
-
-      static inline void log_phase_barrier(ApBarrier barrier)
-      {
-        log_spy.print("Phase Barrier " IDFMT, barrier.id);
       } 
 #endif
     }; // namespace LegionSpy

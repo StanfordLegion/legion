@@ -38,7 +38,7 @@ namespace Legion {
     enum ReferenceSource {
       FUTURE_HANDLE_REF = 0,
       DEFERRED_TASK_REF = 1,
-      CURRENT_STATE_REF = 2,
+      VERSION_MANAGER_REF = 2,
       VERSION_INFO_REF = 3,
       PHYSICAL_STATE_REF = 4,
       PHYSICAL_REGION_REF = 5,
@@ -55,7 +55,8 @@ namespace Legion {
       NEVER_GC_REF = 16,
       CONTEXT_REF = 17,
       RESTRICTED_REF = 18,
-      LAST_SOURCE_REF = 19,
+      VERSION_STATE_TREE_REF = 19,
+      LAST_SOURCE_REF = 20,
     };
 
     enum ReferenceKind {
@@ -68,7 +69,7 @@ namespace Legion {
     const char *const names[LAST_SOURCE_REF] = {    \
       "Future Handle Reference",                    \
       "Deferred Task Reference",                    \
-      "Current State Reference",                    \
+      "Version Manager Reference",                  \
       "Version Info Reference",                     \
       "Physical State Reference",                   \
       "Physical Region Reference",                  \
@@ -85,6 +86,7 @@ namespace Legion {
       "Never GC Reference",                         \
       "Context Reference",                          \
       "Restricted Reference",                       \
+      "Version State Tree Reference",               \
     }
 
     extern LegionRuntime::Logger::Category log_garbage;
@@ -338,12 +340,13 @@ namespace Legion {
       bool has_remote_instance(AddressSpaceID remote_space) const;
       void update_remote_instances(AddressSpaceID remote_space);
     public:
+      inline bool has_remote_instances(void) const;
       template<typename FUNCTOR>
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
       // This is for the owner node only
       void register_with_runtime(ReferenceMutator *mutator);
-      void unregister_with_runtime(VirtualChannelKind vc) const;
+      RtEvent unregister_with_runtime(VirtualChannelKind vc) const;
       RtEvent send_unregister_messages(VirtualChannelKind vc) const;
     public:
       // This for remote nodes only
@@ -438,10 +441,10 @@ namespace Legion {
     {
       did = LEGION_DISTRIBUTED_ID_FILTER(did);
       if (ADD)
-        log_garbage.info("GC Add Base Ref %d %ld %d %d %d",
+        log_garbage.info("GC Add Base Ref %d %lld %d %d %d",
                           kind, did, local_space, src, cnt);
       else
-        log_garbage.info("GC Remove Base Ref %d %ld %d %d %d",
+        log_garbage.info("GC Remove Base Ref %d %lld %d %d %d",
                           kind, did, local_space, src, cnt);
     }
 
@@ -454,10 +457,10 @@ namespace Legion {
       did = LEGION_DISTRIBUTED_ID_FILTER(did);
       src = LEGION_DISTRIBUTED_ID_FILTER(src);
       if (ADD)
-        log_garbage.info("GC Add Nested Ref %d %ld %d %ld %d",
+        log_garbage.info("GC Add Nested Ref %d %lld %d %lld %d",
                           kind, did, local_space, src, cnt);
       else
-        log_garbage.info("GC Remove Nested Ref %d %ld %d %ld %d",
+        log_garbage.info("GC Remove Nested Ref %d %lld %d %lld %d",
                           kind, did, local_space, src, cnt);
     }
 
@@ -479,6 +482,14 @@ namespace Legion {
       // If previous is equal to count, the value is now
       // zero so it is safe to reclaim this object
       return (prev == cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::has_remote_instances(void) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      return !remote_instances.empty();
     }
 
     //--------------------------------------------------------------------------

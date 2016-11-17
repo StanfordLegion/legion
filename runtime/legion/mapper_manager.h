@@ -46,16 +46,11 @@ namespace Legion {
      */
     class MapperManager {
     public:
-      struct MapperContinuationArgs {
+      struct FinishMapperCallContinuationArgs : 
+        public LgTaskArgs<FinishMapperCallContinuationArgs> {
       public:
-        HLRTaskID hlr_id;
-        MapperManager *manager;
-        MappingCallKind call;
-        void *arg1, *arg2, *arg3;
-      };
-      struct FinishMapperCallContinuationArgs {
+        static const LgTaskID TASK_ID = LG_FINISH_MAPPER_CONTINUATION_TASK_ID;
       public:
-        HLRTaskID hlr_id;
         MapperManager *manager;
         MappingCallInfo *info;
       };
@@ -64,11 +59,13 @@ namespace Legion {
         std::set<PhysicalManager*> instances;
         std::vector<bool> results;
       };
-      struct DeferMessageArgs {
+      struct DeferMessageArgs : public LgTaskArgs<DeferMessageArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_MAPPER_MESSAGE_TASK_ID;
+      public:
         MapperManager *manager;
         Processor sender;
+        unsigned kind;
         void *message;
         size_t size;
         bool broadcast;
@@ -640,8 +637,10 @@ namespace Legion {
      */
     class MapperContinuation {
     public:
-      struct ContinuationArgs {
-        HLRTaskID hlr_id;
+      struct ContinuationArgs : public LgTaskArgs<ContinuationArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MAPPER_CONTINUATION_TASK_ID;
+      public:
         MapperContinuation *continuation;
       };
     public:

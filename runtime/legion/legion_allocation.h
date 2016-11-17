@@ -31,6 +31,9 @@
 #include <malloc.h>
 #endif
 #include "legion_template_help.h" // StaticAssert
+#if __cplusplus == 201103L
+#include <utility>
+#endif
 
 namespace Legion {
   namespace Internal {
@@ -66,6 +69,7 @@ namespace Legion {
       POINT_TASK_ALLOC,
       INDEX_TASK_ALLOC,
       SLICE_TASK_ALLOC,
+      TOP_TASK_ALLOC,
       REMOTE_TASK_ALLOC,
       INLINE_TASK_ALLOC,
       MAP_OP_ALLOC,
@@ -73,6 +77,8 @@ namespace Legion {
       FENCE_OP_ALLOC,
       FRAME_OP_ALLOC,
       DELETION_OP_ALLOC,
+      OPEN_OP_ALLOC,
+      ADVANCE_OP_ALLOC,
       CLOSE_OP_ALLOC,
       DYNAMIC_COLLECTIVE_OP_ALLOC,
       FUTURE_PRED_OP_ALLOC,
@@ -126,8 +132,10 @@ namespace Legion {
       DIRECTORY_ALLOC,
       DENSE_INDEX_ALLOC,
       CURRENT_STATE_ALLOC,
+      VERSION_MANAGER_ALLOC,
       PHYSICAL_STATE_ALLOC,
       VERSION_STATE_ALLOC,
+      AGGREGATE_VERSION_ALLOC,
       TASK_IMPL_ALLOC,
       VARIANT_IMPL_ALLOC,
       LAYOUT_CONSTRAINTS_ALLOC,
@@ -1070,8 +1078,16 @@ namespace Legion {
         return std::numeric_limits<size_type>::max() / sizeof(T);
       }
     public:
+#if __cplusplus == 201103L
+      template<class U, class... Args>
+      inline void construct(U *p, Args&&... args) 
+        { ::new((void*)p) U(std::forward<Args>(args)...); }
+      template<class U>
+      inline void destroy(U *p) { p->~U(); }
+#else
       inline void construct(pointer p, const T &t) { new(p) T(t); }
       inline void destroy(pointer p) { p->~T(); }
+#endif
     public:
       inline bool operator==(LegionAllocator const&) const { return true; }
       inline bool operator!=(LegionAllocator const& a) const

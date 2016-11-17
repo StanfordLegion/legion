@@ -32,6 +32,7 @@ std.c = c
 std.file_read_only = c.LEGION_FILE_READ_ONLY
 std.file_read_write = c.LEGION_FILE_READ_WRITE
 std.file_create = c.LEGION_FILE_CREATE
+std.check_cuda_available = cudahelper.check_cuda_available
 
 -- #####################################
 -- ## Utilities
@@ -356,7 +357,7 @@ end
 
 function std.check_constraint(cx, constraint)
   local lhs = constraint.lhs
-  if lhs == wild then
+  if lhs == std.wild then
     return true
   elseif std.is_symbol(lhs) then
     lhs = lhs:gettype()
@@ -365,7 +366,7 @@ function std.check_constraint(cx, constraint)
   assert(std.type_supports_constraints(lhs))
 
   local rhs = constraint.rhs
-  if rhs == wild then
+  if rhs == std.wild then
     return true
   elseif std.is_symbol(rhs) then
     rhs = rhs:gettype()
@@ -798,10 +799,14 @@ function std.type_eq(a, b, mapping)
   elseif mapping[a] == b or mapping[b] == a then
     return true
   elseif std.is_symbol(a) and std.is_symbol(b) then
-    if a == wild or b == wild then
+    if a == std.wild or b == std.wild then
       return true
     end
     return std.type_eq(a:gettype(), b:gettype(), mapping)
+  elseif a == std.wild_type and std.is_region(b) then
+    return true
+  elseif b == std.wild_type and std.is_region(a) then
+    return true
   elseif std.is_bounded_type(a) and std.is_bounded_type(b) then
     if not std.type_eq(a.index_type, b.index_type, mapping) then
       return false
@@ -809,8 +814,11 @@ function std.type_eq(a, b, mapping)
     if not std.type_eq(a.points_to_type, b.points_to_type, mapping) then
       return false
     end
-    local a_bounds = a:bounds()
-    local b_bounds = b:bounds()
+    -- FIXME: pass in bounds properly for type_eq
+    local a_bounds, a_error_message = a:bounds()
+    if a_bounds == nil then report.error({ span = ast.trivial_span() }, a_error_message) end
+    local b_bounds, b_error_message = b:bounds()
+    if b_bounds == nil then report.error({ span = ast.trivial_span() }, b_error_message) end
     if #a_bounds ~= #b_bounds then
       return false
     end
@@ -1497,11 +1505,14 @@ function std.explicit_cast(from, to, expr)
   end
 end
 
-function std.flatten_struct_fields(struct_type)
+function std.flatten_struct_fields(struct_type, pred)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()
-  if struct_type:isstruct() or std.is_fspace_instance(struct_type) then
+  if pred ~= nil and pred(struct_type) then
+    field_paths:insert(data.newtuple())
+    field_types:insert(struct_type)
+  elseif struct_type:isstruct() or std.is_fspace_instance(struct_type) then
     local entries = struct_type:getentries()
     for _, entry in ipairs(entries) do
       local entry_name = entry[1] or entry.field
@@ -1509,7 +1520,7 @@ function std.flatten_struct_fields(struct_type)
       assert(type(entry_name) == "string")
       local entry_type = entry[2] or entry.type
       local entry_field_paths, entry_field_types =
-        std.flatten_struct_fields(entry_type)
+        std.flatten_struct_fields(entry_type, pred)
       field_paths:insertall(
         entry_field_paths:map(
           function(entry_field_path)
@@ -2130,7 +2141,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
         bound = std.as_read(bound)
       end
       if not (terralib.types.istype(bound) and
-              (std.is_ispace(bound) or std.is_region(bound)))
+              (bound == std.wild_type or std.is_ispace(bound) or std.is_region(bound)))
       then
         --report.error(nil, tostring(self.index_type) ..
         --            " expected an ispace or region as argument " ..
@@ -2354,7 +2365,9 @@ function std.index_type(base_type, displayname)
 
   function st.metamethods.__cast(from, to, expr)
     if std.is_index_type(to) then
-      if to:is_opaque() and std.validate_implicit_cast(from, int) then
+      if std.type_eq(from, c.legion_domain_point_t) then
+        return `([to.from_domain_point]([expr]))
+      elseif to:is_opaque() and std.validate_implicit_cast(from, int) then
         return `([to]{ __ptr = c.legion_ptr_t { value = [expr] } })
       elseif not to:is_opaque() and std.validate_implicit_cast(from, to.base_type) then
         return `([to]{ __ptr = [expr] })
@@ -2392,6 +2405,10 @@ function std.index_type(base_type, displayname)
 
   function st:zero()
     return st:const(0)
+  end
+
+  function st:nil_index()
+    return st:const(-(2^31 - 1))
   end
 
   local function make_point(expr)
@@ -2453,15 +2470,22 @@ function std.index_type(base_type, displayname)
     end
     local error_message =
       "from_domain_point (" .. tostring(st) .. "): dimensionality mismatch"
-
+    local nil_case = quote end
+    if st.dim >= 1 then
+      nil_case = quote
+        if [pt_expr].dim == -1 then return [st:nil_index()] end
+      end
+    end
     if fields then
       return quote
+        [nil_case]
         std.assert([dimensionality_match_cond], [error_message])
         return st { __ptr = [st.impl_type] {
           [data.mapi(function(i) return `([pt_expr].point_data[ [i-1] ]) end, st.fields)] } }
       end
     else
       return quote
+        [nil_case]
         std.assert([dimensionality_match_cond], [error_message])
         return st { __ptr = [st.impl_type]([pt_expr].point_data[0]) }
       end
@@ -2642,7 +2666,8 @@ function std.region(ispace_symbol, fspace_type)
   return st
 end
 
-std.wild = std.newsymbol(std.untyped, "wild")
+std.wild_type = terralib.types.newstruct("wild_type")
+std.wild = std.newsymbol(std.wild_type, "wild")
 
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}

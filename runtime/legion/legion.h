@@ -176,7 +176,8 @@ namespace Legion {
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); } 
     private:
-      friend std::ostream& operator<<(std::ostream& os, const LogicalRegion& lr);
+      friend std::ostream& operator<<(
+          std::ostream& os, const LogicalRegion& lr);
       // These are private so the user can't just arbitrarily change them
       RegionTreeID tree_id;
       IndexSpace index_space;
@@ -848,7 +849,7 @@ namespace Legion {
       ReductionOpID redop; /**<reduction operation (default 0)*/
       MappingTagID tag; /**< mapping tag for this region requirement*/
       RegionFlags flags; /**< optional flags set for region requirements*/
-      HandleType handle_type; /**< region or partition requirement*/
+      ProjectionType handle_type; /**< region or partition requirement*/
       ProjectionID projection; /**< projection function for index space tasks*/
     };
 
@@ -949,7 +950,7 @@ namespace Legion {
        * @param silence_warnings silence any warnings for this blocking call
        * @return the value of the future cast as the template type
        */
-      template<typename T> inline T get_result(bool silence_warnings = false);
+      template<typename T> inline T get_result(bool silence_warnings = false) const;
       /**
        * Block until the future completes.
        * @param silence_warnings silence any warnings for this blocking call
@@ -1008,7 +1009,7 @@ namespace Legion {
 						const void *buffer,
 						size_t bytes);
     private:
-      void* get_untyped_result(bool silence_warnings); 
+      void* get_untyped_result(bool silence_warnings) const; 
     };
 
     /**
@@ -1141,6 +1142,8 @@ namespace Legion {
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
     public:
+      inline void set_independent_requirements(bool independent);
+    public:
       Processor::TaskFuncID              task_id;
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
@@ -1161,6 +1164,12 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
+    public:
+      // Users can inform the runtime that all region requirements
+      // are independent of each other in this task. Independent
+      // means that either field sets are independent or region
+      // requirements are disjoint based on the region tree.
+      bool                               independent_requirements;
     public:
       bool                               silence_warnings;
     };
@@ -1201,6 +1210,8 @@ namespace Legion {
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
     public:
+      inline void set_independent_requirements(bool independent);
+    public:
       Processor::TaskFuncID              task_id;
       Domain                             launch_domain;
       std::vector<IndexSpaceRequirement> index_requirements;
@@ -1223,6 +1234,12 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
+    public:
+      // Users can inform the runtime that all region requirements
+      // are independent of each other in this task. Independent
+      // means that either field sets are independent or region
+      // requirements are disjoint based on the region tree.
+      bool                               independent_requirements;
     public:
       bool                               silence_warnings;
     };
@@ -1596,8 +1613,10 @@ namespace Legion {
     class IndexIterator {
     public:
       IndexIterator(const Domain &dom, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, IndexSpace space, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, LogicalRegion lr, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, 
+                    IndexSpace space, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, 
+                    LogicalRegion lr, ptr_t start = ptr_t());
       IndexIterator(const IndexIterator &rhs);
       ~IndexIterator(void);
     public:
@@ -2097,6 +2116,19 @@ namespace Legion {
        * state for memoizing results.
        */
       virtual bool is_exclusive(void) const { return false; }
+
+      /**
+       * Specify the depth which this projection function goes
+       * for all the points in an index space launch from 
+       * the upper bound node in the region tree. Depth is
+       * defined as the number of levels of the region tree
+       * crossed from the upper bound logical region or partition.
+       * So depth 0 for a REG_PROJECTION means the same region
+       * while depth 0 for a PART_PROJECTION means a subregion
+       * in the immediate partition. Depth 0 is the default
+       * for the identity projection function.
+       */
+      virtual unsigned get_depth(void) const = 0;
     private:
       friend class Internal::Runtime;
       // For pre-registered projection functors the runtime will
@@ -5221,9 +5253,6 @@ namespace Legion {
       // Methods for the wrapper functions to get information from the runtime
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
-      const std::vector<PhysicalRegion>& begin_task(Context ctx);
-      void end_task(Context ctx, const void *result, size_t result_size,
-                    bool owned = false);
       Future from_value(const void *value, size_t value_size, bool owned);
     private:
       VariantID register_variant(const TaskVariantRegistrar &registrar,bool ret,

@@ -1187,7 +1187,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::unregister_with_runtime(
+    RtEvent DistributedCollectable::unregister_with_runtime(
                                                     VirtualChannelKind vc) const
     //--------------------------------------------------------------------------
     {
@@ -1200,9 +1200,10 @@ namespace Legion {
       // If the virtual channel is MAX_NUM_VIRTUAL_CHANNELS we'll use
       // that as a signal to avoid sending any messages
       if (!remote_instances.empty() && (vc != MAX_NUM_VIRTUAL_CHANNELS))
-        runtime->recycle_distributed_id(did, send_unregister_messages(vc));
+        return runtime->recycle_distributed_id(did, 
+                                               send_unregister_messages(vc));
       else
-        runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
+        return runtime->recycle_distributed_id(did, RtEvent::NO_RT_EVENT);
     }
 
     //--------------------------------------------------------------------------

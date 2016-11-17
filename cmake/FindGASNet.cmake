@@ -67,6 +67,8 @@ gasnet-cxx:
 	@echo $(GASNET_CXX)
 gasnet-cxxflags:
 	@echo $(GASNET_CXXCPPFLAGS) $(GASNET_CXXFLAGS) $(GASNETTOOLS_CPPFLAGS) $(GASNETTOOLS_CXXFLAGS)
+gasnet-ld:
+	@echo $(GASNET_LD)
 gasnet-ldflags:
 	@echo $(GASNET_LDFLAGS) $(GASNETTOOLS_LDFLAGS)
 gasnet-libs:
@@ -88,6 +90,13 @@ gasnet-libs:
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
     )
     execute_process(
+      COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-ld
+      OUTPUT_VARIABLE _GASNet_LD
+      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+    )
+    # Strip any arguments from _GASNet_LD
+    string(REGEX REPLACE "^([^ ]+).*" "\\1" _GASNet_LD "${_GASNet_LD}")
+    execute_process(
       COMMAND ${GASNet_MAKE_PROGRAM} -s -f ${_TEMP_MAKEFILE} gasnet-ldflags
       OUTPUT_VARIABLE _GASNet_LDFLAGS
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
@@ -108,12 +117,11 @@ macro(_GASNet_parse_flags INVAR FLAG OUTVAR)
   string(REGEX MATCHALL "(^| +)${FLAG}([^ ]*)" OUTTMP "${INVAR2}")
   foreach(OPT IN LISTS OUTTMP)
     string(REGEX REPLACE "(^| +)${FLAG}([^ ]*)" "\\2" OPT "${OPT}")
-    if(OPT STREQUAL "NDEBUG") # NDEBUG should not get propogated
-      continue()
-    endif()
-    list(FIND ${OUTVAR} "${OPT}" _I)
-    if(_I EQUAL -1)
-      list(APPEND ${OUTVAR} "${OPT}")
+    if(NOT (OPT STREQUAL "NDEBUG")) # NDEBUG should not get propogated
+      list(FIND ${OUTVAR} "${OPT}" _I)
+      if(_I EQUAL -1)
+        list(APPEND ${OUTVAR} "${OPT}")
+      endif()
     endif()
   endforeach()
 endmacro()
@@ -146,6 +154,11 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
     endif()
     mark_as_advanced(GASNet_${L}_LIBRARY)
   endforeach()
+  if(COMPONENT_NAME MATCHES "^mpi-.*" AND NOT (_GASNet_LD STREQUAL CMAKE_C_COMPILER))
+    set(MPI_C_COMPILER ${_GASNet_LD})
+    find_package(MPI REQUIRED COMPONENTS C)
+    list(APPEND COMPONENT_DEPS ${MPI_C_LIBRARIES})
+  endif()
   add_library(GASNet::${COMPONENT_NAME} UNKNOWN IMPORTED)
   set_target_properties(GASNet::${COMPONENT_NAME} PROPERTIES
     IMPORTED_LOCATION "${COMPONENT_LIB}"
@@ -167,13 +180,35 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
   endif()
 endfunction()
 
+# Needed for backwards compatibility with older cmake
+macro(list_filter_include varname re)
+  set(tmp_${varname})
+  foreach(item IN LISTS ${varname})
+    if(item MATCHES "${re}")
+      list(APPEND tmp_${varname} ${item})
+    endif()
+  endforeach()
+  set(${varname} ${tmp_${varname}})
+  unset(tmp_${varname})
+endmacro()
+macro(list_filter_exclude varname re)
+  set(tmp_${varname})
+  foreach(item IN LISTS ${varname})
+    if(NOT (item MATCHES "${re}"))
+      list(APPEND tmp_${varname} ${item})
+    endif()
+  endforeach()
+  set(${varname} ${tmp_${varname}})
+  unset(tmp_${varname})
+endmacro()
+
 # This function takes an input list in the variable LVAR and a preferences list
 # in PVAR, and sorts the list in LVAR by the items in PVAR
 function(_sort_list_by_preference LVAR PVAR)
   string(REPLACE ";" "|" L_RE "${${LVAR}}")
-  list(FILTER ${PVAR} INCLUDE REGEX "${L_RE}")
+  list_filter_include(${PVAR} "${L_RE}")
   string(REPLACE ";" "|" P_RE "${${PVAR}}")
-  list(FILTER ${LVAR} EXCLUDE REGEX "${P_RE}")
+  list_filter_exclude(${LVAR} "${P_RE}")
   set(L)
   list(APPEND L ${${PVAR}})
   list(APPEND L ${${LVAR}})
@@ -185,7 +220,7 @@ if(NOT GASNet_FOUND AND NOT TARGET GASNet::GASNet)
   mark_as_advanced(GASNet_ROOT_DIR)
   if(GASNet_ROOT_DIR)
     set(_GASNet_FIND_INCLUDE_OPTS PATHS ${GASNet_ROOT_DIR}/include NO_DEFAULT_PATH)
-  else
+  else()
     set(_GASNet_FIND_INCLUDE_OPTS HINTS ENV MPI_INCLUDE)
   endif()
   find_path(GASNet_INCLUDE_DIR gasnet.h ${_GASNet_FIND_INCLUDE_OPTS})

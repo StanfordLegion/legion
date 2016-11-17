@@ -120,6 +120,7 @@ namespace Realm {
 
     FileMemory::FileMemory(Memory _me)
       : MemoryImpl(_me, 0 /*no memory space*/, MKIND_FILE, ALIGNMENT, Memory::FILE_MEM)
+      , next_offset(0x12340000LL)  // something not zero for debugging
     {
       pthread_mutex_init(&vector_lock, NULL);
     }
@@ -165,6 +166,11 @@ namespace Realm {
                    linearization_bits, bytes_needed,
                    block_size, element_size, field_sizes, redopid,
                    list_size, reqs, parent_inst);
+      // figure out what offset we assigned it (indirect because we went
+      //  through MemoryImpl::create_instance_local)
+      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
+      off_t inst_offset = impl->metadata.alloc_offset;
+
       int fd;
 #ifdef REALM_USE_KERNEL_AIO
       int direct_flag = O_DIRECT;
@@ -214,6 +220,7 @@ namespace Realm {
         assert(index == file_vec.size());
         file_vec.push_back(fd);
       }
+      offset_map[inst_offset] = index;
       pthread_mutex_unlock(&vector_lock);
       return inst;
     }
@@ -233,8 +240,11 @@ namespace Realm {
 
     off_t FileMemory::alloc_bytes(size_t size)
     {
-      // Offset for every instance should be 0!!!
-      return 0;
+      // hand out incrementing offsets and never reuse them
+      // fragile, but we need a way to map from offset -> index for remote
+      //  writes at the moment
+      off_t this_offset = __sync_fetch_and_add(&next_offset, size);
+      return this_offset;
     }
 
     void FileMemory::free_bytes(off_t offset, size_t size)
@@ -244,7 +254,18 @@ namespace Realm {
 
     void FileMemory::get_bytes(off_t offset, void *dst, size_t size)
     {
-      assert(0);
+      // map from the offset back to the instance index
+      assert(offset < next_offset);
+      pthread_mutex_lock(&vector_lock);
+      // this finds the first entry _AFTER_ the one we want
+      std::map<off_t, int>::const_iterator it = offset_map.upper_bound(offset);
+      assert(it != offset_map.begin());
+      // back up to the element we want
+      --it;
+      ID::IDType index = it->second;
+      off_t rel_offset = offset - it->first;
+      pthread_mutex_unlock(&vector_lock);
+      get_bytes(index, rel_offset, dst, size);
     }
 
     void FileMemory::get_bytes(ID::IDType inst_id, off_t offset, void *dst, size_t size)
@@ -262,7 +283,18 @@ namespace Realm {
 
     void FileMemory::put_bytes(off_t offset, const void *src, size_t)
     {
-      assert(0);
+      // map from the offset back to the instance index
+      assert(offset < next_offset);
+      pthread_mutex_lock(&vector_lock);
+      // this finds the first entry _AFTER_ the one we want
+      std::map<off_t, int>::const_iterator it = offset_map.upper_bound(offset);
+      assert(it != offset_map.begin());
+      // back up to the element we want
+      --it;
+      ID::IDType index = it->second;
+      off_t rel_offset = offset - it->first;
+      pthread_mutex_unlock(&vector_lock);
+      put_bytes(index, rel_offset, src, size);
     }
 
     void FileMemory::put_bytes(ID::IDType inst_id, off_t offset, const void *src, size_t size)

@@ -28,7 +28,9 @@
 
 // Apple can go screw itself
 #ifndef __MACH__
+#if defined(__i386__) || defined(__x86_64__)
 #include <x86intrin.h>
+#endif
 #else
 #ifdef __SSE2__
 #include <emmintrin.h>
@@ -58,7 +60,6 @@ namespace Legion {
 #define IS_WRITE(req) ((req).privilege & WRITE_DISCARD)
 #define IS_WRITE_ONLY(req) (((req).privilege & READ_WRITE) == WRITE_DISCARD)
 #define IS_REDUCE(req) (((req).privilege & READ_WRITE) == REDUCE)
-#define IS_PROMOTED(req) ((req).privilege & PROMOTED)
 #define IS_EXCLUSIVE(req) ((req).prop == EXCLUSIVE)
 #define IS_ATOMIC(req) ((req).prop == ATOMIC)
 #define IS_SIMULT(req) ((req).prop == SIMULTANEOUS)
@@ -122,17 +123,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    static inline DependenceType check_for_promotion(const RegionUsage &u1, 
-                                                     DependenceType actual)
-    //--------------------------------------------------------------------------
-    {
-      if (IS_PROMOTED(u1))
-        return PROMOTED_DEPENDENCE;
-      else
-        return actual;
-    }
-
-    //--------------------------------------------------------------------------
     static inline DependenceType check_dependence_type(const RegionUsage &u1,
                                                        const RegionUsage &u2)
     //--------------------------------------------------------------------------
@@ -140,14 +130,14 @@ namespace Legion {
       // Two readers are never a dependence
       if (IS_READ_ONLY(u1) && IS_READ_ONLY(u2))
       {
-        return check_for_promotion(u1, NO_DEPENDENCE);
+        return NO_DEPENDENCE;
       }
       else if (IS_REDUCE(u1) && IS_REDUCE(u2))
       {
         // If they are the same kind of reduction, no dependence, 
         // otherwise true dependence
         if (u1.redop == u2.redop)
-          return check_for_promotion(u1, NO_DEPENDENCE);
+          return NO_DEPENDENCE;
         else
           return TRUE_DEPENDENCE;
       }
@@ -177,7 +167,7 @@ namespace Legion {
           else if ((!IS_ATOMIC(u1) && IS_READ_ONLY(u1)) ||
                    (!IS_ATOMIC(u2) && IS_READ_ONLY(u2)))
           {
-            return check_for_promotion(u1, SIMULTANEOUS_DEPENDENCE);
+            return SIMULTANEOUS_DEPENDENCE;
           }
           // Everything else is a dependence
           return check_for_anti_dependence(u1,u2,TRUE_DEPENDENCE/*default*/);
@@ -414,6 +404,8 @@ namespace Legion {
       template<typename IT, typename DT, bool BIDIR>
       inline void serialize(const IntegerSet<IT,DT,BIDIR> &index_set);
       inline void serialize(const ColorPoint &point);
+      inline void serialize(const Domain &domain);
+      inline void serialize(const DomainPoint &dp);
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -485,6 +477,8 @@ namespace Legion {
       template<typename IT, typename DT, bool BIDIR>
       inline void deserialize(IntegerSet<IT,DT,BIDIR> &index_set);
       inline void deserialize(ColorPoint &color);
+      inline void deserialize(Domain &domain);
+      inline void deserialize(DomainPoint &dp);
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -1240,8 +1234,8 @@ namespace Legion {
     protected:
       bool sparse;
       union {
-        std::set<IT>* sparse;
-        DenseSet*      dense;
+        typename std::set<IT>* sparse;
+        DenseSet*              dense;
       } set_ptr;
     };
 
@@ -1473,6 +1467,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void Serializer::serialize(const Domain &dom)
+    //--------------------------------------------------------------------------
+    {
+      serialize(dom.dim);
+      if (dom.dim == 0)
+        serialize(dom.is_id);
+      else
+      {
+        for (int i = 0; i < 2*dom.dim; i++)
+          serialize(dom.rect_data[i]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Serializer::serialize(const DomainPoint &dp)
+    //--------------------------------------------------------------------------
+    {
+      serialize(dp.dim);
+      if (dp.dim == 0)
+        serialize(dp.point_data[0]);
+      else
+      {
+        for (int idx = 0; idx < dp.dim; idx++)
+          serialize(dp.point_data[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     inline void Serializer::serialize(const void *src, size_t bytes)
     //--------------------------------------------------------------------------
     {
@@ -1648,6 +1670,34 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       point.deserialize(*this);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Deserializer::deserialize(Domain &dom)
+    //--------------------------------------------------------------------------
+    {
+      deserialize(dom.dim);
+      if (dom.dim == 0)
+        deserialize(dom.is_id);
+      else
+      {
+        for (int i = 0; i < 2*dom.dim; i++)
+          deserialize(dom.rect_data[i]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Deserializer::deserialize(DomainPoint &dp)
+    //--------------------------------------------------------------------------
+    {
+      deserialize(dp.dim);
+      if (dp.dim == 0)
+        deserialize(dp.point_data[0]);
+      else
+      {
+        for (int idx = 0; idx < dp.dim; idx++)
+          deserialize(dp.point_data[idx]);
+      }
     }
       
     //--------------------------------------------------------------------------
@@ -8224,7 +8274,7 @@ namespace Legion {
       : sparse(true)
     //-------------------------------------------------------------------------
     {
-      set_ptr.sparse = new std::set<IT>();
+      set_ptr.sparse = new typename std::set<IT>();
     }
 
     //-------------------------------------------------------------------------
@@ -8235,12 +8285,12 @@ namespace Legion {
     {
       if (rhs.sparse)
       {
-        set_ptr.sparse = new std::set<IT>();
+        set_ptr.sparse = new typename std::set<IT>();
         *(set_ptr.sparse) = *(rhs.set_ptr.sparse);
       }
       else
       {
-        set_ptr.dense = new DenseSet();
+        set_ptr.dense = Internal::legion_new<DenseSet>();
         set_ptr.dense->set = rhs.set_ptr.dense->set;
       }
     }
@@ -8256,7 +8306,7 @@ namespace Legion {
       if (sparse)
         delete set_ptr.sparse;
       else
-        delete set_ptr.dense;
+        Internal::legion_delete(set_ptr.dense);
     }
     
     //-------------------------------------------------------------------------
@@ -8269,8 +8319,8 @@ namespace Legion {
       {
         if (!sparse)
         {
-          delete set_ptr.dense;
-          set_ptr.sparse = new std::set<IT>();
+          Internal::legion_delete(set_ptr.dense);
+          set_ptr.sparse = new typename std::set<IT>();
         }
         else
           set_ptr.sparse->clear();
@@ -8281,7 +8331,7 @@ namespace Legion {
         if (sparse)
         {
           delete set_ptr.sparse;
-          set_ptr.dense = new DenseSet();
+          set_ptr.dense = Internal::legion_new<DenseSet>();
         }
         else
           set_ptr.dense->set.clear();
@@ -8314,7 +8364,7 @@ namespace Legion {
         if (sizeof(DT) < (set_ptr.sparse->size() * 
                           (sizeof(IT) + STL_SET_NODE_SIZE)))
         {
-          DenseSet *dense_set = new DenseSet();
+          DenseSet *dense_set = Internal::legion_new<DenseSet>();
           for (typename std::set<IT>::const_iterator it = 
                 set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
           {
@@ -8344,7 +8394,7 @@ namespace Legion {
           IT count = DT::pop_count(set_ptr.dense->set);
           if ((count * (sizeof(IT) + STL_SET_NODE_SIZE)) < sizeof(DT))
           {
-            std::set<IT> *sparse_set = new std::set<IT>();
+            typename std::set<IT> *sparse_set = new typename std::set<IT>();
             for (IT idx = 0; idx < DT::ELEMENTS; idx++)
             {
               if (set_ptr.dense->set[idx])
@@ -8358,7 +8408,7 @@ namespace Legion {
               }
             }
             // Delete the dense set
-            delete set_ptr.dense;
+            Internal::legion_delete(set_ptr.dense);
             set_ptr.sparse = sparse_set;
             sparse = true;
           }
@@ -8475,8 +8525,8 @@ namespace Legion {
         // If it doesn't match then replace the old one
         if (!sparse)
         {
-          delete set_ptr.dense;
-          set_ptr.sparse = new std::set<IT>();
+          Internal::legion_delete(set_ptr.dense);
+          set_ptr.sparse = new typename std::set<IT>();
         }
         else
           set_ptr.sparse->clear();
@@ -8495,7 +8545,7 @@ namespace Legion {
         if (sparse)
         {
           delete set_ptr.sparse;
-          set_ptr.dense = new DenseSet();
+          set_ptr.dense = Internal::legion_new<DenseSet>();
         }
         else
           set_ptr.dense->set.clear();
@@ -8652,7 +8702,7 @@ namespace Legion {
       if (!sparse)
       {
 	delete set_ptr.dense;
-	set_ptr.sparse = new std::set<IT>();
+	set_ptr.sparse = new typename std::set<IT>();
 	sparse = true;
       } else
 	set_ptr.sparse->clear();

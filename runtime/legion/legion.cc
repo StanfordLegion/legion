@@ -18,6 +18,7 @@
 #include "runtime.h"
 #include "legion_ops.h"
 #include "legion_tasks.h"
+#include "legion_context.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
 
@@ -1273,7 +1274,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TaskLauncher::TaskLauncher(void)
       : task_id(0), argument(TaskArgument()), predicate(Predicate::TRUE_PRED),
-        map_id(0), tag(0), point(DomainPoint()), silence_warnings(false)
+        map_id(0), tag(0), point(DomainPoint()), 
+        independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1282,8 +1284,9 @@ namespace Legion {
     TaskLauncher::TaskLauncher(Processor::TaskFuncID tid, TaskArgument arg,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
-      : task_id(tid), argument(arg), predicate(pred), 
-        map_id(mid), tag(t), point(DomainPoint()), silence_warnings(false)
+      : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
+        point(DomainPoint()), independent_requirements(false), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1297,7 +1300,8 @@ namespace Legion {
       : task_id(0), launch_domain(Domain::NO_DOMAIN), 
         global_arg(TaskArgument()), argument_map(ArgumentMap()), 
         predicate(Predicate::TRUE_PRED), must_parallelism(false), 
-        map_id(0), tag(0), silence_warnings(false)
+        map_id(0), tag(0), independent_requirements(false), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1311,7 +1315,8 @@ namespace Legion {
                                  MappingTagID t /*=0*/)
       : task_id(tid), launch_domain(dom), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must),
-        map_id(mid), tag(t), silence_warnings(false)
+        map_id(mid), tag(t), independent_requirements(false), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1670,7 +1675,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* Future::get_untyped_result(bool silence_warnings)
+    void* Future::get_untyped_result(bool silence_warnings) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
@@ -3198,7 +3203,7 @@ namespace Legion {
     ArgumentMap Runtime::create_argument_map(Context ctx)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_argument_map(ctx);
+      return runtime->create_argument_map();
     }
 
     //--------------------------------------------------------------------------
@@ -4086,21 +4091,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<PhysicalRegion>& Runtime::begin_task(Context ctx)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->begin_task(ctx);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::end_task(Context ctx, const void *result, 
-                                    size_t result_size, bool owned /*= false*/)
-    //--------------------------------------------------------------------------
-    {
-      runtime->end_task(ctx, result, result_size, owned);
-    }
-
-    //--------------------------------------------------------------------------
     Future Runtime::from_value(const void *value, 
                                         size_t value_size, bool owned)
     //--------------------------------------------------------------------------
@@ -4372,9 +4362,9 @@ namespace Legion {
       assert(datalen == sizeof(Context));
 #endif
       ctx = *((const Context*)data);
-      task = reinterpret_cast<Task*>(ctx);
+      task = ctx->get_task();
 
-      regionsptr = &runtime->begin_task(ctx);
+      regionsptr = &ctx->begin_task();
     }
 
     //--------------------------------------------------------------------------
@@ -4384,7 +4374,7 @@ namespace Legion {
 		  size_t retvalsize /*= 0*/)
     //--------------------------------------------------------------------------
     {
-      runtime->end_task(ctx, retvalptr, retvalsize);
+      ctx->end_task(retvalptr, retvalsize, false/*owned*/);
     }
 
 }; // namespace Legion

@@ -212,7 +212,6 @@ function ast_util.mk_expr_partition(partition_type, colors, coloring)
 end
 
 function ast_util.mk_expr_ispace(index_type, extent)
-  assert(not index_type:is_opaque())
   return ast.typed.expr.Ispace {
     extent = extent,
     start = false,

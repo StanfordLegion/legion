@@ -84,6 +84,8 @@ def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
+    # Fast Direct Solver
+    # Contact: Chao Chen <cchen10@stanford.edu>
     solver_dir = os.path.join(tmp_dir, 'fastSolver2')
     cmd(['git', 'clone', 'https://github.com/Charles-Chao-Chen/fastSolver2.git', solver_dir])
     solver = [[os.path.join(solver_dir, 'spmd_benchMark/solver'),
@@ -93,6 +95,8 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
+    # MiniAero
+    # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
     miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
     cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
          'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])

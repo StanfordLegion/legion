@@ -128,7 +128,8 @@ if __name__ == '__main__':
         git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-ppopp17-snapshot')
         build_terra(terra_dir, llvm_install_dir, thread_count)
 
+    use_hdf = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
     install.install(
-        shared_llr=False, general_llr=True, gasnet=True, cuda=False,
+        shared_llr=False, general_llr=True, gasnet=True, cuda=False, hdf=use_hdf,
         external_terra_dir=terra_dir, gasnet_dir=gasnet_release_dir,
         debug=False, thread_count=thread_count)

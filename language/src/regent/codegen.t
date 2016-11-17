@@ -2091,7 +2091,8 @@ local function expr_call_setup_task_args(
     var [size] = terralib.sizeof(params_struct_type)
   end)
 
-  for i, arg in ipairs(args) do
+  for i = 1, #args do
+    local arg = args[i]
     local arg_type = arg_types[i]
     if not std.is_future(arg_type) then
       local param_type = param_types[i] -- arg has already been cast to param_type
@@ -2969,19 +2970,30 @@ end
 
 function codegen.expr_isnull(cx, node)
   local pointer = codegen.expr(cx, node.pointer):read(cx)
+  local index_type = std.as_read(node.pointer.expr_type).index_type
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
     [pointer.actions];
     [emit_debuginfo(node)]
   end
 
-  return values.value(
-    node,
-    expr.once_only(
-      actions,
-      `([expr_type](c.legion_ptr_is_null([pointer.value].__ptr))),
-      expr_type),
-    expr_type)
+  if index_type:is_opaque() then
+    return values.value(
+      node,
+      expr.once_only(
+        actions,
+        `([expr_type](c.legion_ptr_is_null([pointer.value].__ptr))),
+        expr_type),
+      expr_type)
+  else
+    return values.value(
+      node,
+      expr.once_only(
+        actions,
+        `([expr_type]([index_type]([pointer.value]) == [index_type:nil_index()])),
+        expr_type),
+      expr_type)
+  end
 end
 
 function codegen.expr_new(cx, node)
@@ -3037,7 +3049,7 @@ function codegen.expr_dynamic_cast(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)].__ptr)
+  local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)])
 
   local result
   local regions = expr_type:bounds()
@@ -3045,28 +3057,62 @@ function codegen.expr_dynamic_cast(cx, node)
     local region = regions[1]
     assert(cx:has_region(region))
     local lr = `([cx:region(region).logical_region].impl)
-    result = `(
-      [expr_type]({
-          __ptr = (c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input], [lr]))
-      }))
+    if expr_type.index_type:is_opaque() then
+      result = `(
+        [expr_type]({
+          __ptr = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
+        }))
+    else
+      result = `(
+        [expr_type]({
+            __ptr = [expr_type.index_type](
+              c.legion_domain_point_safe_cast([cx.runtime], [cx.context], [input], [lr]))
+        }))
+    end
   else
     result = terralib.newsymbol(expr_type)
-    local cases = quote
-      [result] = [expr_type]({ __ptr = c.legion_ptr_nil(), __index = 0 })
-    end
-    for i = #regions, 1, -1 do
-      local region = regions[i]
-      assert(cx:has_region(region))
-      local lr = `([cx:region(region).logical_region].impl)
+    local cases
+    if expr_type.index_type:is_opaque() then
       cases = quote
-        var temp = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input], [lr])
-        if not c.legion_ptr_is_null(temp) then
-          result = [expr_type]({
-            __ptr = temp,
-            __index = [i],
-          })
-        else
-          [cases]
+        [result] = [expr_type]({ __ptr = c.legion_ptr_nil(), __index = 0 })
+      end
+      for i = #regions, 1, -1 do
+        local region = regions[i]
+        assert(cx:has_region(region))
+        local lr = `([cx:region(region).logical_region].impl)
+        cases = quote
+          var temp = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
+          if not c.legion_ptr_is_null(temp) then
+            result = [expr_type]({
+              __ptr = temp,
+              __index = [i],
+            })
+          else
+            [cases]
+          end
+        end
+      end
+    else
+      cases = quote
+        [result] = [expr_type]({
+          __ptr = [expr_type.index_type:nil_index()],
+          __index = 0
+        })
+      end
+      for i = #regions, 1, -1 do
+        local region = regions[i]
+        assert(cx:has_region(region))
+        local lr = `([cx:region(region).logical_region].impl)
+        cases = quote
+          var temp = c.legion_domain_point_safe_cast([cx.runtime], [cx.context], [input], [lr])
+          if temp.dim ~= -1 then
+            result = [expr_type]({
+              __ptr = [expr_type.index_type](temp),
+              __index = [i],
+            })
+          else
+            [cases]
+          end
         end
       end
     end
@@ -3624,22 +3670,18 @@ function codegen.expr_image(cx, node)
   local region_parent =
     cx:region(cx:region(region_type).root_region_type).logical_region
 
-  local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
+  local function is_index_type(ty)
+    return std.is_bounded_type(ty) and std.is_index_type(ty.index_type)
+  end
+  local field_paths, field_types =
+    std.flatten_struct_fields(region_type:fspace(), is_index_type)
   local fields_i = data.filteri(
     function(field) return field:starts_with(node.region.fields[1]) end,
     field_paths)
-  local field_path
-  if #fields_i ~= 1 then
-    assert(#fields_i == 2)
-    -- Hack: This will fail if the index type ever becomes in64.
-    local match = data.filter(
-      function(i) return std.type_eq(field_types[i], int64) end,
-      fields_i)
-    assert(#match == 1)
-    field_path = field_paths[match[1]]
-  else
-    field_path = field_paths[fields_i[1]]
-  end
+  assert(#fields_i == 1)
+  local index_fields =
+    std.flatten_struct_fields(field_types[fields_i[1]])
+  local field_path = field_paths[fields_i[1]] .. index_fields[1]
 
   local field_id = cx:region(region_type):field_id(field_path)
 
@@ -3684,22 +3726,18 @@ function codegen.expr_preimage(cx, node)
   local region_parent =
     cx:region(cx:region(region_type).root_region_type).logical_region
 
-  local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
+  local function is_index_type(ty)
+    return std.is_bounded_type(ty) and std.is_index_type(ty.index_type)
+  end
+  local field_paths, field_types =
+    std.flatten_struct_fields(region_type:fspace(), is_index_type)
   local fields_i = data.filteri(
     function(field) return field:starts_with(node.region.fields[1]) end,
     field_paths)
-  local field_path
-  if #fields_i ~= 1 then
-    assert(#fields_i == 2)
-    -- Hack: This will fail if the index type ever becomes int64.
-    local match = data.filter(
-      function(i) return std.type_eq(field_types[i], int64) end,
-      fields_i)
-    assert(#match == 1)
-    field_path = field_paths[match[1]]
-  else
-    field_path = field_paths[fields_i[1]]
-  end
+  assert(#fields_i == 1)
+  local index_fields =
+    std.flatten_struct_fields(field_types[fields_i[1]])
+  local field_path = field_paths[fields_i[1]] .. index_fields[1]
 
   local field_id = cx:region(region_type):field_id(field_path)
 
@@ -3712,7 +3750,10 @@ function codegen.expr_preimage(cx, node)
     var [ip] = c.legion_index_partition_create_by_preimage(
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, domain,
-      [(result_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
+      [(result_type:is_disjoint() and
+        result_type:parent_region():is_opaque() and
+        c.DISJOINT_KIND) or
+       c.COMPUTE_KIND],
       -1, false)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
@@ -7951,7 +7992,8 @@ function codegen.top_task(cx, node)
       var [future_count] = c.legion_task_get_futures_size([c_task])
       var [future_i] = 0
     end)
-    for i, param in ipairs(params) do
+    for i = 1, #params do
+      local param = params[i]
       local param_type = node.params[i].param_type
       local param_symbol = param:getsymbol()
 

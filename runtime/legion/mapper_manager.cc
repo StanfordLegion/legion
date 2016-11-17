@@ -2898,16 +2898,15 @@ namespace Legion {
       RtEvent precondition = 
         Runtime::acquire_rt_reservation(mapper_lock, true/*exclusive*/);
       DeferMessageArgs args;
-      args.hlr_id = HLR_DEFER_MAPPER_MESSAGE_TASK_ID;
       args.manager = this;
       args.sender = message->sender;
+      args.kind = message->kind;
       args.size = message->size;
       args.message = malloc(args.size);
       memcpy(args.message, message->message, args.size);
       args.broadcast = message->broadcast;
-      runtime->issue_runtime_meta_task(&args, sizeof(args), 
-          HLR_DEFER_MAPPER_MESSAGE_TASK_ID, HLR_RESOURCE_PRIORITY,
-          NULL, precondition);
+      runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
+                                       NULL, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -2917,6 +2916,7 @@ namespace Legion {
       const DeferMessageArgs *margs = (const DeferMessageArgs*)args;
       Mapper::MapperMessage message;
       message.sender = margs->sender;
+      message.kind = margs->kind;
       message.message = margs->message;
       message.size = margs->size;
       message.broadcast = margs->broadcast;
@@ -3157,12 +3157,10 @@ namespace Legion {
         if (!precondition.has_triggered())
         {
           FinishMapperCallContinuationArgs args;
-          args.hlr_id = HLR_FINISH_MAPPER_CONTINUATION_TASK_ID;
           args.manager = this;
           args.info = info;
-          runtime->issue_runtime_meta_task(&args, sizeof(args),
-              HLR_FINISH_MAPPER_CONTINUATION_TASK_ID, HLR_RESOURCE_PRIORITY,
-              info->operation, precondition);
+          runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
+                                           info->operation, precondition);
           // No need to wait, we know the mapper call is done
           // This is all just clean up and can be done asynchronously
           return;
@@ -3404,12 +3402,10 @@ namespace Legion {
         if (!precondition.has_triggered())
         {
           FinishMapperCallContinuationArgs args;
-          args.hlr_id = HLR_FINISH_MAPPER_CONTINUATION_TASK_ID;
           args.manager = this;
           args.info = info;
-          runtime->issue_runtime_meta_task(&args, sizeof(args),
-              HLR_FINISH_MAPPER_CONTINUATION_TASK_ID, HLR_RESOURCE_PRIORITY,
-              info->operation, precondition);
+          runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
+                                           info->operation, precondition);
           // No need to wait, we know the mapper call is done
           // This is all just clean up and can be done asynchronously
           return;
@@ -3490,11 +3486,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ContinuationArgs args;
-      args.hlr_id = HLR_MAPPER_CONTINUATION_TASK_ID;
       args.continuation = this;
-      RtEvent wait_on = runtime->issue_runtime_meta_task(&args, sizeof(args),
-                           HLR_MAPPER_CONTINUATION_TASK_ID, 
-                           HLR_LATENCY_PRIORITY, op, precondition);
+      RtEvent wait_on = runtime->issue_runtime_meta_task(args,
+                       LG_LATENCY_PRIORITY, op, precondition);
       wait_on.wait();
     }
 

@@ -295,7 +295,8 @@ namespace Legion {
       output.initial_proc = default_policy_select_initial_processor(ctx, task);
       output.inline_task = false;
       output.stealable = stealing_enabled; 
-      output.map_locally = true;
+      // Unlike in the past, this is now the best choice
+      output.map_locally = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2014,9 +2015,10 @@ namespace Legion {
       if ((req.tag & DefaultMapper::EXACT_REGION) != 0)
 	return result;
 
-      // Heuristically use the exact region if the target memory is a GPU
-      // framebuffer as it is not shared by other GPUs
-      if (target_memory.kind() == Memory::GPU_FB_MEM)
+      // Heuristically use the exact region if the target memory is either a GPU
+      // framebuffer or a zero copy memory.
+      if (target_memory.kind() == Memory::GPU_FB_MEM ||
+          target_memory.kind() == Memory::Z_COPY_MEM)
         return result;
 
       // Simple heuristic here, if we are on a single node, we go all the
@@ -2153,7 +2155,7 @@ namespace Legion {
         if (finder == source_memories.end())
         {
           affinity.clear();
-          machine.get_mem_mem_affinity(affinity, destination_memory, location);
+          machine.get_mem_mem_affinity(affinity, location, destination_memory);
           unsigned memory_bandwidth = 0;
           if (affinity.empty()) {
             // TODO: More graceful way of dealing with multi-hop copies
@@ -2924,7 +2926,8 @@ namespace Legion {
 	      // if we wrap around, nothing is large enough and we're toast
 	      if(next_as == curr_as) {
 	      }
-	      log_mapper.fatal() << "must_epoch: no address space has enough processors to fit a group of " << group_size << " tasks!";
+	      log_mapper.fatal() << "must_epoch: no address space has enough "
+                  << "processors to fit a group of " << group_size << " tasks!";
 	      assert(false);
 	    } while(next_as->second.size() < group_size);
 	    curr_as = next_as;

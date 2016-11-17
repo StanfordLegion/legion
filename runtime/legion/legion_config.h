@@ -69,6 +69,10 @@
 #ifndef MAX_APPLICATION_TASK_ID
 #define MAX_APPLICATION_TASK_ID         (1<<20)
 #endif
+// Maximum ID for an application field ID
+#ifndef MAX_APPLICATION_FIELD_ID
+#define MAX_APPLICATION_FIELD_ID        (1<<20)
+#endif
 // Maximum ID for an application mapper ID
 #ifndef MAX_APPLICATION_MAPPER_ID
 #define MAX_APPLICATION_MAPPER_ID       (1<<20)
@@ -354,9 +358,10 @@ typedef enum legion_error_t {
   ERROR_UNRESTRICTED_ACQUIRE = 156,
   ERROR_UNACQUIRED_RELEASE = 157,
   ERROR_UNATTACHED_DETACH = 158,
-  ERROR_ILLEGAL_IMPLICIT_MAPPING = 159,
-  ERROR_INNER_TASK_VIOLATION = 160,
-  ERROR_REQUEST_FOR_EMPTY_FUTURE = 161,
+  ERROR_INVALID_PROJECTION_RESULT = 159,
+  ERROR_ILLEGAL_IMPLICIT_MAPPING = 160,
+  ERROR_INNER_TASK_VIOLATION = 161,
+  ERROR_REQUEST_FOR_EMPTY_FUTURE = 162,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -367,7 +372,6 @@ typedef enum legion_privilege_mode_t {
   WRITE_ONLY      = 0x00000002, // same as WRITE_DISCARD
   WRITE_DISCARD   = 0x00000002, // same as WRITE_ONLY
   REDUCE          = 0x00000004,
-  PROMOTED        = 0x00001000, // Internal use only
 } legion_privilege_mode_t;
 
 typedef enum legion_allocate_mode_t {
@@ -402,11 +406,13 @@ typedef enum legion_index_space_kind_t {
   DENSE_ARRAY_KIND,
 } legion_index_space_kind_t;
 
-typedef enum legion_handle_type_t {
+typedef enum legion_projection_type_t {
   SINGULAR, // a single logical region
   PART_PROJECTION, // projection from a partition
   REG_PROJECTION, // projection from a region
-} legion_handle_type_t;
+} legion_projection_type_t;
+// For backwards compatibility
+typedef legion_projection_type_t legion_handle_type_t;
 
 typedef enum legion_partition_kind_t {
   DISJOINT_KIND,
@@ -420,7 +426,6 @@ typedef enum legion_dependence_type_t {
   ANTI_DEPENDENCE = 2, // WAR or WAW with Write-Only privilege
   ATOMIC_DEPENDENCE = 3,
   SIMULTANEOUS_DEPENDENCE = 4,
-  PROMOTED_DEPENDENCE = 5,
 } legion_dependence_type_t;
 
 enum {
@@ -572,6 +577,7 @@ typedef unsigned long legion_variant_id_t;
 typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
+typedef unsigned long long legion_projection_epoch_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
 

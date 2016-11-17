@@ -707,7 +707,10 @@ namespace Realm {
       cp.add_option_int("-ll:numlmbs", dummy)
 	.add_option_int("-ll:lmbsize", dummy)
 	.add_option_int("-ll:forcelong", dummy)
-	.add_option_int("-ll:sdpsize", dummy);
+	.add_option_int("-ll:sdpsize", dummy)
+	.add_option_int("-ll:spillwarn", dummy)
+	.add_option_int("-ll:spillstep", dummy)
+	.add_option_int("-ll:spillstall", dummy);
 
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
@@ -826,11 +829,6 @@ namespace Realm {
 		     *core_reservations,
 		     *argc, (const char **)*argv);
 
-#ifdef USE_GASNET
-      // this needs to happen after init_endpoints
-      gasnet_coll_init(0, 0, 0, 0, 0);
-#endif
-
 #ifndef USE_GASNET
       // network initialization is also responsible for setting the "zero_time"
       //  for relative timing - no synchronization necessary in non-gasnet case
@@ -897,7 +895,12 @@ namespace Realm {
 			    *core_reservations,
 			    stack_size_in_mb << 20);
 
-      //LegionRuntime::LowLevel::create_builtin_dma_channels(this);
+#ifdef USE_GASNET
+      // this needs to happen after init_endpoints
+      gasnet_coll_init(0, 0, 0, 0, 0);
+#endif
+
+      LegionRuntime::LowLevel::create_builtin_dma_channels(this);
 
       LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
                                                         *core_reservations);
@@ -1181,6 +1184,11 @@ namespace Realm {
 	    for(std::vector<Machine::MemoryMemoryAffinity>::const_iterator it2 = mmas.begin();
 		it2 != mmas.end();
 		it2++) {
+	      // only announce intra-node ones and only those with this memory as m1 to avoid
+	      //  duplicates
+	      if((it2->m1 != m) || (it2->m2.address_space() != gasnet_mynode()))
+		continue;
+
 	      adata[apos++] = NODE_ANNOUNCE_MMA;
 	      adata[apos++] = it2->m1.id;
 	      adata[apos++] = it2->m2.id;

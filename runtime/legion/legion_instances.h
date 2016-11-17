@@ -161,10 +161,10 @@ namespace Legion {
         { return is_virtual_manager(); }
     public:
       // Methods for creating/finding/destroying logical top views
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner) = 0;
-      void register_active_context(SingleTask *context);
-      void unregister_active_context(SingleTask *context);
+      void register_active_context(InnerContext *context);
+      void unregister_active_context(InnerContext *context);
     public:
       bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions,
@@ -183,7 +183,7 @@ namespace Legion {
       }
       inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
-      void perform_deletion(RtEvent deferred_event) const;
+      void perform_deletion(RtEvent deferred_event);
       void set_garbage_collection_priority(MapperID mapper_id, Processor p,
                                            GCPriority priority); 
       static void delete_physical_manager(PhysicalManager *manager);
@@ -204,7 +204,7 @@ namespace Legion {
       const bool own_domain;
       const PointerConstraint pointer_constraint;
     protected:
-      std::map<SingleTask*,GenerationID> active_contexts;
+      std::set<InnerContext*> active_contexts;
     };
 
     /**
@@ -240,7 +240,8 @@ namespace Legion {
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
-                      bool register_now, ApEvent use_event); 
+                      bool register_now, ApEvent use_event,
+                      Reservation read_only_mapping_reservation); 
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -256,8 +257,10 @@ namespace Legion {
       virtual size_t get_instance_size(void) const;
     public:
       inline ApEvent get_use_event(void) const { return use_event; }
+      inline Reservation get_read_only_mapping_reservation(void) const
+        { return read_only_mapping_reservation; }
     public:
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<Domain::CopySrcDstField> &fields);
@@ -292,6 +295,8 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event;
+    protected:
+      Reservation read_only_mapping_reservation;
     };
 
     /**
@@ -343,12 +348,14 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
       const FieldID logical_field;
+    protected:
+      Reservation manager_lock;
     };
 
     /**
@@ -472,7 +479,7 @@ namespace Legion {
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
     public:
       static inline VirtualManager* get_virtual_instance(void)
