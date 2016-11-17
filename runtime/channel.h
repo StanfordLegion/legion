@@ -231,7 +231,8 @@ namespace LegionRuntime{
     public:
       const char* src;
       off_t dst_offset;
-      size_t nbytes;
+      off_t src_stride, dst_stride;
+      size_t nbytes_per_line, nlines;
       GPUCompletionEvent event;
     };
 
@@ -239,21 +240,24 @@ namespace LegionRuntime{
     public:
       off_t src_offset;
       char* dst;
-      size_t nbytes;
+      off_t src_stride, dst_stride;
+      size_t nbytes_per_line, nlines;
       GPUCompletionEvent event;
     };
 
     class GPUinFBRequest : public Request {
     public:
       off_t src_offset, dst_offset;
-      size_t nbytes;
+      off_t src_stride, dst_stride;
+      size_t nbytes_per_line, nlines;
       GPUCompletionEvent event;
     };
 
     class GPUpeerFBRequest : public Request {
     public:
       off_t src_offset, dst_offset;
-      size_t nbytes;
+      off_t src_stride, dst_stride;
+      size_t nbytes_per_line, nlines;
       GPU* dst_gpu;
       GPUCompletionEvent event;
     };
@@ -397,6 +401,13 @@ namespace LegionRuntime{
       bool simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                               Layouts::GenericLayoutIterator<DIM>* li,
                               coord_t &offset_idx, coord_t available_slots);
+
+      template<unsigned DIM>
+      bool simple_get_request_2d(off_t &src_start, off_t &dst_start,
+                                 off_t &src_stride, off_t &dst_stride,
+                                 size_t &nbytes_per_line, size_t &nlines,
+                                 Layouts::GenericLayoutIterator<DIM>* li,
+                                 coord_t &offset_idx, coord_t available_slots);
 
 #ifdef DEADCODE_USE_GENERIC_ITERATOR
       template<unsigned DIM>
