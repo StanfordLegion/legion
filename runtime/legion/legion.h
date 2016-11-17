@@ -676,6 +676,7 @@ namespace LegionRuntime {
       void wait(void);
       void alter_arrival_count(int delta);
       Barrier get_barrier(void) const { return phase_barrier; }
+      bool exists(void) const;
     protected:
       Barrier phase_barrier;
       friend std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb);
