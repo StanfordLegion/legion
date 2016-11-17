@@ -311,8 +311,8 @@ namespace LegionRuntime {
             assert(0);
         }
 
-        for (int i = 0; i < DIM; i++) {
-          for (int j = 0; j < DIM; j++) {
+        for (unsigned i = 0; i < DIM; i++) {
+          for (unsigned j = 0; j < DIM; j++) {
             if (src_strides[j][0] == subtotal && dst_strides[j][0] == subtotal) {
               subtotal = subtotal * imin(src_subrect.dim_size(j), dst_subrect.dim_size(j));
             }
@@ -339,14 +339,14 @@ namespace LegionRuntime {
         src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
         dst_idx = src_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
 
-        for (int j = 0; j < DIM; j++) {
+        for (unsigned j = 0; j < DIM; j++) {
           if (src_strides[j][0] == subtotal && dst_strides[j][0] == subtotal) {
             subtotal = subtotal * imin(src_subrect.dim_size(j), dst_subrect.dim_size(j));
           }
         }
 
         if (iter_order == XferOrder::SRC_FIFO) {
-          for (int i = 0; i < DIM; i++)
+          for (unsigned i = 0; i < DIM; i++)
             if (src_strides[i][0] == subtotal) {
               src_stride = src_strides[i][0];
               dst_stride = dst_strides[i][0];
@@ -355,7 +355,7 @@ namespace LegionRuntime {
               return items_per_line * nlines;
             }
         } else if (iter_order == XferOrder::DST_FIFO) {
-          for (int i = 0; i < DIM; i++)
+          for (unsigned i = 0; i < DIM; i++)
             if (dst_strides[i][0] == subtotal) {
               src_stride = src_strides[i][0];
               dst_stride = dst_strides[i][0];
@@ -364,7 +364,7 @@ namespace LegionRuntime {
               return items_per_line * nlines;
             }
         } else if (iter_order == XferOrder::ANY_ORDER) {
-          for (int i = 0; i < DIM; i++)
+          for (unsigned i = 0; i < DIM; i++)
             if (dst_strides[i][0] >= subtotal) {
               src_stride = src_strides[i][0];
               dst_stride = dst_strides[i][0];

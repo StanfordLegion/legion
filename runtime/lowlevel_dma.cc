@@ -3263,7 +3263,7 @@ namespace LegionRuntime {
       //find_shortest_path(src_mem, dst_mem, mem_path);
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
         std::vector<XferDesID> sub_path;
-        for (int idx = 0; idx < mem_path.size() - 1; idx ++) {
+        for (unsigned idx = 0; idx < mem_path.size() - 1; idx ++) {
           XferDesID new_xdid = get_xdq_singleton()->get_guid(ID(mem_path[idx]).memory.owner_node);
           sub_path.push_back(new_xdid);
           path.push_back(new_xdid);
@@ -3288,8 +3288,8 @@ namespace LegionRuntime {
         Buffer dst_buf(&dst_impl->metadata, dst_mem);
         Buffer pre_buf;
         assert(mem_path.size() - 1 == sub_path.size());
-        for (int idx = 0; idx < mem_path.size(); idx ++) {
-	  log_new_dma.info("mem_path[%d]: node(%llu), memory(%d)", idx, ID(mem_path[idx]).memory.owner_node, mem_path[idx].kind());
+        for (unsigned idx = 0; idx < mem_path.size(); idx ++) {
+          log_new_dma.info("mem_path[%d]: node(%llu), memory(%d)", idx, ID(mem_path[idx]).memory.owner_node, mem_path[idx].kind());
           if (idx == 0) {
             pre_buf = src_buf;
           } else {

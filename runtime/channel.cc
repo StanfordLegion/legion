@@ -132,7 +132,7 @@ namespace LegionRuntime {
 
       bool XferDes::simple_get_mask_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                                             MaskEnumerator* me,
-                                            coord_t &offset_idx, coord_t available_slots)
+                                            unsigned &offset_idx, coord_t available_slots)
       {
         assert((size_t) offset_idx < oas_vec.size());
         assert(me->any_left());
@@ -180,7 +180,7 @@ namespace LegionRuntime {
       template<unsigned DIM>
       bool XferDes::simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                               Layouts::GenericLayoutIterator<DIM>* li,
-                              coord_t &offset_idx, coord_t available_slots)
+                              unsigned &offset_idx, coord_t available_slots)
       {
         assert(offset_idx < oas_vec.size());
         assert(li->any_left());
@@ -239,7 +239,7 @@ namespace LegionRuntime {
                                           size_t &nbytes_per_line,
                                           size_t &nlines,
                                   Layouts::GenericLayoutIterator<DIM>* li,
-                                          coord_t &offset_idx,
+                                          unsigned &offset_idx,
                                           coord_t available_slots)
       {
         assert(offset_idx < oas_vec.size());
@@ -292,9 +292,9 @@ namespace LegionRuntime {
           // We are scattering ib, fallback to 1d case
           todo = min(todo, nitems_per_line);
         }
-        if (todo <= nitems_per_line) {
+        if ((size_t)todo <= nitems_per_line) {
           // fallback to 1d case
-          nitems_per_line = todo;
+          nitems_per_line = (size_t)todo;
           nlines = 1;
         } else {
           nlines = todo / nitems_per_line;
@@ -535,7 +535,7 @@ namespace LegionRuntime {
         src_buf_base = (char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
         dst_buf_base = (char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
         size_t total_field_size = 0;
-        for (int i = 0; i < oas_vec.size(); i++) {
+        for (unsigned i = 0; i < oas_vec.size(); i++) {
           total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
@@ -649,7 +649,7 @@ namespace LegionRuntime {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
         size_t total_field_size = 0;
-        for (int i = 0; i < oas_vec.size(); i++) {
+        for (unsigned i = 0; i < oas_vec.size(); i++) {
           total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
@@ -840,7 +840,7 @@ namespace LegionRuntime {
         // Note that we could use get_direct_ptr to get dst_buf_base, since it always returns 0
         dst_buf_base = ((const char*)((Realm::RemoteMemory*)dst_mem_impl)->regbase) + dst_buf.alloc_offset;
         size_t total_field_size = 0;
-        for (int i = 0; i < oas_vec.size(); i++) {
+        for (unsigned i = 0; i < oas_vec.size(); i++) {
           total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
@@ -966,7 +966,7 @@ namespace LegionRuntime {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
         size_t total_field_size = 0;
-        for (int i = 0; i < oas_vec.size(); i++) {
+        for (unsigned i = 0; i < oas_vec.size(); i++) {
           total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
@@ -1158,7 +1158,7 @@ namespace LegionRuntime {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
         size_t total_field_size = 0;
-        for (int i = 0; i < oas_vec.size(); i++) {
+        for (unsigned i = 0; i < oas_vec.size(); i++) {
           total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
@@ -1467,7 +1467,7 @@ namespace LegionRuntime {
         assert(!src_buf.is_ib);
         assert(!dst_buf.is_ib);
         size_t total_field_size = 0;
-        for (int i = 0; i < oas_vec.size(); i++) {
+        for (unsigned i = 0; i < oas_vec.size(); i++) {
           total_field_size += oas_vec[i].size;
         }
         bytes_total = total_field_size * domain.get_volume();
@@ -1580,7 +1580,7 @@ namespace LegionRuntime {
               hdf_read_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
               hsize_t count[DIM], offset[DIM];
               size_t todo = 1;
-              for (int i = 0; i < DIM; i++) {
+              for (unsigned i = 0; i < DIM; i++) {
                 count[i] = hli->sub_rect.hi[i] - hli->sub_rect.lo[i] + 1;
                 todo *= count[i];
                 //offset[i] = pir->pa[i] - hdf_metadata->lo[i];
@@ -1614,7 +1614,7 @@ namespace LegionRuntime {
               hdf_write_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
               hsize_t count[DIM], offset[DIM];
               size_t todo = 1;
-              for (int i = 0; i < DIM; i++) {
+              for (unsigned i = 0; i < DIM; i++) {
                 count[i] = hli->sub_rect.hi[i] - hli->sub_rect.lo[i] + 1;
                 todo *= count[i];
                 offset[i] = hli->sub_rect.lo[i] - hdf_metadata->lo[i];
@@ -1814,7 +1814,7 @@ namespace LegionRuntime {
         pthread_mutex_lock(&pending_lock);
         //if (nr > 0)
           //printf("MemcpyChannel::submit[nr = %ld]\n", nr);
-        for (int i = 0; i < nr; i++) {
+        for (long i = 0; i < nr; i++) {
           pending_queue.push_back(mem_cpy_reqs[i]);
         }
         if (sleep_threads) {
@@ -2570,7 +2570,7 @@ namespace LegionRuntime {
       {
         if (ID(_src_buf.memory).memory.owner_node == gasnet_mynode()) {
           size_t total_field_size = 0;
-          for (int i = 0; i < _oas_vec.size(); i++) {
+          for (unsigned i = 0; i < _oas_vec.size(); i++) {
             total_field_size += _oas_vec[i].size;
           }
           log_new_dma.info("Create local XferDes: id(%lx), pre(%lx), next(%lx), type(%d), domain(%lu), total_field_size(%lu)",
