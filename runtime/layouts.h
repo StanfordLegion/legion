@@ -337,7 +337,7 @@ namespace LegionRuntime {
         }
         r.hi = orig_rect.hi;
         src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
-        dst_idx = src_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
+        dst_idx = dst_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
 
         for (unsigned j = 0; j < DIM; j++) {
           if (src_strides[j][0] == subtotal && dst_strides[j][0] == subtotal) {
