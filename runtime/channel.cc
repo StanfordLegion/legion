@@ -231,6 +231,86 @@ namespace LegionRuntime {
         return true;
       }
 
+      template<unsigned DIM>
+      bool XferDes::simple_get_request_2d(off_t &src_start,
+                                          off_t &dst_start,
+                                          off_t &src_stride_bytes,
+                                          off_t &dst_stride_bytes,
+                                          size_t &nbytes_per_line,
+                                          size_t &nlines,
+                                  Layouts::GenericLayoutIterator<DIM>* li,
+                                          coord_t &offset_idx,
+                                          coord_t available_slots)
+      {
+        assert(offset_idx < oas_vec.size());
+        assert(li->any_left());
+        nbytes_per_line = 0;
+        coord_t src_idx, dst_idx;
+        coord_t src_stride, dst_stride;
+        size_t nitems_per_line;
+        // cannot exceed the max_req_size
+        coord_t todo = min(max_req_size / oas_vec[offset_idx].size,
+                           li->continuous_steps(src_idx, dst_idx,
+                                                src_stride, dst_stride,
+                                                nitems_per_line, nlines));
+        coord_t src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
+        coord_t dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
+        todo = min(todo, min(src_in_block, dst_in_block));
+        if (todo == 0)
+          return false;
+        bool scatter_src_ib = false, scatter_dst_ib = false;
+        // make sure we have source data ready
+        // 2d doesn't support scattering ib
+        if (src_buf.is_ib) {
+          src_start = calc_mem_loc_ib(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                      src_buf.elmt_size, src_buf.block_size, domain.get_volume(), src_idx);
+          todo = min(todo, max(0, pre_bytes_write - src_start) / oas_vec[offset_idx].size);
+          scatter_src_ib = scatter_ib(src_start, todo * oas_vec[offset_idx].size, src_buf.buf_size);
+        } else {
+	  src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                   src_buf.elmt_size, src_buf.block_size, src_idx);
+        }
+        if (todo  == 0)
+          return false;
+        // 2d doesn't support scattering ib
+        if (dst_buf.is_ib) {
+          dst_start = calc_mem_loc_ib(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                      dst_buf.elmt_size, dst_buf.block_size, domain.get_volume(), dst_idx);
+          todo = min(todo, max(0, next_bytes_read + dst_buf.buf_size - dst_start) / oas_vec[offset_idx].size);
+          scatter_dst_ib = scatter_ib(dst_start, todo * oas_vec[offset_idx].size, dst_buf.buf_size);
+        } else {
+          dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                   dst_buf.elmt_size, dst_buf.block_size, dst_idx);
+        }
+        if (todo == 0)
+          return false;
+        if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
+        ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
+          return false;
+
+        if (scatter_src_ib || scatter_dst_ib) {
+          // We are scattering ib, fallback to 1d case
+          todo = min(todo, nitems_per_line);
+        }
+        if (todo <= nitems_per_line) {
+          // fallback to 1d case
+          nitems_per_line = todo;
+          nlines = 1;
+        } else {
+          nlines = todo / nitems_per_line;
+        }
+        todo = nitems_per_line * nlines;
+        nbytes_per_line = nitems_per_line * oas_vec[offset_idx].size;
+        src_stride_bytes = src_stride * oas_vec[offset_idx].size;
+        dst_stride_bytes = dst_stride * oas_vec[offset_idx].size;
+        li->move(todo);
+        if (!li->any_left()) {
+          li->reset();
+          offset_idx ++;
+        }
+        return true;
+      }
+
 #ifdef DEADCODE_OLD_GENERIC_ITERATOR
       template<unsigned DIM>
       bool XferDes::simple_get_request(
@@ -1180,11 +1260,23 @@ namespace LegionRuntime {
         long idx = 0;
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
-          size_t nbytes;
+          off_t src_stride, dst_stride;
+          size_t nbytes, bytes_per_line = 0, nlines = 1;
           if (DIM == 0) {
-            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
+            simple_get_mask_request(src_start, dst_start,
+                                    bytes_per_line, me,
+                                    offset_idx,
+                                    min(available_reqs.size(), nr - idx));
+            nbytes = bytes_per_line;
+            src_stride = nbytes;
+            dst_stride = nbytes;
           } else {
-            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
+            simple_get_request_2d<DIM>(src_start, dst_start,
+                                       src_stride, dst_stride,
+                                       bytes_per_line, nlines,
+                                       li, offset_idx, 
+                                       min(available_reqs.size(), nr - idx));
+            nbytes = bytes_per_line * nlines;
           }
           if (nbytes == 0)
             break;
@@ -1206,30 +1298,42 @@ namespace LegionRuntime {
               case XferDes::XFER_GPU_TO_FB:
               {
                 //printf("[GPUtoFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
+                assert(req_size == nbytes);
                 GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*) requests[idx];
                 gpu_to_fb_req->src = src_buf_base + src_start;
                 gpu_to_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
-                gpu_to_fb_req->nbytes = req_size;
+                gpu_to_fb_req->src_stride = src_stride;
+                gpu_to_fb_req->dst_stride = dst_stride;
+                gpu_to_fb_req->nbytes_per_line = bytes_per_line;
+                gpu_to_fb_req->nlines = nlines;
                 gpu_to_fb_req->event.reset();
                 break;
               }
               case XferDes::XFER_GPU_FROM_FB:
               {
                 //printf("[GPUfromFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
+                assert(req_size == nbytes); 
                 GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*) requests[idx];
                 gpu_from_fb_req->src_offset = src_buf.alloc_offset + src_start;
                 gpu_from_fb_req->dst = dst_buf_base + dst_start;
-                gpu_from_fb_req->nbytes = req_size;
+                gpu_from_fb_req->src_stride = src_stride;
+                gpu_from_fb_req->dst_stride = dst_stride;
+                gpu_from_fb_req->nbytes_per_line = bytes_per_line;
+                gpu_from_fb_req->nlines = nlines;
                 gpu_from_fb_req->event.reset();
                 break;
               }
               case XferDes::XFER_GPU_IN_FB:
               {
                 //printf("[GPUinFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
+                assert(req_size == nbytes); 
                 GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*) requests[idx];
                 gpu_in_fb_req->src_offset = src_buf.alloc_offset + src_start;
                 gpu_in_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
-                gpu_in_fb_req->nbytes = req_size;
+                gpu_in_fb_req->src_stride = src_stride;
+                gpu_in_fb_req->dst_stride = dst_stride;
+                gpu_in_fb_req->nbytes_per_line = bytes_per_line;
+                gpu_in_fb_req->nlines = nlines;
                 gpu_in_fb_req->event.reset();
                 break;
               }
@@ -1238,7 +1342,10 @@ namespace LegionRuntime {
                 GPUpeerFBRequest* gpu_peer_fb_req = (GPUpeerFBRequest*) requests[idx];
                 gpu_peer_fb_req->src_offset = src_buf.alloc_offset + src_start;
                 gpu_peer_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
-                gpu_peer_fb_req->nbytes = req_size;
+                gpu_peer_fb_req->src_stride = src_stride;
+                gpu_peer_fb_req->dst_stride = dst_stride;
+                gpu_peer_fb_req->nbytes_per_line = bytes_per_line;
+                gpu_peer_fb_req->nlines = nlines;
                 gpu_peer_fb_req->dst_gpu = dst_gpu;
                 gpu_peer_fb_req->event.reset();
                 break;
@@ -1264,19 +1371,23 @@ namespace LegionRuntime {
         switch (kind) {
           case XferDes::XFER_GPU_TO_FB:
             offset = ((GPUtoFBRequest*)req)->src - src_buf_base;
-            size = ((GPUtoFBRequest*)req)->nbytes;
+            size = ((GPUtoFBRequest*)req)->nbytes_per_line
+                   * ((GPUtoFBRequest*)req)->nlines;
             break;
           case XferDes::XFER_GPU_FROM_FB:
             offset = ((GPUfromFBRequest*)req)->src_offset - src_buf.alloc_offset;
-            size = ((GPUfromFBRequest*)req)->nbytes;
+            size = ((GPUfromFBRequest*)req)->nbytes_per_line
+                   * ((GPUfromFBRequest*)req)->nlines;
             break;
           case XferDes::XFER_GPU_IN_FB:
             offset = ((GPUinFBRequest*)req)->src_offset - src_buf.alloc_offset;
-            size = ((GPUinFBRequest*)req)->nbytes;
+            size = ((GPUinFBRequest*)req)->nbytes_per_line
+                   * ((GPUinFBRequest*)req)->nlines;
             break;
           case XferDes::XFER_GPU_PEER_FB:
             offset = ((GPUpeerFBRequest*)req)->src_offset - src_buf.alloc_offset;
-            size = ((GPUpeerFBRequest*)req)->nbytes;
+            size = ((GPUpeerFBRequest*)req)->nbytes_per_line
+                   * ((GPUpeerFBRequest*)req)->nlines;
             break;
           default:
             assert(0);
@@ -1293,19 +1404,23 @@ namespace LegionRuntime {
         switch (kind) {
           case XferDes::XFER_GPU_TO_FB:
             offset = ((GPUtoFBRequest*)req)->dst_offset - dst_buf.alloc_offset;
-            size = ((GPUtoFBRequest*)req)->nbytes;
+            size = ((GPUtoFBRequest*)req)->nbytes_per_line
+                   * ((GPUtoFBRequest*)req)->nlines;
             break;
           case XferDes::XFER_GPU_FROM_FB:
             offset = ((GPUfromFBRequest*)req)->dst - dst_buf_base;
-            size = ((GPUfromFBRequest*)req)->nbytes;
+            size = ((GPUfromFBRequest*)req)->nbytes_per_line
+                   * ((GPUfromFBRequest*)req)->nlines;
             break;
           case XferDes::XFER_GPU_IN_FB:
             offset = ((GPUinFBRequest*)req)->dst_offset - dst_buf.alloc_offset;
-            size = ((GPUinFBRequest*)req)->nbytes;
+            size = ((GPUinFBRequest*)req)->nbytes_per_line
+                   * ((GPUinFBRequest*)req)->nlines;
             break;
           case XferDes::XFER_GPU_PEER_FB:
             offset = ((GPUpeerFBRequest*)req)->dst_offset - dst_buf.alloc_offset;
-            size = ((GPUpeerFBRequest*)req)->nbytes;
+            size = ((GPUpeerFBRequest*)req)->nbytes_per_line
+                   * ((GPUpeerFBRequest*)req)->nlines;
             break;
           default:
             assert(0);
@@ -1953,9 +2068,12 @@ namespace LegionRuntime {
             GPUtoFBRequest** gpu_to_fb_reqs = (GPUtoFBRequest**) requests;
             for (long i = 0; i < nr; i++) {
               //gpu_to_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_to_fb(gpu_to_fb_reqs[i]->dst_offset,
+              src_gpu->copy_to_fb_2d(gpu_to_fb_reqs[i]->dst_offset,
                                   gpu_to_fb_reqs[i]->src,
-                                  gpu_to_fb_reqs[i]->nbytes,
+                                  gpu_to_fb_reqs[i]->dst_stride,
+                                  gpu_to_fb_reqs[i]->src_stride,
+                                  gpu_to_fb_reqs[i]->nbytes_per_line,
+                                  gpu_to_fb_reqs[i]->nlines,
                                   &gpu_to_fb_reqs[i]->event
                                   /*Event::NO_EVENT,
                                   gpu_to_fb_reqs[i]->complete_event*/);
@@ -1968,9 +2086,12 @@ namespace LegionRuntime {
             GPUfromFBRequest** gpu_from_fb_reqs = (GPUfromFBRequest**) requests;
             for (long i = 0; i < nr; i++) {
               //gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_from_fb(gpu_from_fb_reqs[i]->dst,
+              src_gpu->copy_from_fb_2d(gpu_from_fb_reqs[i]->dst,
                                     gpu_from_fb_reqs[i]->src_offset,
-                                    gpu_from_fb_reqs[i]->nbytes,
+                                    gpu_from_fb_reqs[i]->dst_stride,
+                                    gpu_from_fb_reqs[i]->src_stride,
+                                    gpu_from_fb_reqs[i]->nbytes_per_line,
+                                    gpu_from_fb_reqs[i]->nlines,
                                     &gpu_from_fb_reqs[i]->event
                                     /*Event::NO_EVENT,
                                     gpu_from_fb_reqs[i]->complete_event*/);
@@ -1983,9 +2104,12 @@ namespace LegionRuntime {
             GPUinFBRequest** gpu_in_fb_reqs = (GPUinFBRequest**) requests;
             for (long i = 0; i < nr; i++) {
               //gpu_in_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_within_fb(gpu_in_fb_reqs[i]->dst_offset,
+              src_gpu->copy_within_fb_2d(gpu_in_fb_reqs[i]->dst_offset,
                                       gpu_in_fb_reqs[i]->src_offset,
-                                      gpu_in_fb_reqs[i]->nbytes,
+                                      gpu_in_fb_reqs[i]->dst_stride,
+                                      gpu_in_fb_reqs[i]->src_stride,
+                                      gpu_in_fb_reqs[i]->nbytes_per_line,
+                                      gpu_in_fb_reqs[i]->nlines,
                                       &gpu_in_fb_reqs[i]->event
                                       /*Event::NO_EVENT,
                                       gpu_in_fb_reqs[i]->complete_event*/);
@@ -1998,10 +2122,13 @@ namespace LegionRuntime {
             GPUpeerFBRequest** gpu_peer_fb_reqs = (GPUpeerFBRequest**) requests;
             for (long i = 0; i < nr; i++) {
               //gpu_peer_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_to_peer(gpu_peer_fb_reqs[i]->dst_gpu,
+              src_gpu->copy_to_peer_2d(gpu_peer_fb_reqs[i]->dst_gpu,
                                     gpu_peer_fb_reqs[i]->dst_offset,
                                     gpu_peer_fb_reqs[i]->src_offset,
-                                    gpu_peer_fb_reqs[i]->nbytes,
+                                    gpu_peer_fb_reqs[i]->dst_stride,
+                                    gpu_peer_fb_reqs[i]->src_stride,
+                                    gpu_peer_fb_reqs[i]->nbytes_per_line,
+                                    gpu_peer_fb_reqs[i]->nlines,
                                     &gpu_peer_fb_reqs[i]->event
                                     /*Event::NO_EVENT,
                                     gpu_peer_fb_reqs[i]->complete_event*/);

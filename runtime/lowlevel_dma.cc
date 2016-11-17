@@ -3299,7 +3299,11 @@ namespace LegionRuntime {
             bool mark_started = ((idx == 1) && (it == oas_by_inst->begin())) ? true : false;
             Buffer cur_buf;
             XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
-            XferOrder::Type order = idx == 1 ? XferOrder::DST_FIFO : XferOrder::SRC_FIFO;
+            XferOrder::Type order;
+            if (mem_path.size() == 2)
+              order = XferOrder::ANY_ORDER;
+            else
+              order = idx == 1 ? XferOrder::DST_FIFO : XferOrder::SRC_FIFO;
             RegionInstance hdf_inst;
             if (kind == XferDes::XFER_HDF_READ)
               hdf_inst = src_inst;
