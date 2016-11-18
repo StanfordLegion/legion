@@ -8602,13 +8602,13 @@ namespace Legion {
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
-        }
-        // Now ask the application what it wants to do
-        if (Runtime::registration_callback != NULL)
-        {
-          log_run.info("Invoking mapper registration callback function...");
-          (*Runtime::registration_callback)(machine, external, local_procs);
-          log_run.info("Completed execution of mapper registration callback");
+          // Now ask the application what it wants to do
+          if (Runtime::registration_callback != NULL)
+          {
+            log_run.info("Invoking mapper registration callback function...");
+            (*Runtime::registration_callback)(machine, external, local_procs);
+            log_run.info("Completed execution of mapper registration callback");
+          }
         }
       }
       else // This is the replay/debug path
@@ -12513,6 +12513,8 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      if (IS_NO_ACCESS(launcher.requirement))
+        return PhysicalRegion();
       ctx->begin_runtime_call();
       MapOp *map_op = get_available_map_op(true);
 #ifdef DEBUG_LEGION
@@ -12589,6 +12591,8 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      if (IS_NO_ACCESS(req))
+        return PhysicalRegion();
       ctx->begin_runtime_call();
       MapOp *map_op = get_available_map_op(true);
 #ifdef DEBUG_LEGION
@@ -12721,6 +12725,8 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
 #endif
+      if (region.impl == NULL)
+        return;
       ctx->begin_runtime_call();
 #ifdef DEBUG_LEGION
       if (ctx->is_leaf_context())
