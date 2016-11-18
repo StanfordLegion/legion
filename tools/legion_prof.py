@@ -2091,14 +2091,12 @@ class State(object):
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
                 if len(proc.tasks) > 0:
-                    data_tsv_file.write("proc_id " + str(p) + "\n")
                     base_level = proc.emit_tsv(data_tsv_file, base_level)
                     processor_levels[proc] = base_level
                     last_time = max(last_time, proc.full_range.stop_time)
         if show_channels:
             for c,channel in sorted(self.channels.iteritems()):
                 if len(channel.copies) > 0:
-                    data_tsv_file.write("chan_id " + str(p) + "\n")
                     base_level = channel.emit_tsv(data_tsv_file, base_level)
                     channel_levels[channel] = base_level
                     last_time = max(last_time, channel.last_time)

@@ -259,7 +259,7 @@ function getMouseOver(zoom) {
 
     descView.append("text")
       .attr("x", x)
-      .attr("y", d.level * thickness - 5)
+      .attr("y", levelMap[d.level].y * thickness - 5)
       .attr("text-anchor", anchor)
       .attr("class", "desc")
       .text(unescape(escape(title)));
@@ -282,7 +282,7 @@ function drawTimeline(targetSvg, data, zoom, scale, thickness) {
   timeline
     .attr("id", function(d) { return "block-" + d.id; })
     .attr("x", function(d) { return d.start * scale * zoom; })
-    .attr("y", function(d) { return d.level * thickness; })
+    .attr("y", function(d) { return levelMap[d.level].y * thickness; })
     .style("fill", function(d) {
       if (!searchEnabled ||
           searchRegex[currentPos].exec(d.title) == null)
@@ -290,13 +290,7 @@ function drawTimeline(targetSvg, data, zoom, scale, thickness) {
       else return "#ff0000";
     })
     .attr("width", function(d) {
-      if (searchEnabled && searchRegex[currentPos].exec(d.title) != null) {
-        return Math.max(min_feature_width, (d.end - d.start) * scale * zoom);
-      } else {
-        //console.log("d.end:", d.end, "d.start:", d.start);
-        return Math.max(min_feature_width, (d.end - d.start) * scale * zoom);
-        //return (d.end - d.start) * scale * zoom;
-      }
+      return Math.max(min_feature_width, (d.end - d.start) * scale * zoom);
     })
     .attr("stroke", "black")
     .attr("stroke-width", "0.5")
@@ -313,6 +307,60 @@ function drawTimeline(targetSvg, data, zoom, scale, thickness) {
   timeline.exit().remove();
 }
 
+function redraw() {
+
+  var timelineSvg = d3.select("#timeline").select("svg");
+  var timelineGroup = timelineSvg.select("g#timeline");
+  timelineGroup.selectAll("rect").remove();
+  filteredData = filterOnlyVisibleData(profilingData, zoom, scale);
+  drawTimeline(timelineGroup, filteredData, zoom, scale, thickness);
+
+  var processorSvg = d3.select("#processors").select("svg");
+
+  var names = processorSvg.selectAll("text");
+
+  names.
+    attr("y", function(d) { 
+      return levelMap[d.level].y * thickness + thickness;
+    })
+    .style("opacity", function(d) {
+      return (levelMap[d.level].enabled) ? 1 : 0.1
+    });
+
+  var lines = timelineSvg.select("g#lines").selectAll("line");
+  console.log(lines);
+
+  lines
+    .attr("y1", function(d) { return levelMap[d.level].y * thickness + thickness; })
+    .attr("y2", function(d) { return levelMap[d.level].y * thickness + thickness; })
+    .style("opacity", function(d) {
+      return (levelMap[d.level].enabled) ? 1 : 0.1
+    });
+}
+
+// This handler is called when you collapse/uncollapse a row in the
+// timeline
+function collapseHandler(d) {
+  if (d.enabled) {
+    for (var i = d.levelStart; i <= d.level; ++i) {
+      levelMap[i].enabled = false;
+    }
+    for (var i = d.levelStart; i < levelMap.length; ++i) {
+      levelMap[i].y -= d.height;
+    }
+  } else {
+    for (var i = d.levelStart; i <= d.level; ++i) {
+      levelMap[i].enabled = true;
+    }
+    for (var i = d.levelStart; i < levelMap.length; ++i) {
+      levelMap[i].y += d.height;
+    }
+  }
+  d.enabled = !d.enabled;
+  // redraw the timeline
+  redraw();
+}
+
 function drawProcessors(data) {
   var svg = d3.select("#processors").append("svg")
     .attr("width", margin_left)
@@ -325,7 +373,8 @@ function drawProcessors(data) {
   names.attr("text-anchor", "start")
     .attr("class", "processor")
     .attr("x", 0)
-    .attr("y", function(d) { return d.level * thickness + thickness; });
+    .attr("y", function(d) { return levelMap[d.level].y * thickness + thickness; })
+    .style("fill", "#000000");
 
   names.each(function(d) {
     var text = d3.select(this);
@@ -340,6 +389,15 @@ function drawProcessors(data) {
       text.append("tspan").text("==> " + target)
         .attr({x : 0, dy : 10});
     }
+    text.on({
+      "mouseover": function(d) {
+        d3.select(this).style("cursor", "pointer")
+      },
+      "mouseout": function(d) {
+        d3.select(this).style("cursor", "default")
+      },
+      "click": collapseHandler
+    });
   });
 
   var lines = timelineSvg
@@ -552,9 +610,9 @@ function binarySearch(data, level, time, useStart) {
   }
 }
 
-
 function filterOnlyVisibleData(profilingData, zoom, scale) {
   updateURL(zoom, scale);
+  console.log("filtering");
   var windowStart = $("#timeline").scrollLeft();
   var windowEnd = windowStart + $("#timeline").width();
   var filteredData = Array();
@@ -563,13 +621,14 @@ function filterOnlyVisibleData(profilingData, zoom, scale) {
   var min_feature_time = min_feature_width / f;
   var min_gap_time = min_gap_width / f;
   for (var level in items) {
+    if (levelMap[level].enabled == false) continue;
     // gap merging below assumes intervals are sorted - do that first
     //items[level].sort(function(a,b) { return a.start - b.start; });
 
     // We will use binary search to limit the following section
-    //var startIndex = binarySearch(items, level, windowStart/f, false);
-    //var endIndex = binarySearch(items, level, windowEnd/f, true);
-    for (var i = 0; i < indices[level].end; ++i) {
+    var startIndex = binarySearch(items, level, windowStart/f, false);
+    var endIndex = binarySearch(items, level, windowEnd/f, true);
+    for (var i = startIndex; i <= endIndex; ++i) {
       var d = items[level][i];
       var start = d.start;
       var end = d.end;
@@ -1027,14 +1086,32 @@ d3.tsv("legion_prof_ops.tsv",
   timeline_loader // callback once we load in the ops will be to load the timeline
 );
 
+var levelMap = [];
+
 d3.tsv(%s,
     function(d) {
       return {
-        level: d.level,
+        level: +d.level,
         processor: d.processor
       };
     },
     function(data) {
+      // TODO: Do this in legion_prof.py
+      data.sort(function(a,b) {return a.level - b.level});
+      var nextStart = 0;
+      data.forEach(function(proc) {
+        proc.levelStart = nextStart;
+        proc.currentStart = nextStart;
+        proc.height = proc.level - proc.levelStart;
+        proc.enabled = true;
+        nextStart = proc.level + 1;
+      });
+      for (var level = 0; level < nextStart; level++) {
+        levelMap[level] = {
+          y: level,
+          enabled: true
+        };
+      }
       profilingData.processors = data;
       drawProcessors(profilingData.processors);
     }
@@ -1078,5 +1155,3 @@ function parseURLParameters() {
 }
 
 hideLoaderIcon();
-
-
