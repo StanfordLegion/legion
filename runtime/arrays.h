@@ -76,6 +76,15 @@ namespace LegionRuntime {
 	return false; 
       }
 
+      CUDAPREFIX bool operator<(const Point<DIM>& other) const
+      {
+        for(unsigned i = 0; i < DIM; i++) {
+          if(x[i] < other.x[i]) return true;
+          else if (x[i] > other.x[i]) return false;
+        }
+        return false;
+      }
+
       CUDAPREFIX bool operator<=(const Point<DIM>& other) const
       { 
 	for(unsigned i = 0; i < DIM; i++) 
@@ -250,6 +259,15 @@ namespace LegionRuntime {
         for(unsigned i = 0; i < DIM; i++) 
 	  if(x[i] != other.x[i]) return true; 
 	return false;
+      }
+
+      CUDAPREFIX bool operator<(const Point<DIM>& other) const
+      {
+        for(unsigned i = 0; i < DIM; i++) {
+          if(x[i] < other.x[i]) return true;
+          else if (x[i] > other.x[i]) return false;
+        }
+        return false;
       }
 
       CUDAPREFIX bool operator<=(const Point<DIM> &other) const
