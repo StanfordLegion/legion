@@ -8345,9 +8345,11 @@ class GraphPrinter(object):
     def print_pdf_after_close(self, simplify):
         dot_file = self.close()
         pdf_file = self.name+".pdf"
+        #svg_file = self.name+".svg"
+        #png_file = self.name+".png"
         try:
             if simplify:
-                print("Simpliyfing dot file "+dot_file+" with tred...")
+                print("Simplifying dot file "+dot_file+" with tred...")
                 tred = subprocess.Popen(['tred', dot_file], stdout=subprocess.PIPE)
                 print("Done")
                 print("Invoking dot to generate file "+pdf_file+"...")
@@ -8358,6 +8360,8 @@ class GraphPrinter(object):
             else:
                 print("Invoking dot to generate file "+pdf_file+"...")
                 subprocess.check_call(['dot', '-Tpdf', '-o', pdf_file, dot_file])
+                #subprocess.check_call(['dot', '-Tsvg', '-o', svg_file, dot_file])
+                #subprocess.check_call(['dot', '-Tpng', '-o', png_file, dot_file])
         except:
             print("WARNING: DOT failure, image for graph "+str(self.name)+" not generated")
             subprocess.call(['rm', '-f', 'core', pdf_file])
@@ -9697,18 +9701,18 @@ class State(object):
         for op in self.ops.itervalues():
             if not op.physical_incoming:
                 topological_sorter.visit_node(op)
-        for copy in self.ops.itervalues():
+        for copy in self.copies.itervalues():
             if not copy.physical_incoming:
-                topological_sorter.visit_node(op)
+                topological_sorter.visit_node(copy)
         for fill in self.fills.itervalues():
             if not fill.physical_incoming:
                 topological_sorter.visit_node(fill)
-        # Now that we have everything sorter based on topology
+        # Now that we have everything sorted based on topology
         # Do the simplification in order
         count = 0;
         for src in topological_sorter.order:
             if self.verbose:
-                print('Simplifying node %d of %d' % (count, len(topological_sorter.order)))
+                print('Simplifying node %s %d of %d' % (str(src), count, len(topological_sorter.order)))
                 count += 1
             if src.physical_outgoing is None:
                 continue
