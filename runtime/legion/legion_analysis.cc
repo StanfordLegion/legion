@@ -4437,10 +4437,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::record_advance_versions(const FieldMask &version_mask,
+                                                InnerContext *context,
                                                 VersionInfo &version_info,
                                                 std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
+      // See if we have been assigned
+      if (context != current_context)
+      {
+        const AddressSpaceID local_space = 
+          node->context->runtime->address_space;
+        owner_space = context->get_version_owner(node, local_space);
+        is_owner = (owner_space == local_space);
+        current_context = context;
+      }
       // See if we are the owner
       if (!is_owner)
       {

@@ -896,6 +896,7 @@ namespace Legion {
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events);
       void record_advance_versions(const FieldMask &version_mask,
+                                   InnerContext *context,
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events);
       void compute_advance_split_mask(VersionInfo &version_info,
