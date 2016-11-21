@@ -2055,10 +2055,12 @@ class State(object):
                                        show_channels, show_instances, force):
         self.assign_colors()
 
-        html_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "legion_prof.html.template")
-        js_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "timeline.js.template")
+        html_src_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+                "legion_prof_files","index.html")
+        js_src_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+                "legion_prof_files", "js", "timeline.js.template")
+        util_src_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+                "legion_prof_files", "js", "util.js")
 
         # the output directory will either be overwritten, or we will find
         # a new unique name to create new logs
@@ -2072,14 +2074,12 @@ class State(object):
         data_tsv_file_name = os.path.join(output_dirname, "legion_prof_data.tsv")
         processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
         html_file_name = os.path.join(output_dirname, "index.html")
-        js_file_name = os.path.join(output_dirname, "timeline.js")
+        js_file_name = os.path.join(output_dirname, "js", "timeline.js")
+        util_file_name = os.path.join(output_dirname, "js", "util.js")
         ops_file_name = os.path.join(output_dirname, "legion_prof_ops.tsv")
         print 'Generating interactive visualization files in directory ' + output_dirname
 
         os.mkdir(output_dirname)
-        template_file = open(js_template_file_name, "r")
-        template = template_file.read()
-        template_file.close()
 
         processor_levels = {}
         channel_levels = {}
@@ -2127,12 +2127,18 @@ class State(object):
                 processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(memory)))
         processor_tsv_file.close()
 
+        os.mkdir(os.path.join(output_dirname, "js"))
+
+        js_src_file = open(js_src_file_name, "r")
+        timeline_js = js_src_file.read()
+        js_src_file.close()
         js_file = open(js_file_name, "w")
-        js_file.write(template % (last_time, base_level + 1,
-                                    repr(os.path.basename(data_tsv_file_name)),
-                                    repr(os.path.basename(processor_tsv_file_name))))
+        js_file.write(timeline_js % (last_time, base_level + 1))
         js_file.close()
-        shutil.copyfile(html_template_file_name, html_file_name)
+
+        shutil.copyfile(util_src_file_name, util_file_name)
+
+        shutil.copyfile(html_src_file_name, html_file_name)
 
 def usage():
     print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'
