@@ -244,6 +244,28 @@ namespace Realm {
       GPUCompletionNotification *notification;
     };
 
+    class GPUMemcpy3D : public GPUMemcpy {
+    public:
+      GPUMemcpy3D(GPU *_gpu,
+                  void *_dst, const void *_src,
+                  off_t _dst_stride, off_t _src_stride,
+                  off_t _dst_height, off_t _src_height,
+                  size_t _bytes, size_t _height, size_t _depth,
+                  GPUMemcpyKind _kind,
+                  GPUCompletionNotification *_notification);
+
+      virtual ~GPUMemcpy3D(void);
+
+    public:
+      virtual void execute(GPUStream *stream);
+    protected:
+      void *dst;
+      const void *src;
+      off_t dst_stride, src_stride, dst_height, src_height;
+      size_t bytes, height, depth;
+      GPUCompletionNotification *notification;
+    };
+
     // a class that represents a CUDA stream and work associated with 
     //  it (e.g. queued copies, events in flight)
     // a stream is also associated with a GPUWorker that it will register
@@ -395,14 +417,32 @@ namespace Realm {
                          size_t bytes, size_t lines,
 			 GPUCompletionNotification *notification = 0);
 
+      void copy_to_fb_3d(off_t dst_offset, const void *src,
+                         off_t dst_stride, off_t src_stride,
+                         off_t dst_height, off_t src_height,
+                         size_t bytes, size_t height, size_t depth,
+			 GPUCompletionNotification *notification = 0);
+
       void copy_from_fb_2d(void *dst, off_t src_offset,
                            off_t dst_stride, off_t src_stride,
                            size_t bytes, size_t lines,
 			   GPUCompletionNotification *notification = 0);
 
+      void copy_from_fb_3d(void *dst, off_t src_offset,
+                           off_t dst_stride, off_t src_stride,
+                           off_t dst_height, off_t src_height,
+                           size_t bytes, size_t height, size_t depth,
+			   GPUCompletionNotification *notification = 0);
+
       void copy_within_fb_2d(off_t dst_offset, off_t src_offset,
                              off_t dst_stride, off_t src_stride,
                              size_t bytes, size_t lines,
+			     GPUCompletionNotification *notification = 0);
+
+      void copy_within_fb_3d(off_t dst_offset, off_t src_offset,
+                             off_t dst_stride, off_t src_stride,
+                             off_t dst_height, off_t src_height,
+                             size_t bytes, size_t height, size_t depth,
 			     GPUCompletionNotification *notification = 0);
 
       void copy_to_peer(GPU *dst, off_t dst_offset, 
@@ -412,6 +452,12 @@ namespace Realm {
       void copy_to_peer_2d(GPU *dst, off_t dst_offset, off_t src_offset,
                            off_t dst_stride, off_t src_stride,
                            size_t bytes, size_t lines,
+			   GPUCompletionNotification *notification = 0);
+
+      void copy_to_peer_3d(GPU *dst, off_t dst_offset, off_t src_offset,
+                           off_t dst_stride, off_t src_stride,
+                           off_t dst_height, off_t src_height,
+                           size_t bytes, size_t height, size_t depth,
 			   GPUCompletionNotification *notification = 0);
 
       void copy_to_fb(off_t dst_offset, const void *src,

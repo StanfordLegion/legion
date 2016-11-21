@@ -388,6 +388,79 @@ namespace Realm {
                    dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind);
     }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GPUMemcpy3D
+    GPUMemcpy3D::GPUMemcpy3D(GPU *_gpu,
+                             void *_dst, const void *_src,
+                             off_t _dst_stride, off_t _src_stride,
+                             off_t _dst_height, off_t _src_height,
+                             size_t _bytes, size_t _height, size_t _depth,
+                             GPUMemcpyKind _kind,
+                             GPUCompletionNotification *_notification)
+       : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
+	dst_stride((_dst_stride < (off_t)_bytes) ? _bytes : _dst_stride), 
+	src_stride((_src_stride < (off_t)_bytes) ? _bytes : _src_stride),
+        dst_height((_dst_height < (off_t)_height) ? _height : _dst_height),
+        src_height((_src_height < (off_t)_height) ? _height : _src_height),
+	bytes(_bytes), height(_height), depth(_depth),
+        notification(_notification)
+    {}
+
+    GPUMemcpy3D::~GPUMemcpy3D(void)
+    {}
+    
+    void GPUMemcpy3D::execute(GPUStream *stream)
+    {
+      log_gpudma.info("gpu memcpy 3d: dst=%p src=%p"
+                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %id"
+                      "bytes=%lu height=%lu depth=%lu kind=%d",
+                      dst, src, (long)dst_stride, (long)src_stride,
+                      (long)dst_height, (long)src_height, bytes, height,
+                      depth, kind);
+      CUDA_MEMCPY3D copy_info;
+      if (kind == GPU_MEMCPY_PEER_TO_PEER) {
+        // If we're doing peer to peer, just let unified memory it deal with it
+        copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+        copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
+      } else {
+        // otherwise we know the answers here 
+        copy_info.srcMemoryType = (kind == GPU_MEMCPY_HOST_TO_DEVICE) ?
+          CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+        copy_info.dstMemoryType = (kind == GPU_MEMCPY_DEVICE_TO_HOST) ? 
+          CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+      }
+      copy_info.srcDevice = (CUdeviceptr)src;
+      copy_info.srcHost = src;
+      copy_info.srcPitch = src_stride;
+      copy_info.srcHeight = src_height;
+      copy_info.srcY = 0;
+      copy_info.srcZ = 0;
+      copy_info.srcXInBytes = 0;
+      copy_info.srcLOD = 0;
+      copy_info.dstDevice = (CUdeviceptr)dst;
+      copy_info.dstHost = dst;
+      copy_info.dstPitch = dst_stride;
+      copy_info.dstHeight = dst_height;
+      copy_info.dstY = 0;
+      copy_info.dstZ = 0;
+      copy_info.dstXInBytes = 0;
+      copy_info.dstLOD = 0;
+      copy_info.WidthInBytes = bytes;
+      copy_info.Height = height;
+      copy_info.Depth = depth;
+      CHECK_CU( cuMemcpy3DAsync(&copy_info, stream->get_stream()) );
+
+      if(notification)
+        stream->add_notification(notification);
+
+       log_gpudma.info("gpu memcpy 3d complete: dst=%p src=%p"
+                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %id"
+                      "bytes=%ld height=%ld depth=%ld kind=%d",
+                      dst, src, (long)dst_stride, (long)src_stride,
+                      (long)dst_height, (long)src_height, bytes, height,
+                      depth, kind);
+    }
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -1168,6 +1241,21 @@ namespace Realm {
       host_to_device_stream->add_copy(copy);
     }
 
+    void GPU::copy_to_fb_3d(off_t dst_offset, const void *src,
+                            off_t dst_stride, off_t src_stride,
+                            off_t dst_height, off_t src_height,
+                            size_t bytes, size_t height, size_t depth,
+                            GPUCompletionNotification *notification /* = 0*/)
+    {
+      GPUMemcpy *copy = new GPUMemcpy3D(this,
+					(void *)(fbmem->base + dst_offset),
+					src, dst_stride, src_stride,
+                                        dst_height, src_height,
+                                        bytes, height, depth,
+					GPU_MEMCPY_HOST_TO_DEVICE, notification);
+      host_to_device_stream->add_copy(copy);
+    }
+
     void GPU::copy_from_fb_2d(void *dst, off_t src_offset,
 			      off_t dst_stride, off_t src_stride,
 			      size_t bytes, size_t lines,
@@ -1176,6 +1264,21 @@ namespace Realm {
       GPUMemcpy *copy = new GPUMemcpy2D(this, dst,
 					(const void *)(fbmem->base + src_offset),
 					dst_stride, src_stride, bytes, lines,
+					GPU_MEMCPY_DEVICE_TO_HOST, notification);
+      device_to_host_stream->add_copy(copy);
+    }
+
+    void GPU::copy_from_fb_3d(void *dst, off_t src_offset,
+                              off_t dst_stride, off_t src_stride,
+                              off_t dst_height, off_t src_height,
+                              size_t bytes, size_t height, size_t depth,
+                              GPUCompletionNotification *notification /*= 0*/)
+    {
+      GPUMemcpy *copy = new GPUMemcpy3D(this, dst,
+					(const void *)(fbmem->base + src_offset),
+					dst_stride, src_stride,
+                                        dst_height, src_height,
+                                        bytes, height, depth,
 					GPU_MEMCPY_DEVICE_TO_HOST, notification);
       device_to_host_stream->add_copy(copy);
     }
@@ -1189,6 +1292,22 @@ namespace Realm {
 					(void *)(fbmem->base + dst_offset),
 					(const void *)(fbmem->base + src_offset),
 					dst_stride, src_stride, bytes, lines,
+					GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
+      device_to_device_stream->add_copy(copy);
+    }
+
+    void GPU::copy_within_fb_3d(off_t dst_offset, off_t src_offset,
+                                off_t dst_stride, off_t src_stride,
+                                off_t dst_height, off_t src_height,
+                                size_t bytes, size_t height, size_t depth,
+                                GPUCompletionNotification *notification /*= 0*/)
+    {
+      GPUMemcpy *copy = new GPUMemcpy3D(this,
+					(void *)(fbmem->base + dst_offset),
+					(const void *)(fbmem->base + src_offset),
+					dst_stride, src_stride,
+                                        dst_height, src_height,
+                                        bytes, height, depth,
 					GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
       device_to_device_stream->add_copy(copy);
     }
@@ -1214,6 +1333,22 @@ namespace Realm {
 					(void *)(dst->fbmem->base + dst_offset),
 					(const void *)(fbmem->base + src_offset),
 					dst_stride, src_stride, bytes, lines,
+					GPU_MEMCPY_PEER_TO_PEER, notification);
+      peer_to_peer_stream->add_copy(copy);
+    }
+
+    void GPU::copy_to_peer_3d(GPU *dst, off_t dst_offset, off_t src_offset,
+                              off_t dst_stride, off_t src_stride,
+                              off_t dst_height, off_t src_height,
+                              size_t bytes, size_t height, size_t depth,
+                              GPUCompletionNotification *notification /*= 0*/)
+    {
+      GPUMemcpy *copy = new GPUMemcpy3D(this,
+					(void *)(dst->fbmem->base + dst_offset),
+					(const void *)(fbmem->base + src_offset),
+					dst_stride, src_stride,
+                                        dst_height, src_height,
+                                        bytes, height, depth,
 					GPU_MEMCPY_PEER_TO_PEER, notification);
       peer_to_peer_stream->add_copy(copy);
     }

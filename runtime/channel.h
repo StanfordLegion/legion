@@ -232,7 +232,8 @@ namespace LegionRuntime{
       const char* src;
       off_t dst_offset;
       off_t src_stride, dst_stride;
-      size_t nbytes_per_line, nlines;
+      off_t src_height, dst_height;
+      size_t nbytes_per_line, height, depth;
       GPUCompletionEvent event;
     };
 
@@ -241,7 +242,8 @@ namespace LegionRuntime{
       off_t src_offset;
       char* dst;
       off_t src_stride, dst_stride;
-      size_t nbytes_per_line, nlines;
+      off_t src_height, dst_height;
+      size_t nbytes_per_line, height, depth;
       GPUCompletionEvent event;
     };
 
@@ -249,7 +251,8 @@ namespace LegionRuntime{
     public:
       off_t src_offset, dst_offset;
       off_t src_stride, dst_stride;
-      size_t nbytes_per_line, nlines;
+      off_t src_height, dst_height;
+      size_t nbytes_per_line, height, depth;
       GPUCompletionEvent event;
     };
 
@@ -257,7 +260,8 @@ namespace LegionRuntime{
     public:
       off_t src_offset, dst_offset;
       off_t src_stride, dst_stride;
-      size_t nbytes_per_line, nlines;
+      off_t src_height, dst_height;
+      size_t nbytes_per_line, height, depth;
       GPU* dst_gpu;
       GPUCompletionEvent event;
     };
@@ -406,6 +410,14 @@ namespace LegionRuntime{
       bool simple_get_request_2d(off_t &src_start, off_t &dst_start,
                                  off_t &src_stride, off_t &dst_stride,
                                  size_t &nbytes_per_line, size_t &nlines,
+                                 Layouts::GenericLayoutIterator<DIM>* li,
+                                 unsigned &offset_idx, coord_t available_slots);
+
+      template<unsigned DIM>
+      bool simple_get_request_3d(off_t &src_start, off_t &dst_start,
+                                 off_t &src_stride, off_t &dst_stride,
+                                 off_t &src_height, off_t &dst_height,
+                                 size_t &nbytes_per_line, size_t &height, size_t &depth,
                                  Layouts::GenericLayoutIterator<DIM>* li,
                                  unsigned &offset_idx, coord_t available_slots);
 

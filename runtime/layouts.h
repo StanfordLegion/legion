@@ -380,6 +380,108 @@ namespace LegionRuntime {
         return subtotal;
       }
 
+      // TODO: currently only support FortranArrayLinearization
+      coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx,
+                               coord_t &src_stride, coord_t &dst_stride,
+                               off_t &src_height, off_t &dst_height,
+                               size_t &items_per_line, size_t &height, size_t &depth)
+      {
+        Rect<DIM> r, src_subrect, dst_subrect;
+        Point<1> src_strides[DIM], dst_strides[DIM];
+        coord_t subtotal = 1;
+        coord_t idx = cur_idx;
+        for (unsigned i = 0; i < DIM; i++) {
+          r.lo.x[i] = idx % orig_rect.dim_size(i) + orig_rect.lo.x[i];
+          idx = idx / orig_rect.dim_size(i);
+        }
+        r.hi = orig_rect.hi;
+        src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
+        dst_idx = dst_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
+
+        for (unsigned j = 0; j < DIM; j++) {
+          if (src_strides[j][0] == subtotal && dst_strides[j][0] == subtotal) {
+            subtotal = subtotal * imin(src_subrect.dim_size(j), dst_subrect.dim_size(j));
+          }
+        }
+
+        // see if we can use 3D/2D
+        assert(DIM == 3);
+        if (iter_order == XferOrder::SRC_FIFO) {
+          if (src_strides[1][0] == subtotal
+          && src_strides[2][0] == subtotal * src_subrect.dim_size(1)){
+//          &&(dst_strides[2][0] == subtotal * dst_strides[1][0])) {
+            src_stride = src_strides[1][0];
+            dst_stride = dst_strides[1][0];
+            src_height = src_strides[2][0] / src_strides[1][0];
+            dst_height = dst_strides[2][0] / dst_strides[1][0];
+            items_per_line = subtotal;
+            height = src_subrect.dim_size(1);
+            depth = src_subrect.dim_size(2);
+            return items_per_line * height * depth;
+          }
+          for (unsigned i = 0; i < DIM; i++)
+            if (src_strides[i][0] == subtotal) {
+              src_stride = src_strides[i][0];
+              dst_stride = dst_strides[i][0];
+              items_per_line = subtotal;
+              height = imin(src_subrect.dim_size(i), dst_subrect.dim_size(i));
+              src_height = dst_height = height;
+              depth = 1;
+              return items_per_line * height;
+            }
+        } else if (iter_order == XferOrder::DST_FIFO) {
+          if (dst_strides[1][0] == subtotal
+          && dst_strides[2][0] == subtotal * dst_subrect.dim_size(1)){
+//          &&(dst_strides[2][0] == subtotal * dst_strides[1][0])) {
+            src_stride = src_strides[1][0];
+            dst_stride = dst_strides[1][0];
+            src_height = src_strides[2][0] / src_strides[1][0];
+            dst_height = dst_strides[2][0] / dst_strides[1][0];
+            items_per_line = subtotal;
+            height = dst_subrect.dim_size(1);
+            depth = dst_subrect.dim_size(2);
+            return items_per_line * height * depth;
+          }
+          for (unsigned i = 0; i < DIM; i++)
+            if (dst_strides[i][0] == subtotal) {
+              src_stride = src_strides[i][0];
+              dst_stride = dst_strides[i][0];
+              items_per_line = subtotal;
+              height = imin(src_subrect.dim_size(i), dst_subrect.dim_size(i));
+              src_height = dst_height = height;
+              depth = 1;
+              return items_per_line * height;
+            }
+        } else if (iter_order == XferOrder::ANY_ORDER) {
+          src_stride = src_strides[1][0];
+          dst_stride = dst_strides[1][0];
+          src_height = src_strides[2][0] / src_strides[1][0];
+          dst_height = dst_strides[2][0] / dst_strides[1][0];
+          items_per_line = subtotal;
+          height = dst_subrect.dim_size(1);
+          depth = dst_subrect.dim_size(2);
+          return items_per_line * height * depth;
+          for (unsigned i = 0; i < DIM; i++)
+            if (dst_strides[i][0] >= subtotal) {
+              src_stride = src_strides[i][0];
+              dst_stride = dst_strides[i][0];
+              items_per_line = subtotal;
+              height = imin(src_subrect.dim_size(i), dst_subrect.dim_size(i));
+              src_height = dst_height = height;
+              depth = 1;
+              return items_per_line * height;
+            }
+        }
+
+        src_stride = subtotal;
+        dst_stride = subtotal;
+        src_height = 1;
+        dst_height = 1;
+        items_per_line = subtotal;
+        height = 1;
+        depth = 1;
+        return subtotal;
+      }
       void move(int steps)
       {
         cur_idx += steps;

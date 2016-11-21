@@ -311,6 +311,94 @@ namespace LegionRuntime {
         return true;
       }
 
+      template<unsigned DIM>
+      bool XferDes::simple_get_request_3d(off_t &src_start,
+                                          off_t &dst_start,
+                                          off_t &src_stride_bytes,
+                                          off_t &dst_stride_bytes,
+                                          off_t &src_height,
+                                          off_t &dst_height,
+                                          size_t &nbytes_per_line,
+                                          size_t &height,
+                                          size_t &depth,
+                                  Layouts::GenericLayoutIterator<DIM>* li,
+                                          unsigned &offset_idx,
+                                          coord_t available_slots)
+      {
+        assert(offset_idx < oas_vec.size());
+        assert(li->any_left());
+        nbytes_per_line = 0;
+        coord_t src_idx, dst_idx;
+        coord_t src_stride, dst_stride;
+        size_t nitems_per_line;
+        // cannot exceed the max_req_size
+        coord_t todo = min(max_req_size / oas_vec[offset_idx].size,
+                           li->continuous_steps(src_idx, dst_idx,
+                                                src_stride, dst_stride,
+                                                src_height, dst_height,
+                                                nitems_per_line, height, depth));
+        coord_t src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
+        coord_t dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
+        todo = min(todo, min(src_in_block, dst_in_block));
+        if (todo == 0)
+          return false;
+        bool scatter_src_ib = false, scatter_dst_ib = false;
+        // make sure we have source data ready
+        // 2d doesn't support scattering ib
+        if (src_buf.is_ib) {
+          src_start = calc_mem_loc_ib(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                      src_buf.elmt_size, src_buf.block_size, domain.get_volume(), src_idx);
+          todo = min(todo, max(0, pre_bytes_write - src_start) / oas_vec[offset_idx].size);
+          scatter_src_ib = scatter_ib(src_start, todo * oas_vec[offset_idx].size, src_buf.buf_size);
+        } else {
+	  src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
+                                   src_buf.elmt_size, src_buf.block_size, src_idx);
+        }
+        if (todo  == 0)
+          return false;
+        // 2d doesn't support scattering ib
+        if (dst_buf.is_ib) {
+          dst_start = calc_mem_loc_ib(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                      dst_buf.elmt_size, dst_buf.block_size, domain.get_volume(), dst_idx);
+          todo = min(todo, max(0, next_bytes_read + dst_buf.buf_size - dst_start) / oas_vec[offset_idx].size);
+          scatter_dst_ib = scatter_ib(dst_start, todo * oas_vec[offset_idx].size, dst_buf.buf_size);
+        } else {
+          dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
+                                   dst_buf.elmt_size, dst_buf.block_size, dst_idx);
+        }
+        if (todo == 0)
+          return false;
+        if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
+        ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
+          return false;
+
+        if (scatter_src_ib || scatter_dst_ib) {
+          // We are scattering ib, fallback to 1d case
+          todo = min(todo, nitems_per_line);
+        }
+        if ((size_t)todo <= nitems_per_line) {
+          // fallback to 1d case
+          nitems_per_line = (size_t)todo;
+          height = 1;
+          depth = 1;
+        } else if ((size_t)todo <= nitems_per_line * height){
+          height = todo / nitems_per_line;
+          depth = 1;
+        } else {
+          depth = todo / (nitems_per_line * height);
+        }
+        todo = nitems_per_line * height * depth;
+        nbytes_per_line = nitems_per_line * oas_vec[offset_idx].size;
+        src_stride_bytes = src_stride * oas_vec[offset_idx].size;
+        dst_stride_bytes = dst_stride * oas_vec[offset_idx].size;
+        li->move(todo);
+        if (!li->any_left()) {
+          li->reset();
+          offset_idx ++;
+        }
+        return true;
+      }
+
 #ifdef DEADCODE_OLD_GENERIC_ITERATOR
       template<unsigned DIM>
       bool XferDes::simple_get_request(
@@ -1261,7 +1349,8 @@ namespace LegionRuntime {
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           off_t src_stride, dst_stride;
-          size_t nbytes, bytes_per_line = 0, nlines = 1;
+          off_t src_height, dst_height;
+          size_t nbytes, bytes_per_line = 0, height = 1, depth = 1;
           if (DIM == 0) {
             simple_get_mask_request(src_start, dst_start,
                                     bytes_per_line, me,
@@ -1270,13 +1359,25 @@ namespace LegionRuntime {
             nbytes = bytes_per_line;
             src_stride = nbytes;
             dst_stride = nbytes;
+            src_height = height;
+            dst_height = height;
+          } else if (DIM >= 3) {
+            simple_get_request_3d<DIM>(src_start, dst_start,
+                                       src_stride, dst_stride,
+                                       src_height, dst_height,
+                                       bytes_per_line, height, depth,
+                                       li, offset_idx, 
+                                       min(available_reqs.size(), nr - idx));
+            nbytes = bytes_per_line * height * depth;
           } else {
             simple_get_request_2d<DIM>(src_start, dst_start,
                                        src_stride, dst_stride,
-                                       bytes_per_line, nlines,
-                                       li, offset_idx, 
+                                       bytes_per_line, height,
+                                       li, offset_idx,
                                        min(available_reqs.size(), nr - idx));
-            nbytes = bytes_per_line * nlines;
+            nbytes = bytes_per_line * height;
+            src_height = height;
+            dst_height = height;
           }
           if (nbytes == 0)
             break;
@@ -1304,8 +1405,11 @@ namespace LegionRuntime {
                 gpu_to_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
                 gpu_to_fb_req->src_stride = src_stride;
                 gpu_to_fb_req->dst_stride = dst_stride;
+                gpu_to_fb_req->src_height = src_height;
+                gpu_to_fb_req->dst_height = dst_height;
                 gpu_to_fb_req->nbytes_per_line = bytes_per_line;
-                gpu_to_fb_req->nlines = nlines;
+                gpu_to_fb_req->height = height;
+                gpu_to_fb_req->depth = depth;
                 gpu_to_fb_req->event.reset();
                 break;
               }
@@ -1318,8 +1422,11 @@ namespace LegionRuntime {
                 gpu_from_fb_req->dst = dst_buf_base + dst_start;
                 gpu_from_fb_req->src_stride = src_stride;
                 gpu_from_fb_req->dst_stride = dst_stride;
+                gpu_from_fb_req->src_height = src_height;
+                gpu_from_fb_req->dst_height = dst_height;
                 gpu_from_fb_req->nbytes_per_line = bytes_per_line;
-                gpu_from_fb_req->nlines = nlines;
+                gpu_from_fb_req->height = height;
+                gpu_from_fb_req->depth = depth;
                 gpu_from_fb_req->event.reset();
                 break;
               }
@@ -1332,8 +1439,11 @@ namespace LegionRuntime {
                 gpu_in_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
                 gpu_in_fb_req->src_stride = src_stride;
                 gpu_in_fb_req->dst_stride = dst_stride;
+                gpu_in_fb_req->src_height = src_height;
+                gpu_in_fb_req->dst_height = dst_height;
                 gpu_in_fb_req->nbytes_per_line = bytes_per_line;
-                gpu_in_fb_req->nlines = nlines;
+                gpu_in_fb_req->height = height;
+                gpu_in_fb_req->depth = depth;
                 gpu_in_fb_req->event.reset();
                 break;
               }
@@ -1344,8 +1454,11 @@ namespace LegionRuntime {
                 gpu_peer_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
                 gpu_peer_fb_req->src_stride = src_stride;
                 gpu_peer_fb_req->dst_stride = dst_stride;
+                gpu_peer_fb_req->src_height = src_height;
+                gpu_peer_fb_req->dst_height = dst_height;
                 gpu_peer_fb_req->nbytes_per_line = bytes_per_line;
-                gpu_peer_fb_req->nlines = nlines;
+                gpu_peer_fb_req->height = height;
+                gpu_peer_fb_req->depth = depth;
                 gpu_peer_fb_req->dst_gpu = dst_gpu;
                 gpu_peer_fb_req->event.reset();
                 break;
@@ -1370,25 +1483,37 @@ namespace LegionRuntime {
         uint64_t size;
         switch (kind) {
           case XferDes::XFER_GPU_TO_FB:
-            offset = ((GPUtoFBRequest*)req)->src - src_buf_base;
-            size = ((GPUtoFBRequest*)req)->nbytes_per_line
-                   * ((GPUtoFBRequest*)req)->nlines;
+          {
+            GPUtoFBRequest* gpu_req = (GPUtoFBRequest*) req;
+            offset = gpu_req->src - src_buf_base;
+            size = gpu_req->nbytes_per_line
+                   * gpu_req->height * gpu_req->depth;
             break;
+          }
           case XferDes::XFER_GPU_FROM_FB:
-            offset = ((GPUfromFBRequest*)req)->src_offset - src_buf.alloc_offset;
-            size = ((GPUfromFBRequest*)req)->nbytes_per_line
-                   * ((GPUfromFBRequest*)req)->nlines;
+          {
+            GPUfromFBRequest* gpu_req = (GPUfromFBRequest*) req;
+            offset = gpu_req->src_offset - src_buf.alloc_offset;
+            size = gpu_req->nbytes_per_line
+                   * gpu_req->height * gpu_req->depth;
             break;
+          }
           case XferDes::XFER_GPU_IN_FB:
-            offset = ((GPUinFBRequest*)req)->src_offset - src_buf.alloc_offset;
-            size = ((GPUinFBRequest*)req)->nbytes_per_line
-                   * ((GPUinFBRequest*)req)->nlines;
+          {
+            GPUinFBRequest* gpu_req = (GPUinFBRequest*) req;
+            offset = gpu_req->src_offset - src_buf.alloc_offset;
+            size = gpu_req->nbytes_per_line
+                   * gpu_req->height * gpu_req->depth;
             break;
+          }
           case XferDes::XFER_GPU_PEER_FB:
-            offset = ((GPUpeerFBRequest*)req)->src_offset - src_buf.alloc_offset;
-            size = ((GPUpeerFBRequest*)req)->nbytes_per_line
-                   * ((GPUpeerFBRequest*)req)->nlines;
+          {
+            GPUpeerFBRequest* gpu_req = (GPUpeerFBRequest*) req;
+            offset = gpu_req->src_offset - src_buf.alloc_offset;
+            size = gpu_req->nbytes_per_line
+                   * gpu_req->height * gpu_req->depth;
             break;
+          }
           default:
             assert(0);
         }
@@ -1403,25 +1528,37 @@ namespace LegionRuntime {
         uint64_t size;
         switch (kind) {
           case XferDes::XFER_GPU_TO_FB:
-            offset = ((GPUtoFBRequest*)req)->dst_offset - dst_buf.alloc_offset;
-            size = ((GPUtoFBRequest*)req)->nbytes_per_line
-                   * ((GPUtoFBRequest*)req)->nlines;
+          {
+            GPUtoFBRequest* gpu_req = (GPUtoFBRequest*) req;
+            offset = gpu_req->dst_offset - dst_buf.alloc_offset;
+            size = gpu_req->nbytes_per_line
+                   * gpu_req->height * gpu_req->depth;
             break;
+          }
           case XferDes::XFER_GPU_FROM_FB:
-            offset = ((GPUfromFBRequest*)req)->dst - dst_buf_base;
-            size = ((GPUfromFBRequest*)req)->nbytes_per_line
-                   * ((GPUfromFBRequest*)req)->nlines;
+          {
+            GPUfromFBRequest* gpu_req = (GPUfromFBRequest*) req;
+            offset = gpu_req->dst - dst_buf_base;
+            size = gpu_req->nbytes_per_line
+                   * gpu_req->height * gpu_req->depth;
             break;
+          }
           case XferDes::XFER_GPU_IN_FB:
-            offset = ((GPUinFBRequest*)req)->dst_offset - dst_buf.alloc_offset;
-            size = ((GPUinFBRequest*)req)->nbytes_per_line
-                   * ((GPUinFBRequest*)req)->nlines;
+          {
+            GPUinFBRequest* gpu_req = (GPUinFBRequest*) req;
+            offset = gpu_req->dst_offset - dst_buf.alloc_offset;
+            size = gpu_req->nbytes_per_line
+                   * gpu_req->height * gpu_req->depth;
             break;
+          }
           case XferDes::XFER_GPU_PEER_FB:
-            offset = ((GPUpeerFBRequest*)req)->dst_offset - dst_buf.alloc_offset;
-            size = ((GPUpeerFBRequest*)req)->nbytes_per_line
-                   * ((GPUpeerFBRequest*)req)->nlines;
+          {
+            GPUpeerFBRequest* gpu_req = (GPUpeerFBRequest*) req;
+            offset = gpu_req->dst_offset - dst_buf.alloc_offset;
+            size = gpu_req->nbytes_per_line
+                   * gpu_req->height * gpu_req->depth;
             break;
+          }
           default:
             assert(0);
         }
@@ -2068,12 +2205,15 @@ namespace LegionRuntime {
             GPUtoFBRequest** gpu_to_fb_reqs = (GPUtoFBRequest**) requests;
             for (long i = 0; i < nr; i++) {
               //gpu_to_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_to_fb_2d(gpu_to_fb_reqs[i]->dst_offset,
+              src_gpu->copy_to_fb_3d(gpu_to_fb_reqs[i]->dst_offset,
                                   gpu_to_fb_reqs[i]->src,
                                   gpu_to_fb_reqs[i]->dst_stride,
                                   gpu_to_fb_reqs[i]->src_stride,
+                                  gpu_to_fb_reqs[i]->dst_height,
+                                  gpu_to_fb_reqs[i]->src_height,
                                   gpu_to_fb_reqs[i]->nbytes_per_line,
-                                  gpu_to_fb_reqs[i]->nlines,
+                                  gpu_to_fb_reqs[i]->height,
+                                  gpu_to_fb_reqs[i]->depth,
                                   &gpu_to_fb_reqs[i]->event
                                   /*Event::NO_EVENT,
                                   gpu_to_fb_reqs[i]->complete_event*/);
@@ -2086,12 +2226,15 @@ namespace LegionRuntime {
             GPUfromFBRequest** gpu_from_fb_reqs = (GPUfromFBRequest**) requests;
             for (long i = 0; i < nr; i++) {
               //gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_from_fb_2d(gpu_from_fb_reqs[i]->dst,
+              src_gpu->copy_from_fb_3d(gpu_from_fb_reqs[i]->dst,
                                     gpu_from_fb_reqs[i]->src_offset,
                                     gpu_from_fb_reqs[i]->dst_stride,
                                     gpu_from_fb_reqs[i]->src_stride,
+                                    gpu_from_fb_reqs[i]->dst_height,
+                                    gpu_from_fb_reqs[i]->src_height,
                                     gpu_from_fb_reqs[i]->nbytes_per_line,
-                                    gpu_from_fb_reqs[i]->nlines,
+                                    gpu_from_fb_reqs[i]->height,
+                                    gpu_from_fb_reqs[i]->depth,
                                     &gpu_from_fb_reqs[i]->event
                                     /*Event::NO_EVENT,
                                     gpu_from_fb_reqs[i]->complete_event*/);
@@ -2104,12 +2247,15 @@ namespace LegionRuntime {
             GPUinFBRequest** gpu_in_fb_reqs = (GPUinFBRequest**) requests;
             for (long i = 0; i < nr; i++) {
               //gpu_in_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_within_fb_2d(gpu_in_fb_reqs[i]->dst_offset,
+              src_gpu->copy_within_fb_3d(gpu_in_fb_reqs[i]->dst_offset,
                                       gpu_in_fb_reqs[i]->src_offset,
                                       gpu_in_fb_reqs[i]->dst_stride,
                                       gpu_in_fb_reqs[i]->src_stride,
+                                      gpu_in_fb_reqs[i]->dst_height,
+                                      gpu_in_fb_reqs[i]->src_height,
                                       gpu_in_fb_reqs[i]->nbytes_per_line,
-                                      gpu_in_fb_reqs[i]->nlines,
+                                      gpu_in_fb_reqs[i]->height,
+                                      gpu_in_fb_reqs[i]->depth,
                                       &gpu_in_fb_reqs[i]->event
                                       /*Event::NO_EVENT,
                                       gpu_in_fb_reqs[i]->complete_event*/);
@@ -2122,13 +2268,16 @@ namespace LegionRuntime {
             GPUpeerFBRequest** gpu_peer_fb_reqs = (GPUpeerFBRequest**) requests;
             for (long i = 0; i < nr; i++) {
               //gpu_peer_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_to_peer_2d(gpu_peer_fb_reqs[i]->dst_gpu,
+              src_gpu->copy_to_peer_3d(gpu_peer_fb_reqs[i]->dst_gpu,
                                     gpu_peer_fb_reqs[i]->dst_offset,
                                     gpu_peer_fb_reqs[i]->src_offset,
                                     gpu_peer_fb_reqs[i]->dst_stride,
                                     gpu_peer_fb_reqs[i]->src_stride,
+                                    gpu_peer_fb_reqs[i]->dst_height,
+                                    gpu_peer_fb_reqs[i]->src_height,
                                     gpu_peer_fb_reqs[i]->nbytes_per_line,
-                                    gpu_peer_fb_reqs[i]->nlines,
+                                    gpu_peer_fb_reqs[i]->height,
+                                    gpu_peer_fb_reqs[i]->depth,
                                     &gpu_peer_fb_reqs[i]->event
                                     /*Event::NO_EVENT,
                                     gpu_peer_fb_reqs[i]->complete_event*/);
