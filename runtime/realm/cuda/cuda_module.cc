@@ -413,8 +413,8 @@ namespace Realm {
     void GPUMemcpy3D::execute(GPUStream *stream)
     {
       log_gpudma.info("gpu memcpy 3d: dst=%p src=%p"
-                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %id"
-                      "bytes=%lu height=%lu depth=%lu kind=%d",
+                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
+                      "bytes=%ld height=%ld depth=%ld kind=%d",
                       dst, src, (long)dst_stride, (long)src_stride,
                       (long)dst_height, (long)src_height, bytes, height,
                       depth, kind);
@@ -455,7 +455,7 @@ namespace Realm {
         stream->add_notification(notification);
 
        log_gpudma.info("gpu memcpy 3d complete: dst=%p src=%p"
-                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %id"
+                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
                       "bytes=%ld height=%ld depth=%ld kind=%d",
                       dst, src, (long)dst_stride, (long)src_stride,
                       (long)dst_height, (long)src_height, bytes, height,
