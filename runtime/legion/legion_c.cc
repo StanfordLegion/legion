@@ -1749,15 +1749,15 @@ PartitionByImageShim::structured(const Task *task,
       lo[i] = target_domain.rect_data[args.target_dim + i];
       hi[i] = target_domain.rect_data[i];
     }
-    DomainPoint point; point.dim = args.target_dim;
     for (IndexIterator it(runtime, ctx, r); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
       for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
-        for (int i = 0; i < args.target_dim; ++i)
-          point.point_data[i] = accessors[i].read(p);
-        if (point < lo) lo = point;
-        if (hi < point) hi = point;
+        for (int i = 0; i < args.target_dim; ++i) {
+          int point = accessors[i].read(p);
+          if (point < lo[i]) lo[i] = point;
+          if (hi[i] < point) hi[i] = point;
+        }
       }
     }
     for (int i = 0; i < args.target_dim; ++i) result.ref().push_back(lo[i]);
@@ -1778,12 +1778,12 @@ PartitionByImageShim::structured(const Task *task,
       lo[i] = target_domain.rect_data[args.target_dim + i];
       hi[i] = target_domain.rect_data[i];
     }
-    DomainPoint point; point.dim = args.target_dim;
     for (Domain::DomainPointIterator it(domain); it; it++) {
-      for (int i = 0; i < args.target_dim; ++i)
-        point.point_data[i] = accessors[i].read(it.p);
-      if (point < lo) lo = point;
-      if (hi < point) hi = point;
+      for (int i = 0; i < args.target_dim; ++i) {
+        int point = accessors[i].read(it.p);
+        if (point < lo[i]) lo[i] = point;
+        if (hi[i] < point) hi[i] = point;
+      }
     }
     for (int i = 0; i < args.target_dim; ++i) result.ref().push_back(lo[i]);
     for (int i = 0; i < args.target_dim; ++i) result.ref().push_back(hi[i]);
@@ -2063,8 +2063,10 @@ PartitionByPreimageShim::task(const Task *task,
       }
       for (Domain::DomainPointIterator it(domain); it; it++) {
         if (points.count(accessor.read(it.p))) {
-          if (it.p < lo) lo = it.p;
-          if (hi < it.p) hi = it.p;
+          for (int i = 0; i < args.source_dim; ++i) {
+            if (it.p[i] < lo[i]) lo[i] = it.p[i];
+            if (hi[i] < it.p[i]) hi[i] = it.p[i];
+          }
         }
       }
       for (int i = 0; i < args.source_dim; ++i) result.ref().push_back(lo[i]);
@@ -2093,8 +2095,10 @@ PartitionByPreimageShim::task(const Task *task,
         for (int i = 0; i < args.target_dim; ++i)
           point.point_data[i] = accessors[i].read(it.p);
         if (target_domain.contains(point)) {
-          if (it.p < lo) lo = it.p;
-          if (hi < it.p) hi = it.p;
+          for (int i = 0; i < args.source_dim; ++i) {
+            if (it.p[i] < lo[i]) lo[i] = it.p[i];
+            if (hi[i] < it.p[i]) hi[i] = it.p[i];
+          }
         }
       }
       for (int i = 0; i < args.source_dim; ++i) result.ref().push_back(lo[i]);
