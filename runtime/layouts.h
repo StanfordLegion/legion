@@ -453,14 +453,16 @@ namespace LegionRuntime {
               return items_per_line * height;
             }
         } else if (iter_order == XferOrder::ANY_ORDER) {
-          src_stride = src_strides[1][0];
-          dst_stride = dst_strides[1][0];
-          src_height = src_strides[2][0] / src_strides[1][0];
-          dst_height = dst_strides[2][0] / dst_strides[1][0];
-          items_per_line = subtotal;
-          height = dst_subrect.dim_size(1);
-          depth = dst_subrect.dim_size(2);
-          return items_per_line * height * depth;
+          if (dst_strides[1][0] >= subtotal) {
+            src_stride = src_strides[1][0];
+            dst_stride = dst_strides[1][0];
+            src_height = src_strides[2][0] / src_strides[1][0];
+            dst_height = dst_strides[2][0] / dst_strides[1][0];
+            items_per_line = subtotal;
+            height = dst_subrect.dim_size(1);
+            depth = dst_subrect.dim_size(2);
+            return items_per_line * height * depth;
+          }
           for (unsigned i = 0; i < DIM; i++)
             if (dst_strides[i][0] >= subtotal) {
               src_stride = src_strides[i][0];
