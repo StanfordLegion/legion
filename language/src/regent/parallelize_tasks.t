@@ -1118,7 +1118,7 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
       color_type = index_type
     end
   else
-    assert(#factors == dim,
+    assert(dim == 0 or #factors == dim,
       "degree-of-parallelism does not match with the dimensions of regions, " ..
       "expected: " .. tostring(dim) .. ", got " .. tostring(#factors))
     extent_expr = mk_expr_ctor(factors:map(function(f)
