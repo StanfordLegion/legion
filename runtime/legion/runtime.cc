@@ -19345,6 +19345,8 @@ namespace Legion {
         context = finder->second;
         remote_contexts.erase(finder);
       }
+      // Invalidate the region tree context
+      context->invalidate_region_tree_contexts();
       // Remove our reference and delete it if we're done with it
       if (context->remove_reference())
         delete context;

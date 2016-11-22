@@ -4326,8 +4326,6 @@ namespace Legion {
     RemoteContext::~RemoteContext(void)
     //--------------------------------------------------------------------------
     {
-      // Invalidate the region tree context
-      invalidate_region_tree_contexts();
       // Invalidate our context if necessary before deactivating
       // the wrapper as it will release the context
       if (!top_level_context)
