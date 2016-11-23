@@ -231,6 +231,20 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
+      struct DeferMaterializedViewArgs : 
+        public LgTaskArgs<DeferMaterializedViewArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MATERIALIZED_VIEW_TASK_ID;
+      public:
+        DistributedID did;
+        AddressSpaceID owner_space;
+        AddressSpaceID logical_owner;
+        RegionTreeNode *target_node;
+        PhysicalManager *manager;
+        MaterializedView *parent;
+        UniqueID context_uid;
+      };
+    public:
       struct EventUsers {
       public:
         EventUsers(void)
@@ -576,6 +590,16 @@ namespace Legion {
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
+      static void handle_deferred_materialized_view(Runtime *runtime, 
+                                                    const void *args);
+      static void create_remote_materialized_view(Runtime *runtime,
+                                                  DistributedID did,
+                                                  AddressSpaceID owner_space,
+                                                  AddressSpaceID logical_owner,
+                                                  RegionTreeNode *target_node,
+                                                  PhysicalManager *manager,
+                                                  MaterializedView *parent,
+                                                  UniqueID context_uid);
     public:
       void perform_remote_valid_check(const FieldMask &check_mask,
                                       VersionTracker *version_tracker,

@@ -2988,8 +2988,21 @@ namespace Legion {
         RtEvent par_ready;
         LogicalView *par_view = 
           runtime->find_or_request_logical_view(parent_did, par_ready);
-        if (par_ready.exists())
-          par_ready.wait();
+        if (par_ready.exists() && !par_ready.has_triggered())
+        {
+          // Need to avoid virtual channel deadlock here so defer it
+          DeferMaterializedViewArgs args;
+          args.did = did;
+          args.owner_space = owner_space;
+          args.logical_owner = logical_owner;
+          args.target_node = target_node;
+          args.manager = phy_man;
+          args.parent = parent;
+          args.context_uid = context_uid;
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+             NULL/*op*/, Runtime::merge_events(par_ready, man_ready));
+          return;
+        }
 #ifdef DEBUG_LEGION
         assert(par_view->is_materialized_view());
 #endif
@@ -3000,6 +3013,29 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(phy_man->is_instance_manager());
 #endif
+      create_remote_materialized_view(runtime, did, owner_space, logical_owner,
+                                    target_node, phy_man, parent, context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::handle_deferred_materialized_view(
+                                             Runtime *runtime, const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMaterializedViewArgs *margs = 
+        (const DeferMaterializedViewArgs*)args;
+      create_remote_materialized_view(runtime, margs->did, margs->owner_space,
+          margs->logical_owner, margs->target_node, margs->manager,
+          margs->parent, margs->context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::create_remote_materialized_view(
+       Runtime *runtime, DistributedID did, AddressSpaceID owner_space,
+       AddressSpaceID logical_owner, RegionTreeNode *target_node, 
+       PhysicalManager *phy_man, MaterializedView *parent, UniqueID context_uid)
+    //--------------------------------------------------------------------------
+    {
       InstanceManager *inst_manager = phy_man->as_instance_manager();
       void *location;
       MaterializedView *view = NULL;
