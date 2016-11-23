@@ -2067,25 +2067,28 @@ local function lift_all_accesses(task_cx, normalizer_cx, accesses, stat)
 		  stencil_expr = stencil_expr.arg
 		end
 
-    assert(#access.expr_type.bounds_symbols == 1)
-    local region_symbol = access.expr_type.bounds_symbols[1]
-    local field_path = access.expr_type.field_path
-    local stencil = Stencil {
-      region = region_symbol,
-      index = simplify_expression(stencil_expr),
-      range = loop_var:gettype().bounds_symbols[1],
-      fields = { [field_path:hash()] = field_path },
-    }
-    task_cx:add_access(access, stencil)
+    if not std.type_eq(std.as_read(loop_var:gettype()),
+                       std.as_read(stencil_expr.expr_type)) then
+      assert(#access.expr_type.bounds_symbols == 1)
+      local region_symbol = access.expr_type.bounds_symbols[1]
+      local field_path = access.expr_type.field_path
+      local stencil = Stencil {
+        region = region_symbol,
+        index = simplify_expression(stencil_expr),
+        range = loop_var:gettype().bounds_symbols[1],
+        fields = { [field_path:hash()] = field_path },
+      }
+      task_cx:add_access(access, stencil)
 
-    local base_name = (
-      ((region_symbol:hasname() and region_symbol:getname()) or "")
-        .. "__" .. tostring(field_path))
-    local tmp_symbol = get_new_tmp_var(std.as_read(access.expr_type), base_name .. "__access")
-    local stat = mk_stat_var(tmp_symbol, nil, access)
-    task_cx:record_stat_requires_case_split(stat)
-    stats:insert(stat)
-    rewrites[access] = mk_expr_id(tmp_symbol)
+      local base_name = (
+        ((region_symbol:hasname() and region_symbol:getname()) or "")
+          .. "__" .. tostring(field_path))
+      local tmp_symbol = get_new_tmp_var(std.as_read(access.expr_type), base_name .. "__access")
+      local stat = mk_stat_var(tmp_symbol, nil, access)
+      task_cx:record_stat_requires_case_split(stat)
+      stats:insert(stat)
+      rewrites[access] = mk_expr_id(tmp_symbol)
+    end
   end
   stat = ast.map_node_continuation(function(node, continuation)
     if rewrites[node] then
