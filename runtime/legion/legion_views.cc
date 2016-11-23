@@ -4373,7 +4373,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Traverse up the tree and remove any writen fields 
-      // that have been written at this level or the parent
+      // that have been written at this level or a parent
       LegionMap<RegionTreeNode*,FieldMask>::aligned::const_iterator finder = 
         written_nodes.find(node);
       while (finder != written_nodes.end())
@@ -4381,11 +4381,10 @@ namespace Legion {
         mask -= finder->second;
         if (!mask)
           return;
-        if (node == root)
+        // Not entirely convinced the second part of this expression
+        // is correct, so we'll let legion spy find any bugs
+        if ((node == root) || (node->get_depth() <= root->get_depth()))
           return;
-#ifdef DEBUG_LEGION
-        assert(node->get_depth() > root->get_depth());
-#endif
         node = node->get_parent();
         finder = written_nodes.find(node);
       }
