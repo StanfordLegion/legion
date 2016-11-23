@@ -2235,37 +2235,14 @@ function stencil_analysis.explode_expr(cx, expr)
       return stencil_analysis.explode_expr(cx, expr.lhs):map(function(lhs)
         return expr { lhs = lhs }
       end)
-    elseif expr.op == "+" or expr.op == "-" then
+    elseif expr.op == "+" then
       if expr.rhs:is(ast.typed.expr.Ctor) then
-        local convert = function(n) return n end
-        if expr.op == "-" then
-          convert = function(n)
-            if n.value.value == 0 then return n
-            else
-              return n {
-                value = n.value {
-                  value = -n.value.value,
-                },
-              }
-            end
-          end
-        end
         return stencil_analysis.explode_expr(cx, expr.rhs):map(function(rhs)
-          return expr {
-            op = "+",
-            rhs = rhs { fields = rhs.fields:map(convert) },
-          }
+          return expr { rhs = rhs }
         end)
       elseif expr.rhs:is(ast.typed.expr.Constant) and
              expr.rhs.expr_type.type == "integer" then
-        if expr.op == "-" then
-          return terralib.newlist { expr {
-            op = "+",
-            rhs = expr.rhs { value = -expr.rhs.value }
-          }}
-        else
-          return terralib.newlist { expr }
-        end
+        return terralib.newlist { expr }
       else
         assert(false)
       end
