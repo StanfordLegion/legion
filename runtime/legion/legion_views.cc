@@ -5103,6 +5103,7 @@ namespace Legion {
       if (!!changed_mask)
       {
         CompositeView *view = clone(changed_mask, local_replacements);
+        view->finalize_capture(false/*need prune*/);
         replacements[view] = changed_mask;
         // Any fields that changed are no longer valid
         valid_mask -= changed_mask;
@@ -5604,7 +5605,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void CompositeView::finalize_capture(void)
+    void CompositeView::finalize_capture(bool need_prune)
     //--------------------------------------------------------------------------
     {
       // Add base references to all our version states
@@ -5620,51 +5621,61 @@ namespace Legion {
         it->first->add_nested_resource_ref(did);
       // For the deferred views, we try to prune them 
       // based on our closed tree if they are the same we keep them 
-      std::vector<CompositeView*> to_erase;
-      LegionMap<CompositeView*,FieldMask>::aligned replacements;
-      for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
-            nested_composite_views.begin(); it != 
-            nested_composite_views.end(); it++)
+      if (need_prune)
       {
-        // If the composite view is above in the tree we don't
-        // need to worry about pruning it for resource reasons
-        if (it->first->logical_node != logical_node)
+        std::vector<CompositeView*> to_erase;
+        LegionMap<CompositeView*,FieldMask>::aligned replacements;
+        for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
+              nested_composite_views.begin(); it != 
+              nested_composite_views.end(); it++)
         {
-#ifdef DEBUG_LEGION
-          // Should be above us in the region tree
-          assert(logical_node->get_depth() > 
-                  it->first->logical_node->get_depth());
-#endif
-          it->first->add_nested_resource_ref(did);
-          continue;
-        }
-        it->first->prune(closed_tree, it->second, replacements);
-        if (!it->second)
-          to_erase.push_back(it->first);
-        else
-          it->first->add_nested_resource_ref(did);
-      }
-      if (!to_erase.empty())
-      {
-        for (std::vector<CompositeView*>::const_iterator it = to_erase.begin();
-              it != to_erase.end(); it++)
-          nested_composite_views.erase(*it);
-      }
-      if (!replacements.empty())
-      {
-        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
-              replacements.begin(); it != replacements.end(); it++)
-        {
-          LegionMap<CompositeView*,FieldMask>::aligned::iterator finder =
-            nested_composite_views.find(it->first);
-          if (finder == nested_composite_views.end())
+          // If the composite view is above in the tree we don't
+          // need to worry about pruning it for resource reasons
+          if (it->first->logical_node != logical_node)
           {
+#ifdef DEBUG_LEGION
+            // Should be above us in the region tree
+            assert(logical_node->get_depth() > 
+                    it->first->logical_node->get_depth());
+#endif
             it->first->add_nested_resource_ref(did);
-            nested_composite_views.insert(*it);
+            continue;
           }
+          it->first->prune(closed_tree, it->second, replacements);
+          if (!it->second)
+            to_erase.push_back(it->first);
           else
-            finder->second |= it->second;
+            it->first->add_nested_resource_ref(did);
         }
+        if (!to_erase.empty())
+        {
+          for (std::vector<CompositeView*>::const_iterator it = to_erase.begin();
+                it != to_erase.end(); it++)
+            nested_composite_views.erase(*it);
+        }
+        if (!replacements.empty())
+        {
+          for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
+                replacements.begin(); it != replacements.end(); it++)
+          {
+            LegionMap<CompositeView*,FieldMask>::aligned::iterator finder =
+              nested_composite_views.find(it->first);
+            if (finder == nested_composite_views.end())
+            {
+              it->first->add_nested_resource_ref(did);
+              nested_composite_views.insert(*it);
+            }
+            else
+              finder->second |= it->second;
+          }
+        }
+      }
+      else
+      {
+        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+              nested_composite_views.begin(); it != 
+              nested_composite_views.end(); it++)
+          it->first->add_nested_resource_ref(did);
       }
     }
 
@@ -6670,8 +6681,8 @@ namespace Legion {
         event_preconds.insert(it->first);
       }
       ApEvent reduce_pre = Runtime::merge_events(event_preconds); 
-      ApEvent reduce_post = manager->issue_reduction(op, src_fields, 
-                                                     dst_fields,
+      ApEvent reduce_post = manager->issue_reduction(op, 
+                                                     src_fields, dst_fields,
                                                      target->logical_node,
                                                      reduce_pre,
                                                      fold, true/*precise*/,
@@ -6721,9 +6732,8 @@ namespace Legion {
       }
       ApEvent reduce_pre = Runtime::merge_events(preconditions); 
       ApEvent reduce_post = target->logical_node->issue_copy(op, 
-                                                     src_fields, dst_fields,
-                                                     reduce_pre, intersect,
-                                                     manager->redop, fold);
+                             src_fields, dst_fields, reduce_pre, 
+                             intersect, manager->redop, fold);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, versions,

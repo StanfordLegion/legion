@@ -1337,6 +1337,15 @@ namespace Legion {
     {
       manager_lock.destroy_reservation();
       manager_lock = Reservation::NO_RESERVATION;
+#if 0
+      if (!created_index_spaces.empty())
+      {
+        for (std::vector<Realm::IndexSpace>::const_iterator it = 
+              created_index_spaces.begin(); it != 
+              created_index_spaces.end(); it++)
+          it->destroy();
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1510,6 +1519,118 @@ namespace Legion {
       return result;
     }
 
+#if 0
+    //--------------------------------------------------------------------------
+    Domain ReductionManager::compute_reduction_domain(PhysicalInstance target,
+                             const Domain &copy_domain, ApEvent copy_domain_pre)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner())
+      {
+        // If we're not the owner we have to send a message
+        assert(false);
+      }
+      // For now, if we need to wait, then do that now
+      // Later we can chain these dependences when we compute intersections
+      if (copy_domain_pre.exists() && !copy_domain_pre.has_triggered())
+      {
+        RtEvent wait_on = Runtime::protect_event(copy_domain_pre);
+        wait_on.wait();
+      }
+      Domain result = Domain::NO_DOMAIN;
+      AutoLock m_lock(manager_lock);
+      // See if we've handled this destination before
+      std::map<PhysicalInstance,std::vector<Domain> >::const_iterator finder =
+        reduction_domains.find(target);
+      if (finder != reduction_domains.end())
+      {
+        const std::vector<Domain> &prev = finder->second;
+        switch (copy_domain.get_dim())
+        {
+          case 0:
+            {
+              Realm::ElementMask copy_mask = 
+                copy_domain.get_index_space().get_valid_mask();
+              for (std::vector<Domain>::const_iterator it = prev.begin();
+                    it != prev.end(); it++)
+              {
+#ifdef DEBUG_LEGION
+                assert(it->get_dim() == 0);
+#endif
+                copy_mask &= it->get_index_space().get_valid_mask();
+                if (!copy_mask)
+                  break;
+              }
+              if (!!copy_mask)
+              {
+                result = 
+                  Domain(Realm::IndexSpace::create_index_space(copy_mask));
+                created_index_spaces.push_back(result.get_index_space());
+              }
+              break;
+            }
+          case 1:
+            {
+              Rect<1> copy_rect = copy_domain.get_rect<1>();
+              for (std::vector<Domain>::const_iterator it = prev.begin();
+                    it != prev.end(); it++)
+              {
+#ifdef DEBUG_LEGION
+                assert(it->get_dim() == 1);
+#endif
+                copy_rect = copy_rect.intersection(it->get_rect<1>());
+                if (copy_rect.volume() == 0)
+                  break;
+              }
+              if (copy_rect.volume() > 0)
+                result = Domain::from_rect<1>(copy_rect);
+              break;
+            }
+          case 2:
+            {
+              Rect<2> copy_rect = copy_domain.get_rect<2>();
+              for (std::vector<Domain>::const_iterator it = prev.begin();
+                    it != prev.end(); it++)
+              {
+#ifdef DEBUG_LEGION
+                assert(it->get_dim() == 2);
+#endif
+                copy_rect = copy_rect.intersection(it->get_rect<2>());
+                if (copy_rect.volume() == 0)
+                  break;
+              }
+              if (copy_rect.volume() > 0)
+                result = Domain::from_rect<2>(copy_rect);
+              break;
+            }
+          case 3:
+            {
+              Rect<3> copy_rect = copy_domain.get_rect<3>();
+              for (std::vector<Domain>::const_iterator it = prev.begin();
+                    it != prev.end(); it++)
+              {
+#ifdef DEBUG_LEGION
+                assert(it->get_dim() == 3);
+#endif
+                copy_rect = copy_rect.intersection(it->get_rect<3>());
+                if (copy_rect.volume() == 0)
+                  break;
+              }
+              if (copy_rect.volume() > 0)
+                result = Domain::from_rect<3>(copy_rect);
+              break;
+            }
+          default:
+            assert(false);
+        }
+      }
+      // Add the result domain to the set and return
+      if (result.exists())
+        reduction_domains[target].push_back(result);
+      return result;
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // ListReductionManager 
     /////////////////////////////////////////////////////////////
@@ -1642,7 +1763,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ListReductionManager::issue_reduction(Operation *op,
+    ApEvent ListReductionManager::issue_reduction(Operation *op, 
         const std::vector<Domain::CopySrcDstField> &src_fields,
         const std::vector<Domain::CopySrcDstField> &dst_fields,
         RegionTreeNode *dst, ApEvent precondition, bool reduction_fold, 
@@ -1811,7 +1932,7 @@ namespace Legion {
       assert(instance.exists());
 #endif
       // Doesn't matter if this one is precise or not
-      return dst->issue_copy(op, src_fields, dst_fields, precondition, 
+      return dst->issue_copy(op, src_fields, dst_fields, precondition,
                              intersect, redop, reduction_fold);
     }
 

@@ -871,7 +871,7 @@ namespace Legion {
       LegionMap<ApEvent,EventUsers>::aligned reading_users;
       std::set<ApEvent> outstanding_gc_events;
     protected:
-      std::set<ApEvent> initial_user_events;
+      std::set<ApEvent> initial_user_events; 
     protected:
       // the request event for reducers
       // only needed on remote views
@@ -1232,7 +1232,7 @@ namespace Legion {
       void record_child_version_state(const ColorPoint &child_color, 
                                  VersionState *state, const FieldMask &mask);
       void record_top_version_state(VersionState *state);
-      void finalize_capture(void);
+      void finalize_capture(bool need_prune);
     public:
       void pack_composite_view(Serializer &rez) const;
       void unpack_composite_view(Deserializer &derez,
