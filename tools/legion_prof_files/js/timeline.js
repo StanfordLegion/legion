@@ -2,38 +2,71 @@ var constants = {
   margin_left: 300,
   margin_right: 50,
   margin_bottom: 50,
-  start: 0,
-  end: %d * 1.01,
-  max_level: %d,
   min_feature_width: 3,
-  min_gap_width: 1
+  min_gap_width: 1,
 }
 
 var state = {};
 var mouseX = 0;
-var rangeZoom = true;
+
+function parseURLParameters() {
+  var match,
+  pl     = /\+/g,  // Regex for replacing addition symbol with a space
+  search = /([^&=]+)=?([^&]*)/g,
+  decode = function (s) { return decodeURIComponent(s.replace(pl, " ")); },
+  query  = window.location.search.substring(1);
+
+  var urlParams = {};
+  while (match = search.exec(query))
+    urlParams[decode(match[1])] = decode(match[2]);
+
+  if ("resolution" in urlParams)
+    state.resolution = Math.max(1, parseFloat(urlParams["resolution"]));
+  // adjust zoom
+  var zstart = constants.start;
+  if ("start" in urlParams)
+    zstart = Math.max(constants.start, parseFloat(urlParams["start"]));
+
+  var zend = constants.end;
+  if ("end" in urlParams)
+    zend = Math.min(constants.end, parseFloat(urlParams["end"]));
+
+  if(zstart < zend) {
+    // set zoom to get: (zend - start) * zoom * scale = $("#timeline").width()
+    var newZoom = $("#timeline").width() / state.scale / (zend - zstart);
+    adjustZoom(newZoom, false);
+
+    // set scrollLeft to get:  zstart * zoom * state.scale = scrollLeft()
+    $("#timeline").scrollLeft(convertToPos(state, zstart));
+  }
+
+  if ("search" in urlParams) {
+    state.searchEnabled = true;
+    searchRegex = new Array(sizeHistory);
+    currentPos = 0;
+    nextPos = 1;
+    searchRegex[currentPos] = new RegExp(urlParams["search"]);
+  }
+}
 
 function makeTimelineTransparent() {
-  var timelineSvg = d3.select("#timeline").select("svg");
-  timelineSvg.select("g#timeline").style("opacity", "0.1");
+  state.timelineSvg.select("g#timeline").style("opacity", "0.1");
   $("#timeline").css("overflow-x", "hidden");
-  timelineSvg.select("g#lines").style("opacity", "0.1");
-  timelineSvg.select("g.locator").style("opacity", "0.1");
+  state.timelineSvg.select("g#lines").style("opacity", "0.1");
+  state.timelineSvg.select("g.locator").style("opacity", "0.1");
 }
 
 function makeTimelineOpaque() {
-  var timelineSvg = d3.select("#timeline").select("svg");
-  timelineSvg.select("g#timeline").style("opacity", "1.0");
+  state.timelineSvg.select("g#timeline").style("opacity", "1.0");
   $("#timeline").css("overflow-x", "scroll");
-  timelineSvg.select("g#lines").style("opacity", "1.0");
-  timelineSvg.select("g.locator").style("opacity", "1.0");
+  state.timelineSvg.select("g#lines").style("opacity", "1.0");
+  state.timelineSvg.select("g.locator").style("opacity", "1.0");
 }
 
 function mouseMoveHandlerWhenDown() {
-  var timelineSvg = d3.select("#timeline").select("svg");
   var p = d3.mouse(this);
-  var select_block = timelineSvg.select("rect.select-block");
-  var select_text = timelineSvg.select("text.select-block");
+  var select_block = state.timelineSvg.select("rect.select-block");
+  var select_text = state.timelineSvg.select("text.select-block");
   var newWidth = Math.abs(p[0] - mouseX);
   select_block.attr("width", newWidth);
   if (p[0] >= mouseX) {
@@ -55,9 +88,8 @@ function mouseMoveHandlerWhenUp() {
   var paneWidth = $("#timeline").width();
   var currentTime = convertToTime(state, x);
 
-  var timelineSvg = d3.select("#timeline").select("svg");
-  timelineSvg.select("g.locator").remove();
-  var locator = timelineSvg.append("g").attr("class", "locator");
+  state.timelineSvg.select("g.locator").remove();
+  var locator = state.timelineSvg.append("g").attr("class", "locator");
   locator.insert("line")
     .attr({
       x1: p[0],
@@ -88,10 +120,9 @@ function mouseMoveHandlerWhenUp() {
 }
 
 function mouseDownHandler() {
-  var timelineSvg = d3.select("#timeline").select("svg");
-  timelineSvg.select("g.locator").remove();
+  state.timelineSvg.select("g.locator").remove();
   var p = d3.mouse(this);
-  timelineSvg.append("rect")
+  state.timelineSvg.append("rect")
     .attr({
       x : p[0],
       y : 0,
@@ -99,7 +130,7 @@ function mouseDownHandler() {
       width : 0,
       height : state.height
     });
-  timelineSvg.append("text")
+  state.timelineSvg.append("text")
     .attr({
       x : p[0],
       y : p[1],
@@ -108,20 +139,20 @@ function mouseDownHandler() {
       "text-anchor" : "middle",
     }).text("0 us");
   mouseX = p[0];
-  timelineSvg.on("mousemove", null);
-  timelineSvg.on("mousemove", mouseMoveHandlerWhenDown);
+  state.timelineSvg.on("mousemove", null);
+  state.timelineSvg.on("mousemove", mouseMoveHandlerWhenDown);
   $(document).off("keydown");
 }
 
 function mouseUpHandler() {
+  console.log("rangeZoom: " + state.rangeZoom);
   var p = d3.mouse(this);
-  var timelineSvg = d3.select("#timeline").select("svg");
-  var select_block = timelineSvg.select("rect.select-block");
-  var select_text = timelineSvg.select("text.select-block");
+  var select_block = state.timelineSvg.select("rect.select-block");
+  var select_text = state.timelineSvg.select("text.select-block");
   var prevZoom = state.zoom;
   var selectWidth = parseInt(select_block.attr("width"));
-  var svgWidth = timelineSvg.attr("width");
-  if (rangeZoom && selectWidth > 10) {
+  var svgWidth = state.timelineSvg.attr("width");
+  if (state.rangeZoom && selectWidth > 10) {
     var x = select_block.attr("x");
     state.zoomHistory.push({zoom: prevZoom, start: $("#timeline").scrollLeft()});
     showLoaderIcon();
@@ -129,31 +160,28 @@ function mouseUpHandler() {
     $("#timeline").scrollLeft(x / prevZoom * state.zoom);
     hideLoaderIcon();
   }
-  timelineSvg.selectAll("rect.select-block").remove();
-  timelineSvg.selectAll("text.select-block").remove();
+  state.timelineSvg.selectAll("rect.select-block").remove();
+  state.timelineSvg.selectAll("text.select-block").remove();
   mouseX = 0;
-  timelineSvg.on("mousemove", null);
-  timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
+  state.timelineSvg.on("mousemove", null);
+  state.timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
   $(document).on("keydown", defaultKeydown);
 }
 
 function turnOffMouseHandlers() {
-  var timelineSvg = d3.select("#timeline").select("svg");
-  timelineSvg.on("mousedown", null);
-  timelineSvg.on("mouseup", null);
-  timelineSvg.on("mousemove", null);
+  state.timelineSvg.on("mousedown", null);
+  state.timelineSvg.on("mouseup", null);
+  state.timelineSvg.on("mousemove", null);
 }
 
 function turnOnMouseHandlers() {
-  var timelineSvg = d3.select("#timeline").select("svg");
-  timelineSvg.on("mousedown", mouseDownHandler);
-  timelineSvg.on("mouseup", mouseUpHandler);
-  timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
+  state.timelineSvg.on("mousedown", mouseDownHandler);
+  state.timelineSvg.on("mouseup", mouseUpHandler);
+  state.timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
 }
 
 function drawLoaderIcon() {
-  var loaderSvg = d3.select("#loader-icon").select("svg");
-  var loaderGroup = loaderSvg.append("g")
+  var loaderGroup = state.loaderSvg.append("g")
     .attr({
         id: "loader-icon",
     });
@@ -181,11 +209,11 @@ function drawLoaderIcon() {
 }
 
 function showLoaderIcon() {
-  loaderSvg.select("g").attr("visibility", "visible");
+  state.loaderSvg.select("g").attr("visibility", "visible");
 }
 
 function hideLoaderIcon() {
-  loaderSvg.select("g").attr("visibility", "hidden");
+  state.loaderSvg.select("g").attr("visibility", "hidden");
 }
 
 function getMouseOver() {
@@ -198,12 +226,12 @@ function getMouseOver() {
     var relativeX = (x - $("#timeline").scrollLeft())
     var anchor = relativeX < left ? "start" :
                  relativeX < right ? "middle" : "end";
-    var descView = timelineSvg.append("g").attr("id", "desc");
+    var descView = state.timelineSvg.append("g").attr("id", "desc");
 
     var total = d.end - d.start;
     var initiation = "";
     if ((d.initiation != undefined) && d.initiation != "") {
-      initiation = " initiated by " + operations[d.initiation];
+      initiation = " initiated by " + state.operations[d.initiation];
     } 
     var title = d.title + initiation + ", total=" + total + "us, start=" + 
                 d.start + "us, end=" + d.end+ "us";
@@ -234,8 +262,7 @@ var searchRegex = null;
 
 function drawTimeline() {
   updateURL(state.zoom, state.scale);
-  var timelineSvg = d3.select("#timeline").select("svg")
-  var timelineGroup = timelineSvg.select("g#timeline");
+  var timelineGroup = state.timelineSvg.select("g#timeline");
   timelineGroup.selectAll("rect").remove();
   var timeline = timelineGroup.selectAll("rect")
     .data(state.dataToDraw, function(d) { return d.id; });
@@ -265,9 +292,11 @@ function drawTimeline() {
         return d.opacity;
       else return 0.05;
     })
-    .on("mouseout", function(d, i) { timelineSvg.selectAll("#desc").remove(); });
-  timeline.on("mouseover", mouseOver);
+    .on("mouseout", function(d, i) { 
+      state.timelineSvg.selectAll("#desc").remove();
+    });
 
+  timeline.on("mouseover", mouseOver);
   timeline.exit().remove();
 }
 
@@ -287,9 +316,8 @@ function redraw() {
       return (state.levelMap[d.level].enabled) ? 1 : 0.1
     });
 
-  var timelineSvg = d3.select("#timeline").select("svg");
-  var timelineGroup = timelineSvg.select("g#timeline");
-  var lines = timelineSvg.select("g#lines").selectAll("line");
+  var timelineGroup = state.timelineSvg.select("g#timeline");
+  var lines = state.timelineSvg.select("g#lines").selectAll("line");
 
   var thickness = state.thickness;
   lines
@@ -366,7 +394,7 @@ function drawProcessors() {
     });
   });
 
-  var lines = timelineSvg
+  var lines = state.timelineSvg
     .append("g")
     .attr("id", "lines");
 
@@ -385,14 +413,14 @@ function drawProcessors() {
 function drawHelpBox() {
   var paneWidth = $("#timeline").width();
   var paneHeight = $("#timeline").height();
-  var helpBoxGroup = timelineSvg.append("g").attr("class", "help-box");
+  var helpBoxGroup = state.timelineSvg.append("g").attr("class", "help-box");
   var helpBoxWidth = Math.min(450, paneWidth - 100);
   var helpTextOffset = 20;
   var helpBoxHeight = Math.min(helpMessage.length * helpTextOffset + 100,
                                paneHeight - 100);
 
-  var timelineWidth = timelineSvg.select("g#timeline").attr("width");
-  var timelineHeight = timelineSvg.select("g#timeline").attr("height");
+  var timelineWidth = state.timelineSvg.select("g#timeline").attr("width");
+  var timelineHeight = state.timelineSvg.select("g#timeline").attr("height");
   var scrollLeft = $("#timeline").scrollLeft();
   var scrollTop = $(window).scrollTop();
 
@@ -433,12 +461,12 @@ function drawHelpBox() {
 function drawSearchBox() {
   var paneWidth = $("#timeline").width();
   var paneHeight = $("#timeline").height();
-  var searchBoxGroup = timelineSvg.append("g").attr("class", "search-box");
+  var searchBoxGroup = state.timelineSvg.append("g").attr("class", "search-box");
   var searchBoxWidth = Math.min(450, paneWidth - 100);
   var searchBoxHeight = Math.min(250, paneHeight - 100);
 
-  var timelineWidth = timelineSvg.select("g#timeline").attr("width");
-  var timelineHeight = timelineSvg.select("g#timeline").attr("height");
+  var timelineWidth = state.timelineSvg.select("g#timeline").attr("width");
+  var timelineHeight = state.timelineSvg.select("g#timeline").attr("height");
   var scrollLeft = $("#timeline").scrollLeft();
   var scrollTop = $(window).scrollTop();
 
@@ -479,12 +507,12 @@ function drawSearchBox() {
 function drawSearchHistoryBox() {
   var paneWidth = $("#timeline").width();
   var paneHeight = $("#timeline").height();
-  var historyBoxGroup = timelineSvg.append("g").attr("class", "history-box");
+  var historyBoxGroup = state.timelineSvg.append("g").attr("class", "history-box");
   var historyBoxWidth = Math.min(450, paneWidth - 100);
   var historyBoxHeight = Math.min(350, paneHeight - 100);
 
-  var timelineWidth = timelineSvg.select("g#timeline").attr("width");
-  var timelineHeight = timelineSvg.select("g#timeline").attr("height");
+  var timelineWidth = state.timelineSvg.select("g#timeline").attr("width");
+  var timelineHeight = state.timelineSvg.select("g#timeline").attr("height");
   var scrollLeft = $("#timeline").scrollLeft();
   var scrollTop = $(window).scrollTop();
 
@@ -515,7 +543,7 @@ function drawSearchHistoryBox() {
     var off = 15;
     var id = 1;
     for (var i = 0; i < sizeHistory; ++i) {
-      var pos = (nextPos + i) %% sizeHistory;
+      var pos = (nextPos + i) % sizeHistory;
       var regex = searchRegex[pos];
       if (regex != null) {
         if (pos == currentPos) prefix = ">>> ";
@@ -580,7 +608,7 @@ function adjustThickness(newThickness) {
   var svg = d3.select("#timeline").select("svg");
   var timelineGroup = svg.select("g#timeline");
   //timelineGroup.selectAll("rect").remove();
-  var lines = timelineSvg.select("g#lines");
+  var lines = state.timelineSvg.select("g#lines");
   lines.remove();
 
   svg.attr("width", state.zoom * state.width)
@@ -638,7 +666,7 @@ function defaultKeydown(e) {
 
   if (commandType == undefined) {
     if (e.metaKey || e.altKey)
-      rangeZoom = false;
+      state.rangeZoom = false;
     return true;
   }
 
@@ -648,8 +676,7 @@ function defaultKeydown(e) {
     makeTimelineTransparent();
     drawHelpBox();
     setKeyHandler(makeModalKeyHandler(['/', 'esc'], function(key) {
-      var timelineSvg = d3.select("#timeline").select("svg");
-      timelineSvg.select("g.help-box").remove();
+      state.timelineSvg.select("g.help-box").remove();
       makeTimelineOpaque();
       setKeyHandler(defaultKeydown);
       turnOnMouseHandlers();
@@ -671,13 +698,12 @@ function defaultKeydown(e) {
             nextPos = 0;
           }
           currentPos = nextPos;
-          nextPos = (nextPos + 1) %% sizeHistory;
+          nextPos = (nextPos + 1) % sizeHistory;
           searchRegex[currentPos] = new RegExp(re);
           state.searchEnabled = true;
         }
       }
-      var timelineSvg = d3.select("#timeline").select("svg");
-      timelineSvg.select("g.search-box").remove();
+      state.timelineSvg.select("g.search-box").remove();
       if (state.searchEnabled) {
         filterAndMergeBlocks(state);
         drawTimeline();
@@ -693,8 +719,7 @@ function defaultKeydown(e) {
     makeTimelineTransparent();
     drawSearchHistoryBox();
     setKeyHandler(makeModalKeyHandler(['h', 'esc'], function(key) {
-      var timelineSvg = d3.select("#timeline").select("svg");
-      timelineSvg.select("g.history-box").remove();
+      state.timelineSvg.select("g.history-box").remove();
       makeTimelineOpaque();
       setKeyHandler(defaultKeydown);
       turnOnMouseHandlers();
@@ -745,10 +770,10 @@ function defaultKeydown(e) {
            commandType == Command.next_search) {
     if (state.searchEnabled) {
       var pos = commandType == Command.previous_search ?
-                (currentPos - 1 + sizeHistory) %% sizeHistory :
-                (currentPos + 1) %% sizeHistory;
+                (currentPos - 1 + sizeHistory) % sizeHistory :
+                (currentPos + 1) % sizeHistory;
       var sentinel = commandType == Command.previous_search ?
-                (nextPos - 1 + sizeHistory) %% sizeHistory : nextPos;
+                (nextPos - 1 + sizeHistory) % sizeHistory : nextPos;
       if (pos != sentinel && searchRegex[pos] != null) {
         currentPos = pos;
         filterAndMergeBlocks(state);
@@ -763,52 +788,12 @@ function defaultKeydown(e) {
 function defaultKeyUp(e) {
   if (!e) e = event;
   if (!(e.metaKey || e.altKey)) {
-    rangeZoom = true;
+    state.rangeZoom = true;
   }
   return true;
 }
 
-function initializeState() {
-  var margin = constants.margin_left + constants.margin_right;
-  state.width = $(window).width() - margin;
-  state.height = $(window).height() - constants.margin_bottom;
-  state.scale = state.width / (constants.end - constants.start);
-  state.zoom = 1.0;
-  state.zoomHistory = Array();
-  state.levelMap = Array();
-  state.profilingData = {};
-  state.thickness = Math.max(state.height / constants.max_level, 20);
-  state.baseThickness = state.height / constants.max_level;
-  state.height = constants.max_level * state.thickness;
-  state.resolution = 10; // time (in us) of the smallest feature we want to load
-  state.searchEnabled = false;
-}
-
-
-function init() {
-  initializeState();
-  setKeyHandler(defaultKeydown);
-  $(document).on("keyup", defaultKeyUp);
-}
-
-init();
-
-var timelineSvg = d3.select("#timeline").append("svg")
-  .attr("width", state.zoom * state.width)
-  .attr("height", state.height);
-var loaderSvg = d3.select("#loader-icon").append("svg")
-  .attr("width", "40px")
-  .attr("height", "40px");
-drawLoaderIcon();
-
-var operations = {}
-
-var timeline_loader = function(operation_data) { 
-  
-  operation_data.forEach(function(d) {
-    operations[parseInt(d.op_id)] = d.operation;      
-  });
-
+function load_timeline() { 
   d3.tsv('legion_prof_data.tsv',
     function(d, i) {
         var level = +d.level;
@@ -829,7 +814,7 @@ var timeline_loader = function(operation_data) {
         }
     },
     function(data) {
-      var timelineGroup = timelineSvg.append("g")
+      var timelineGroup = state.timelineSvg.append("g")
           .attr("id", "timeline");
 
       // split profiling items by which level they're on
@@ -843,7 +828,7 @@ var timeline_loader = function(operation_data) {
       }
 
       $("#timeline").scrollLeft(0);
-      parseURLParameters(); // TODO: move this to be the first thing we do
+      parseURLParameters();
 
       filterAndMergeBlocks(state);
       drawTimeline();
@@ -853,6 +838,7 @@ var timeline_loader = function(operation_data) {
           $("#loader-icon").css("top", $(window).scrollTop() + windowCenterY);
       });
 
+      // set scroll callback
       var timer = null;
       $("#timeline").scroll(function() {
           showLoaderIcon();
@@ -869,15 +855,23 @@ var timeline_loader = function(operation_data) {
   });
 };
 
-d3.tsv("legion_prof_ops.tsv", 
-  function(d) {
-    return d;
-  },
-  timeline_loader // callback once we load in the ops will be to load the timeline
-);
+function load_ops_and_timeline() {
+  d3.tsv("legion_prof_ops.tsv", 
+    function(d) {
+      return d;
+    },
+    function(data) { 
+      data.forEach(function(d) {
+        state.operations[parseInt(d.op_id)] = d.operation;      
+      });
+      // load_timeline depends on the ops to be loaded
+      load_timeline();
+    }
+  );
+}
 
-
-d3.tsv('legion_prof_processor.tsv',
+function load_procs() {
+  d3.tsv('legion_prof_processor.tsv',
     function(d) {
       return {
         level: +d.level,
@@ -903,47 +897,55 @@ d3.tsv('legion_prof_processor.tsv',
       }
       state.processors = data;
       drawProcessors();
+      hideLoaderIcon();
     }
-);
-
-function parseURLParameters() {
-  var match,
-  pl     = /\+/g,  // Regex for replacing addition symbol with a space
-  search = /([^&=]+)=?([^&]*)/g,
-  decode = function (s) { return decodeURIComponent(s.replace(pl, " ")); },
-  query  = window.location.search.substring(1);
-
-  var urlParams = {};
-  while (match = search.exec(query))
-    urlParams[decode(match[1])] = decode(match[2]);
-
-  if ("resolution" in urlParams)
-    state.resolution = Math.max(1, parseFloat(urlParams["resolution"]));
-  // adjust zoom
-  var zstart = constants.start;
-  if ("start" in urlParams)
-    zstart = Math.max(constants.start, parseFloat(urlParams["start"]));
-
-  var zend = constants.end;
-  if ("end" in urlParams)
-    zend = Math.min(constants.end, parseFloat(urlParams["end"]));
-
-  if(zstart < zend) {
-    // set zoom to get: (zend - start) * zoom * scale = $("#timeline").width()
-    var newZoom = $("#timeline").width() / state.scale / (zend - zstart);
-    adjustZoom(newZoom, false);
-
-    // set scrollLeft to get:  zstart * zoom * state.scale = scrollLeft()
-    $("#timeline").scrollLeft(convertToPos(state, zstart));
-  }
-
-  if ("search" in urlParams) {
-    state.searchEnabled = true;
-    searchRegex = new Array(sizeHistory);
-    currentPos = 0;
-    nextPos = 1;
-    searchRegex[currentPos] = new RegExp(urlParams["search"]);
-  }
+  );
 }
 
-hideLoaderIcon();
+function load_data() {
+  load_ops_and_timeline();
+  load_procs();
+}
+
+function initializeState() {
+  var margin = constants.margin_left + constants.margin_right;
+  state.width = $(window).width() - margin;
+  state.height = $(window).height() - constants.margin_bottom;
+  state.scale = state.width / (constants.end - constants.start);
+  state.zoom = 1.0;
+  state.zoomHistory = Array();
+  state.levelMap = Array();
+  state.profilingData = {};
+  state.operations = {};
+  state.thickness = Math.max(state.height / constants.max_level, 20);
+  state.baseThickness = state.height / constants.max_level;
+  state.height = constants.max_level * state.thickness;
+  state.resolution = 10; // time (in us) of the smallest feature we want to load
+  state.searchEnabled = false;
+  state.rangeZoom = true
+
+  setKeyHandler(defaultKeydown);
+  $(document).on("keyup", defaultKeyUp);
+
+  state.timelineSvg = d3.select("#timeline").append("svg")
+    .attr("width", state.zoom * state.width)
+    .attr("height", state.height);
+
+  state.loaderSvg = d3.select("#loader-icon").append("svg")
+    .attr("width", "40px")
+    .attr("height", "40px");
+  drawLoaderIcon();
+  load_data();
+}
+
+function main() {
+  $.getJSON("json/scale.json", function(json) {
+    $.each(json, function(key, val) {
+      console.log("setting " + key + " to " + val);
+      constants[key] = val;
+    });
+  }).done(initializeState);
+  // TODO: Error messages
+}
+
+main();

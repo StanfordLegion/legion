@@ -16,11 +16,12 @@
 #
 
 import sys, os, shutil
-import string, re
+import string, re, json
 from math import sqrt, log
 from getopt import getopt
 from cgi import escape
 from operator import itemgetter
+from os.path import dirname, exists, basename
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
 task_info_pat = re.compile(prefix + r'Prof Task Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
@@ -1218,7 +1219,7 @@ class RuntimeCall(object):
 class SVGPrinter(object):
     def __init__(self, file_name, html_file):
         self.target = open(file_name,'w')
-        self.file_name = os.path.basename(file_name)
+        self.file_name = basename(file_name)
         self.html_file = html_file
         assert self.target is not None
         self.offset = 0
@@ -2020,7 +2021,7 @@ class State(object):
         printer.close()
 
     def show_copy_matrix(self, output_prefix):
-        template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+        template_file_name = os.path.join(dirname(sys.argv[0]),
                 "legion_prof_copy.html.template")
         tsv_file_name = output_prefix + ".tsv"
         html_file_name = output_prefix + ".html"
@@ -2063,52 +2064,44 @@ class State(object):
         html_file.close()
 
     def find_unique_dirname(self, dirname):
-        if (not os.path.exists(dirname)):
+        if (not exists(dirname)):
             return dirname
         # if the dirname exists, loop through dirname.i until we
         # find one that doesn't exist
         i = 1
         while (True):
             potential_dir = dirname + "." + str(i)
-            if (not os.path.exists(potential_dir)):
+            if (not exists(potential_dir)):
                 return potential_dir
             i += 1
 
     def emit_interactive_visualization(self, output_dirname, show_procs,
                                        show_channels, show_instances, force):
         self.assign_colors()
-
-        html_src_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "legion_prof_files","index.html")
-        js_src_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "legion_prof_files", "js", "timeline.js.template")
-        util_src_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "legion_prof_files", "js", "util.js")
-
         # the output directory will either be overwritten, or we will find
         # a new unique name to create new logs
-
         if force:
-            if (os.path.exists(output_dirname)):
+            if (exists(output_dirname)):
                 shutil.rmtree(output_dirname)
         else:
             output_dirname = self.find_unique_dirname(output_dirname)
 
-        data_tsv_file_name = os.path.join(output_dirname, "legion_prof_data.tsv")
-        processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
-        html_file_name = os.path.join(output_dirname, "index.html")
-        js_file_name = os.path.join(output_dirname, "js", "timeline.js")
-        util_file_name = os.path.join(output_dirname, "js", "util.js")
-        ops_file_name = os.path.join(output_dirname, "legion_prof_ops.tsv")
         print 'Generating interactive visualization files in directory ' + output_dirname
+        src_directory = os.path.join(dirname(sys.argv[0]), "legion_prof_files")
 
-        os.mkdir(output_dirname)
+        shutil.copytree(src_directory, output_dirname)
 
         processor_levels = {}
         channel_levels = {}
         memory_levels = {}
         base_level = 0
         last_time = 0
+
+        ops_file_name = os.path.join(output_dirname, "legion_prof_ops.tsv")
+        data_tsv_file_name = os.path.join(output_dirname, "legion_prof_data.tsv")
+        processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
+        scale_json_file_name = os.path.join(output_dirname, "json", "scale.json")
+
         data_tsv_file = open(data_tsv_file_name, "w")
         data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n")
         if show_procs:
@@ -2150,18 +2143,14 @@ class State(object):
                 processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(memory)))
         processor_tsv_file.close()
 
-        os.mkdir(os.path.join(output_dirname, "js"))
+        scale_data = {
+            'start': 0,
+            'end': last_time * 1.01,
+            'max_level': base_level + 1
+        }
 
-        js_src_file = open(js_src_file_name, "r")
-        timeline_js = js_src_file.read()
-        js_src_file.close()
-        js_file = open(js_file_name, "w")
-        js_file.write(timeline_js % (last_time, base_level + 1))
-        js_file.close()
-
-        shutil.copyfile(util_src_file_name, util_file_name)
-
-        shutil.copyfile(html_src_file_name, html_file_name)
+        with open(scale_json_file_name, "w") as scale_json_file:
+            json.dump(scale_data, scale_json_file)
 
 def usage():
     print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'
