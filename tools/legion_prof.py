@@ -592,9 +592,10 @@ class Memory(object):
             self.time_points.append(TimePoint(inst.create, inst, True))
             self.time_points.append(TimePoint(inst.destroy, inst, False))
         # Keep track of which levels are free
+        self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
         # Iterate over all the points in sorted order
-        for point in sorted(self.time_points,key=lambda p: p.time_key):
+        for point in self.time_points:
             if point.first:
                 # Find a level to assign this to
                 if len(free_levels) > 0:
@@ -624,16 +625,26 @@ class Memory(object):
     def emit_tsv(self, tsv_file, base_level):
         max_levels = self.max_live_instances + 1
         if max_levels > 1:
-            for instance in self.instances:
-                assert instance.level is not None
-                assert instance.create is not None
-                assert instance.destroy is not None
-                inst_name = repr(instance)
-                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
-                        (base_level + (max_levels - instance.level),
-                         instance.create, instance.destroy,
-                         instance.get_color(), inst_name))
+            # iterate over tasks in start time order
+            max_levels = max(4, max_levels)
+            for point in self.time_points:
+                if point.first:
+                    point.thing.emit_tsv(tsv_file, base_level,\
+                                max_levels, point.thing.level)
+
         return base_level + max_levels
+
+        # if max_levels > 1:
+        #     for instance in self.instances:
+        #         assert instance.level is not None
+        #         assert instance.create is not None
+        #         assert instance.destroy is not None
+        #         inst_name = repr(instance)
+        #         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+        #                 (base_level + (max_levels - instance.level),
+        #                  instance.create, instance.destroy,
+        #                  instance.get_color(), inst_name))
+        # return base_level + max_levels
 
 
     def print_stats(self):
@@ -1038,13 +1049,14 @@ class Copy(object):
         return 'Copy size='+str(self.size) + '\t' + str(self.op.op_id)
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        assert self.level is not None
+        assert self.start is not None
+        assert self.stop is not None
         copy_name = repr(self)
         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
-                (base_level + (max_levels - self.level),
+                (base_level + (max_levels - level),
                 self.start, self.stop,
                 self.get_color(), copy_name))
-        
-
 
 class Fill(object):
     def __init__(self, dst, op):
@@ -1077,6 +1089,17 @@ class Instance(object):
         self.create = None
         self.destroy = None
         self.level = None
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        assert self.level is not None
+        assert self.create is not None
+        assert self.destroy is not None
+        inst_name = repr(self)
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                (base_level + (max_levels - level),
+                 self.create, self.destroy,
+                 self.get_color(), inst_name))
+
 
     def get_color(self):
         # Get the color from the operation
@@ -2042,7 +2065,7 @@ class State(object):
     def find_unique_dirname(self, dirname):
         if (not os.path.exists(dirname)):
             return dirname
-        # if the dirname exists, loop through dirname.i until wee
+        # if the dirname exists, loop through dirname.i until we
         # find one that doesn't exist
         i = 1
         while (True):
