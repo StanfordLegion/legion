@@ -2149,6 +2149,8 @@ class State(object):
             'max_level': base_level + 1
         }
 
+        if not os.path.exists(os.path.join(output_dirname, "json")):
+            os.makedirs(os.path.join(output_dirname, "json"))
         with open(scale_json_file_name, "w") as scale_json_file:
             json.dump(scale_data, scale_json_file)
 
