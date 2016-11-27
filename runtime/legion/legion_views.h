@@ -271,6 +271,8 @@ namespace Legion {
     public:
       MaterializedView& operator=(const MaterializedView &rhs);
     public:
+      void add_remote_child(MaterializedView *child);
+    public:
       inline const FieldMask& get_space_mask(void) const 
         { return manager->layout->allocated_fields; }
     public:

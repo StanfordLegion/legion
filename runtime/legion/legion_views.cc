@@ -330,6 +330,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MaterializedView::add_remote_child(MaterializedView *child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager == child->manager);
+#endif
+      const ColorPoint &c = child->logical_node->get_color();
+      AutoLock v_lock(view_lock);
+      children[c] = child;
+    }
+
+    //--------------------------------------------------------------------------
     Memory MaterializedView::get_location(void) const
     //--------------------------------------------------------------------------
     {
@@ -427,11 +439,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(child_view->is_materialized_view());
 #endif
-        MaterializedView *mat_child = child_view->as_materialized_view();
-        // Retake the lock and add the child
-        AutoLock v_lock(view_lock);
-        children[c] = mat_child;
-        return mat_child;
+        return child_view->as_materialized_view();
       }
     }
 
@@ -3052,6 +3060,8 @@ namespace Legion {
                                      runtime->address_space, logical_owner,
                                      target_node, inst_manager, parent, 
                                      context_uid, false/*register now*/);
+      if (parent != NULL)
+        parent->add_remote_child(view);
       // Register only after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
