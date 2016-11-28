@@ -32,6 +32,9 @@ public:
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
+  virtual void select_task_options(const MapperContext    ctx,
+                                   const Task&            task,
+                                         TaskOptions&     output);
   virtual Processor default_policy_select_initial_processor(
                                     MapperContext ctx, const Task &task);
   virtual void default_policy_select_target_processors(
@@ -68,6 +71,22 @@ StencilMapper::StencilMapper(MapperRuntime *rt, Machine machine, Processor local
     // proc_sysmems(*_proc_sysmems),
     // proc_regmems(*_proc_regmems)
 {
+}
+
+//--------------------------------------------------------------------------
+void StencilMapper::select_task_options(const MapperContext    ctx,
+                                        const Task&            task,
+                                              TaskOptions&     output)
+//--------------------------------------------------------------------------
+{
+  output.initial_proc = default_policy_select_initial_processor(ctx, task);
+  output.inline_task = false;
+  output.stealable = stealing_enabled;
+#ifdef MAP_LOCALLY
+  output.map_locally = true;
+#else
+  output.map_locally = false;
+#endif
 }
 
 Processor StencilMapper::default_policy_select_initial_processor(
