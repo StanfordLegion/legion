@@ -330,6 +330,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MaterializedView::add_remote_child(MaterializedView *child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager == child->manager);
+#endif
+      const ColorPoint &c = child->logical_node->get_color();
+      AutoLock v_lock(view_lock);
+      children[c] = child;
+    }
+
+    //--------------------------------------------------------------------------
     Memory MaterializedView::get_location(void) const
     //--------------------------------------------------------------------------
     {
@@ -427,11 +439,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(child_view->is_materialized_view());
 #endif
-        MaterializedView *mat_child = child_view->as_materialized_view();
-        // Retake the lock and add the child
-        AutoLock v_lock(view_lock);
-        children[c] = mat_child;
-        return mat_child;
+        return child_view->as_materialized_view();
       }
     }
 
@@ -2988,8 +2996,21 @@ namespace Legion {
         RtEvent par_ready;
         LogicalView *par_view = 
           runtime->find_or_request_logical_view(parent_did, par_ready);
-        if (par_ready.exists())
-          par_ready.wait();
+        if (par_ready.exists() && !par_ready.has_triggered())
+        {
+          // Need to avoid virtual channel deadlock here so defer it
+          DeferMaterializedViewArgs args;
+          args.did = did;
+          args.owner_space = owner_space;
+          args.logical_owner = logical_owner;
+          args.target_node = target_node;
+          args.manager = phy_man;
+          args.parent = parent;
+          args.context_uid = context_uid;
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+             NULL/*op*/, Runtime::merge_events(par_ready, man_ready));
+          return;
+        }
 #ifdef DEBUG_LEGION
         assert(par_view->is_materialized_view());
 #endif
@@ -3000,6 +3021,29 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(phy_man->is_instance_manager());
 #endif
+      create_remote_materialized_view(runtime, did, owner_space, logical_owner,
+                                    target_node, phy_man, parent, context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::handle_deferred_materialized_view(
+                                             Runtime *runtime, const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMaterializedViewArgs *margs = 
+        (const DeferMaterializedViewArgs*)args;
+      create_remote_materialized_view(runtime, margs->did, margs->owner_space,
+          margs->logical_owner, margs->target_node, margs->manager,
+          margs->parent, margs->context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::create_remote_materialized_view(
+       Runtime *runtime, DistributedID did, AddressSpaceID owner_space,
+       AddressSpaceID logical_owner, RegionTreeNode *target_node, 
+       PhysicalManager *phy_man, MaterializedView *parent, UniqueID context_uid)
+    //--------------------------------------------------------------------------
+    {
       InstanceManager *inst_manager = phy_man->as_instance_manager();
       void *location;
       MaterializedView *view = NULL;
@@ -3016,6 +3060,8 @@ namespace Legion {
                                      runtime->address_space, logical_owner,
                                      target_node, inst_manager, parent, 
                                      context_uid, false/*register now*/);
+      if (parent != NULL)
+        parent->add_remote_child(view);
       // Register only after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
@@ -4337,7 +4383,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Traverse up the tree and remove any writen fields 
-      // that have been written at this level or the parent
+      // that have been written at this level or a parent
       LegionMap<RegionTreeNode*,FieldMask>::aligned::const_iterator finder = 
         written_nodes.find(node);
       while (finder != written_nodes.end())
@@ -4345,11 +4391,10 @@ namespace Legion {
         mask -= finder->second;
         if (!mask)
           return;
-        if (node == root)
+        // Not entirely convinced the second part of this expression
+        // is correct, so we'll let legion spy find any bugs
+        if ((node == root) || (node->get_depth() <= root->get_depth()))
           return;
-#ifdef DEBUG_LEGION
-        assert(node->get_depth() > root->get_depth());
-#endif
         node = node->get_parent();
         finder = written_nodes.find(node);
       }
@@ -5068,6 +5113,7 @@ namespace Legion {
       if (!!changed_mask)
       {
         CompositeView *view = clone(changed_mask, local_replacements);
+        view->finalize_capture(false/*need prune*/);
         replacements[view] = changed_mask;
         // Any fields that changed are no longer valid
         valid_mask -= changed_mask;
@@ -5569,7 +5615,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void CompositeView::finalize_capture(void)
+    void CompositeView::finalize_capture(bool need_prune)
     //--------------------------------------------------------------------------
     {
       // Add base references to all our version states
@@ -5585,51 +5631,61 @@ namespace Legion {
         it->first->add_nested_resource_ref(did);
       // For the deferred views, we try to prune them 
       // based on our closed tree if they are the same we keep them 
-      std::vector<CompositeView*> to_erase;
-      LegionMap<CompositeView*,FieldMask>::aligned replacements;
-      for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
-            nested_composite_views.begin(); it != 
-            nested_composite_views.end(); it++)
+      if (need_prune)
       {
-        // If the composite view is above in the tree we don't
-        // need to worry about pruning it for resource reasons
-        if (it->first->logical_node != logical_node)
+        std::vector<CompositeView*> to_erase;
+        LegionMap<CompositeView*,FieldMask>::aligned replacements;
+        for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it = 
+              nested_composite_views.begin(); it != 
+              nested_composite_views.end(); it++)
         {
-#ifdef DEBUG_LEGION
-          // Should be above us in the region tree
-          assert(logical_node->get_depth() > 
-                  it->first->logical_node->get_depth());
-#endif
-          it->first->add_nested_resource_ref(did);
-          continue;
-        }
-        it->first->prune(closed_tree, it->second, replacements);
-        if (!it->second)
-          to_erase.push_back(it->first);
-        else
-          it->first->add_nested_resource_ref(did);
-      }
-      if (!to_erase.empty())
-      {
-        for (std::vector<CompositeView*>::const_iterator it = to_erase.begin();
-              it != to_erase.end(); it++)
-          nested_composite_views.erase(*it);
-      }
-      if (!replacements.empty())
-      {
-        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
-              replacements.begin(); it != replacements.end(); it++)
-        {
-          LegionMap<CompositeView*,FieldMask>::aligned::iterator finder =
-            nested_composite_views.find(it->first);
-          if (finder == nested_composite_views.end())
+          // If the composite view is above in the tree we don't
+          // need to worry about pruning it for resource reasons
+          if (it->first->logical_node != logical_node)
           {
+#ifdef DEBUG_LEGION
+            // Should be above us in the region tree
+            assert(logical_node->get_depth() > 
+                    it->first->logical_node->get_depth());
+#endif
             it->first->add_nested_resource_ref(did);
-            nested_composite_views.insert(*it);
+            continue;
           }
+          it->first->prune(closed_tree, it->second, replacements);
+          if (!it->second)
+            to_erase.push_back(it->first);
           else
-            finder->second |= it->second;
+            it->first->add_nested_resource_ref(did);
         }
+        if (!to_erase.empty())
+        {
+          for (std::vector<CompositeView*>::const_iterator it = to_erase.begin();
+                it != to_erase.end(); it++)
+            nested_composite_views.erase(*it);
+        }
+        if (!replacements.empty())
+        {
+          for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it =
+                replacements.begin(); it != replacements.end(); it++)
+          {
+            LegionMap<CompositeView*,FieldMask>::aligned::iterator finder =
+              nested_composite_views.find(it->first);
+            if (finder == nested_composite_views.end())
+            {
+              it->first->add_nested_resource_ref(did);
+              nested_composite_views.insert(*it);
+            }
+            else
+              finder->second |= it->second;
+          }
+        }
+      }
+      else
+      {
+        for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
+              nested_composite_views.begin(); it != 
+              nested_composite_views.end(); it++)
+          it->first->add_nested_resource_ref(did);
       }
     }
 
@@ -6635,8 +6691,8 @@ namespace Legion {
         event_preconds.insert(it->first);
       }
       ApEvent reduce_pre = Runtime::merge_events(event_preconds); 
-      ApEvent reduce_post = manager->issue_reduction(op, src_fields, 
-                                                     dst_fields,
+      ApEvent reduce_post = manager->issue_reduction(op, 
+                                                     src_fields, dst_fields,
                                                      target->logical_node,
                                                      reduce_pre,
                                                      fold, true/*precise*/,
@@ -6686,9 +6742,8 @@ namespace Legion {
       }
       ApEvent reduce_pre = Runtime::merge_events(preconditions); 
       ApEvent reduce_post = target->logical_node->issue_copy(op, 
-                                                     src_fields, dst_fields,
-                                                     reduce_pre, intersect,
-                                                     manager->redop, fold);
+                             src_fields, dst_fields, reduce_pre, 
+                             intersect, manager->redop, fold);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, versions,

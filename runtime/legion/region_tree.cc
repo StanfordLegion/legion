@@ -13072,7 +13072,8 @@ namespace Legion {
         manager.advance_versions(closing_mask, owner_ctx, update_parent_state, 
                                  local_space, ready_events);
       // Now we can record our advance versions
-      manager.record_advance_versions(closing_mask, version_info, ready_events);
+      manager.record_advance_versions(closing_mask, owner_ctx, 
+                                      version_info, ready_events);
       // Fix the closed tree
       closed_tree->fix_closed_tree();
       // Prepare to make the new view
@@ -13112,7 +13113,7 @@ namespace Legion {
         }
       }
       state->capture_composite_root(result, closing_mask, valid_above);
-      result->finalize_capture();
+      result->finalize_capture(true/*prune*/);
       // Clear out any reductions
       invalidate_reduction_views(state, closing_mask);
       // Update the valid views to reflect the new valid instance
@@ -15505,8 +15506,8 @@ namespace Legion {
       }
       // Sine we're mapping we need to record the advance versions
       // where we'll put the results when we're done
-      manager.record_advance_versions(info.traversal_mask, info.version_info,
-                                      info.map_applied_events);
+      manager.record_advance_versions(info.traversal_mask, context,
+                                    info.version_info, info.map_applied_events);
       PhysicalState *state = get_physical_state(info.version_info);
       const AddressSpaceID local_space = context->runtime->address_space;
       // Get any restricted fields
@@ -15902,8 +15903,8 @@ namespace Legion {
       manager.advance_versions(fill_mask, context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
-      manager.record_advance_versions(fill_mask, version_info, 
-                                      map_applied_events);
+      manager.record_advance_versions(fill_mask, context, 
+                                      version_info, map_applied_events);
       // Make the fill instance
       DistributedID did = context->runtime->get_available_distributed_id(false);
       FillView::FillViewValue *fill_value = 
@@ -15940,8 +15941,8 @@ namespace Legion {
       manager.advance_versions(fill_mask, context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
-      manager.record_advance_versions(fill_mask, version_info, 
-                                      map_applied_events);
+      manager.record_advance_versions(fill_mask, context, 
+                                      version_info, map_applied_events);
       // Effectively a fill is a special kind of copy so we can analyze
       // it the same way to figure out how to issue the fill
       std::set<ApEvent> post_events;

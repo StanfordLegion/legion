@@ -22164,6 +22164,12 @@ namespace Legion {
             InterCloseOp::handle_disjoint_close(args);
             break;
           }
+        case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
+          {
+            MaterializedView::handle_deferred_materialized_view(
+                                  Runtime::get_runtime(p), args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 
