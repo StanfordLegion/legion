@@ -5960,15 +5960,6 @@ namespace Legion {
       // Get the context information from our slice owner
       parent_ctx = slice_owner->get_context();
       parent_task = parent_ctx->get_task();
-      // Check to see if we had no virtual mappings and everything
-      // was pre-mapped and we're remote then we can mark this
-      // task as being mapped
-      if (is_locally_mapped() && is_leaf())
-      {
-        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
-                                         ApEvent::NO_AP_EVENT);
-        complete_mapping();
-      }
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependence(completion_event, point_termination);
 #endif
