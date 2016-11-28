@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4"]]
--- [["-ll:cpu", "2", "-map_locally"]]
+-- [["-ll:cpu", "4"],
+--  ["-ll:cpu", "2", "-map_locally"]]
 
 -- FIXME: Something is wrong with SPMD
 -- [["-ll:cpu", "4", "-fflow-spmd", "4", "-fflow-spmd-shardsize", "4"]]
