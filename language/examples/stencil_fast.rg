@@ -14,6 +14,7 @@
 
 -- runs-with:
 -- [["-ll:cpu", "4"]]
+-- [["-ll:cpu", "2", "-map_locally"]]
 
 -- FIXME: Something is wrong with SPMD
 -- [["-ll:cpu", "4", "-fflow-spmd", "4", "-fflow-spmd-shardsize", "4"]]
@@ -62,6 +63,17 @@ if USE_FOREIGN then
                               "-DRADIUS=" .. tostring(RADIUS)})
 end
 
+local map_locally = false
+do
+  local cstring = terralib.includec("string.h")
+  for _, arg in ipairs(arg) do
+    if cstring.strcmp(arg, "-map_locally") == 0 then
+      map_locally = true
+      break
+    end
+  end
+end
+
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = root_dir .. "../../runtime/"
@@ -77,6 +89,7 @@ do
   local cxx = os.getenv('CXX') or 'c++'
 
   local cxx_flags = "-O2 -Wall -Werror"
+  if map_locally then cxx_flags = cxx_flags .. " -DMAP_LOCALLY " end
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
