@@ -2370,6 +2370,8 @@ namespace Legion {
         rez.serialize<size_t>(target_processors.size());
         for (unsigned idx = 0; idx < target_processors.size(); idx++)
           rez.serialize(target_processors[idx]);
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          rez.serialize<bool>(virtual_mapped[idx]);
       }
       else
       {
@@ -2401,6 +2403,13 @@ namespace Legion {
         target_processors.resize(num_target_processors);
         for (unsigned idx = 0; idx < num_target_processors; idx++)
           derez.deserialize(target_processors[idx]);
+        virtual_mapped.resize(regions.size());
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          bool result;
+          derez.deserialize(result);
+          virtual_mapped[idx] = result;
+        }
       }
       else
       {
@@ -5960,6 +5969,14 @@ namespace Legion {
       // Get the context information from our slice owner
       parent_ctx = slice_owner->get_context();
       parent_task = parent_ctx->get_task();
+      // Check to see if we are locally mapped and we are a leaf with no
+      // virtual instances in which case we are already known to be mapped
+      if (is_locally_mapped() && is_leaf() && !has_virtual_instances())
+      {
+        slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
+                                         ApEvent::NO_AP_EVENT);
+        complete_mapping();
+      }
 #ifdef LEGION_SPY
       LegionSpy::log_event_dependence(completion_event, point_termination);
 #endif
