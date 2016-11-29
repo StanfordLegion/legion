@@ -13,11 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4"],
---  ["-ll:cpu", "2", "-map_locally"]]
-
--- FIXME: Something is wrong with SPMD
--- [["-ll:cpu", "4", "-fflow-spmd", "4", "-fflow-spmd-shardsize", "4"]]
+-- [["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4"],
+--  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally"]]
 
 -- Inspired by https://github.com/ParRes/Kernels/tree/master/LEGION/Stencil
 
