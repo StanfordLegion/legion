@@ -10564,7 +10564,7 @@ namespace Legion {
         for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
               advances.begin(); it != advances.end(); it++)
           perform_advance_analysis(ctx, state, it->first, it->second, 
-                                   user, next_child);
+                                   user, next_child, trace_info.already_traced);
       }
       // See if we need to perform any advance operations
       // because we're going to be writing below this level
@@ -10878,8 +10878,8 @@ namespace Legion {
           advance_user, above_advances, advance_mask,
           advance_mask/*doesn't matter*/, false/*validates*/);
       // Now perform our local dependence analysis for this advance
-      perform_advance_analysis(ctx, state, advance, 
-                               advance_user, creator, next_child);
+      perform_advance_analysis(ctx, state, advance, advance_user, creator, 
+                               next_child, trace_info.already_traced);
       // Update our list of advance operations
       advances[advance] = advance_user;
       // Add it to the list of current epoch users even if we're tracing 
@@ -10943,7 +10943,7 @@ namespace Legion {
       LogicalState &state = get_logical_state(ctx);
       const ColorPoint empty_next_child;
       perform_advance_analysis(ctx, state, advance_op, advance_user, 
-                               create_user, empty_next_child, false/*root*/);
+          create_user, empty_next_child, false/*traced*/, false/*root*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10953,6 +10953,7 @@ namespace Legion {
                                                 const LogicalUser &advance_user,
                                                 const LogicalUser &create_user,
                                                 const ColorPoint &next_child,
+                                                const bool already_traced,
                                                 const bool advance_root)
     //--------------------------------------------------------------------------
     {
@@ -10970,24 +10971,29 @@ namespace Legion {
       // the current version number including those that are in disjoint
       // trees from what we might be traversing. We can skip the next child
       // if there is one because we're going to traverse that subtree later 
-      const bool has_next_child = next_child.is_valid();
-      for (LegionList<FieldState>::aligned::const_iterator fit = 
-            state.field_states.begin(); fit != state.field_states.end(); fit++)
+      // No need to traverse those sub-trees if we are tracing though because
+      // we know there is nothing
+      if (!already_traced)
       {
-        const FieldMask overlap = advance_user.field_mask & fit->valid_fields;
-        if (!overlap)
-          continue;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
-              fit->open_children.begin(); it != fit->open_children.end(); it++)
+        const bool has_next_child = next_child.is_valid();
+        for (LegionList<FieldState>::aligned::const_iterator fit = 
+             state.field_states.begin(); fit != state.field_states.end(); fit++)
         {
-          if (has_next_child && (it->first == next_child))
+          const FieldMask overlap = advance_user.field_mask & fit->valid_fields;
+          if (!overlap)
             continue;
-          const FieldMask child_overlap = it->second & overlap;
-          if (!child_overlap)
-            continue;
-          RegionTreeNode *child = get_tree_child(it->first);
-          child->traverse_advance_analysis(ctx, advance_op, 
-                                           advance_user, create_user);
+          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+               fit->open_children.begin(); it != fit->open_children.end(); it++)
+          {
+            if (has_next_child && (it->first == next_child))
+              continue;
+            const FieldMask child_overlap = it->second & overlap;
+            if (!child_overlap)
+              continue;
+            RegionTreeNode *child = get_tree_child(it->first);
+            child->traverse_advance_analysis(ctx, advance_op, 
+                                             advance_user, create_user);
+          }
         }
       }
       // We know we are dominating from above, so we don't care about

@@ -1339,6 +1339,7 @@ namespace Legion {
                                     const LogicalUser &advance_user,
                                     const LogicalUser &create_user,
                                     const ColorPoint &next_child,
+                                    const bool already_traced,
                                     const bool advance_root = true);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
