@@ -12542,7 +12542,7 @@ namespace Legion {
         // See if our child is open, if it's not then we can keep going
         LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
           it->open_children.find(next_child);
-        if (!it->is_projection_state() && 
+        if (!it->is_projection_state() ||
             (finder == it->open_children.end()))
         {
           it++;
