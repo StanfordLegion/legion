@@ -997,7 +997,8 @@ namespace Legion {
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
-                  LegionMap<ApEvent,FieldMask>::aligned &postconditions);
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  AddressSpaceID local_space, bool restrict_out);
     protected:
       void issue_nested_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,

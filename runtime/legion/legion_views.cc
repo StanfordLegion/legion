@@ -4004,7 +4004,8 @@ namespace Legion {
                             MaterializedView *dst, const FieldMask &copy_mask,
                             VersionTracker *src_version_tracker,
                 const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
-                      LegionMap<ApEvent,FieldMask>::aligned &postconditions)
+                      LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                      AddressSpaceID local_space, bool restrict_out)
     //--------------------------------------------------------------------------
     {
       // Make a temporary instance and issue copies to it
@@ -4042,6 +4043,14 @@ namespace Legion {
       LegionMap<ApEvent,FieldMask>::aligned empty_pre, local_pre, local_reduce;
       issue_copies(info, temporary_dst, copy_mask, src_version_tracker,
                    empty_pre, local_pre, local_reduce, NULL/*across helper*/);
+      // Now that we've done all the copies to the temporary instance
+      // we can compute the rest of the destination preconditions
+      dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
+                                   false/*single copy*/, restrict_out,
+                                   copy_mask, &info.version_info,
+                                   info.op->get_unique_op_id(), info.index,
+                                   local_space, local_pre, 
+                                   info.map_applied_events);
       // Merge the destination preconditions
       if (!dst_preconditions.empty())
         local_pre.insert(dst_preconditions.begin(), dst_preconditions.end());
@@ -4055,7 +4064,6 @@ namespace Legion {
       // on the temporary for being done with copies there, issue a copy
       // from the temporary to the original destination, and then record
       // users on both instances, put the done event in the postcondition set
-      const AddressSpaceID local_space = dst->context->runtime->address_space;
       for (LegionList<EventSet>::aligned::const_iterator it = 
             event_sets.begin(); it != event_sets.end(); it++)
       {
@@ -5147,12 +5155,7 @@ namespace Legion {
       }
       LegionMap<ApEvent,FieldMask>::aligned preconditions;
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
-                                   false/*single copy*/, restrict_out,
-                                   copy_mask, &info.version_info, 
-                                   info.op->get_unique_op_id(), info.index,
-                                   local_space, preconditions, 
-                                   info.map_applied_events);
+      
       if (restrict_info.has_restrictions())
       {
         FieldMask restrict_mask;
@@ -5171,10 +5174,18 @@ namespace Legion {
       {
         // We need to make a temporary instance 
         copy_tree->copy_to_temporary(info, dst, copy_mask, this,
-                                     preconditions, postconditions);
+                                     preconditions, postconditions, 
+                                     local_space, restrict_out);
       }
       else
       {
+        // Compute the rest of the destination preconditions now
+        dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
+                                     false/*single copy*/, restrict_out,
+                                     copy_mask, &info.version_info, 
+                                     info.op->get_unique_op_id(), info.index,
+                                     local_space, preconditions, 
+                                     info.map_applied_events);  
         LegionMap<ApEvent,FieldMask>::aligned postreductions;
         // No temporary instance necessary here
         copy_tree->issue_copies(info, dst, copy_mask, this, 
