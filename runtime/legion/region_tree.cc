@@ -10563,7 +10563,8 @@ namespace Legion {
       {
         for (LegionMap<AdvanceOp*,LogicalUser>::aligned::const_iterator it =
               advances.begin(); it != advances.end(); it++)
-          perform_advance_analysis(state, it->first, it->second, user);
+          perform_advance_analysis(ctx, state, it->first, it->second, 
+                                   user, next_child);
       }
       // See if we need to perform any advance operations
       // because we're going to be writing below this level
@@ -10588,8 +10589,8 @@ namespace Legion {
           }
           // If we still have fields, then we have to make a new advance
           if (!!advance_mask)
-            create_logical_advance(state, advance_mask, user, trace_info, 
-                advances, version_info.is_upper_bound_node(this));
+            create_logical_advance(ctx, state, advance_mask, user, trace_info, 
+                advances, version_info.is_upper_bound_node(this), next_child);
         }
       }
       else if (arrived && IS_REDUCE(user.usage))
@@ -10615,8 +10616,8 @@ namespace Legion {
           }
           // If we still have fields, then we have to make a new advance
           if (!!advance_mask)
-            create_logical_advance(state, advance_mask, user, trace_info,
-                advances, version_info.is_upper_bound_node(this));
+            create_logical_advance(ctx, state, advance_mask, user, trace_info,
+                advances, version_info.is_upper_bound_node(this), next_child);
         }
       }
       // We also always do our dependence analysis even if we have
@@ -10833,12 +10834,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::create_logical_advance(LogicalState &state,
+    void RegionTreeNode::create_logical_advance(ContextID ctx, 
+                                                LogicalState &state,
                                                 const FieldMask &advance_mask,
                                                 const LogicalUser &creator,
                                                 const TraceInfo &trace_info,
                            LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
-                                                bool parent_is_upper_bound) 
+                                                bool parent_is_upper_bound,
+                                                const ColorPoint &next_child) 
     //--------------------------------------------------------------------------
     {
       // These are the fields for which we have to issue an advance op
@@ -10875,7 +10878,8 @@ namespace Legion {
           advance_user, above_advances, advance_mask,
           advance_mask/*doesn't matter*/, false/*validates*/);
       // Now perform our local dependence analysis for this advance
-      perform_advance_analysis(state, advance, advance_user, creator);
+      perform_advance_analysis(ctx, state, advance, 
+                               advance_user, creator, next_child);
       // Update our list of advance operations
       advances[advance] = advance_user;
       // Add it to the list of current epoch users even if we're tracing 
@@ -10930,17 +10934,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::perform_advance_analysis(LogicalState &state,
-                                                  AdvanceOp *advance_op,
+    void RegionTreeNode::traverse_advance_analysis(ContextID ctx, 
+                                                   AdvanceOp *advance_op,
                                                 const LogicalUser &advance_user,
                                                 const LogicalUser &create_user)
     //--------------------------------------------------------------------------
     {
+      LogicalState &state = get_logical_state(ctx);
+      const ColorPoint empty_next_child;
+      perform_advance_analysis(ctx, state, advance_op, advance_user, 
+                               create_user, empty_next_child, false/*root*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::perform_advance_analysis(ContextID ctx, 
+                                                  LogicalState &state,
+                                                  AdvanceOp *advance_op,
+                                                const LogicalUser &advance_user,
+                                                const LogicalUser &create_user,
+                                                const ColorPoint &next_child,
+                                                const bool advance_root)
+    //--------------------------------------------------------------------------
+    {
       // See if we have any previous dirty data to record at this depth
-      FieldMask previous_dirty = advance_user.field_mask & 
-                                (state.dirty_fields | state.reduction_fields);
-      if (!!previous_dirty)
-        advance_op->record_dirty_previous(get_depth(), previous_dirty);
+      // Only have to do this at the root of the advance
+      if (advance_root)
+      {
+        FieldMask previous_dirty = advance_user.field_mask & 
+                                  (state.dirty_fields | state.reduction_fields);
+        if (!!previous_dirty)
+          advance_op->record_dirty_previous(get_depth(), previous_dirty);
+      }
+      // Advances are going to bump the version number so we have to get
+      // mapping dependences on any operations which might need to read
+      // the current version number including those that are in disjoint
+      // trees from what we might be traversing. We can skip the next child
+      // if there is one because we're going to traverse that subtree later 
+      const bool has_next_child = next_child.is_valid();
+      for (LegionList<FieldState>::aligned::const_iterator fit = 
+            state.field_states.begin(); fit != state.field_states.end(); fit++)
+      {
+        const FieldMask overlap = advance_user.field_mask & fit->valid_fields;
+        if (!overlap)
+          continue;
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+              fit->open_children.begin(); it != fit->open_children.end(); it++)
+        {
+          if (has_next_child && (it->first == next_child))
+            continue;
+          const FieldMask child_overlap = it->second & overlap;
+          if (!child_overlap)
+            continue;
+          RegionTreeNode *child = get_tree_child(it->first);
+          child->traverse_advance_analysis(ctx, advance_op, 
+                                           advance_user, create_user);
+        }
+      }
       // We know we are dominating from above, so we don't care about
       // open below fields for advance analysis
       FieldMask empty_below;
