@@ -26,7 +26,7 @@
 // Note: there is a way to use this example with the
 // MPI conduit, but you have to have a version of 
 // MPI that supports MPI_THREAD_MULTIPLE. See the 
-// macro GASNET_MPI_CONDUIT below.
+// macro GASNET_CONDUIT_MPI below.
 ////////////////////////////////////////////////////////////
 
 #include <cstdio>
@@ -144,7 +144,7 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-#ifdef GASNET_MPI_CONDUIT
+#ifdef GASNET_CONDUIT_MPI
   // The GASNet MPI conduit requires special start-up
   // in order to handle MPI calls from multiple threads
   int provided;
@@ -221,7 +221,7 @@ int main(int argc, char **argv)
   }
   // When you're done wait for the Legion runtime to shutdown
   Runtime::wait_for_shutdown();
-#ifndef GASNET_MPI_CONDUIT
+#ifndef GASNET_CONDUIT_MPI
   // Then finalize MPI like normal
   // Exception for the MPI conduit which does its own finalization
   MPI_Finalize();
