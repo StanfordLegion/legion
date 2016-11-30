@@ -3232,7 +3232,7 @@ function codegen.expr_unsafe_cast(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local input = `([std.implicit_cast(value_type, expr_type.index_type, value.value)].__ptr)
+  local input = std.implicit_cast(value_type, expr_type.index_type, value.value)
 
   local result = terralib.newsymbol(expr_type, "result")
   if bounds_checks then
@@ -3242,19 +3242,38 @@ function codegen.expr_unsafe_cast(cx, node)
     assert(cx:has_region(region))
     local lr = `([cx:region(region).logical_region].impl)
 
-    local check = terralib.newsymbol(c.legion_ptr_t, "check")
-    actions = quote
-      [actions]
-      var [check] = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input], [lr])
-      if c.legion_ptr_is_null([check]) then
-        std.assert_error(false, [get_source_location(node) .. ": pointer " .. tostring(expr_type) .. " is out-of-bounds"])
+    if expr_type.index_type:is_opaque() then
+      local check = terralib.newsymbol(c.legion_ptr_t, "check")
+      actions = quote
+        [actions]
+        var [check] = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
+        if c.legion_ptr_is_null([check]) then
+          std.assert_error(false, [get_source_location(node) .. ": pointer " .. tostring(expr_type) .. " is out-of-bounds"])
+        end
+        var [result] = [expr_type]({ __ptr = [check] })
       end
-      var [result] = [expr_type]({ __ptr = [check] })
+    else
+      local check = terralib.newsymbol(c.legion_domain_point_t, "check")
+      actions = quote
+        [actions]
+        var [check] = c.legion_domain_point_safe_cast([cx.runtime], [cx.context], [input], [lr])
+        if c.legion_domain_point_is_null([check]) then
+          std.assert_error(false, [get_source_location(node) .. ": pointer " .. tostring(expr_type) .. " is out-of-bounds"])
+        end
+        var [result] = [expr_type]({ __ptr = [expr_type.index_type]([check]) })
+      end
     end
   else
-    actions = quote
-      [actions]
-      var [result] = [expr_type]({ __ptr = [input] })
+    if expr_type.index_type:is_opaque() then
+      actions = quote
+        [actions]
+        var [result] = [expr_type]({ __ptr = [input].__ptr })
+      end
+    else
+      actions = quote
+        [actions]
+        var [result] = [expr_type]({ __ptr = [input] })
+      end
     end
   end
 

@@ -16,11 +16,12 @@
 #
 
 import sys, os, shutil
-import string, re
+import string, re, json
 from math import sqrt, log
 from getopt import getopt
 from cgi import escape
 from operator import itemgetter
+from os.path import dirname, exists, basename
 
 prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
 task_info_pat = re.compile(prefix + r'Prof Task Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
@@ -592,9 +593,10 @@ class Memory(object):
             self.time_points.append(TimePoint(inst.create, inst, True))
             self.time_points.append(TimePoint(inst.destroy, inst, False))
         # Keep track of which levels are free
+        self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
         # Iterate over all the points in sorted order
-        for point in sorted(self.time_points,key=lambda p: p.time_key):
+        for point in self.time_points:
             if point.first:
                 # Find a level to assign this to
                 if len(free_levels) > 0:
@@ -624,16 +626,26 @@ class Memory(object):
     def emit_tsv(self, tsv_file, base_level):
         max_levels = self.max_live_instances + 1
         if max_levels > 1:
-            for instance in self.instances:
-                assert instance.level is not None
-                assert instance.create is not None
-                assert instance.destroy is not None
-                inst_name = repr(instance)
-                tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
-                        (base_level + (max_levels - instance.level),
-                         instance.create, instance.destroy,
-                         instance.get_color(), inst_name))
+            # iterate over tasks in start time order
+            max_levels = max(4, max_levels)
+            for point in self.time_points:
+                if point.first:
+                    point.thing.emit_tsv(tsv_file, base_level,\
+                                max_levels, point.thing.level)
+
         return base_level + max_levels
+
+        # if max_levels > 1:
+        #     for instance in self.instances:
+        #         assert instance.level is not None
+        #         assert instance.create is not None
+        #         assert instance.destroy is not None
+        #         inst_name = repr(instance)
+        #         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+        #                 (base_level + (max_levels - instance.level),
+        #                  instance.create, instance.destroy,
+        #                  instance.get_color(), inst_name))
+        # return base_level + max_levels
 
 
     def print_stats(self):
@@ -1038,13 +1050,14 @@ class Copy(object):
         return 'Copy size='+str(self.size) + '\t' + str(self.op.op_id)
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        assert self.level is not None
+        assert self.start is not None
+        assert self.stop is not None
         copy_name = repr(self)
         tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
-                (base_level + (max_levels - self.level),
+                (base_level + (max_levels - level),
                 self.start, self.stop,
                 self.get_color(), copy_name))
-        
-
 
 class Fill(object):
     def __init__(self, dst, op):
@@ -1077,6 +1090,17 @@ class Instance(object):
         self.create = None
         self.destroy = None
         self.level = None
+
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        assert self.level is not None
+        assert self.create is not None
+        assert self.destroy is not None
+        inst_name = repr(self)
+        tsv_file.write("%d\t%ld\t%ld\t%s\t1.0\t%s\n" % \
+                (base_level + (max_levels - level),
+                 self.create, self.destroy,
+                 self.get_color(), inst_name))
+
 
     def get_color(self):
         # Get the color from the operation
@@ -1195,7 +1219,7 @@ class RuntimeCall(object):
 class SVGPrinter(object):
     def __init__(self, file_name, html_file):
         self.target = open(file_name,'w')
-        self.file_name = os.path.basename(file_name)
+        self.file_name = basename(file_name)
         self.html_file = html_file
         assert self.target is not None
         self.offset = 0
@@ -1997,7 +2021,7 @@ class State(object):
         printer.close()
 
     def show_copy_matrix(self, output_prefix):
-        template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
+        template_file_name = os.path.join(dirname(sys.argv[0]),
                 "legion_prof_copy.html.template")
         tsv_file_name = output_prefix + ".tsv"
         html_file_name = output_prefix + ".html"
@@ -2040,52 +2064,44 @@ class State(object):
         html_file.close()
 
     def find_unique_dirname(self, dirname):
-        if (not os.path.exists(dirname)):
+        if (not exists(dirname)):
             return dirname
-        # if the dirname exists, loop through dirname.i until wee
+        # if the dirname exists, loop through dirname.i until we
         # find one that doesn't exist
         i = 1
         while (True):
             potential_dir = dirname + "." + str(i)
-            if (not os.path.exists(potential_dir)):
+            if (not exists(potential_dir)):
                 return potential_dir
             i += 1
 
     def emit_interactive_visualization(self, output_dirname, show_procs,
                                        show_channels, show_instances, force):
         self.assign_colors()
-
-        html_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "legion_prof.html.template")
-        js_template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "timeline.js.template")
-
         # the output directory will either be overwritten, or we will find
         # a new unique name to create new logs
-
         if force:
-            if (os.path.exists(output_dirname)):
+            if (exists(output_dirname)):
                 shutil.rmtree(output_dirname)
         else:
             output_dirname = self.find_unique_dirname(output_dirname)
 
-        data_tsv_file_name = os.path.join(output_dirname, "legion_prof_data.tsv")
-        processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
-        html_file_name = os.path.join(output_dirname, "index.html")
-        js_file_name = os.path.join(output_dirname, "timeline.js")
-        ops_file_name = os.path.join(output_dirname, "legion_prof_ops.tsv")
         print 'Generating interactive visualization files in directory ' + output_dirname
+        src_directory = os.path.join(dirname(sys.argv[0]), "legion_prof_files")
 
-        os.mkdir(output_dirname)
-        template_file = open(js_template_file_name, "r")
-        template = template_file.read()
-        template_file.close()
+        shutil.copytree(src_directory, output_dirname)
 
         processor_levels = {}
         channel_levels = {}
         memory_levels = {}
         base_level = 0
         last_time = 0
+
+        ops_file_name = os.path.join(output_dirname, "legion_prof_ops.tsv")
+        data_tsv_file_name = os.path.join(output_dirname, "legion_prof_data.tsv")
+        processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
+        scale_json_file_name = os.path.join(output_dirname, "json", "scale.json")
+
         data_tsv_file = open(data_tsv_file_name, "w")
         data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n")
         if show_procs:
@@ -2127,12 +2143,16 @@ class State(object):
                 processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(memory)))
         processor_tsv_file.close()
 
-        js_file = open(js_file_name, "w")
-        js_file.write(template % (last_time, base_level + 1,
-                                    repr(os.path.basename(data_tsv_file_name)),
-                                    repr(os.path.basename(processor_tsv_file_name))))
-        js_file.close()
-        shutil.copyfile(html_template_file_name, html_file_name)
+        scale_data = {
+            'start': 0,
+            'end': last_time * 1.01,
+            'max_level': base_level + 1
+        }
+
+        if not os.path.exists(os.path.join(output_dirname, "json")):
+            os.makedirs(os.path.join(output_dirname, "json"))
+        with open(scale_json_file_name, "w") as scale_json_file:
+            json.dump(scale_data, scale_json_file)
 
 def usage():
     print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'

@@ -1316,12 +1316,13 @@ namespace Legion {
                                const LogicalUser &creator,
                                const RegionTreePath &path,
                                const TraceInfo &trace_info);
-      void create_logical_advance(LogicalState &state,
+      void create_logical_advance(ContextID ctx, LogicalState &state,
                                   const FieldMask &advance_mask,
                                   const LogicalUser &creator,
                                   const TraceInfo &trace_info,
                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
-                                  bool parent_is_upper_bound);
+                                  bool parent_is_upper_bound,
+                                  const ColorPoint &next_child);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
                                const TraceInfo &trace_info);
@@ -1330,9 +1331,16 @@ namespace Legion {
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
                                 const ColorPoint &next_child);
-      void perform_advance_analysis(LogicalState &state, AdvanceOp *advance,
+      void traverse_advance_analysis(ContextID ctx, AdvanceOp *advance,
+                                     const LogicalUser &advance_user,
+                                     const LogicalUser &create_user);
+      void perform_advance_analysis(ContextID ctx, LogicalState &state, 
+                                    AdvanceOp *advance,
                                     const LogicalUser &advance_user,
-                                    const LogicalUser &create_user);
+                                    const LogicalUser &create_user,
+                                    const ColorPoint &next_child,
+                                    const bool already_traced,
+                                    const bool advance_root = true);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               bool permit_leave_open,

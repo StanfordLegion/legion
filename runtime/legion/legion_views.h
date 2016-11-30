@@ -231,6 +231,20 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
+      struct DeferMaterializedViewArgs : 
+        public LgTaskArgs<DeferMaterializedViewArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MATERIALIZED_VIEW_TASK_ID;
+      public:
+        DistributedID did;
+        AddressSpaceID owner_space;
+        AddressSpaceID logical_owner;
+        RegionTreeNode *target_node;
+        PhysicalManager *manager;
+        MaterializedView *parent;
+        UniqueID context_uid;
+      };
+    public:
       struct EventUsers {
       public:
         EventUsers(void)
@@ -256,6 +270,8 @@ namespace Legion {
       virtual ~MaterializedView(void);
     public:
       MaterializedView& operator=(const MaterializedView &rhs);
+    public:
+      void add_remote_child(MaterializedView *child);
     public:
       inline const FieldMask& get_space_mask(void) const 
         { return manager->layout->allocated_fields; }
@@ -576,6 +592,16 @@ namespace Legion {
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
+      static void handle_deferred_materialized_view(Runtime *runtime, 
+                                                    const void *args);
+      static void create_remote_materialized_view(Runtime *runtime,
+                                                  DistributedID did,
+                                                  AddressSpaceID owner_space,
+                                                  AddressSpaceID logical_owner,
+                                                  RegionTreeNode *target_node,
+                                                  PhysicalManager *manager,
+                                                  MaterializedView *parent,
+                                                  UniqueID context_uid);
     public:
       void perform_remote_valid_check(const FieldMask &check_mask,
                                       VersionTracker *version_tracker,
@@ -847,7 +873,7 @@ namespace Legion {
       LegionMap<ApEvent,EventUsers>::aligned reading_users;
       std::set<ApEvent> outstanding_gc_events;
     protected:
-      std::set<ApEvent> initial_user_events;
+      std::set<ApEvent> initial_user_events; 
     protected:
       // the request event for reducers
       // only needed on remote views
@@ -971,7 +997,8 @@ namespace Legion {
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
-                  LegionMap<ApEvent,FieldMask>::aligned &postconditions);
+                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                  AddressSpaceID local_space, bool restrict_out);
     protected:
       void issue_nested_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
@@ -1208,7 +1235,7 @@ namespace Legion {
       void record_child_version_state(const ColorPoint &child_color, 
                                  VersionState *state, const FieldMask &mask);
       void record_top_version_state(VersionState *state);
-      void finalize_capture(void);
+      void finalize_capture(bool need_prune);
     public:
       void pack_composite_view(Serializer &rez) const;
       void unpack_composite_view(Deserializer &derez,

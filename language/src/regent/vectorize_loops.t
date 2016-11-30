@@ -813,9 +813,17 @@ function check_vectorizability.expr(cx, node)
     end
 
     if cx:lookup_expr_type(node.index) == V then
-      cx:report_error_when_demanded(node,
-        error_prefix .. "an array access with non-contiguous values")
-      return false
+      local value_type = std.as_read(node.value.expr_type)
+      -- TODO: We currently don't support scattered reads from structured regions
+      if std.is_region(value_type) and not value_type:is_opaque() then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "a scattered read from a structured region")
+        return false
+      elseif value_type:isarray() then
+        cx:report_error_when_demanded(node,
+          error_prefix .. "an array access with non-contiguous values")
+        return false
+      end
     end
 
     local fact =
@@ -891,7 +899,13 @@ function check_vectorizability.expr(cx, node)
   elseif node:is(ast.typed.expr.Deref) then
     if not check_vectorizability.expr(cx, node.value) then return false end
     local fact = cx:lookup_expr_type(node.value)
-    if fact == C then fact = V end
+    if fact == C then fact = V
+    -- TODO: We currently don't support scattered reads from structured regions
+    elseif fact == V and not std.as_read(node.value.expr_type).index_type:is_opaque() then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "a scattered read from a structured region")
+      return false
+    end
     cx:assign_expr_type(node, fact)
     return true
 

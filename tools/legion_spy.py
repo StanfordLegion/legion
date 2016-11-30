@@ -3114,6 +3114,7 @@ class LogicalState(object):
             # Mark that we are now dirty below
             assert not self.dirty_below
             self.dirty_below = True
+            # TODO: Record dependences on other users in disjoint trees
         elif req.has_write() and not self.dirty_below and \
                           (not arrived or (req.is_projection() and
                             (not req.is_reg or req.projection_function.depth > 0))):
@@ -3124,6 +3125,7 @@ class LogicalState(object):
             # Mark that we are dirty below
             if not arrived or req.is_projection():
                 self.dirty_below = True
+            # TODO: Record dependences on other users in disjoint trees
         # Now do our analysis to figure out who we need to wait on locally
         if not self.perform_epoch_analysis(op, req, perform_checks,
                                            arrived, previous_deps):
@@ -3214,11 +3216,7 @@ class LogicalState(object):
                 # This will only happen during replays
                 if prev_req.index == req.index:
                     continue
-                if not op.need_logical_replay:
-                    op.need_logical_replay = set()
-                assert False or need_replay
-                op.need_logical_replay.add((prev_req.index,self.field))
-                continue
+                assert False
             # Check to see if it has the mapping dependence
             if perform_checks:
                 if not open_op.has_mapping_dependence(open_req, prev_op, prev_req,
@@ -3263,11 +3261,7 @@ class LogicalState(object):
                 # This will only happen during replays
                 if prev_req.index == req.index:
                     continue
-                if not op.need_logical_replay:
-                    op.need_logical_replay = set()
-                assert False or need_replay
-                op.need_logical_replay.add((prev_req.index,self.field))
-                continue
+                assert False
             if not advance.has_mapping_dependence(advance_req, prev_op, prev_req,
                                   ANTI_DEPENDENCE if prev_req.is_read_only()
                                   else TRUE_DEPENDENCE, self.field):
@@ -3698,11 +3692,7 @@ class LogicalState(object):
                 # This will only happen during replays
                 if prev_req.index == req.index:
                     continue
-                if not op.need_logical_replay:
-                    op.need_logical_replay = set()
-                assert False or need_replay
-                op.need_logical_replay.add((prev_req.index,self.field))
-                continue
+                assert False
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
                                   ANTI_DEPENDENCE if prev_req.is_read_only() 
                                   else TRUE_DEPENDENCE, self.field):
@@ -3722,11 +3712,7 @@ class LogicalState(object):
                 # This will only happen during replays
                 if prev_req.index == req.index:
                     continue
-                if not op.need_logical_replay:
-                    op.need_logical_replay = set()
-                assert False or need_replay
-                op.need_logical_replay.add((prev_req.index,self.field))
-                continue
+                assert False
             if not close.has_mapping_dependence(close_req, prev_op, prev_req, 
                                   ANTI_DEPENDENCE if prev_req.is_read_only()
                                   else TRUE_DEPENDENCE, self.field):
@@ -3847,11 +3833,7 @@ class LogicalState(object):
                 if prev_req.index == req.index:
                     dominates = False
                     continue
-                if not replay_op.need_logical_replay:
-                    replay_op.need_logical_replay = set()
-                assert False or need_replay
-                replay_op.need_logical_replay.add((prev_req.index,self.field))
-                continue
+                assert False
             # Close operations from the same creator can never depend on eachother
             if op.is_close() and prev_op.is_close() and op.creator is prev_op.creator:
                 continue
@@ -3879,11 +3861,7 @@ class LogicalState(object):
                     # This will only happen during replays
                     if prev_req.index == req.index:
                         continue
-                    if not replay_op.need_logical_replay:
-                        replay_op.need_logical_replay = set()
-                    assert False or need_replay
-                    replay_op.need_logical_replay.add((prev_req.index,self.field))
-                    continue
+                    assert False
                 if perform_checks:
                     if not op.has_mapping_dependence(req, prev_op, prev_req, 
                                                      dep_type, self.field):
@@ -4803,6 +4781,9 @@ class Requirement(object):
             assert proj_func is self.projection_function
         else:
             self.projection_function = proj_func
+        # Special case here for depth 0 and is_reg
+        if self.projection_function.depth == 0 and self.is_reg:
+            self.projection_function = None
 
     def is_no_access(self):
         return self.priv == NO_ACCESS
@@ -4920,9 +4901,8 @@ class Operation(object):
                  'realm_copies', 'realm_fills', 'version_numbers', 
                  'internal_idx', 'disjoint_close_fields', 'partition_kind', 
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
-                 'need_logical_replay', 'reachable_cache', 
-                 'transitive_warning_issued', 'arrival_barriers', 'wait_barriers',
-                 'created_futures', 'used_futures', 'merged']
+                 'reachable_cache', 'transitive_warning_issued', 'arrival_barriers', 
+                 'wait_barriers', 'created_futures', 'used_futures', 'merged']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -4968,7 +4948,6 @@ class Operation(object):
         self.cluster_name = None 
         # For traversals
         self.generation = 0
-        self.need_logical_replay = None 
         self.reachable_cache = None
         self.transitive_warning_issued = False
         # Phase barrier information
@@ -5756,27 +5735,9 @@ class Operation(object):
                 if not self.analyze_logical_deletion(idx, perform_checks):
                     return False
             return True
-        assert not self.need_logical_replay
         for idx in range(0,len(self.reqs)):
             if not self.analyze_logical_requirement(idx, perform_checks):
                 return False
-        # If we had any replay regions, analyze them now
-        assert not self.need_logical_replay
-        if self.need_logical_replay:
-            replays = self.need_logical_replay
-            self.need_logical_replay = None
-            for idx,field in replays:
-                if not self.analyze_logical_requirement(idx, perform_checks, field):
-                    return False
-                if self.need_logical_replay:
-                    print("ERROR: Replay failed! This is really bad! "+
-                          "Region requirement "+str(idx)+" of "+str(self)+
-                          "failed to replay successfully. This is most likely "+
-                          "a conceptual bug in the analysis and not an "+
-                          "implementation bug.")
-                    if self.state.assert_on_error:
-                        assert False
-                    return False
         # See if our operation had any bearing on the restricted
         # properties of the enclosing context
         if self.kind == ACQUIRE_OP_KIND:

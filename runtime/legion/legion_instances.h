@@ -351,11 +351,22 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
     public:
+      // This method is very important, it helps us prevent duplicate
+      // applications of a reduction to a target physical instance
+      //Domain compute_reduction_domain(PhysicalInstance target,
+      //                const Domain &copy_domain, ApEvent copy_domain_pre);
+    public:
       const ReductionOp *const op;
       const ReductionOpID redop;
       const FieldID logical_field;
     protected:
       Reservation manager_lock;
+#if 0
+    protected:
+      // Need to deduplicate reductions to target instances
+      std::map<PhysicalInstance,std::vector<Domain> > reduction_domains;
+      std::vector<Realm::IndexSpace> created_index_spaces;
+#endif
     };
 
     /**
