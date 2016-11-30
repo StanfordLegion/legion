@@ -152,8 +152,10 @@ int main(int argc, char **argv)
   // If you fail this assertion, then your version of MPI
   // does not support calls from multiple threads and you 
   // cannot use the GASNet MPI conduit
-  if (provided != MPI_THREAD_MULTIPLE)
-    printf("ERROR: MPI_THREAD_MULTIPLE not supported!\n");
+  if (provided < MPI_THREAD_MULTIPLE)
+    printf("ERROR: Your implementation of MPI does not support "
+           "MPI_THREAD_MULTIPLE which is required for use of the "
+           "GASNet MPI conduit with the Legion-MPI Interop!\n");
   assert(provided == MPI_THREAD_MULTIPLE);
 #else
   // Perform MPI start-up like normal for most GASNet conduits
