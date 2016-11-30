@@ -5025,15 +5025,32 @@ namespace Legion {
         // This is only sound because we know we are on the owner
         // node for the event, otherwise Realm could lie to us
         if (!last_message_event.has_triggered())
-          shutdown_manager->record_pending_message(last_message_event);
+        {
+          // A little hack here for slow gasnet conduits
+          // If the event didn't trigger yet, make sure its just
+          // because we haven't gotten the return message yet
+          usleep(1000);
+          if (!last_message_event.has_triggered())
+            shutdown_manager->record_pending_message(last_message_event);
+          else
+            observed_recent = false;
+        }
         else
           observed_recent = false;
       }
       else
       {
-        if (observed_recent || (packaged_messages > 0) || 
-            !last_message_event.has_triggered())
-          shutdown_manager->record_recent_message();
+        if (observed_recent || (packaged_messages > 0)) 
+          shutdown_manager->record_recent_message(); 
+        else if (!last_message_event.has_triggered())
+        {
+          // A little hack here for slow gasnet conduits
+          // If the event didn't trigger yet, make sure its just
+          // because we haven't gotten the return message yet
+          usleep(1000);
+          if (!last_message_event.has_triggered())
+            shutdown_manager->record_recent_message();
+        }
       }
     }
 
