@@ -12564,9 +12564,13 @@ namespace Legion {
                                      check_mask, false/*dominate*/);
           visit_node(&registrar);
         }
-        // We've arrived, so clear out the current state here and anywhere below
-        DeletionInvalidator invalidator(ctx, user.field_mask);
-        visit_node(&invalidator);
+        // We used to clear out the state below here but we've stopped doing
+        // that in order to support multiple deletions. We just leave the
+        // logical state in place until the end of the context so that multiple
+        // deletions of resources will work properly. We might change this if
+        // we ever come up with a way to avoid duplicate deletions.
+        // DeletionInvalidator invalidator(ctx, user.field_mask);
+        // visit_node(&invalidator);
       }
     }
 
@@ -12595,9 +12599,9 @@ namespace Legion {
           continue;
         }
         // See if our child is open, if it's not then we can keep going
-        LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+        LegionMap<ColorPoint,FieldMask>::aligned::const_iterator finder = 
           it->open_children.find(next_child);
-        if (!it->is_projection_state() ||
+        if (it->is_projection_state() ||
             (finder == it->open_children.end()))
         {
           it++;
@@ -12614,22 +12618,9 @@ namespace Legion {
         {
           case OPEN_READ_ONLY:
             {
-              finder->second -= overlap;
-              if (!finder->second)
-                it->open_children.erase(finder);
-              // Rebuild the state mask
-              FieldMask new_state_mask;
-              for (LegionMap<ColorPoint,FieldMask>::aligned::iterator
-                    child_it = it->open_children.begin(); child_it !=
-                    it->open_children.end(); child_it++)
-                new_state_mask |= child_it->second;
-              if (!!new_state_mask)
-              {
-                it->valid_fields = new_state_mask;
-                it++;
-              }
-              else
-                it = state.field_states.erase(it);
+              // Record that it is already open below
+              open_below |= overlap;
+              it++;
               break;
             }
           case OPEN_READ_WRITE:
@@ -12681,25 +12672,7 @@ namespace Legion {
               else
               {
                 open_below |= overlap;
-                finder->second -= overlap;
-                // Add the new read-write state
-                new_states.push_back(
-                    FieldState(closer.user, overlap, next_child));
-                if (!finder->second)
-                  it->open_children.erase(finder);  
-                // Rebuild the state mask
-                FieldMask new_state_mask;
-                for (LegionMap<ColorPoint,FieldMask>::aligned::iterator
-                      child_it = it->open_children.begin(); child_it !=
-                      it->open_children.end(); child_it++)
-                  new_state_mask |= child_it->second;
-                if (!!new_state_mask)
-                {
-                  it->valid_fields = new_state_mask;
-                  it++;
-                }
-                else
-                  it = state.field_states.erase(it);
+                it++; 
               }
               break;
             }
