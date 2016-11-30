@@ -515,19 +515,11 @@ namespace Legion {
                                              const RegionRequirement &req) const
     //--------------------------------------------------------------------------
     {
-      // Region was created and not deleted
-      if (created_regions.find(req.region) != created_regions.end())
-        return false;
-      // Otherwise see if the field was created and still not deleted
-      // If it is has more than one privilege field then it was not 
-      // a created field
-      if (req.privilege_fields.size() > 1)
-        return true;
-      std::pair<FieldSpace,FieldID> key(req.region.get_field_space(),
-                                    *(req.privilege_fields.begin()));
-      if (created_fields.find(key) != created_fields.end())
-        return false;
-      return true;
+      // No need to worry about deleted field creation requirements here
+      // since this method is only called for requirements with returnable
+      // privileges and therefore we just need to see if the region is
+      // still in the set of created regions.
+      return (created_regions.find(req.region) == created_regions.end());
     }
 
     //--------------------------------------------------------------------------
@@ -813,10 +805,11 @@ namespace Legion {
         parent_req_indexes.push_back(parent_index);
       }
       // Now do the same thing for the created requirements
+      unsigned created_index = 0;
       AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
       for (std::deque<RegionRequirement>::const_iterator it = 
             created_requirements.begin(); it != 
-            created_requirements.end(); it++, parent_index++)
+            created_requirements.end(); it++, parent_index++, created_index++)
       {
         // Different index space trees means we can skip
         if (handle.get_tree_id() != it->region.index_space.get_tree_id())
@@ -946,10 +939,11 @@ namespace Legion {
         req.handle_type = SINGULAR;
         parent_req_indexes.push_back(parent_index);
       }
+      unsigned created_index = 0;
       AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
       for (std::deque<RegionRequirement>::const_iterator it = 
             created_requirements.begin(); it != 
-            created_requirements.end(); it++, parent_index++)
+            created_requirements.end(); it++, parent_index++, created_index++)
       {
         if (it->region.get_field_space() != handle)
           continue;
@@ -1064,10 +1058,11 @@ namespace Legion {
         req.handle_type = SINGULAR;
         parent_req_indexes.push_back(parent_index);
       }
+      unsigned created_index = 0;
       AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
       for (std::deque<RegionRequirement>::const_iterator it = 
             created_requirements.begin(); it != 
-            created_requirements.end(); it++, parent_index++)
+            created_requirements.end(); it++, parent_index++, created_index++)
       {
         // Different index space trees means we can skip
         if (handle.get_tree_id() != it->region.get_tree_id())

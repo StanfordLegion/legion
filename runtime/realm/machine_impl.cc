@@ -135,6 +135,50 @@ namespace Realm {
     machine_singleton = 0;
   }
 
+#ifndef REALM_SKIP_INTERNODE_AFFINITIES
+  static bool allows_internode_copies(Memory::Kind kind,
+				      bool& send_ok, bool& recv_ok,
+				      bool& is_reg)
+  {
+    send_ok = false;
+    recv_ok = false;
+    is_reg = false;
+    switch(kind) {
+      // these can be the source of a RemoteWrite, but it's non-ideal
+    case Memory::SYSTEM_MEM:
+    case Memory::Z_COPY_MEM:
+      {
+	send_ok = true;
+	recv_ok = true;
+	break;
+      }
+
+      // these can be the target of a RemoteWrite message, but
+      //  not the source
+    case Memory::GPU_FB_MEM:
+    case Memory::DISK_MEM:
+    case Memory::HDF_MEM:
+    case Memory::FILE_MEM:
+      {
+	recv_ok = true;
+	break;
+      }
+
+    case Memory::REGDMA_MEM:
+      {
+	send_ok = true;
+	recv_ok = true;
+	is_reg = true;
+	break;
+      }
+
+    default: break;
+    }
+
+    return (send_ok || recv_ok);
+  }
+#endif
+
     void MachineImpl::parse_node_announce_data(int node_id,
 					       unsigned num_procs, unsigned num_memories,
 					       const void *args, size_t arglen,
@@ -187,75 +231,45 @@ namespace Realm {
 		// acceptable remote targets: SYSTEM, Z_COPY, GPU_FB, DISK, HDF, FILE, REGDMA (bonus)
 		int bw = 6;
 		int latency = 1000;
-		bool tgt_ok = false;
-		switch(kind) {
-		case Memory::SYSTEM_MEM:
-		case Memory::Z_COPY_MEM:
-		case Memory::GPU_FB_MEM:
-		case Memory::DISK_MEM:
-		case Memory::HDF_MEM:
-		case Memory::FILE_MEM:
-		  {
-		    tgt_ok = true;
-		    break;
+		bool rem_send, rem_recv, rem_reg;
+		if(!allows_internode_copies(kind,
+					    rem_send, rem_recv, rem_reg))
+		  continue;
+
+		// iterate over local memories and check their kinds
+		Node *n = &(get_runtime()->nodes[gasnet_mynode()]);
+		for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
+		    it != n->memories.end();
+		    ++it) {		    
+		  Machine::MemoryMemoryAffinity mma;
+		  mma.bandwidth = bw + (rem_reg ? 1 : 0);
+		  mma.latency = latency - (rem_reg ? 100 : 0);
+
+		  bool lcl_send, lcl_recv, lcl_reg;
+		  if(!allows_internode_copies((*it)->get_kind(),
+					      lcl_send, lcl_recv, lcl_reg))
+		    continue;
+
+		  if(lcl_reg) {
+		    mma.bandwidth += 1;
+		    mma.latency -= 100;
 		  }
 
-		case Memory::REGDMA_MEM:
-		  {
-		    bw += 1;
-		    latency -= 100;
-		    tgt_ok = true;
-		    break;
-		  }
-
-		default:
-		  {
-		    tgt_ok = false;
-		  }
-		}
-
-		if(tgt_ok) {
-		  // iterate over local memories and check their kinds
-		  Node *n = &(get_runtime()->nodes[gasnet_mynode()]);
-		  for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
-		      it != n->memories.end();
-		      ++it) {		    
-		    Machine::MemoryMemoryAffinity mma;
+		  if(lcl_send && rem_recv) {
 		    mma.m1 = (*it)->me;
 		    mma.m2 = m;
-		    mma.bandwidth = bw;
-		    mma.latency = latency;
-		    bool src_ok = false;
-
-		    switch((*it)->get_kind()) {
-		    case Memory::SYSTEM_MEM:
-		    case Memory::Z_COPY_MEM:
-		      {
-			src_ok = true;
-			break;
-		      }
-
-		    case Memory::REGDMA_MEM:
-		      {
-			mma.bandwidth += 1;
-			mma.latency -= 100;
-			src_ok = true;
-			break;
-		      }
-
-		    default:
-		      {
-			src_ok = false;
-			break;
-		      }
-		    }
-
-		    if(src_ok) {
-		      log_annc.debug() << "adding inter-node affinity "
-				       << mma.m1 << " <-> " << mma.m2
-				       << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
-		      mem_mem_affinities.push_back(mma);
-		    }
+		    log_annc.debug() << "adding inter-node affinity "
+				     << mma.m1 << " -> " << mma.m2
+				     << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
+		    mem_mem_affinities.push_back(mma);
+		  }
+		  if(rem_send && lcl_recv) {
+		    mma.m1 = m;
+		    mma.m2 = (*it)->me;
+		    log_annc.debug() << "adding inter-node affinity "
+				     << mma.m1 << " -> " << mma.m2
+				     << " (bw = " << mma.bandwidth << ", latency = " << mma.latency << ")";
+		    mem_mem_affinities.push_back(mma);
 		  }
 		}
 	      }

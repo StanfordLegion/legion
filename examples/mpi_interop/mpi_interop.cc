@@ -16,6 +16,17 @@
 ////////////////////////////////////////////////////////////
 // THIS EXAMPLE MUST BE BUILT WITH A VERSION
 // OF GASNET CONFIGURED WITH MPI COMPATIBILITY
+//
+// NOTE THAT GASNET ONLY SUPPORTS MPI-COMPATIBILITY
+// ON SOME CONDUITS. CURRENTLY THESE ARE IBV, GEMINI,
+// ARIES, MXM, and OFI. IF YOU WOULD LIKE ADDITIONAL
+// CONDUITS SUPPORTED PLEASE CONTACT THE MAINTAINERS
+// OF GASNET.
+//
+// Note: there is a way to use this example with the
+// MPI conduit, but you have to have a version of 
+// MPI that supports MPI_THREAD_MULTIPLE. See the 
+// macro GASNET_CONDUIT_MPI below.
 ////////////////////////////////////////////////////////////
 
 #include <cstdio>
@@ -133,8 +144,23 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-  // Perform MPI start-up like normal
-  MPI_Init(&argc,&argv);
+#ifdef GASNET_CONDUIT_MPI
+  // The GASNet MPI conduit requires special start-up
+  // in order to handle MPI calls from multiple threads
+  int provided;
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+  // If you fail this assertion, then your version of MPI
+  // does not support calls from multiple threads and you 
+  // cannot use the GASNet MPI conduit
+  if (provided < MPI_THREAD_MULTIPLE)
+    printf("ERROR: Your implementation of MPI does not support "
+           "MPI_THREAD_MULTIPLE which is required for use of the "
+           "GASNet MPI conduit with the Legion-MPI Interop!\n");
+  assert(provided == MPI_THREAD_MULTIPLE);
+#else
+  // Perform MPI start-up like normal for most GASNet conduits
+  MPI_Init(&argc, &argv);
+#endif
 
   int rank = -1, size = -1;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -197,8 +223,11 @@ int main(int argc, char **argv)
   }
   // When you're done wait for the Legion runtime to shutdown
   Runtime::wait_for_shutdown();
+#ifndef GASNET_CONDUIT_MPI
   // Then finalize MPI like normal
+  // Exception for the MPI conduit which does its own finalization
   MPI_Finalize();
+#endif
 
   return 0;
 }
