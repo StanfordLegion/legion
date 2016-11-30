@@ -221,8 +221,11 @@ int main(int argc, char **argv)
   }
   // When you're done wait for the Legion runtime to shutdown
   Runtime::wait_for_shutdown();
+#ifndef GASNET_MPI_CONDUIT
   // Then finalize MPI like normal
+  // Exception for the MPI conduit which does its own finalization
   MPI_Finalize();
+#endif
 
   return 0;
 }
