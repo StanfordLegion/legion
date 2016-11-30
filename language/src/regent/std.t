@@ -3761,6 +3761,7 @@ function std.setup(main_task, extra_setup_thunk)
         c.legion_task_layout_constraint_set_destroy(layout_constraints)
       end
     end)
+  local cuda_setup = quote end
   if std.config["cuda"] and cudahelper.check_cuda_available() then
     cudahelper.link_driver_library()
     local all_kernels = {}
@@ -3774,7 +3775,7 @@ function std.setup(main_task, extra_setup_thunk)
         end
       end
     end)
-    cudahelper.jit_compile_kernels_and_register(all_kernels)
+    cuda_setup = cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
   local extra_setup = quote end
@@ -3788,6 +3789,7 @@ function std.setup(main_task, extra_setup_thunk)
     [reduction_registrations];
     [layout_registrations];
     [task_registrations];
+    [cuda_setup];
     [extra_setup];
     c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
     return c.legion_runtime_start(argc, argv, false)

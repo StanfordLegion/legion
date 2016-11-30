@@ -155,7 +155,7 @@ local terra register_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) :
   fat_bin.magic = 1234
   fat_bin.versions = 5678
   fat_bin.data = C.malloc(ptxSize + 1)
-  C.memcpy(fat_bin.data, ptxc, ptxSize + 1)
+  fat_bin.data = ptxc
   var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
   return handle
 end
@@ -180,11 +180,21 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
     return llvmbc:extern(name, ftype)
   end
   local ptx = cudalib.toptx(module, nil, version)
-  local handle = register_ptx(ptx, #ptx, version)
+
+  local ptxc = terralib.constant(ptx)
+  local handle = terralib.newsymbol(&&opaque, "handle")
+  local register = quote
+    var [handle] = register_ptx(ptxc, [ptx:len() + 1], [version])
+  end
 
   for k, v in pairs(kernels) do
-    register_function(handle, k, v.name)
+    register = quote
+      [register]
+      register_function([handle], [k], [v.name])
+    end
   end
+
+  return register
 end
 
 function cudahelper.codegen_kernel_call(kernel_id, counts, args)
