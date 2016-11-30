@@ -339,15 +339,18 @@ namespace LegionRuntime {
         src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
         dst_idx = dst_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
 
+        bool mergeable = true;
         for (unsigned j = 0; j < DIM; j++) {
           if (src_strides[j][0] == subtotal && dst_strides[j][0] == subtotal) {
+            if (src_subrect.dim_size(j) != orig_rect.dim_size(j))
+              mergeable = false;
             subtotal = subtotal * imin(src_subrect.dim_size(j), dst_subrect.dim_size(j));
           }
         }
 
         if (iter_order == XferOrder::SRC_FIFO) {
           for (unsigned i = 0; i < DIM; i++)
-            if (src_strides[i][0] == subtotal) {
+            if (src_strides[i][0] == subtotal && mergeable) {
               src_stride = src_strides[i][0];
               dst_stride = dst_strides[i][0];
               items_per_line = subtotal;
@@ -356,7 +359,7 @@ namespace LegionRuntime {
             }
         } else if (iter_order == XferOrder::DST_FIFO) {
           for (unsigned i = 0; i < DIM; i++)
-            if (dst_strides[i][0] == subtotal) {
+            if (dst_strides[i][0] == subtotal && mergeable) {
               src_stride = src_strides[i][0];
               dst_stride = dst_strides[i][0];
               items_per_line = subtotal;
@@ -365,7 +368,7 @@ namespace LegionRuntime {
             }
         } else if (iter_order == XferOrder::ANY_ORDER) {
           for (unsigned i = 0; i < DIM; i++)
-            if (dst_strides[i][0] >= subtotal) {
+            if (dst_strides[i][0] >= subtotal && mergeable) {
               src_stride = src_strides[i][0];
               dst_stride = dst_strides[i][0];
               items_per_line = subtotal;
@@ -398,8 +401,11 @@ namespace LegionRuntime {
         src_idx = src_mapping->image_linear_subrect(r, src_subrect, src_strides);
         dst_idx = dst_mapping->image_linear_subrect(r, dst_subrect, dst_strides);
 
+        bool mergeable = true;
         for (unsigned j = 0; j < DIM; j++) {
           if (src_strides[j][0] == subtotal && dst_strides[j][0] == subtotal) {
+            if (src_subrect.dim_size(j) != orig_rect.dim_size(j))
+              mergeable = false;
             subtotal = subtotal * imin(src_subrect.dim_size(j), dst_subrect.dim_size(j));
           }
         }
@@ -407,7 +413,7 @@ namespace LegionRuntime {
         // see if we can use 3D/2D
         assert(DIM == 3);
         if (iter_order == XferOrder::SRC_FIFO) {
-          if (src_strides[1][0] == subtotal
+          if (src_strides[1][0] == subtotal && mergeable
           && src_strides[2][0] == subtotal * src_subrect.dim_size(1)){
 //          &&(dst_strides[2][0] == subtotal * dst_strides[1][0])) {
             src_stride = src_strides[1][0];
@@ -420,7 +426,7 @@ namespace LegionRuntime {
             return items_per_line * height * depth;
           }
           for (unsigned i = 0; i < DIM; i++)
-            if (src_strides[i][0] == subtotal) {
+            if (src_strides[i][0] == subtotal && mergeable) {
               src_stride = src_strides[i][0];
               dst_stride = dst_strides[i][0];
               items_per_line = subtotal;
@@ -430,7 +436,7 @@ namespace LegionRuntime {
               return items_per_line * height;
             }
         } else if (iter_order == XferOrder::DST_FIFO) {
-          if (dst_strides[1][0] == subtotal
+          if (dst_strides[1][0] == subtotal && mergeable
           && dst_strides[2][0] == subtotal * dst_subrect.dim_size(1)){
 //          &&(dst_strides[2][0] == subtotal * dst_strides[1][0])) {
             src_stride = src_strides[1][0];
@@ -443,7 +449,7 @@ namespace LegionRuntime {
             return items_per_line * height * depth;
           }
           for (unsigned i = 0; i < DIM; i++)
-            if (dst_strides[i][0] == subtotal) {
+            if (dst_strides[i][0] == subtotal && mergeable) {
               src_stride = src_strides[i][0];
               dst_stride = dst_strides[i][0];
               items_per_line = subtotal;
@@ -453,7 +459,7 @@ namespace LegionRuntime {
               return items_per_line * height;
             }
         } else if (iter_order == XferOrder::ANY_ORDER) {
-          if (dst_strides[1][0] >= subtotal) {
+          if (dst_strides[1][0] >= subtotal && mergeable) {
             src_stride = src_strides[1][0];
             dst_stride = dst_strides[1][0];
             src_height = src_strides[2][0] / src_strides[1][0];
@@ -464,7 +470,7 @@ namespace LegionRuntime {
             return items_per_line * height * depth;
           }
           for (unsigned i = 0; i < DIM; i++)
-            if (dst_strides[i][0] >= subtotal) {
+            if (dst_strides[i][0] >= subtotal && mergeable) {
               src_stride = src_strides[i][0];
               dst_stride = dst_strides[i][0];
               items_per_line = subtotal;

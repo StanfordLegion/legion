@@ -1379,6 +1379,10 @@ namespace LegionRuntime {
             src_height = height;
             dst_height = height;
           }
+          //printf("[%lx] src_str(%ld) dst_str(%ld) src_hei(%ld) dst_hei(%ld) "
+          //       "bytes(%lu) hei(%lu) dep(%lu)\n",
+          //       guid, src_stride, dst_stride, src_height, dst_height,
+          //       bytes_per_line, height, depth);
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
