@@ -22,6 +22,11 @@
 // ARIES, MXM, and OFI. IF YOU WOULD LIKE ADDITIONAL
 // CONDUITS SUPPORTED PLEASE CONTACT THE MAINTAINERS
 // OF GASNET.
+//
+// Note: there is a way to use this example with the
+// MPI conduit, but you have to have a version of 
+// MPI that supports MPI_THREAD_MULTIPLE. See the 
+// macro GASNET_MPI_CONDUIT below.
 ////////////////////////////////////////////////////////////
 
 #include <cstdio>
@@ -139,8 +144,21 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-  // Perform MPI start-up like normal
-  MPI_Init(&argc,&argv);
+#ifdef GASNET_MPI_CONDUIT
+  // The GASNet MPI conduit requires special start-up
+  // in order to handle MPI calls from multiple threads
+  int provided;
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+  // If you fail this assertion, then your version of MPI
+  // does not support calls from multiple threads and you 
+  // cannot use the GASNet MPI conduit
+  if (provided != MPI_THREAD_MULTIPLE)
+    printf("ERROR: MPI_THREAD_MULTIPLE not supported!\n");
+  assert(provided == MPI_THREAD_MULTIPLE);
+#else
+  // Perform MPI start-up like normal for most GASNet conduits
+  MPI_Init(&argc, &argv);
+#endif
 
   int rank = -1, size = -1;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
