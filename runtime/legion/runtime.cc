@@ -7197,7 +7197,7 @@ namespace Legion {
       DerezCheck z(derez);
       TaskID task_id;
       derez.deserialize(task_id);
-      TaskVariantRegistrar registrar(task_id);
+      TaskVariantRegistrar registrar(task_id, false/*global*/);
       VariantID variant_id;
       derez.deserialize(variant_id);
       RtUserEvent done;
