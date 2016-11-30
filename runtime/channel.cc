@@ -114,7 +114,6 @@ namespace LegionRuntime {
         IndexSpace is;
         ElementMask::Enumerator* e;
         Mapping<1, 1> *src_mapping, *dst_mapping;
-        XferOrder::Type iter_order;
         coord_t rstart, src_idx_offset, dst_idx_offset;
         size_t rlen, rleft;
       };

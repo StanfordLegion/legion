@@ -692,7 +692,7 @@ namespace LegionRuntime {
       Message::request(target, args);
     }
 
-#define IB_MAX_SIZE (16 * 1024 * 1024)
+#define IB_MAX_SIZE (128 * 1024 * 1024)
 
     void CopyRequest::alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx)
     {
@@ -3339,7 +3339,7 @@ namespace LegionRuntime {
                 create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
                                    next_xd_guid, mark_started, pre_buf, cur_buf,
                                    new_domain, oasvec_src,
-                                   1024 * 1024/*max_req_size*/, 100/*max_nr*/,
+                                   16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
                                    priority, order, kind, complete_fence, hdf_inst);
               } else {
                 if (idx != mem_path.size() - 1) {
@@ -3353,7 +3353,7 @@ namespace LegionRuntime {
                 create_xfer_des<0>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
                                    next_xd_guid, mark_started, pre_buf, cur_buf,
                                    domain, oasvec_src,
-                                   1024 * 1024 /*max_req_size*/, 100/*max_nr*/,
+                                   16 * 1024 * 1024 /*max_req_size*/, 100/*max_nr*/,
                                    priority, order, kind, complete_fence, hdf_inst);
               }
             }
@@ -3369,7 +3369,7 @@ namespace LegionRuntime {
               create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
                                    next_xd_guid, mark_started, pre_buf, cur_buf,
                                    domain, oasvec_src,
-                                   1024 * 1024/*max_req_size*/, 100/*max_nr*/,
+                                   16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
                                    priority, order, kind, complete_fence, hdf_inst);
             }
             pre_buf = cur_buf;
