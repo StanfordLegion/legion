@@ -3935,7 +3935,8 @@ namespace Legion {
        */
       void defer_dynamic_collective_arrival(Context ctx, 
                                             DynamicCollective dc,
-                                            Future f, unsigned count = 1);
+                                            const Future &f,
+                                            unsigned count = 1);
 
       /**
        * This will return the value of a dynamic collective in

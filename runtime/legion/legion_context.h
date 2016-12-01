@@ -186,6 +186,11 @@ namespace Legion {
       virtual void perform_restricted_analysis(const RegionRequirement &req, 
                                                RestrictInfo &restrict_info) = 0;
     public:
+      virtual void record_dynamic_collective_contribution(DynamicCollective dc,
+                                                          const Future &f) = 0;
+      virtual void find_collective_contributions(DynamicCollective dc,
+                                             std::vector<Future> &futures) = 0;
+    public:
       PhysicalRegion get_physical_region(unsigned idx);
       void get_physical_references(unsigned idx, InstanceSet &refs);
     public:
@@ -371,7 +376,7 @@ namespace Legion {
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked local_fields;
     protected:
       // Some help for performing fast safe casts
-      std::map<IndexSpace,Domain> safe_cast_domains;  
+      std::map<IndexSpace,Domain> safe_cast_domains;   
     protected:
       RtEvent pending_done;
       bool task_executed;
@@ -543,6 +548,11 @@ namespace Legion {
       virtual void perform_restricted_analysis(const RegionRequirement &req, 
                                                RestrictInfo &restrict_info);
     public:
+      virtual void record_dynamic_collective_contribution(DynamicCollective dc,
+                                                          const Future &f);
+      virtual void find_collective_contributions(DynamicCollective dc,
+                                       std::vector<Future> &contributions);
+    public:
       static void handle_version_owner_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       void process_version_owner_response(RegionTreeNode *node, 
@@ -607,6 +617,10 @@ namespace Legion {
       std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
     protected:
       std::map<AddressSpaceID,RemoteContext*> remote_instances;
+    protected:
+      // Tracking information for dynamic collectives
+      std::map<unsigned long/*ID*/,std::map<unsigned/*gen*/,
+               std::vector<Future> > > collective_contributions;
     };
 
     /**
@@ -809,6 +823,11 @@ namespace Legion {
       virtual bool has_restrictions(void) const; 
       virtual void perform_restricted_analysis(const RegionRequirement &req, 
                                                RestrictInfo &restrict_info);
+    public:
+      virtual void record_dynamic_collective_contribution(DynamicCollective dc,
+                                                          const Future &f);
+      virtual void find_collective_contributions(DynamicCollective dc,
+                                             std::vector<Future> &futures);
     };
 
     /**
@@ -911,6 +930,11 @@ namespace Legion {
       virtual bool has_restrictions(void) const; 
       virtual void perform_restricted_analysis(const RegionRequirement &req, 
                                                RestrictInfo &restrict_info);
+    public:
+      virtual void record_dynamic_collective_contribution(DynamicCollective dc,
+                                                          const Future &f);
+      virtual void find_collective_contributions(DynamicCollective dc,
+                                             std::vector<Future> &futures);
     protected:
       TaskContext *const enclosing;
       TaskOp *const inline_task;

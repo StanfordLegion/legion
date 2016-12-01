@@ -3187,6 +3187,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::record_dynamic_collective_contribution(
+                                          DynamicCollective dc, const Future &f) 
+    //--------------------------------------------------------------------------
+    {
+      // This is a little Realm specific, but can't avoid it at the moment
+      // 20 bits for the generation and everything else is ID
+      const unsigned long id = dc.phase_barrier.id & 0xFFFFFFFFFFF00000UL;
+      const unsigned gen = dc.phase_barrier.id & 0xFFFFF;
+      AutoLock ctx(context_lock);
+      collective_contributions[id][gen].push_back(f);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_collective_contributions(DynamicCollective dc, 
+                                             std::vector<Future> &contributions)
+    //--------------------------------------------------------------------------
+    {
+      // Find any future contributions and record dependences for the op
+      // Contributions were made to the previous phase
+      ApEvent previous = Runtime::get_previous_phase(dc.phase_barrier);
+      const unsigned long id = previous.id & 0xFFFFFFFFFFF00000UL;
+      const unsigned gen = previous.id & 0xFFFFF;
+      AutoLock ctx(context_lock);
+      std::map<unsigned long, std::map<unsigned,
+        std::vector<Future> > >::iterator finder = 
+          collective_contributions.find(id);
+      if (finder == collective_contributions.end())
+        return;
+      std::map<unsigned,std::vector<Future> >::iterator it = 
+        finder->second.begin();
+      while ((it != finder->second.end()) && (it->first <= gen))
+      {
+        if (it->first == gen)
+        {
+          contributions = it->second;
+          it++;
+        }
+        else
+        {
+          std::map<unsigned,std::vector<Future> >::iterator to_erase = it;
+          it++;
+          finder->second.erase(to_erase);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::configure_context(MapperManager *mapper)
     //--------------------------------------------------------------------------
     {
@@ -5053,6 +5100,22 @@ namespace Legion {
       assert(false);
     }
 
+    //--------------------------------------------------------------------------
+    void LeafContext::record_dynamic_collective_contribution(
+                                          DynamicCollective dc, const Future &f) 
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::find_collective_contributions(DynamicCollective dc, 
+                                             std::vector<Future> &contributions) 
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
     /////////////////////////////////////////////////////////////
     // Inline Context 
     /////////////////////////////////////////////////////////////
@@ -5483,6 +5546,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->perform_restricted_analysis(req, restrict_info);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::record_dynamic_collective_contribution(
+                                          DynamicCollective dc, const Future &f)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->record_dynamic_collective_contribution(dc, f);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::find_collective_contributions(DynamicCollective dc, 
+                                             std::vector<Future> &contributions)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->find_collective_contributions(dc, contributions);
     }
 
   };

@@ -3553,8 +3553,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::defer_dynamic_collective_arrival(Context ctx,
-                                                      DynamicCollective dc,
-                                                      Future f, unsigned count)
+                                                   DynamicCollective dc,
+                                                   const Future &f, 
+                                                   unsigned count)
     //--------------------------------------------------------------------------
     {
       runtime->defer_dynamic_collective_arrival(ctx, dc, f, count);

@@ -7873,6 +7873,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DynamicCollectiveOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // See if we had any contributions for this dynamic collective
+      std::vector<Future> contributions;
+      parent_ctx->find_collective_contributions(collective, contributions);
+      for (std::vector<Future>::const_iterator it = contributions.begin();
+            it != contributions.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->impl != NULL);
+#endif
+        it->impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (it->impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
+              get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void DynamicCollectiveOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {

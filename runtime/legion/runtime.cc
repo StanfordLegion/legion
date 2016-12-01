@@ -13735,7 +13735,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::defer_dynamic_collective_arrival(Context ctx, 
                                                    DynamicCollective dc,
-                                                   Future f, unsigned count)
+                                                   const Future &f, 
+                                                   unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13751,6 +13752,9 @@ namespace Legion {
                           ctx->get_task_name(), ctx->get_unique_id());
 #endif
       ctx->begin_runtime_call();
+      // Record this future as a contribution to the collective
+      // for future dependence analysis
+      ctx->record_dynamic_collective_contribution(dc, f);
       f.impl->contribute_to_collective(dc, count);
       ctx->end_runtime_call();
     }
