@@ -7723,7 +7723,7 @@ class Event(object):
                 if op.finish_event is self:
                     owner = op
                     break
-            assert location is not None
+            assert self.location is not None
             if owner:
                 print("WARNING: "+str(self)+" is an untriggered application "+
                       "user event for "+str(owner)+" created at "+str(self.location))
