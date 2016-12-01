@@ -15,6 +15,8 @@
 # limitations under the License.
 #
 
+from __future__ import print_function
+
 import sys, os, shutil
 import string, re, json
 from math import sqrt, log
@@ -546,12 +548,12 @@ class Processor(object):
         active_ratio = 100.0*float(active_time)/float(total_time)
         application_ratio = 100.0*float(application_time)/float(total_time)
         meta_ratio = 100.0*float(meta_time)/float(total_time)
-        print self
-        print "    Total time: %d us" % total_time
-        print "    Active time: %d us (%.3f%%)" % (active_time, active_ratio)
-        print "    Application time: %d us (%.3f%%)" % (application_time, application_ratio)
-        print "    Meta time: %d us (%.3f%%)" % (meta_time, meta_ratio)
-        print
+        print(self)
+        print("    Total time: %d us" % total_time)
+        print("    Active time: %d us (%.3f%%)" % (active_time, active_ratio))
+        print("    Application time: %d us (%.3f%%)" % (application_time, application_ratio))
+        print("    Meta time: %d us (%.3f%%)" % (meta_time, meta_ratio))
+        print()
 
     def update_task_stats(self, stat):
         for task in self.tasks:
@@ -672,11 +674,11 @@ class Memory(object):
             previous_time = point.time
         # Last interval is empty so don't worry about it
         average_usage /= float(self.last_time) 
-        print self
-        print "    Total Instances: %d" % len(self.instances)
-        print "    Maximum Utilization: %.3f%%" % (100.0 * max_usage)
-        print "    Average Utilization: %.3f%%" % (100.0 * average_usage)
-        print
+        print(self)
+        print("    Total Instances: %d" % len(self.instances))
+        print("    Maximum Utilization: %.3f%%" % (100.0 * max_usage))
+        print("    Average Utilization: %.3f%%" % (100.0 * average_usage))
+        print()
   
     def __repr__(self):
         return '%s Memory %s' % (self.kind, hex(self.mem_id))
@@ -775,11 +777,11 @@ class Channel(object):
                 if current_transfers == 0:
                     total_usage_time += (point.time - previous_time)
         average_usage = float(total_usage_time)/float(self.last_time)
-        print self
-        print "    Total Transfers: %d" % len(self.copies)
-        print "    Maximum Executing Transfers: %d" % (max_transfers)
-        print "    Average Utilization: %.3f%%" % (100.0 * average_usage)
-        print
+        print(self)
+        print("    Total Transfers: %d" % len(self.copies))
+        print("    Maximum Executing Transfers: %d" % (max_transfers))
+        print("    Average Utilization: %.3f%%" % (100.0 * average_usage))
+        print()
         
     def __repr__(self):
         if self.src is None:
@@ -849,11 +851,11 @@ class Variant(object):
             max_call, max_dev, min_call, min_dev):
         avg = float(total_execution_time) / float(total_calls) \
                 if total_calls > 0 else 0
-        print '       Total Invocations: %d' % total_calls
-        print '       Total Time: %d us' % total_execution_time
-        print '       Average Time: %.2f us' % avg
-        print '       Maximum Time: %d us (%.3f sig)' % (max_call,max_dev)
-        print '       Minimum Time: %d us (%.3f sig)' % (min_call,min_dev)
+        print('       Total Invocations: %d' % total_calls)
+        print('       Total Time: %d us' % total_execution_time)
+        print('       Average Time: %.2f us' % avg)
+        print('       Maximum Time: %d us (%.3f sig)' % (max_call,max_dev))
+        print('       Minimum Time: %d us (%.3f sig)' % (min_call,min_dev))
 
 
     def print_stats(self, verbose):
@@ -880,10 +882,10 @@ class Variant(object):
         max_dev = (float(max_call) - avg) / stddev if stddev != 0.0 else 0.0
         min_dev = (float(min_call) - avg) / stddev if stddev != 0.0 else 0.0
 
-        print '  '+self.name
+        print('  '+self.name)
         self.print_task_stat(total_calls, total_execution_time,
                 max_call, max_dev, min_call, min_dev)
-        print
+        print()
 
         if verbose and len(procs) > 1:
             for proc in sorted(self.total_calls.iterkeys()):
@@ -898,12 +900,12 @@ class Variant(object):
                 max_dev = (float(self.max_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
                 min_dev = (float(self.min_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
 
-                print '    On ' + repr(proc)
+                print('    On ' + repr(proc))
                 self.print_task_stat(self.total_calls[proc],
                         self.total_execution_time[proc],
                         self.max_call[proc], max_dev,
                         self.min_call[proc], min_dev)
-                print
+                print()
 
 class Operation(object):
     def __init__(self, op_id):
@@ -1358,15 +1360,15 @@ class StatGatherer(object):
             task.variant.increment_calls(exec_time, proc)
 
     def print_stats(self, verbose):
-        print "  -------------------------"
-        print "  Task Statistics"
-        print "  -------------------------"
+        print("  -------------------------")
+        print("  Task Statistics")
+        print("  -------------------------")
         for variant in sorted(self.application_tasks,
                                 key=lambda v: v.total_time(),reverse=True):
             variant.print_stats(verbose)
-        print "  -------------------------"
-        print "  Meta-Task Statistics"
-        print "  -------------------------"
+        print("  -------------------------")
+        print("  Meta-Task Statistics")
+        print("  -------------------------")
         for variant in sorted(self.meta_tasks,
                                 key=lambda v: v.total_time(),reverse=True):
             variant.print_stats(verbose)
@@ -1600,9 +1602,9 @@ class State(object):
                 matches -= 1 
                 skipped += 1
                 if verbose:
-                    print 'Skipping line: %s' % line.strip()
+                    print('Skipping line: %s' % line.strip())
         if skipped > 0:
-            print 'WARNING: Skipped %d lines in %s' % (skipped, file_name)
+            print('WARNING: Skipped %d lines in %s' % (skipped, file_name))
         return matches
 
     def log_task_info(self, op_id, variant_id, proc_id,
@@ -1923,33 +1925,33 @@ class State(object):
             channel.sort_time_range()
 
     def print_processor_stats(self):
-        print '****************************************************'
-        print '   PROCESSOR STATS'
-        print '****************************************************'
+        print('****************************************************')
+        print('   PROCESSOR STATS')
+        print('****************************************************')
         for p,proc in sorted(self.processors.iteritems()):
             proc.print_stats()
         print
 
     def print_memory_stats(self):
-        print '****************************************************'
-        print '   MEMORY STATS'
-        print '****************************************************'
+        print('****************************************************')
+        print('   MEMORY STATS')
+        print('****************************************************')
         for m,mem in sorted(self.memories.iteritems()):
             mem.print_stats()
         print
 
     def print_channel_stats(self):
-        print '****************************************************'
-        print '   CHANNEL STATS'
-        print '****************************************************'
+        print('****************************************************')
+        print('   CHANNEL STATS')
+        print('****************************************************')
         for c,channel in sorted(self.channels.iteritems()):
             channel.print_stats()
         print
 
     def print_task_stats(self, verbose):
-        print '****************************************************'
-        print '   TASK STATS'
-        print '****************************************************'
+        print('****************************************************')
+        print('   TASK STATS')
+        print('****************************************************')
         stat = StatGatherer(self)
         for proc in self.processors.itervalues():
             proc.update_task_stats(stat)
@@ -2006,7 +2008,7 @@ class State(object):
         self.assign_colors()
         svg_file = output_prefix + '.svg'
         html_file = output_prefix + '.html'
-        print 'Generating visualization files %s and %s' % (svg_file,html_file) 
+        print('Generating visualization files %s and %s' % (svg_file,html_file))
         # Make a printer and emit the files
         printer = SVGPrinter(svg_file, html_file)
         if show_procs:
@@ -2025,7 +2027,7 @@ class State(object):
                 "legion_prof_copy.html.template")
         tsv_file_name = output_prefix + ".tsv"
         html_file_name = output_prefix + ".html"
-        print 'Generating copy visualization files %s and %s' % (tsv_file_name,html_file_name)
+        print('Generating copy visualization files %s and %s' % (tsv_file_name,html_file_name))
 
         def node_id(memory):
             return (memory.mem_id >> 23) & ((1 << 5) - 1)
@@ -2086,7 +2088,7 @@ class State(object):
         else:
             output_dirname = self.find_unique_dirname(output_dirname)
 
-        print 'Generating interactive visualization files in directory ' + output_dirname
+        print('Generating interactive visualization files in directory ' + output_dirname)
         src_directory = os.path.join(dirname(sys.argv[0]), "legion_prof_files")
 
         shutil.copytree(src_directory, output_dirname)
@@ -2155,15 +2157,15 @@ class State(object):
             json.dump(scale_data, scale_json_file)
 
 def usage():
-    print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'
-    print '  -p : include processors in visualization'
-    print '  -i : include instances in visualization'
-    print '  -c : include channels in visualization'
-    print '  -s : print statistics'
-    print '  -v : print verbose profiling information'
-    print '  -o <out_dirname> : give the directory for the output'
-    print '  -f : force the creation of a new directory for legion_prof timelines (OVERWRITES OLD DIRECTORY)'
-    print '  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL)
+    print('Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+')
+    print('  -p : include processors in visualization')
+    print('  -i : include instances in visualization')
+    print('  -c : include channels in visualization')
+    print('  -s : print statistics')
+    print('  -v : print verbose profiling information')
+    print('  -o <out_dirname> : give the directory for the output')
+    print('  -f : force the creation of a new directory for legion_prof timelines (OVERWRITES OLD DIRECTORY)')
+    print('  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL))
     sys.exit(1)
 
 def main():
@@ -2218,13 +2220,13 @@ def main():
     state = State()
     has_matches = False
     for file_name in file_names:
-        print 'Reading log file %s...' % file_name
+        print('Reading log file %s...' % file_name)
         total_matches = state.parse_log_file(file_name, verbose)
-        print 'Matched %s lines' % total_matches
+        print('Matched %s lines' % total_matches)
         if total_matches > 0:
             has_matches = True
     if not has_matches:
-        print 'No matches found! Exiting...'
+        print('No matches found! Exiting...')
         return
 
     # Once we are done loading everything, do the sorting
