@@ -548,6 +548,7 @@ namespace Legion {
       std::vector<ProjectionInfo> projection_infos;
       bool sliced;
     protected:
+      Domain internal_domain;
       ReductionOpID redop;
       const ReductionOp *reduction_op;
       ArgumentMap argument_map;

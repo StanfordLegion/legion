@@ -398,9 +398,9 @@ namespace Legion {
       rez.serialize<unsigned>(get_context_index());
     }
 
-     //--------------------------------------------------------------------------
-    void ExternalTask::unpack_external_task(Deserializer &derez,Runtime *runtime,
-                                            ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    void ExternalTask::unpack_external_task(Deserializer &derez,
+                                    Runtime *runtime, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -3987,7 +3987,7 @@ namespace Legion {
       stealable = false; // cannot steal something that has been sliced
       Mapper::SliceTaskInput input;
       Mapper::SliceTaskOutput output;
-      input.domain = index_domain;
+      input.domain = internal_domain;
       output.verify_correctness = false;
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
@@ -4089,14 +4089,14 @@ namespace Legion {
       }
 #if DEBUG_LEGION
       // If the volumes don't match, then something bad happend in the mapper
-      if (total_points != index_domain.get_volume())
+      if (total_points != internal_domain.get_volume())
       {
         log_run.error("Invalid mapper output from invocation of 'slice_task' "
                       "on mapper %s. Mapper returned slices with a total "
                       "volume %ld that does not match the expected volume of "
                       "%zd when slicing task %s (ID %lld).", 
                       mapper->get_mapper_name(), long(total_points),
-                      index_domain.get_volume(), 
+                      internal_domain.get_volume(), 
                       get_task_name(), get_unique_id());
         assert(false);
         exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
@@ -4127,7 +4127,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, CLONE_MULTI_CALL);
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
-      this->index_domain = d;
+      this->index_domain = rhs->index_domain;
+      this->internal_domain = d;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
       this->redop = rhs->redop;
@@ -6191,6 +6192,7 @@ namespace Legion {
       tag = launcher.tag;
       is_index_space = true;
       index_domain = launcher.launch_domain;
+      internal_domain = launcher.launch_domain;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.predicate, task_id);
       if (launcher.predicate != Predicate::TRUE_PRED)
@@ -6251,6 +6253,7 @@ namespace Legion {
       tag = launcher.tag;
       is_index_space = true;
       index_domain = launcher.launch_domain;
+      internal_domain = launcher.launch_domain;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -6329,6 +6332,7 @@ namespace Legion {
       tag = t;
       is_index_space = true;
       index_domain = domain;
+      internal_domain = domain;
       initialize_base_task(ctx, true/*track*/, pred, task_id);
       future_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime));
 #ifdef DEBUG_LEGION
@@ -6380,6 +6384,7 @@ namespace Legion {
       tag = t;
       is_index_space = true;
       index_domain = domain;
+      internal_domain = domain;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
@@ -7783,6 +7788,7 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(locally_mapped);
       rez.serialize(remote_owner_uid);
+      rez.serialize(internal_domain);
       if (is_locally_mapped())
       {
         // If we've mapped everything and there are no virtual mappings
@@ -7814,7 +7820,7 @@ namespace Legion {
       if (points.empty())
       {
         std::map<DomainPoint,TaskArgument> non_empty_args;
-        for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
+        for (Domain::DomainPointIterator itr(internal_domain); itr; itr++)
         {
           TaskArgument arg = argument_map.impl->get_point(itr.p);
           if (arg.get_size() > 0)
@@ -7866,9 +7872,10 @@ namespace Legion {
       derez.deserialize(remote_unique_id); 
       derez.deserialize(locally_mapped);
       derez.deserialize(remote_owner_uid);
+      derez.deserialize(internal_domain);
       unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
-      unpack_projection_infos(derez, projection_infos, index_domain);
+      unpack_projection_infos(derez, projection_infos, internal_domain);
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
       if (runtime->profiler != NULL)
@@ -8037,14 +8044,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_ENUMERATE_POINTS_CALL);
-      size_t num_points = index_domain.get_volume();
+      size_t num_points = internal_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
       unsigned point_idx = 0;
       std::vector<MinimalPoint> minimal_points(num_points);
       // Enumerate all the points in our slice and make point tasks
-      for (Domain::DomainPointIterator itr(index_domain); 
+      for (Domain::DomainPointIterator itr(internal_domain); 
             itr; itr++, point_idx++)
       {
         MinimalPoint &mp = minimal_points[point_idx];
