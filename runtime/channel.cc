@@ -580,7 +580,9 @@ namespace LegionRuntime {
 
       inline void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size)
       {
-        //printf("update_write[%lx]: offset = %ld, size = %lu, pre = %lx, next = %lx\n", guid, offset, size, pre_xd_guid, next_xd_guid);
+        log_request.info(
+            "update_write: guid(%llx) off(%zd) size(%zu) pre(%llx) next(%llx)\n",
+            guid, offset, size, pre_xd_guid, next_xd_guid);
         if (next_xd_guid != XFERDES_NO_GUID) {
           bool update = false;
           if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
@@ -1394,10 +1396,11 @@ namespace LegionRuntime {
             src_height = height;
             dst_height = height;
           }
-          //printf("[%lx] src_str(%ld) dst_str(%ld) src_hei(%ld) dst_hei(%ld) "
-          //       "bytes(%lu) hei(%lu) dep(%lu)\n",
-          //       guid, src_stride, dst_stride, src_height, dst_height,
-          //       bytes_per_line, height, depth);
+          log_request.info(
+              "GPUXD_get_request: guid(%llx) src_str(%ld) dst_str(%ld)"
+              " src_hei(%ld) dst_hei(%ld) bytes(%lu) hei(%lu) dep(%lu)\n",
+              guid, src_stride, dst_stride, src_height, dst_height,
+              bytes_per_line, height, depth);
           if (nbytes == 0)
             break;
           while (nbytes > 0) {
