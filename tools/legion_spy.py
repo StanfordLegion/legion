@@ -5048,7 +5048,7 @@ class Operation(object):
         if self.logical_incoming is None:
             self.logical_incoming = set()
         self.logical_incoming.add(pred)
-        if not pred.logical_outgoing is None:
+        if pred.logical_outgoing is None:
             pred.logical_outgoing = set()
         pred.logical_outgoing.add(self)
 
@@ -7119,12 +7119,14 @@ class Future(object):
             # then get the physical creator
             self.physical_creators = set()
             if self.logical_creator.kind == INDEX_TASK_KIND:
-                if self.point.dim > 0:
-                    self.physical_creators.add(
-                            self.logical_creator.get_point_task(self.point).op)
-                else:
-                    for point in self.logical_creator.points.itervalues():
-                        self.physical_creators.add(point.op)
+                # Deal with predication
+                if self.logical_creator.points:
+                    if self.point.dim > 0:
+                        self.physical_creators.add(
+                                self.logical_creator.get_point_task(self.point).op)
+                    else:
+                        for point in self.logical_creator.points.itervalues():
+                            self.physical_creators.add(point.op)
             else:
                 self.physical_creators.add(self.logical_creator) 
             for creator in self.physical_creators:
