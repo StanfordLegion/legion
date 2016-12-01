@@ -1402,7 +1402,7 @@ namespace LegionRuntime {
               case XferDes::XFER_GPU_TO_FB:
               {
                 //printf("[GPUtoFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                assert(req_size == nbytes);
+                assert(req_size == nbytes || (height * depth == 1));
                 GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*) requests[idx];
                 gpu_to_fb_req->src = src_buf_base + src_start;
                 gpu_to_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
@@ -1419,7 +1419,7 @@ namespace LegionRuntime {
               case XferDes::XFER_GPU_FROM_FB:
               {
                 //printf("[GPUfromFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                assert(req_size == nbytes); 
+                assert(req_size == nbytes || (height * depth == 1)); 
                 GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*) requests[idx];
                 gpu_from_fb_req->src_offset = src_buf.alloc_offset + src_start;
                 gpu_from_fb_req->dst = dst_buf_base + dst_start;
@@ -1436,7 +1436,7 @@ namespace LegionRuntime {
               case XferDes::XFER_GPU_IN_FB:
               {
                 //printf("[GPUinFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                assert(req_size == nbytes); 
+                assert(req_size == nbytes || (height * depth == 1)); 
                 GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*) requests[idx];
                 gpu_in_fb_req->src_offset = src_buf.alloc_offset + src_start;
                 gpu_in_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
@@ -1452,6 +1452,7 @@ namespace LegionRuntime {
               }
               case XferDes::XFER_GPU_PEER_FB:
               {
+                assert(req_size == nbytes || (height * depth == 1));
                 GPUpeerFBRequest* gpu_peer_fb_req = (GPUpeerFBRequest*) requests[idx];
                 gpu_peer_fb_req->src_offset = src_buf.alloc_offset + src_start;
                 gpu_peer_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
