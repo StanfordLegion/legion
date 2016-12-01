@@ -3702,7 +3702,8 @@ namespace Legion {
             // Also make the region requirement read-write to force
             // people to wait on the value
             clone_requirements[idx].privilege = READ_WRITE;
-            unmap_events[idx] = Runtime::create_ap_user_event();
+            unmap_events[idx] = 
+              Runtime::create_ap_user_event<TASK_UNMAP_LOC>();
             execution_context->add_physical_region(clone_requirements[idx],
                     false/*mapped*/, map_id, tag, unmap_events[idx],
                     false/*virtual mapped*/, physical_instances[idx]);
@@ -3721,7 +3722,8 @@ namespace Legion {
             // context of this task
             clone_requirements[idx] = regions[idx];
             localize_region_requirement(clone_requirements[idx]);
-            unmap_events[idx] = Runtime::create_ap_user_event();
+            unmap_events[idx] = 
+              Runtime::create_ap_user_event<TASK_UNMAP_LOC>();
             execution_context->add_physical_region(clone_requirements[idx],
                     true/*mapped*/, map_id, tag, unmap_events[idx],
                     false/*virtual mapped*/, physical_instances[idx]);
@@ -6055,7 +6057,7 @@ namespace Legion {
       // Get our argument
       mp.assign_argument(local_args, local_arglen);
       // Make a new termination event for this point
-      point_termination = Runtime::create_ap_user_event();
+      point_termination = Runtime::create_ap_user_event<POINT_TERM_LOC>();
     }  
 
     //--------------------------------------------------------------------------
