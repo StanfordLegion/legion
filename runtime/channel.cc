@@ -19,6 +19,7 @@
 namespace LegionRuntime {
   namespace LowLevel {
     Logger::Category log_new_dma("new_dma");
+    Logger::Category log_request("request");
 #ifdef USE_DISK 
     inline int io_setup(unsigned nr, aio_context_t *ctxp)
       {
@@ -222,6 +223,9 @@ namespace LegionRuntime {
           return false; // case we don't have enough slots
 
         nbytes = todo * oas_vec[offset_idx].size;
+        log_request.info("[1D] guid(%llx) src_start(%zd) dst_start(%zd)"
+                         " todo(%lld) offset_idx(%u) nbytes(%zu)",
+                         guid, src_start, dst_start, todo, offset_idx, nbytes);
         li->move(todo);
         if (!li->any_left()) {
           li->reset();
@@ -302,6 +306,12 @@ namespace LegionRuntime {
         nbytes_per_line = nitems_per_line * oas_vec[offset_idx].size;
         src_stride_bytes = src_stride * oas_vec[offset_idx].size;
         dst_stride_bytes = dst_stride * oas_vec[offset_idx].size;
+        log_request.info("[2D] guid(%llx) src_start(%zd) dst_start(%zd)"
+                         "src_str(%zd) dst_str(%zd)"
+                         " nbytes(%zu) nlines(%zu) offset_idx(%u)",
+                         guid, src_start, dst_start, src_stride_bytes,
+                         dst_stride_bytes, nbytes_per_line, nlines, offset_idx);
+
         li->move(todo);
         if (!li->any_left()) {
           li->reset();
@@ -390,6 +400,12 @@ namespace LegionRuntime {
         nbytes_per_line = nitems_per_line * oas_vec[offset_idx].size;
         src_stride_bytes = src_stride * oas_vec[offset_idx].size;
         dst_stride_bytes = dst_stride * oas_vec[offset_idx].size;
+        log_request.info("[3D] guid(%llx) src_start(%zd) dst_start(%zd)"
+                         "src_str(%zd) dst_str(%zd) src_hei(%zd) dst_hei(%zd)"
+                         " nbytes(%zu) height(%zu) depth(%zd) offset_idx(%u)",
+                         guid, src_start, dst_start, src_stride_bytes,
+                         dst_stride_bytes, src_height, dst_height,
+                         nbytes_per_line, height, depth, offset_idx);
         li->move(todo);
         if (!li->any_left()) {
           li->reset();
@@ -2565,7 +2581,7 @@ namespace LegionRuntime {
               it->second->erase(xd);
               // We flush all changes into destination before mark this XferDes as completed
               xd->flush();
-              log_new_dma.info("Finish XferDes : id(%lx)", xd->guid);
+              log_new_dma.info("Finish XferDes : id(" IDFMT ")", xd->guid);
               xd->mark_completed();
               /*bool need_to_delete_dma_request = xd->mark_completed();
               if (need_to_delete_dma_request) {
@@ -2726,7 +2742,8 @@ namespace LegionRuntime {
           for (unsigned i = 0; i < _oas_vec.size(); i++) {
             total_field_size += _oas_vec[i].size;
           }
-          log_new_dma.info("Create local XferDes: id(%lx), pre(%lx), next(%lx), type(%d), domain(%lu), total_field_size(%lu)",
+          log_new_dma.info("Create local XferDes: id(" IDFMT "), pre(" IDFMT
+                           "), next(" IDFMT "), type(%d), domain(%zu), total_field_size(%zu)",
                            _guid, _pre_xd_guid, _next_xd_guid, _kind, _domain.get_volume(), total_field_size);
           XferDes* xd;
           switch (_kind) {
@@ -2795,9 +2812,11 @@ namespace LegionRuntime {
         }
         xferDes_queue->enqueue_xferDes_local(xd);
       } else {
-        log_new_dma.info("Create remote XferDes: id(%lx), pre(%lx), next(%lx), type(%d)",
+        log_new_dma.info("Create remote XferDes: id(" IDFMT "),"
+                         " pre(" IDFMT "), next(" IDFMT "), type(%d)",
                          _guid, _pre_xd_guid, _next_xd_guid, _kind);
-        XferDesCreateMessage::send_request(ID(_src_buf.memory).memory.owner_node, _dma_request, _launch_node,
+        XferDesCreateMessage::send_request(ID(_src_buf.memory).memory.owner_node,
+                                           _dma_request, _launch_node,
                                            _guid, _pre_xd_guid, _next_xd_guid,
                                            _src_buf, _dst_buf, _domain, _oas_vec,
                                            _max_req_size, max_nr, _priority,
@@ -2807,7 +2826,7 @@ namespace LegionRuntime {
 
     void destroy_xfer_des(XferDesID _guid)
     {
-      log_new_dma.info("Destroy XferDes: id(%lx)", _guid);
+      log_new_dma.info("Destroy XferDes: id(" IDFMT ")", _guid);
       gasnet_node_t execution_node = _guid >> (XferDesQueue::NODE_BITS + XferDesQueue::INDEX_BITS);
       if (execution_node == gasnet_mynode()) {
         xferDes_queue->destroy_xferDes(_guid);

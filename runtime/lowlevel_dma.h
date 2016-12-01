@@ -132,7 +132,7 @@ namespace LegionRuntime {
 			  size_t size, off_t& field_start, int& field_size);
     
     class DmaRequestQueue;
-    typedef uint64_t XferDesID;
+    typedef unsigned long long XferDesID;
     class DmaRequest : public Realm::Operation {
     public:
       DmaRequest(int _priority, Event _after_copy);

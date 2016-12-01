@@ -290,8 +290,6 @@ namespace LegionRuntime{
     };
 #endif
 
-    typedef uint64_t XferDesID;
-
     typedef class Layouts::XferOrder XferOrder;
     class XferDesFence : public Realm::Operation::AsyncWorkItem {
     public:
