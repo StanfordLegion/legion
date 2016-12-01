@@ -73,7 +73,7 @@ namespace LegionRuntime {
       class MaskEnumerator {
       public:
         MaskEnumerator(IndexSpace _is, Mapping<1, 1> *src_m, Mapping<1, 1> *dst_m, XferOrder::Type order, bool is_src_ib, bool is_dst_ib)
-          : is(_is), src_mapping(src_m), dst_mapping(dst_m), iter_order(order), rstart(0), rlen(0), rleft(0) {
+          : is(_is), src_mapping(src_m), dst_mapping(dst_m), rstart(0), rlen(0), rleft(0) {
           e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
           e->peek_next(rstart, rlen);
           src_idx_offset = is_src_ib ? src_mapping->image(rstart)[0] : 0;
