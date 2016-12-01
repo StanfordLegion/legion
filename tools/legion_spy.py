@@ -7661,7 +7661,7 @@ class EventHandle(object):
         return (self.uid != 0)
 
 class Event(object):
-    __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing',
+    __slots__ = ['state', 'handle', 'location', 'phase_barrier', 'incoming', 'outgoing',
                  'incoming_ops', 'outgoing_ops', 'incoming_fills', 'outgoing_fills',
                  'incoming_copies', 'outgoing_copies', 'generation', 'ap_user_event',
                  'rt_user_event', 'user_event_triggered', 
@@ -7669,6 +7669,7 @@ class Event(object):
     def __init__(self, state, handle):
         self.state = state
         self.handle = handle
+        self.location = None
         self.phase_barrier = False
         self.incoming = None
         self.outgoing = None
@@ -7695,10 +7696,11 @@ class Event(object):
 
     __repr__ = __str__
 
-    def set_ap_user_event(self):
+    def set_ap_user_event(self, location):
         assert not self.ap_user_event
         assert not self.rt_user_event
         self.ap_user_event = True
+        self.location = location
 
     def set_rt_user_event(self):
         assert not self.ap_user_event
@@ -7716,7 +7718,18 @@ class Event(object):
             return
         # This is an untriggered user event, report it
         if self.ap_user_event:
-            print("WARNING: "+str(self)+" is an untriggered application user event")
+            owner = None
+            for op in self.state.ops.itervalues():
+                if op.finish_event is self:
+                    owner = op
+                    break
+            assert location is not None
+            if owner:
+                print("WARNING: "+str(self)+" is an untriggered application "+
+                      "user event for "+str(owner)+" created at "+str(self.location))
+            else:
+                print("WARNING: "+str(self)+" is an untriggered application "+
+                      "user event created at "+str(self.location))
             if self.state.assert_on_warning:
                 assert False
         else:
@@ -8618,7 +8631,7 @@ tunable_pat             = re.compile(
 event_dependence_pat     = re.compile(
     prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
 ap_user_event_pat       = re.compile(
-    prefix+"Ap User Event (?P<id>[0-9a-f]+)")
+    prefix+"Ap User Event (?P<id>[0-9a-f]+) (?P<loc>[0-9]+)")
 rt_user_event_pat       = re.compile(
     prefix+"Rt User Event (?P<id>[0-9a-f]+)")
 ap_user_event_trig_pat  = re.compile(
@@ -8670,7 +8683,7 @@ def parse_legion_spy_line(line, state):
     m = ap_user_event_pat.match(line)
     if m is not None:
         e = state.get_event(int(m.group('id'),16))
-        e.set_ap_user_event()
+        e.set_ap_user_event(int(m.group('loc')))
         return True
     m = rt_user_event_pat.match(line)
     if m is not None:
