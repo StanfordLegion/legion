@@ -2920,7 +2920,6 @@ namespace Legion {
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
       static inline RtEvent merge_events(const std::set<RtEvent> &events);
     public:
-      template<UserLocation AP_USER_LOCATION>
       static inline ApUserEvent create_ap_user_event(void);
       static inline void trigger_event(ApUserEvent to_trigger,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
@@ -3241,13 +3240,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<UserLocation AP_USER_LOCATION>
     /*static*/ inline ApUserEvent Runtime::create_ap_user_event(void)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
       ApUserEvent result(Realm::UserEvent::create_user_event());
-      LegionSpy::log_ap_user_event(result, AP_USER_LOCATION);
+      LegionSpy::log_ap_user_event(result);
       return result;
 #else
       return ApUserEvent(Realm::UserEvent::create_user_event());

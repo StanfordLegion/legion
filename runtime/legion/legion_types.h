@@ -1094,23 +1094,6 @@ namespace Legion {
       TASK_SEMANTIC,
     };
 
-    // For tracking the creation locations of user events
-    enum UserLocation {
-      OP_COMPLETION_LOC = 0,
-      INLINE_MAP_TERM_LOC = 1,
-      COPY_OP_LOCAL_LOC = 2,
-      PENDING_PARTITION_LOC = 3,
-      DEPENDENT_PARTITION_LOC = 4,
-      TASK_UNMAP_LOC = 5,
-      POINT_TERM_LOC = 6,
-      FUTURE_TASK_LOC = 7,
-      MPI_INTEROP_LOC = 8,
-      MAPPER_TASK_LOC = 9,
-      HANDLE_READY_LOC = 10,
-      DOMAIN_READY_LOC = 11,
-      COPY_TEMP_LOC = 12,
-    };
-
     // Forward declarations for runtime level objects
     // runtime.h
     class Collectable;

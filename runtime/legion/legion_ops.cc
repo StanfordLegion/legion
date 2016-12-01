@@ -87,8 +87,7 @@ namespace Legion {
       need_completion_trigger = true;
       mapped_event = Runtime::create_rt_user_event();
       resolved_event = Runtime::create_rt_user_event();
-      completion_event = 
-        Runtime::create_ap_user_event<OP_COMPLETION_LOC>();
+      completion_event = Runtime::create_ap_user_event();
       if (Runtime::resilient_mode)
         commit_event = Runtime::create_rt_user_event();
       trace = NULL;
@@ -1873,8 +1872,7 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       layout_constraint_id = launcher.layout_constraint_id;
-      termination_event = 
-        Runtime::create_ap_user_event<INLINE_MAP_TERM_LOC>();
+      termination_event = Runtime::create_ap_user_event();
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, 
@@ -1908,8 +1906,7 @@ namespace Legion {
       requirement = req;
       map_id = id;
       tag = t;
-      termination_event = 
-        Runtime::create_ap_user_event<INLINE_MAP_TERM_LOC>();
+      termination_event = Runtime::create_ap_user_event();
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, 
@@ -1931,8 +1928,7 @@ namespace Legion {
       requirement = reg.impl->get_requirement();
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
-      termination_event = 
-        Runtime::create_ap_user_event<INLINE_MAP_TERM_LOC>();
+      termination_event = Runtime::create_ap_user_event();
       region = reg;
       region.impl->remap_region(completion_event);
       // We're only really remapping it if it already had a physical
@@ -3374,8 +3370,7 @@ namespace Legion {
         int src_composite = -1;
         // Make a user event for when this copy across is done
         // and add it to the set of copy complete events
-        ApUserEvent local_completion = 
-          Runtime::create_ap_user_event<COPY_OP_LOCAL_LOC>();
+        ApUserEvent local_completion = Runtime::create_ap_user_event();
         copy_complete_events.insert(local_completion);
         // Do the conversion and check for errors
         src_composite = 
@@ -9984,7 +9979,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      handle_ready = Runtime::create_ap_user_event<PENDING_PARTITION_LOC>();
+      handle_ready = Runtime::create_ap_user_event();
     }
 
     //--------------------------------------------------------------------------
@@ -10254,7 +10249,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      handle_ready = Runtime::create_ap_user_event<DEPENDENT_PARTITION_LOC>();
+      handle_ready = Runtime::create_ap_user_event();
     }
 
     //--------------------------------------------------------------------------

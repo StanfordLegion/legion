@@ -610,10 +610,8 @@ namespace Legion {
           assert(!domain_ready.exists());
 #endif
           // Create a separate handle ready event for each node
-          ApUserEvent local_handle_ready = 
-            Runtime::create_ap_user_event<HANDLE_READY_LOC>();
-          ApUserEvent local_domain_ready = 
-            Runtime::create_ap_user_event<DOMAIN_READY_LOC>();
+          ApUserEvent local_handle_ready = Runtime::create_ap_user_event();
+          ApUserEvent local_domain_ready = Runtime::create_ap_user_event();
           create_node(is, local_handle_ready, local_domain_ready,
                       partition_node, child_color, parent_node->kind, 
                       allocable ? MUTABLE : NO_MEMORY);
@@ -15045,7 +15043,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (!result.exists())
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event<COPY_TEMP_LOC>();
+        ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
         result = new_result;
       }
@@ -15140,7 +15138,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       if (!result.exists())
       {
-        ApUserEvent new_result = Runtime::create_ap_user_event<COPY_TEMP_LOC>();
+        ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
         result = new_result;
       }

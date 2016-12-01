@@ -372,7 +372,7 @@ namespace Legion {
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
-        ready_event(Runtime::create_ap_user_event<FUTURE_TASK_LOC>()), 
+        ready_event(Runtime::create_ap_user_event()), 
         result(NULL), result_size(0), empty(true), sampled(false)
     //--------------------------------------------------------------------------
     {
@@ -605,7 +605,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (ready_event.has_triggered())
-        ready_event = Runtime::create_ap_user_event<FUTURE_TASK_LOC>();
+        ready_event = Runtime::create_ap_user_event();
       bool was_sampled = sampled;
       sampled = false;
       return was_sampled;
@@ -1670,7 +1670,7 @@ namespace Legion {
         // We can't call external wait directly on the barrier
         // right now, so as a work-around we'll make an event
         // and then wait on that
-        ApUserEvent wait_on = Runtime::create_ap_user_event<MPI_INTEROP_LOC>();
+        ApUserEvent wait_on = Runtime::create_ap_user_event();
         Runtime::trigger_event(wait_on, previous);
         wait_on.external_wait();
       }
@@ -8724,7 +8724,7 @@ namespace Legion {
       // Create a temporary event to name the result since we 
       // have to pack it in the task that runs, but it also depends
       // on the task being reported back to the mapper
-      ApUserEvent result = Runtime::create_ap_user_event<MAPPER_TASK_LOC>();
+      ApUserEvent result = Runtime::create_ap_user_event();
       // Add a reference to the future impl to prevent it being collected
       f.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
       // Create a meta-task to return the results to the mapper

@@ -734,9 +734,9 @@ namespace Legion {
 			one.id, two.id);
       }
 
-      static inline void log_ap_user_event(ApUserEvent event, UserLocation loc)
+      static inline void log_ap_user_event(ApUserEvent event)
       {
-        log_spy.print("Ap User Event " IDFMT " %d", event.id, loc);
+        log_spy.print("Ap User Event " IDFMT, event.id);
       }
 
       static inline void log_rt_user_event(RtUserEvent event)
