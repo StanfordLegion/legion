@@ -313,7 +313,7 @@ int read_events(FILE *f)
 	  unsigned long long ev2_id;
 	  unsigned wgen, pos, ts;
 	  int delta;
-	  int ret = sscanf(s, "  [%d] L:%*p - %ndeferred arrival: barrier=%llx (%d) delta=%d datalen=%*d",
+	  int ret = sscanf(s, "  [%d] L:%*p - %ndeferred arrival: barrier=%llx (%d), delta=%d datalen=%*d",
 			   &wgen, &pos, &ev2_id, &ts, &delta);
 	  if(ret == 4) {
 	    Event *e1 = Event::get_event(ev_id, wgen);
