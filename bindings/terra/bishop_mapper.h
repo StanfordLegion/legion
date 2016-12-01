@@ -17,6 +17,7 @@
 #define __BISHOP_MAPPER_H__
 
 #include <vector>
+#include <map>
 #include <string>
 
 #include "legion.h"
@@ -26,35 +27,45 @@ extern "C" {
 #include "bishop_c.h"
 }
 
-namespace LegionRuntime {
-  namespace HighLevel {
+namespace Legion {
 
-		class BishopMapper : public DefaultMapper
-		{
-			public:
-				BishopMapper(const std::vector<bishop_task_rule_t>&,
-                     const std::vector<bishop_region_rule_t>&,
+  namespace Mapping {
+
+    class BishopMapper : public DefaultMapper
+    {
+      public:
+        BishopMapper(const std::vector<bishop_mapper_impl_t>&,
+                     const std::vector<bishop_transition_fn_t>&,
                      bishop_mapper_state_init_fn_t,
-                     Machine, HighLevelRuntime*, Processor);
-				~BishopMapper();
+                     MapperRuntime*, Machine, Processor);
+        ~BishopMapper();
 
-				virtual void select_task_options(Task *task);
-				virtual void slice_domain(const Task *task, const Domain &domain,
-						std::vector<DomainSplit> &slices);
-				virtual bool pre_map_task(Task *task);
-				virtual void select_task_variant(Task *task);
-				virtual bool map_task(Task *task);
+        virtual void select_task_options(const MapperContext ctx,
+                                         const Task&         task,
+                                               TaskOptions&  output);
+        virtual void slice_task(const MapperContext    ctx,
+                                const Task&            task,
+                                const SliceTaskInput&  input,
+                                      SliceTaskOutput& output);
+        virtual void map_task(const MapperContext  ctx,
+                              const Task&          task,
+                              const MapTaskInput&  input,
+                                    MapTaskOutput& output);
 
-				virtual void notify_mapping_result(const Mappable *mappable);
-				virtual void notify_mapping_failed(const Mappable *mappable);
+        bishop_mapper_impl_t& get_mapper_impl(bishop_matching_state_t state);
 
+        bishop_matching_state_t get_current_state(bishop_matching_state_t prev_state,
+                                                  const Task& task);
       private:
-        std::vector<bishop_task_rule_t> task_rules;
-        std::vector<bishop_region_rule_t> region_rules;
+        std::vector<bishop_mapper_impl_t> mapper_impls;
+        std::vector<bishop_transition_fn_t> transitions;
+
         bishop_mapper_state_init_fn_t mapper_init;
         bishop_mapper_state_t mapper_state;
-		};
+        legion_mapper_runtime_t runtime_;
+    };
 
-	};
+  };
+
 };
 #endif // __BISHOP_MAPPER_H__

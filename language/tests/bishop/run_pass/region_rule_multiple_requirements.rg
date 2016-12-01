@@ -26,7 +26,7 @@ $HAS_REGMEM = memories[kind=regmem].size > 0
 
 task#foo[target=$proc] region#r1 {
   target : $HAS_REGMEM ? $proc.memories[kind=regmem] :
-                         $proc.memories[kind=l1cache];
+                         $proc.memories[kind=sysmem];
 }
 
 task[target=$proc] region {
@@ -50,11 +50,15 @@ do
   var kind_r1y = c.legion_memory_kind(memory_r1y)
   var memory_r2 = c.bishop_physical_region_get_memory(__physical(r2)[0])
   var kind_r2 = c.legion_memory_kind(memory_r2)
-  regentlib.assert(kind_r1x == c.REGDMA_MEM or kind_r1x == c.LEVEL1_CACHE,
+  var all_memories = c.bishop_all_memories()
+  var regmems = c.bishop_filter_memories_by_kind(all_memories, c.REGDMA_MEM)
+  regentlib.assert(regmems.size == 0 or kind_r1x == c.REGDMA_MEM,
     "test failed")
-  regentlib.assert(kind_r1y == c.REGDMA_MEM or kind_r1y == c.LEVEL1_CACHE,
+  regentlib.assert(regmems.size == 0 or kind_r1y == c.REGDMA_MEM,
     "test failed")
   regentlib.assert(kind_r2 == c.SYSTEM_MEM, "test failed")
+  c.bishop_delete_memory_list(regmems)
+  c.bishop_delete_memory_list(all_memories)
 end
 
 task toplevel()

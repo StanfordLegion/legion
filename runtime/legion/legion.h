@@ -18,6 +18,14 @@
 #define __LEGION_RUNTIME_H__
 
 /**
+ * \mainpage Legion Runtime Documentation
+ *
+ * This is the main page of the Legion Runtime documentation.
+ *
+ * @see Legion::Runtime
+ */
+
+/**
  * \file legion.h
  * Legion C++ API
  */
@@ -29,7 +37,7 @@
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
 
 /**
- * \namespace LegionRuntime
+ * \namespace Legion
  * Namespace for all Legion runtime objects
  */
 namespace Legion {
@@ -96,6 +104,7 @@ namespace Legion {
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
     public:
+      friend std::ostream& operator<<(std::ostream& os, const IndexPartition& ip);
       IndexPartitionID id;
       IndexTreeID tid;
     };
@@ -167,7 +176,8 @@ namespace Legion {
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); } 
     private:
-      friend std::ostream& operator<<(std::ostream& os, const LogicalRegion& lr);
+      friend std::ostream& operator<<(
+          std::ostream& os, const LogicalRegion& lr);
       // These are private so the user can't just arbitrarily change them
       RegionTreeID tree_id;
       IndexSpace index_space;
@@ -211,6 +221,7 @@ namespace Legion {
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); }
     private:
+      friend std::ostream& operator<<(std::ostream& os, const LogicalPartition& lp);
       // These are private so the user can't just arbitrary change them
       RegionTreeID tree_id;
       IndexPartition index_partition;
@@ -655,7 +666,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty phase barriers
       FRIEND_ALL_RUNTIME_CLASSES
-      PhaseBarrier(Barrier b);
+      PhaseBarrier(ApBarrier b);
     public:
       bool operator<(const PhaseBarrier &rhs) const;
       bool operator==(const PhaseBarrier &rhs) const;
@@ -664,9 +675,10 @@ namespace Legion {
       void arrive(unsigned count = 1);
       void wait(void);
       void alter_arrival_count(int delta);
-      Barrier get_barrier(void) const { return phase_barrier; }
+      Realm::Barrier get_barrier(void) const { return phase_barrier; }
+      bool exists(void) const;
     protected:
-      Barrier phase_barrier;
+      ApBarrier phase_barrier;
       friend std::ostream& operator<<(std::ostream& os, const PhaseBarrier& pb);
     };
 
@@ -690,7 +702,7 @@ namespace Legion {
     protected:
       // Only the runtime is allowed to make non-empty dynamic collectives
       FRIEND_ALL_RUNTIME_CLASSES
-      DynamicCollective(Barrier b, ReductionOpID redop);
+      DynamicCollective(ApBarrier b, ReductionOpID redop);
     public:
       // All the same operations as a phase barrier
       void arrive(const void *value, size_t size, unsigned count = 1);
@@ -838,7 +850,7 @@ namespace Legion {
       ReductionOpID redop; /**<reduction operation (default 0)*/
       MappingTagID tag; /**< mapping tag for this region requirement*/
       RegionFlags flags; /**< optional flags set for region requirements*/
-      HandleType handle_type; /**< region or partition requirement*/
+      ProjectionType handle_type; /**< region or partition requirement*/
       ProjectionID projection; /**< projection function for index space tasks*/
     };
 
@@ -936,13 +948,15 @@ namespace Legion {
        * Wait on the result of this future.  Return
        * the value of the future as the specified 
        * template type.
+       * @param silence_warnings silence any warnings for this blocking call
        * @return the value of the future cast as the template type
        */
-      template<typename T> inline T get_result(void);
+      template<typename T> inline T get_result(bool silence_warnings = false) const;
       /**
        * Block until the future completes.
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      void get_void_result(void) const;
+      void get_void_result(bool silence_warnings = false) const;
       /**
        * Check to see if the future is empty.  The
        * user can specify whether to block and wait
@@ -950,8 +964,10 @@ namespace Legion {
        * returning.  If the non-blocking version
        * of the call will return true, until
        * the future actually completes.
+       * @param block indicate whether to block for the result
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      bool is_empty(bool block = false) const;
+      bool is_empty(bool block = false, bool silence_warnings = false) const;
     public:
       /**
        * Return a const reference to the future.
@@ -963,8 +979,10 @@ namespace Legion {
        * own risk.  Note also that this call will not
        * properly deserialize buffers that were serialized
        * with a 'legion_serialize' method.
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      template<typename T> inline const T& get_reference(void);
+      template<typename T> 
+        inline const T& get_reference(bool silence_warnings = false);
       /**
        * Return an untyped pointer to the 
        * future result.  WARNING: this
@@ -972,8 +990,9 @@ namespace Legion {
        * as get_reference.  It also will not 
        * deserialize anything serialized with a 
        * legion_serialize method.
+       * @param silence_warnings silence any warnings for this blocking call
        */
-      inline const void* get_untyped_pointer(void);
+      inline const void* get_untyped_pointer(bool silence_warnings = false);
     public:
       /**
        * Allow users to generate their own futures. These
@@ -991,7 +1010,7 @@ namespace Legion {
 						const void *buffer,
 						size_t bytes);
     private:
-      void* get_untyped_result(void); 
+      void* get_untyped_result(bool silence_warnings) const; 
     };
 
     /**
@@ -1029,10 +1048,12 @@ namespace Legion {
        * Block until we can return the result for the
        * task executing for the given domain point.
        * @param point the point task to wait for
+       * @param silence_warnings silence any warnings for this blocking call
        * @return the return value of the task
        */
       template<typename T>
-        inline T get_result(const DomainPoint &point);
+        inline T get_result(const DomainPoint &point,
+                            bool silence_warnings = false);
       /**
        * Non-blocking call that will return a future that
        * will contain the value from the given index task
@@ -1045,8 +1066,10 @@ namespace Legion {
        * Blocking call that will return one the point
        * in the index space task has executed.
        * @param point the point task to wait for
+       * @param silience_warnings silence any warnings for this blocking call
        */
-      void get_void_result(const DomainPoint &point);
+      void get_void_result(const DomainPoint &point,
+                           bool silence_warnings = false);
     public:
       /**
        * An older method for getting the result of
@@ -1078,8 +1101,9 @@ namespace Legion {
       /**
        * Wait for all the tasks in the index space launch of
        * tasks to complete before returning.
+       * @param silence_warnings silience warnings for this blocking call
        */
-      void wait_all_results(void); 
+      void wait_all_results(bool silence_warnings = false); 
     }; 
 
 
@@ -1113,9 +1137,13 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
+    public:
+      inline void set_independent_requirements(bool independent);
     public:
       Processor::TaskFuncID              task_id;
       std::vector<IndexSpaceRequirement> index_requirements;
@@ -1137,6 +1165,14 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
+    public:
+      // Users can inform the runtime that all region requirements
+      // are independent of each other in this task. Independent
+      // means that either field sets are independent or region
+      // requirements are disjoint based on the region tree.
+      bool                               independent_requirements;
+    public:
+      bool                               silence_warnings;
     };
 
     /**
@@ -1169,9 +1205,13 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       inline void set_predicate_false_future(Future f);
       inline void set_predicate_false_result(TaskArgument arg);
+    public:
+      inline void set_independent_requirements(bool independent);
     public:
       Processor::TaskFuncID              task_id;
       Domain                             launch_domain;
@@ -1195,6 +1235,14 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
+    public:
+      // Users can inform the runtime that all region requirements
+      // are independent of each other in this task. Independent
+      // means that either field sets are independent or region
+      // requirements are disjoint based on the region tree.
+      bool                               independent_requirements;
+    public:
+      bool                               silence_warnings;
     };
 
     /**
@@ -1259,6 +1307,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       std::vector<RegionRequirement>  src_requirements;
       std::vector<RegionRequirement>  dst_requirements;
@@ -1268,6 +1318,8 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
     };
 
     /**
@@ -1290,6 +1342,8 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier bar);
       inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       LogicalRegion                   handle;
       LogicalRegion                   parent;
@@ -1300,6 +1354,8 @@ namespace Legion {
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
+    public:
+      bool                            silence_warnings;
     };
 
     //==========================================================================
@@ -1499,13 +1555,15 @@ namespace Legion {
       /**
        * Check to see if this represents a mapped physical region. 
        */
-      inline bool is_mapped(void) const;
+      bool is_mapped(void) const;
       /**
        * For physical regions returned as the result of an
        * inline mapping, this call will block until the physical
-       * instance has a valid copy of the data.
+       * instance has a valid copy of the data. You can silence
+       * warnings about this blocking call with the 
+       * 'silence_warnings' parameter.
        */
-      void wait_until_valid(void);
+      void wait_until_valid(bool silence_warnings = false);
       /**
        * For physical regions returned from inline mappings,
        * this call will query if the instance contains valid
@@ -1521,17 +1579,21 @@ namespace Legion {
        * @deprecated
        * Return a generic accessor for the entire physical region.
        * This method is now deprecated. Please use the 'get_field_accessor'
-       * method instead.
+       * method instead. You can silence warnings about this blocking
+       * call with the 'silence_warnings' parameter.
        */
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
-          get_accessor(void) const;
+          get_accessor(bool silience_warnings = false) const;
       /**
        * Return a field accessor for a specific field within the region.
+       * You can silence warnings regarding this blocking call with
+       * the 'silence_warnings' parameter.
        */
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
-          get_field_accessor(FieldID field) const; 
+          get_field_accessor(FieldID field, 
+                             bool silence_warnings = false) const;
       /**
        * Return the memories where the underlying physical instances locate.
        */
@@ -1552,8 +1614,10 @@ namespace Legion {
     class IndexIterator {
     public:
       IndexIterator(const Domain &dom, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, IndexSpace space, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, LogicalRegion lr, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, 
+                    IndexSpace space, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, 
+                    LogicalRegion lr, ptr_t start = ptr_t());
       IndexIterator(const IndexIterator &rhs);
       ~IndexIterator(void);
     public:
@@ -1602,7 +1666,7 @@ namespace Legion {
     public:
       AcquireLauncher(LogicalRegion logical_region, 
                       LogicalRegion parent_region,
-                      PhysicalRegion physical_region,
+                      PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0);
     public:
@@ -1610,11 +1674,14 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
+      // This field is now optional
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -1623,6 +1690,8 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
     };
 
     /**
@@ -1635,7 +1704,7 @@ namespace Legion {
     public:
       ReleaseLauncher(LogicalRegion logical_region, 
                       LogicalRegion parent_region,
-                      PhysicalRegion physical_region,
+                      PhysicalRegion physical_region = PhysicalRegion(),
                       Predicate pred = Predicate::TRUE_PRED,
                       MapperID id = 0, MappingTagID tag = 0);
     public:
@@ -1643,11 +1712,14 @@ namespace Legion {
       inline void add_grant(Grant g);
       inline void add_wait_barrier(PhaseBarrier pb);
       inline void add_arrival_barrier(PhaseBarrier pb);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
       LogicalRegion                   logical_region;
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
+      // This field is now optional
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -1656,6 +1728,8 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
     };
 
     //==========================================================================
@@ -1683,10 +1757,12 @@ namespace Legion {
                                   const TaskLauncher &launcher);
       inline void add_index_task(const IndexLauncher &launcher);
     public:
-      MapperID                        map_id;
-      MappingTagID               mapping_tag;
-      std::vector<TaskLauncher> single_tasks;
-      std::vector<IndexLauncher> index_tasks;
+      MapperID                      map_id;
+      MappingTagID                  mapping_tag;
+      std::vector<TaskLauncher>     single_tasks;
+      std::vector<IndexLauncher>    index_tasks;
+    public:
+      bool                          silence_warnings;
     };
 
     //==========================================================================
@@ -1715,23 +1791,41 @@ namespace Legion {
        * Non-blocking call to signal to Legion that this participant
        * is ready to pass control to Legion.
        */
-      void mpi_handoff_to_legion(void);
+      void mpi_handoff_to_legion(void) const;
       /**
        * A blocking call that will cause this participant to wait
        * for all Legion participants to hand over control to MPI.
        */
-      void mpi_wait_on_legion(void);
+      void mpi_wait_on_legion(void) const;
     public:
       /**
        * A non-blocking call to signal to MPI that this participant
        * is ready to pass control to MPI.
        */
-      void legion_handoff_to_mpi(void);
+      void legion_handoff_to_mpi(void) const;
       /**
        * A blocking call that will cause this participant to wait
        * for all MPI participants to hand over control to Legion.
        */
-      void legion_wait_on_mpi(void);
+      void legion_wait_on_mpi(void) const;
+    public:
+      /*
+       * For asynchronous Legion execution, you can use these
+       * methods to get a phase barrier associated with the 
+       * handshake object instead of blocking on the legion side
+       */
+      /**
+       * Get the Legion phase barrier associated with waiting on the handshake 
+       */
+      PhaseBarrier get_legion_wait_phase_barrier(void) const;
+      /**
+       * Get the Legion phase barrier associated with arriving on the handshake
+       */
+      PhaseBarrier get_legion_arrive_phase_barrier(void) const;
+      /**
+       * Advance the handshake associated with the Legion side
+       */
+      void advance_legion_handshake(void) const;
     };
 
     //==========================================================================
@@ -1753,7 +1847,13 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       Mappable(void);
     public:
+      // Return a globally unique ID for this operation
       virtual UniqueID get_unique_id(void) const = 0;
+      // Return the number of operations that came before
+      // this operation in the same context (close operations
+      // return number of previous close operations)
+      virtual unsigned get_context_index(void) const = 0;
+      // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
     public:
       MapperID                                  map_id;
@@ -1859,7 +1959,6 @@ namespace Legion {
       LogicalRegion                     logical_region;
       LogicalRegion                     parent_region;
       std::set<FieldID>                 fields;
-      PhysicalRegion                    region;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
@@ -1882,7 +1981,6 @@ namespace Legion {
       LogicalRegion                     logical_region;
       LogicalRegion                     parent_region;
       std::set<FieldID>                 fields;
-      PhysicalRegion                    region;
       std::vector<Grant>                grants;
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
@@ -1980,6 +2078,7 @@ namespace Legion {
      */
     class ProjectionFunctor {
     public:
+      ProjectionFunctor(void);
       ProjectionFunctor(Runtime *rt);
       virtual ~ProjectionFunctor(void);
     public:
@@ -2011,8 +2110,33 @@ namespace Legion {
                                     unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point) = 0;
+      /**
+       * Indicate whether calls to this projection functor
+       * must be serialized or can be performed in parallel.
+       * Usually they must be exclusive if this functor contains
+       * state for memoizing results.
+       */
+      virtual bool is_exclusive(void) const { return false; }
+
+      /**
+       * Specify the depth which this projection function goes
+       * for all the points in an index space launch from 
+       * the upper bound node in the region tree. Depth is
+       * defined as the number of levels of the region tree
+       * crossed from the upper bound logical region or partition.
+       * So depth 0 for a REG_PROJECTION means the same region
+       * while depth 0 for a PART_PROJECTION means a subregion
+       * in the immediate partition. Depth 0 is the default
+       * for the identity projection function.
+       */
+      virtual unsigned get_depth(void) const = 0;
+    private:
+      friend class Internal::Runtime;
+      // For pre-registered projection functors the runtime will
+      // use this to initialize the runtime pointer
+      inline void set_runtime(Runtime *rt) { runtime = rt; }
     protected:
-      Runtime *const runtime;
+      Runtime *runtime;
     };
 
     /**
@@ -2028,6 +2152,15 @@ namespace Legion {
      * for initializing the runtime during start-up callback.
      * The final section of calls are static methods that are
      * used to configure the runtime prior to starting it up.
+     *
+     * A note on context free functions: context free functions 
+     * have equivalent functionality to their non-context-free 
+     * couterparts. However, context free functions can be 
+     * safely used in a leaf task while any runtime function 
+     * that requires a context cannot be used in a leaf task. 
+     * If your task variant only uses context free functions
+     * as part of its implementation then it is safe for you 
+     * to annotate it as a leaf task variant.
      */
     class Runtime {
     protected:
@@ -2664,6 +2797,10 @@ namespace Legion {
                                          Color color);
       IndexPartition get_index_partition(Context ctx, IndexSpace parent,
                                          const DomainPoint &color);
+      // Context free versions
+      IndexPartition get_index_partition(IndexSpace parent, Color color);
+      IndexPartition get_index_partition(IndexSpace parent, 
+                                         const DomainPoint &color);
       /**
        * Return true if the index space has an index partition
        * with the specified color.
@@ -2673,6 +2810,9 @@ namespace Legion {
        * @return true if an index partition exists with the specified color
        */
       bool has_index_partition(Context ctx, IndexSpace parent,
+                               const DomainPoint &color);
+      // Context free
+      bool has_index_partition(IndexSpace parent,
                                const DomainPoint &color);
 
       /**
@@ -2687,6 +2827,10 @@ namespace Legion {
                                     Color color); 
       IndexSpace get_index_subspace(Context ctx, IndexPartition p,
                                     const DomainPoint &color);
+      // Context free versions
+      IndexSpace get_index_subspace(IndexPartition p, Color color);
+      IndexSpace get_index_subspace(IndexPartition p,
+                                    const DomainPoint &color);
 
       /**
        * Return true if the index partition has an index subspace
@@ -2697,6 +2841,9 @@ namespace Legion {
        * @return true if an index space exists with the specified color
        */
       bool has_index_subspace(Context ctx, IndexPartition p,
+                              const DomainPoint &color);
+      // Context free
+      bool has_index_subspace(IndexPartition p,
                               const DomainPoint &color);
 
       /**
@@ -2709,6 +2856,8 @@ namespace Legion {
        * @return true if the index space has multiple domains
        */
       bool has_multiple_domains(Context ctx, IndexSpace handle);
+      // Context free
+      bool has_multiple_domains(IndexSpace handle);
 
       /**
        * Return the domain corresponding to the
@@ -2718,6 +2867,8 @@ namespace Legion {
        * @return the domain corresponding to the index space
        */
       Domain get_index_space_domain(Context ctx, IndexSpace handle);
+      // Context free
+      Domain get_index_space_domain(IndexSpace handle);
 
       /**
        * Return the domains that represent the index space.
@@ -2730,6 +2881,9 @@ namespace Legion {
        */
       void get_index_space_domains(Context ctx, IndexSpace handle,
                                    std::vector<Domain> &domains);
+      // Context free
+      void get_index_space_domains(IndexSpace handle,
+                                   std::vector<Domain> &domains);
 
       /**
        * Return a domain that represents the color space
@@ -2739,6 +2893,8 @@ namespace Legion {
        * @return a domain for the color space of the specified partition
        */
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
+      // Context free
+      Domain get_index_partition_color_space(IndexPartition p);
 
       /**
        * Return a set that contains the colors of all
@@ -2753,6 +2909,11 @@ namespace Legion {
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(Context ctx, IndexSpace sp,
                                             std::set<DomainPoint> &colors);
+      // Context free versions
+      void get_index_space_partition_colors(IndexSpace sp,
+                                            std::set<Color> &colors);
+      void get_index_space_partition_colors(IndexSpace sp,
+                                            std::set<DomainPoint> &colors);
 
       /**
        * Return whether a given index partition is disjoint
@@ -2761,6 +2922,8 @@ namespace Legion {
        * @return whether the index partition is disjoint
        */
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
+      // Context free
+      bool is_index_partition_disjoint(IndexPartition p);
 
       /**
        * Return whether a given index partition is complete
@@ -2769,6 +2932,8 @@ namespace Legion {
        * @return whether the index partition is complete
        */
       bool is_index_partition_complete(Context ctx, IndexPartition p);
+      // Context free
+      bool is_index_partition_complete(IndexPartition p);
 
       /**
        * Get an index subspace from a partition with a given
@@ -2792,6 +2957,9 @@ namespace Legion {
        */
       Color get_index_space_color(Context ctx, IndexSpace handle);
       DomainPoint get_index_space_color_point(Context ctx, IndexSpace handle);
+      // Context free
+      Color get_index_space_color(IndexSpace handle);
+      DomainPoint get_index_space_color_point(IndexSpace handle);
 
       /**
        * Return the color for the corresponding index partition in
@@ -2803,6 +2971,9 @@ namespace Legion {
       Color get_index_partition_color(Context ctx, IndexPartition handle);
       DomainPoint get_index_partition_color_point(Context ctx,
                                                   IndexPartition handle);
+      // Context free
+      Color get_index_partition_color(IndexPartition handle);
+      DomainPoint get_index_partition_color_point(IndexPartition handle);
 
       /**
        * Return the index space parent for the given index partition.
@@ -2811,6 +2982,8 @@ namespace Legion {
        * @return index space for the parent
        */
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
+      // Context free
+      IndexSpace get_parent_index_space(IndexPartition handle);
 
       /**
        * Returns true if the given index space has a parent partition.
@@ -2819,6 +2992,8 @@ namespace Legion {
        * @return true if there is a parent index partition
        */
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
+      // Context free
+      bool has_parent_index_partition(IndexSpace handle);
 
       /**
        * Returns the parent partition for the given index space.
@@ -2828,6 +3003,28 @@ namespace Legion {
        * @return the parent index partition
        */
       IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
+      // Context free
+      IndexPartition get_parent_index_partition(IndexSpace handle);
+
+      /**
+       * Return the depth in the index space tree of the given index space.
+       * @param ctx enclosing task context
+       * @param handle the index space
+       * @return depth in the index space tree of the index space
+       */
+      unsigned get_index_space_depth(Context ctx, IndexSpace handle);
+      // Context free
+      unsigned get_index_space_depth(IndexSpace handle);
+
+      /**
+       * Return the depth in the index space tree of the given index partition.
+       * @param ctx enclosing task context
+       * @param handle the index partition
+       * @return depth in the index space tree of the index partition
+       */
+      unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
+      // Context free
+      unsigned get_index_partition_depth(IndexPartition handle);
     public:
       //------------------------------------------------------------------------
       // Safe Cast Operations
@@ -2878,6 +3075,8 @@ namespace Legion {
        * @return the size of the field in bytes
        */
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
+      // Context free
+      size_t get_field_size(FieldSpace handle, FieldID fid);
 
       /**
        * Get the IDs of the fields currently allocated in a field space.
@@ -2886,6 +3085,21 @@ namespace Legion {
        * @param set in which to place the field IDs
        */
       void get_field_space_fields(Context ctx, FieldSpace handle,
+                                  std::vector<FieldID> &fields);
+      // Context free
+      void get_field_space_fields(FieldSpace handle,
+                                  std::vector<FieldID> &fields);
+
+      /**
+       * Get the IDs of the fields currently allocated in a field space.
+       * @param ctx enclosing task context
+       * @param handle field space handle
+       * @param set in which to place the field IDs
+       */
+      void get_field_space_fields(Context ctx, FieldSpace handle,
+                                  std::set<FieldID> &fields);
+      // Context free
+      void get_field_space_fields(FieldSpace handle,
                                   std::set<FieldID> &fields);
     public:
       //------------------------------------------------------------------------
@@ -2932,6 +3146,9 @@ namespace Legion {
        */
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);
+      // Context free
+      LogicalPartition get_logical_partition(LogicalRegion parent,
+                                             IndexPartition handle);
       
       /**
        * Return the logical partition of the logical region parent with
@@ -2947,6 +3164,11 @@ namespace Legion {
       LogicalPartition get_logical_partition_by_color(Context ctx,
                                                       LogicalRegion parent,
                                                       const DomainPoint &c);
+      // Context free
+      LogicalPartition get_logical_partition_by_color(LogicalRegion parent, 
+                                                      Color c);
+      LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
+                                                      const DomainPoint &c);
 
       /**
        * Return true if the logical region has a logical partition with
@@ -2958,6 +3180,9 @@ namespace Legion {
        */
       bool has_logical_partition_by_color(Context ctx,
                                           LogicalRegion parent,
+                                          const DomainPoint &c);
+      // Context free
+      bool has_logical_partition_by_color(LogicalRegion parent,
                                           const DomainPoint &c);
       
       /**
@@ -2973,6 +3198,10 @@ namespace Legion {
                                                      IndexPartition handle, 
                                                      FieldSpace fspace, 
                                                      RegionTreeID tid); 
+      // Context free
+      LogicalPartition get_logical_partition_by_tree(IndexPartition handle, 
+                                                     FieldSpace fspace, 
+                                                     RegionTreeID tid);
 
       /**
        * Return the logical region instance of the given index space 
@@ -2984,6 +3213,9 @@ namespace Legion {
        *    as the parent partition 
        */
       LogicalRegion get_logical_subregion(Context ctx, LogicalPartition parent, 
+                                          IndexSpace handle);
+      // Context free
+      LogicalRegion get_logical_subregion(LogicalPartition parent, 
                                           IndexSpace handle);
 
       /**
@@ -3000,6 +3232,11 @@ namespace Legion {
       LogicalRegion get_logical_subregion_by_color(Context ctx,
                                                    LogicalPartition parent,
                                                    const DomainPoint &c);
+      // Context free
+      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent, 
+                                                   Color c);
+      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
+                                                   const DomainPoint &c);
 
       /**
        * Return true if the logical partition has a logical region with
@@ -3011,6 +3248,9 @@ namespace Legion {
        */
       bool has_logical_subregion_by_color(Context ctx,
                                           LogicalPartition parent,
+                                          const DomainPoint &c);
+      // Context free
+      bool has_logical_subregion_by_color(LogicalPartition parent,
                                           const DomainPoint &c);
 
       /**
@@ -3026,6 +3266,10 @@ namespace Legion {
                                                   IndexSpace handle, 
                                                   FieldSpace fspace, 
                                                   RegionTreeID tid);
+      // Context free
+      LogicalRegion get_logical_subregion_by_tree(IndexSpace handle, 
+                                                  FieldSpace fspace, 
+                                                  RegionTreeID tid);
 
       /**
        * Return the color for the logical region corresponding to
@@ -3038,6 +3282,9 @@ namespace Legion {
       Color get_logical_region_color(Context ctx, LogicalRegion handle);
       DomainPoint get_logical_region_color_point(Context ctx, 
                                                  LogicalRegion handle);
+      // Context free versions
+      Color get_logical_region_color(LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(LogicalRegion handle);
 
       /**
        * Return the color for the logical partition corresponding to
@@ -3049,6 +3296,9 @@ namespace Legion {
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
       DomainPoint get_logical_partition_color_point(Context ctx,
                                                     LogicalPartition handle);
+      // Context free versions
+      Color get_logical_partition_color(LogicalPartition handle);
+      DomainPoint get_logical_partition_color_point(LogicalPartition handle);
 
       /**
        * Return the parent logical region for a given logical partition.
@@ -3058,6 +3308,8 @@ namespace Legion {
        */
       LogicalRegion get_parent_logical_region(Context ctx, 
                                               LogicalPartition handle);
+      // Context free
+      LogicalRegion get_parent_logical_region(LogicalPartition handle);
 
       /**
        * Return true if the logical region has a parent logical partition.
@@ -3066,6 +3318,8 @@ namespace Legion {
        * @return true if a parent exists
        */
       bool has_parent_logical_partition(Context ctx, LogicalRegion handle);
+      // Context free
+      bool has_parent_logical_partition(LogicalRegion handle);
 
       /**
        * Return the parent logical partition for a logical region.
@@ -3075,6 +3329,8 @@ namespace Legion {
        */
       LogicalPartition get_parent_logical_partition(Context ctx, 
                                                     LogicalRegion handle);
+      // Context free
+      LogicalPartition get_parent_logical_partition(LogicalRegion handle);
     public:
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 
@@ -3679,7 +3935,8 @@ namespace Legion {
        */
       void defer_dynamic_collective_arrival(Context ctx, 
                                             DynamicCollective dc,
-                                            Future f, unsigned count = 1);
+                                            const Future &f,
+                                            unsigned count = 1);
 
       /**
        * This will return the value of a dynamic collective in
@@ -4302,11 +4559,25 @@ namespace Legion {
        * zero is the identity projection. Unlike mappers which
        * require a separate instance per processor, only
        * one of these must be registered per projection ID.
+       * The runtime takes ownership for deleting the projection 
+       * functor after the application has finished executing.
        * @param pid the projection ID to use for the registration
-       * @param functor the object to register for handle projections
+       * @param functor the object to register for handling projections
        */
       void register_projection_functor(ProjectionID pid, 
                                        ProjectionFunctor *functor);
+
+      /**
+       * Register a projection functor before the runtime has started only.
+       * The runtime will update the projection functor so that it has 
+       * contains a valid runtime pointer prior to the projection functor
+       * ever being invoked. The runtime takes ownership for deleting the
+       * projection functor after the application has finished executing.
+       * @param pid the projection ID to use for the registration
+       * @param functor the objecto register for handling projections
+       */
+      static void preregister_projection_functor(ProjectionID pid,
+                                                 ProjectionFunctor *functor);
     public:
       //------------------------------------------------------------------------
       // Start-up Operations
@@ -4331,30 +4602,30 @@ namespace Legion {
        * -------------
        *  Stealing
        * -------------
-       * -hl:nosteal  Disable any stealing in the runtime.  The runtime
+       * -lg:nosteal  Disable any stealing in the runtime.  The runtime
        *              will never query any mapper about stealing.
        * ------------------------
        *  Out-of-order Execution
        * ------------------------
-       * -hl:window <int> Specify the maximum number of child tasks
+       * -lg:window <int> Specify the maximum number of child tasks
        *              allowed in a given task context at a time.  A call
        *              to launch more tasks than the allotted window
        *              will stall the parent task until child tasks
        *              begin completing.  The default is 1024.
-       * -hl:sched <int> The run-ahead factor for the runtime.  How many
+       * -lg:sched <int> The run-ahead factor for the runtime.  How many
        *              outstanding tasks ready to run should be on each
        *              processor before backing off the mapping procedure.
-       * -hl:width <int> Scheduling granularity when handling dependence
+       * -lg:width <int> Scheduling granularity when handling dependence
        *              analysis and issuing operations.  Effectively the
        *              Legion runtime superscalar width.
-       * -hl:inorder  Execute operations in strict propgram order. This
+       * -lg:inorder  Execute operations in strict propgram order. This
        *              flag will actually run the entire operation through
        *              the pipeline and wait for it to complete before
        *              permitting the next operation to start.
        * -------------
        *  Messaging
        * -------------
-       * -hl:message <int> Maximum size in bytes of the active messages
+       * -lg:message <int> Maximum size in bytes of the active messages
        *              to be sent between instances of the high-level 
        *              runtime.  This can help avoid the use of expensive
        *              per-pair-of-node RDMA buffers in the low-level
@@ -4363,30 +4634,35 @@ namespace Legion {
        * ---------------------
        *  Dependence Analysis
        * ---------------------
-       * -hl:no_dyn   Disable dynamic disjointness tests when the runtime
+       * -lg:no_dyn   Disable dynamic disjointness tests when the runtime
        *              has been compiled with macro DYNAMIC_TESTS defined
        *              which enables dynamic disjointness testing.
-       * -hl:epoch <int> Change the size of garbage collection epochs. The
+       * -lg:epoch <int> Change the size of garbage collection epochs. The
        *              default value is 64. Increasing it adds latency to
        *              the garbage collection but makes it more efficient.
        *              Decreasing the value reduces latency, but adds
        *              inefficiency to the collection.
-       * -hl:unsafe_launch Tell the runtime to skip any checks for 
+       * -lg:unsafe_launch Tell the runtime to skip any checks for 
        *              checking for deadlock between a parent task and
        *              the sub-operations that it is launching. Note
        *              that this is unsafe for a reason. The application
        *              can and will deadlock if any currently mapped
        *              regions conflict with those requested by a child
        *              task or other operation.
-       * -hl:unsafe_mapper Tell the runtime to skip any checks for 
+       * -lg:unsafe_mapper Tell the runtime to skip any checks for 
        *              validating the correctness of the results from 
        *              mapper calls. Turning this off may result in 
        *              internal crashes in the runtime if the mapper
        *              provides invalid output from any mapper call.
+       *              (Default: false in debug mode, true in release mode.)
+       * -lg:safe_mapper Tell the runtime to perform all correctness
+       *              checks on mapper calls regardless of the 
+       *              optimization level. (Default: true in debug mode,
+       *              false in release mode.)
        * ---------------------
        *  Resiliency
        * ---------------------
-       * -hl:resilient Enable features that make the runtime resilient
+       * -lg:resilient Enable features that make the runtime resilient
        *              including deferred commit that can be controlled
        *              by the next two flags.  By default this is off
        *              for performance reasons.  Once resiliency mode
@@ -4395,40 +4671,44 @@ namespace Legion {
        * -------------
        *  Debugging
        * ------------- 
-       * -hl:ldb <replay_file> Replay the execution of the application
+       * -lg:warn     Enable all verbose runtime warnings
+       * -lg:ldb <replay_file> Replay the execution of the application
        *              with the associated replay file generted by LegionSpy. 
        *              This will run the application in the Legion debugger.
-       * -hl:replay <replay_file> Rerun the execution of the application with
+       * -lg:replay <replay_file> Rerun the execution of the application with
        *              the associated replay file generated by LegionSpy.
-       * -hl:tree     Dump intermediate physical region tree states before
+       * -lg:tree     Dump intermediate physical region tree states before
        *              and after every operation.  The runtime must be
        *              compiled in debug mode with the DEBUG_LEGION
        *              macro defined.
-       * -hl:disjointness Verify the specified disjointness of 
+       * -lg:disjointness Verify the specified disjointness of 
        *              partitioning operations.  The runtime must be
        *              compiled with the DEBUG_LEGION macro defined.
-       * -hl:separate Indicate that separate instances of the high
+       * -lg:separate Indicate that separate instances of the high
        *              level runtime should be made for each processor.
        *              The default is one runtime instance per node.
        *              This is primarily useful for debugging purposes
        *              to force messages to be sent between runtime 
        *              instances on the same node.
-       * -hl:registration Record the mapping from low-level task IDs to
+       * -lg:registration Record the mapping from low-level task IDs to
        *              task variant names for debugging low-level runtime
        *              error messages.
-       * -hl:test     Replace the default mapper with the test mapper
+       * -lg:test     Replace the default mapper with the test mapper
        *              which will generate sound but random mapping 
        *              decision in order to stress-test the runtime.
+       * -lg:delay <sec> Delay the start of the runtime by 'sec' seconds.
+       *              This is often useful for attaching debuggers on 
+       *              one or more nodes prior to an application beginning.
        * -------------
        *  Profiling
        * -------------
-       * -hl:spy      Enable light-weight logging for Legion Spy which
+       * -lg:spy      Enable light-weight logging for Legion Spy which
        *              is valuable for understanding properties of an
        *              application such as the shapes of region trees
        *              and the kinds of tasks/operations that are created.
        *              Checking of the runtime with Legion Spy will still
        *              require the runtime to be compiled with -DLEGION_SPY.
-       * -hl:prof <int> Specify the number of nodes on which to enable
+       * -lg:prof <int> Specify the number of nodes on which to enable
        *              profiling information to be collected.  By default
        *              all nodes are disabled. Zero will disable all
        *              profiling while each number greater than zero will
@@ -4526,8 +4806,7 @@ namespace Legion {
        * from an upper bound of a logical region down to a specific
        * logical sub-region for a given domain point during index
        * task execution.  The projection ID zero is reserved for runtime
-       * use. The user can pass in AUTO_GENERATE_ID to
-       * have the runtime automatically generate an ID.
+       * use.
        * @param handle the projection ID to register the function at
        * @return ID where the function was registered
        */
@@ -4540,8 +4819,6 @@ namespace Legion {
        * map from an upper bound of a logical partition down to a specific
        * logical sub-region for a given domain point during index task
        * execution.  The projection ID zero is reserved for runtime use.
-       * The user can pass in AUTO_GENERATE_ID to have the runtime
-       * automatically generate an ID.
        * @param handle the projection ID to register the function at
        * @return ID where the function was registered
        */
@@ -4978,15 +5255,7 @@ namespace Legion {
       // Methods for the wrapper functions to get information from the runtime
       friend class LegionTaskWrapper;
       friend class LegionSerialization;
-      const std::vector<PhysicalRegion>& begin_task(Context ctx);
-      void end_task(Context ctx, const void *result, size_t result_size,
-                    bool owned = false);
       Future from_value(const void *value, size_t value_size, bool owned);
-    private:
-      static ProjectionID register_region_projection_function(
-                                    ProjectionID handle, void *func_ptr);
-      static ProjectionID register_partition_projection_function(
-                                    ProjectionID handle, void *func_ptr);
     private:
       VariantID register_variant(const TaskVariantRegistrar &registrar,bool ret,
                                  const void *user_data, size_t user_data_size,

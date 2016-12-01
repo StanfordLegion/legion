@@ -62,8 +62,9 @@ namespace Realm {
       bool get_strided_parameters(void *&base, size_t &stride,
 				  off_t field_offset);
 
-      Event request_metadata(void) { return metadata.request_data(ID(me).node(), me.id); }
+      Event request_metadata(void) { return metadata.request_data(ID(me).instance.owner_node, me.id); }
 
+      void record_instance_usage(void);
       void finalize_instance(void);
 
     public: //protected:

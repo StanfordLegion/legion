@@ -65,7 +65,6 @@ namespace Realm {
     void destroy(Event wait_on = Event::NO_EVENT) const;
 
     AddressSpace address_space(void) const;
-    id_t local_id(void) const;
 
     // apparently we can't use default template parameters on methods without C++11, but we
     //  can provide templates of two different arities...
@@ -83,10 +82,8 @@ namespace Realm {
 
     struct DestroyedField {
     public:
-      DestroyedField(void) 
-        : offset(0), size(0), serdez_id(0) { }
-      DestroyedField(unsigned o, unsigned s, CustomSerdezID sid)
-        : offset(o), size(s), serdez_id(sid) { }
+      DestroyedField(void);
+      DestroyedField(unsigned o, unsigned s, CustomSerdezID sid);
     public:
       unsigned offset, size;
       CustomSerdezID serdez_id;

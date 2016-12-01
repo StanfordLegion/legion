@@ -216,6 +216,11 @@ namespace Realm {
   {
     Thread *thread = self();
 
+    // suspend any performance counters before we do internal stuff
+#ifdef REALM_USE_PAPI
+    if(thread->papi_counters) thread->papi_counters->suspend();
+#endif
+
     // we're interacting with the scheduler, so check for signals first
     if(thread->signal_count > 0)
       thread->process_signals();
@@ -238,6 +243,11 @@ namespace Realm {
     //  but synchronous ones do not)
     if(thread->signal_count > 0)
       thread->process_signals();
+
+    // finally, resume any performance counters
+#ifdef REALM_USE_PAPI
+    if(thread->papi_counters) thread->papi_counters->resume();
+#endif
   }
 
   inline bool Thread::exceptions_permitted(void) const
@@ -260,6 +270,38 @@ namespace Realm {
   inline Operation *Thread::get_operation(void) const
   {
     return current_op;
+  }
+
+  inline void Thread::setup_perf_counters(const ProfilingMeasurementCollection& pmc)
+  {
+#ifdef REALM_USE_PAPI
+    papi_counters = PAPICounters::setup_counters(pmc);
+#endif
+  }
+
+  inline void Thread::start_perf_counters(void)
+  {
+#ifdef REALM_USE_PAPI
+    if(papi_counters) papi_counters->start();
+#endif
+  }
+
+  inline void Thread::stop_perf_counters(void)
+  {
+#ifdef REALM_USE_PAPI
+    if(papi_counters) papi_counters->stop();
+#endif
+  }
+
+  inline void Thread::record_perf_counters(ProfilingMeasurementCollection& pmc)
+  {
+#ifdef REALM_USE_PAPI
+    if(papi_counters) {
+      papi_counters->record(pmc);
+      papi_counters->cleanup();
+      papi_counters = 0; // cleanup call might delete, or save it for later
+    }
+#endif
   }
 
 

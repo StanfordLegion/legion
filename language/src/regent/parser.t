@@ -16,24 +16,28 @@
 
 local parsing = require("parsing")
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
 
 local parser = {}
 
-function parser.option_level(p)
+function parser.lookaheadif(p, tok)
+  return p:lookahead().type == tok
+end
+
+function parser.annotation_level(p)
   if p:nextif("__allow") then
-    return ast.options.Allow { value = false }
+    return ast.annotation.Allow { value = false }
   elseif p:nextif("__demand") then
-    return ast.options.Demand { value = false }
+    return ast.annotation.Demand { value = false }
   elseif p:nextif("__forbid") then
-    return ast.options.Forbid { value = false }
+    return ast.annotation.Forbid { value = false }
   else
     return false
   end
 end
 
-function parser.option_values(p)
+function parser.annotation_values(p)
   if p:nextif("(") then
     p:expect("__unroll")
     p:expect("(")
@@ -43,16 +47,15 @@ function parser.option_values(p)
       p:error("unroll factor should be an integer")
     end
     p:expect(")")
-    p:expect(")")
-    return ast.options.Unroll { value = value }
+    return ast.annotation.Unroll { value = value }
   else
     return false
   end
 end
 
-function parser.option_name(p, required)
+function parser.annotation_name(p, required)
   if p:nextif("__cuda") then
-    local values = p:option_values()
+    local values = p:annotation_values()
     return "cuda", values
   elseif p:nextif("__inline") then
     return "inline"
@@ -64,38 +67,36 @@ function parser.option_name(p, required)
     return "trace"
   elseif p:nextif("__vectorize") then
     return "vectorize"
-  elseif p:nextif("__block") then
-    return "block"
   elseif required then
-    p:error("expected option name")
+    p:error("expected annotation name")
   end
 end
 
-function parser.options(p, allow_expr, allow_stat)
+function parser.annotations(p, allow_expr, allow_stat)
   assert(allow_expr or allow_stat)
-  local options = ast.default_options()
+  local annotations = ast.default_annotations()
 
-  local level = p:option_level()
-  if not level then return options end
+  local level = p:annotation_level()
+  if not level then return annotations end
 
   p:expect("(")
-  local name = p:option_name(true)
-  options = options { [name] = level }
+  local name = p:annotation_name(true)
+  annotations = annotations { [name] = level }
 
   while p:nextif(",") do
-    local name = p:option_name(false)
+    local name = p:annotation_name(false)
     if name then
-      options = options { [name] = level }
+      annotations = annotations { [name] = level }
     elseif allow_expr then
       local expr = p:expr()
       p:expect(")")
-      return expr { options = options }
+      return expr { annotations = annotations }
     end
   end
 
   if allow_stat then
     p:expect(")")
-    return options
+    return annotations
   else
     assert(allow_expr)
     -- Fail: This was supposed to be an expression, but we never saw
@@ -124,9 +125,26 @@ function parser.reduction_op(p, optional)
   end
 end
 
+function parser.field_names(p)
+  local start = ast.save(p)
+  local names_expr
+  if p:nextif("[") then
+    names_expr = p:luaexpr()
+    p:expect("]")
+  elseif p:nextif("ispace") then
+    names_expr = "ispace"
+  else
+    names_expr = p:expect(p.name).value
+  end
+  return ast.unspecialized.FieldNames {
+    names_expr = names_expr,
+    span = ast.span(start, p),
+  }
+end
+
 function parser.region_field(p)
   local start = ast.save(p)
-  local field_name = p:expect(p.name).value
+  local field_name = p:field_names()
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
     fields = p:region_fields()
@@ -155,6 +173,7 @@ end
 function parser.region_root(p)
   local start = ast.save(p)
   local region_name = p:expect(p.name).value
+  p:ref(region_name)
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
     fields = p:region_fields()
@@ -176,7 +195,7 @@ function parser.expr_region_root(p)
   return ast.unspecialized.expr.RegionRoot {
     region = region,
     fields = fields,
-    options = ast.default_options(),
+    annotations = ast.default_annotations(),
     span = ast.span(start, p),
   }
 end
@@ -184,6 +203,7 @@ end
 function parser.region_bare(p)
   local start = ast.save(p)
   local region_name = p:expect(p.name).value
+  p:ref(region_name)
   return ast.unspecialized.region.Bare {
     region_name = region_name,
     span = ast.span(start, p),
@@ -202,6 +222,7 @@ end
 function parser.condition_variable(p)
   local start = ast.save(p)
   local name = p:expect(p.name).value
+  p:ref(name)
   return ast.unspecialized.ConditionVariable {
     name = name,
     span = ast.span(start, p),
@@ -223,14 +244,13 @@ end
 function parser.privilege_kind(p)
   local start = ast.save(p)
   if p:nextif("reads") then
-    return ast.unspecialized.privilege_kind.Reads { span = ast.span(start, p) }
+    return ast.privilege_kind.Reads {}
   elseif p:nextif("writes") then
-    return ast.unspecialized.privilege_kind.Writes { span = ast.span(start, p) }
+    return ast.privilege_kind.Writes {}
   elseif p:nextif("reduces") then
     local op = p:reduction_op()
-    return ast.unspecialized.privilege_kind.Reduces {
+    return ast.privilege_kind.Reduces {
       op = op,
-      span = ast.span(start, p),
     }
   else
     p:error("expected privilege")
@@ -245,21 +265,13 @@ end
 function parser.coherence_kind(p)
   local start = ast.save(p)
   if p:nextif("exclusive") then
-    return ast.unspecialized.coherence_kind.Exclusive {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Exclusive {}
   elseif p:nextif("atomic") then
-    return ast.unspecialized.coherence_kind.Atomic {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Atomic {}
   elseif p:nextif("simultaneous") then
-    return ast.unspecialized.coherence_kind.Simultaneous {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Simultaneous {}
   elseif p:nextif("relaxed") then
-    return ast.unspecialized.coherence_kind.Relaxed {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Relaxed {}
   else
     p:error("expected coherence mode")
   end
@@ -272,9 +284,7 @@ end
 function parser.flag_kind(p)
   local start = ast.save(p)
   if p:nextif("no_access_flag") then
-    return ast.unspecialized.flag_kind.NoAccessFlag {
-      span = ast.span(start, p),
-    }
+    return ast.flag_kind.NoAccessFlag {}
   else
     p:error("expected flag")
   end
@@ -330,13 +340,9 @@ end
 function parser.condition_kind(p)
   local start = ast.save(p)
   if p:nextif("arrives") then
-    return ast.unspecialized.condition_kind.Arrives {
-      span = ast.span(start, p),
-    }
+    return ast.condition_kind.Arrives {}
   elseif p:nextif("awaits") then
-    return ast.unspecialized.condition_kind.Awaits {
-      span = ast.span(start, p),
-    }
+    return ast.condition_kind.Awaits {}
   else
     p:error("expected condition")
   end
@@ -374,7 +380,7 @@ function parser.expr_condition(p)
   return ast.unspecialized.expr.Condition {
     conditions = conditions,
     values = values,
-    options = ast.default_options(),
+    annotations = ast.default_annotations(),
     span = ast.span(start, p),
   }
 end
@@ -382,13 +388,9 @@ end
 function parser.constraint_kind(p)
   local start = ast.save(p)
   if p:nextif("<=") then
-    return ast.unspecialized.constraint_kind.Subregion {
-      span = ast.span(start, p),
-    }
+    return ast.constraint_kind.Subregion {}
   elseif p:nextif("*") then
-    return ast.unspecialized.constraint_kind.Disjointness {
-      span = ast.span(start, p),
-    }
+    return ast.constraint_kind.Disjointness {}
   else
     p:error("unexpected token in constraint")
   end
@@ -414,16 +416,23 @@ end
 function parser.disjointness_kind(p)
   local start = ast.save(p)
   if p:nextif("aliased") then
-    return ast.unspecialized.disjointness_kind.Aliased {
-      span = ast.span(start, p),
-    }
+    return ast.disjointness_kind.Aliased {}
   elseif p:nextif("disjoint") then
-    return ast.unspecialized.disjointness_kind.Disjoint {
-      span = ast.span(start, p),
-    }
+    return ast.disjointness_kind.Disjoint {}
   else
     p:error("expected disjointness")
   end
+end
+
+function parser.effect(p)
+  local start = ast.save(p)
+  p:expect("[")
+  local effect_expr = p:luaexpr()
+  p:expect("]")
+  return ast.unspecialized.Effect {
+    expr = effect_expr,
+    span = ast.span(start, p),
+  }
 end
 
 function parser.expr_prefix(p)
@@ -438,7 +447,7 @@ function parser.expr_prefix(p)
     p:expect("]")
     return ast.unspecialized.expr.Escape {
       expr = expr,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -447,7 +456,7 @@ function parser.expr_prefix(p)
     p:ref(name)
     return ast.unspecialized.expr.ID {
       name = name,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -461,7 +470,7 @@ function parser.expr_prefix(p)
       op = "max",
       lhs = lhs,
       rhs = rhs,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -475,7 +484,7 @@ function parser.expr_prefix(p)
       op = "min",
       lhs = lhs,
       rhs = rhs,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -483,7 +492,7 @@ function parser.expr_prefix(p)
     p:expect("(")
     p:expect(")")
     return ast.unspecialized.expr.RawContext {
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -493,7 +502,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.RawFields {
       region = region,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -503,7 +512,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.RawPhysical {
       region = region,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -513,7 +522,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.RawDelete {
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -521,7 +530,7 @@ function parser.expr_prefix(p)
     p:expect("(")
     p:expect(")")
     return ast.unspecialized.expr.RawRuntime {
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -531,7 +540,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.RawValue {
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -541,7 +550,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.Isnull {
       pointer = pointer,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -556,7 +565,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.New {
       pointer_type_expr = pointer_type_expr,
       extent = extent,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -566,7 +575,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.Null {
       pointer_type_expr = pointer_type_expr,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -579,7 +588,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.DynamicCast {
       type_expr = type_expr,
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -592,7 +601,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.StaticCast {
       type_expr = type_expr,
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -605,7 +614,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.UnsafeCast {
       type_expr = type_expr,
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -615,8 +624,7 @@ function parser.expr_prefix(p)
     p:expect(",")
     local extent = p:expr()
     local start_at = false
-    if not p:matches(")") then
-      p:expect(",")
+    if p:nextif(",") then
       start_at = p:expr()
     end
     p:expect(")")
@@ -624,7 +632,7 @@ function parser.expr_prefix(p)
       index_type_expr = index_type_expr,
       extent = extent,
       start = start_at,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -637,7 +645,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.Region {
       ispace = ispace,
       fspace_type_expr = fspace_type_expr,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -660,7 +668,7 @@ function parser.expr_prefix(p)
         region = region,
         coloring = coloring,
         colors = colors,
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
     elseif p:nextif("equal") then
@@ -672,7 +680,7 @@ function parser.expr_prefix(p)
       return ast.unspecialized.expr.PartitionEqual {
         region = region,
         colors = colors,
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
     else
@@ -683,7 +691,7 @@ function parser.expr_prefix(p)
       return ast.unspecialized.expr.PartitionByField {
         region = region,
         colors = colors,
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
     end
@@ -700,7 +708,7 @@ function parser.expr_prefix(p)
       parent = parent,
       partition = partition,
       region = region,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -716,7 +724,7 @@ function parser.expr_prefix(p)
       parent = parent,
       partition = partition,
       region = region,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -726,7 +734,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.CrossProduct {
       args = args,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -742,7 +750,7 @@ function parser.expr_prefix(p)
       lhs = lhs,
       disjointness = disjointness,
       colorings = colorings,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -755,7 +763,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.ListSlicePartition {
       partition = partition,
       indices = indices,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -768,7 +776,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.ListDuplicatePartition {
       partition = partition,
       indices = indices,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -792,7 +800,7 @@ function parser.expr_prefix(p)
       lhs = lhs,
       rhs = rhs,
       shallow = shallow,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -805,7 +813,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.ListCrossProductComplete {
       lhs = lhs,
       product = product,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -815,7 +823,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.ListPhaseBarriers {
       product = product,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -831,7 +839,7 @@ function parser.expr_prefix(p)
       rhs = rhs,
       product = product,
       barriers = barriers,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -844,7 +852,17 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.ListRange {
       start = range_start,
       stop = range_stop,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("list_ispace") then
+    p:expect("(")
+    local ispace = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListIspace {
+      ispace = ispace,
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -854,7 +872,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.PhaseBarrier {
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -870,7 +888,7 @@ function parser.expr_prefix(p)
       value_type_expr = value_type_expr,
       arrivals = arrivals,
       op = op,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -880,7 +898,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.DynamicCollectiveGetResult {
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -890,7 +908,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.Advance {
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -905,7 +923,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.Arrive {
       barrier = barrier,
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -915,7 +933,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.Await {
       barrier = barrier,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -941,7 +959,7 @@ function parser.expr_prefix(p)
       dst = dst,
       op = op,
       conditions = conditions,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -961,7 +979,71 @@ function parser.expr_prefix(p)
       dst = dst,
       value = value,
       conditions = conditions,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("acquire") then
+    p:expect("(")
+    local region = p:expr_region_root()
+    local conditions = terralib.newlist()
+    if p:nextif(",") then
+      repeat
+        conditions:insert(p:expr_condition())
+      until not p:nextif(",")
+    end
+    p:expect(")")
+    return ast.unspecialized.expr.Acquire {
+      region = region,
+      conditions = conditions,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("release") then
+    p:expect("(")
+    local region = p:expr_region_root()
+    local conditions = terralib.newlist()
+    if p:nextif(",") then
+      repeat
+        conditions:insert(p:expr_condition())
+      until not p:nextif(",")
+    end
+    p:expect(")")
+    return ast.unspecialized.expr.Release {
+      region = region,
+      conditions = conditions,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("attach") then
+    p:expect("(")
+    p:expect("hdf5")
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(",")
+    local filename = p:expr()
+    p:expect(",")
+    local mode = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.AttachHDF5 {
+      region = region,
+      filename = filename,
+      mode = mode,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("detach") then
+    p:expect("(")
+    p:expect("hdf5")
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(")")
+    return ast.unspecialized.expr.DetachHDF5 {
+      region = region,
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -971,7 +1053,7 @@ function parser.expr_prefix(p)
     p:expect(")")
     return ast.unspecialized.expr.AllocateScratchFields {
       region = region,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -984,7 +1066,7 @@ function parser.expr_prefix(p)
     return ast.unspecialized.expr.WithScratchFields {
       region = region,
       field_ids = field_ids,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -995,34 +1077,46 @@ end
 
 function parser.field(p)
   local start = ast.save(p)
-  if p:matches(p.name) and p:lookahead("=") then
+  if p:matches(p.name) and p:lookaheadif("=") then
     local name = p:expect(p.name).value
     p:expect("=")
     local value = p:expr()
     return ast.unspecialized.expr.CtorRecField {
       name_expr = function(env) return name end,
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
   elseif p:nextif("[") then
     local name_expr = p:luaexpr()
     p:expect("]")
-    p:expect("=")
-    local value = p:expr()
-    return ast.unspecialized.expr.CtorRecField {
-      name_expr = name_expr,
-      value = value,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    }
+    if p:nextif("=") then
+      local value = p:expr()
+      return ast.unspecialized.expr.CtorRecField {
+        name_expr = name_expr,
+        value = value,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    else
+      local value = ast.unspecialized.expr.Escape {
+        expr = name_expr,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+      return ast.unspecialized.expr.CtorListField {
+        value = value,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    end
 
   else
     local value = p:expr()
     return ast.unspecialized.expr.CtorListField {
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
   end
@@ -1045,7 +1139,7 @@ function parser.expr_ctor(p)
 
   return ast.unspecialized.expr.Ctor {
     fields = fields,
-    options = ast.default_options(),
+    annotations = ast.default_annotations(),
     span = ast.span(start, p),
   }
 end
@@ -1093,19 +1187,16 @@ function parser.expr_primary_continuation(p, expr)
       if p:nextif("{") then
         repeat
           if p:matches("}") then break end
-          local field_name = p:expect(p.name).value
-          field_names:insert(field_name)
+          field_names:insert(p:field_names())
         until not p:sep()
         p:expect("}")
-      elseif p:nextif("ispace") then
-        field_names:insert("ispace")
       else
-        field_names:insert(p:expect(p.name).value)
+        field_names:insert(p:field_names())
       end
       expr = ast.unspecialized.expr.FieldAccess {
         value = expr,
         field_names = field_names,
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
 
@@ -1115,7 +1206,7 @@ function parser.expr_primary_continuation(p, expr)
       expr = ast.unspecialized.expr.IndexAccess {
         value = expr,
         index = index,
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
 
@@ -1129,7 +1220,7 @@ function parser.expr_primary_continuation(p, expr)
         value = expr,
         method_name = method_name,
         args = args,
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
 
@@ -1139,7 +1230,7 @@ function parser.expr_primary_continuation(p, expr)
         fn = expr,
         args = args,
         conditions = conditions,
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
 
@@ -1157,9 +1248,9 @@ function parser.expr_primary(p)
 end
 
 function parser.expr_simple(p)
-  local options = p:options(true, false)
-  if options:is(ast.unspecialized.expr) then
-    return options
+  local annotations = p:annotations(true, false)
+  if annotations:is(ast.unspecialized.expr) then
+    return annotations
   end
 
   local start = ast.save(p)
@@ -1168,7 +1259,7 @@ function parser.expr_simple(p)
     return ast.unspecialized.expr.Constant {
       value = token.value,
       expr_type = token.valuetype,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -1177,7 +1268,7 @@ function parser.expr_simple(p)
     return ast.unspecialized.expr.Constant {
       value = token.value,
       expr_type = rawstring,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -1185,7 +1276,7 @@ function parser.expr_simple(p)
     return ast.unspecialized.expr.Constant {
       value = true,
       expr_type = bool,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -1193,7 +1284,7 @@ function parser.expr_simple(p)
     return ast.unspecialized.expr.Constant {
       value = false,
       expr_type = bool,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
 
@@ -1213,14 +1304,14 @@ parser.expr_unary = function(precedence)
     if op == "@" then
       return ast.unspecialized.expr.Deref {
         value = rhs,
-        options = ast.default_options(),
+        annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
     end
     return ast.unspecialized.expr.Unary {
       op = op,
       rhs = rhs,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
   end
@@ -1234,7 +1325,7 @@ parser.expr_binary_left = function(p, lhs)
     op = op,
     lhs = lhs,
     rhs = rhs,
-    options = ast.default_options(),
+    annotations = ast.default_annotations(),
     span = ast.span(start, p),
   }
 end
@@ -1266,7 +1357,7 @@ function parser.expr_lhs(p)
     local value = p:expr(50) -- Precedence for unary @
     return ast.unspecialized.expr.Deref {
       value = value,
-      options = ast.default_options(),
+      annotations = ast.default_annotations(),
       span = ast.span(start, p),
     }
   else
@@ -1297,7 +1388,7 @@ function parser.block(p)
   }
 end
 
-function parser.stat_if(p, options)
+function parser.stat_if(p, annotations)
   local start = ast.save(p)
   p:expect("if")
   local cond = p:expr()
@@ -1312,7 +1403,7 @@ function parser.stat_if(p, options)
     elseif_blocks:insert(ast.unspecialized.stat.Elseif {
         cond = elseif_cond,
         block = elseif_block,
-        options = options,
+        annotations = annotations,
         span = ast.span(elseif_start, p),
     })
     elseif_start = ast.save(p)
@@ -1330,12 +1421,12 @@ function parser.stat_if(p, options)
     then_block = then_block,
     elseif_blocks = elseif_blocks,
     else_block = else_block,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_while(p, options)
+function parser.stat_while(p, annotations)
   local start = ast.save(p)
   p:expect("while")
   local cond = p:expr()
@@ -1345,12 +1436,12 @@ function parser.stat_while(p, options)
   return ast.unspecialized.stat.While {
     cond = cond,
     block = block,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_for_num(p, start, name, type_expr, options)
+function parser.stat_for_num(p, start, name, type_expr, annotations)
   local values = p:expr_list()
 
   if #values < 2 or #values > 3 then
@@ -1365,12 +1456,12 @@ function parser.stat_for_num(p, start, name, type_expr, options)
     type_expr = type_expr,
     values = values,
     block = block,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_for_list(p, start, name, type_expr, options)
+function parser.stat_for_list(p, start, name, type_expr, annotations)
   local value = p:expr()
 
   p:expect("do")
@@ -1381,33 +1472,39 @@ function parser.stat_for_list(p, start, name, type_expr, options)
     type_expr = type_expr,
     value = value,
     block = block,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_for(p, options)
+function parser.stat_for(p, annotations)
   local start = ast.save(p)
   p:expect("for")
 
-  local name = p:expect(p.name).value
-  local type_expr
-  if p:nextif(":") then
-    type_expr = p:luaexpr()
+  local name, type_expr
+  if p:nextif("[") then
+    name = p:luaexpr()
+    type_expr = false
+    p:expect("]")
   else
-    type_expr = function(env) end
+    name = p:expect(p.name).value
+    if p:nextif(":") then
+      type_expr = p:luaexpr()
+    else
+      type_expr = false
+    end
   end
 
   if p:nextif("=") then
-    return p:stat_for_num(start, name, type_expr, options)
+    return p:stat_for_num(start, name, type_expr, annotations)
   elseif p:nextif("in") then
-    return p:stat_for_list(start, name, type_expr, options)
+    return p:stat_for_list(start, name, type_expr, annotations)
   else
     p:error("expected = or in")
   end
 end
 
-function parser.stat_repeat(p, options)
+function parser.stat_repeat(p, annotations)
   local start = ast.save(p)
   p:expect("repeat")
   local block = p:block()
@@ -1416,36 +1513,36 @@ function parser.stat_repeat(p, options)
   return ast.unspecialized.stat.Repeat {
     block = block,
     until_cond = until_cond,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_must_epoch(p, options)
+function parser.stat_must_epoch(p, annotations)
   local start = ast.save(p)
   p:expect("must_epoch")
   local block = p:block()
   p:expect("end")
   return ast.unspecialized.stat.MustEpoch {
     block = block,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_block(p, options)
+function parser.stat_block(p, annotations)
   local start = ast.save(p)
   p:expect("do")
   local block = p:block()
   p:expect("end")
   return ast.unspecialized.stat.Block {
     block = block,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_var_unpack(p, start, options)
+function parser.stat_var_unpack(p, start, annotations)
   p:expect("{")
   local names = terralib.newlist()
   local fields = terralib.newlist()
@@ -1465,16 +1562,16 @@ function parser.stat_var_unpack(p, start, options)
     var_names = names,
     fields = fields,
     value = value,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_var(p, options)
+function parser.stat_var(p, annotations)
   local start = ast.save(p)
   p:expect("var")
   if p:matches("{") then
-    return p:stat_var_unpack(start, options)
+    return p:stat_var_unpack(start, annotations)
   end
 
   local names = terralib.newlist()
@@ -1482,14 +1579,14 @@ function parser.stat_var(p, options)
   repeat
     if p:nextif("[") then
       names:insert(p:luaexpr())
-      type_exprs:insert(nil)
+      type_exprs:insert(false)
       p:expect("]")
     else
       names:insert(p:expect(p.name).value)
       if p:nextif(":") then
         type_exprs:insert(p:luaexpr())
       else
-        type_exprs:insert(nil)
+        type_exprs:insert(false)
       end
     end
   until not p:nextif(",")
@@ -1501,12 +1598,12 @@ function parser.stat_var(p, options)
     var_names = names,
     type_exprs = type_exprs,
     values = values,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_return(p, options)
+function parser.stat_return(p, annotations)
   local start = ast.save(p)
   p:expect("return")
   local value = false
@@ -1517,21 +1614,21 @@ function parser.stat_return(p, options)
   end
   return ast.unspecialized.stat.Return {
     value = value,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_break(p, options)
+function parser.stat_break(p, annotations)
   local start = ast.save(p)
   p:expect("break")
   return ast.unspecialized.stat.Break {
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_raw_delete(p, options)
+function parser.stat_raw_delete(p, annotations)
   local start = ast.save(p)
   p:expect("__delete")
   p:expect("(")
@@ -1539,12 +1636,12 @@ function parser.stat_raw_delete(p, options)
   p:expect(")")
   return ast.unspecialized.stat.RawDelete {
     value = value,
-    options = ast.default_options(),
+    annotations = ast.default_annotations(),
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_expr_assignment(p, start, first_lhs, options)
+function parser.stat_expr_assignment(p, start, first_lhs, annotations)
   local lhs = terralib.newlist()
   lhs:insert(first_lhs)
   while p:nextif(",") do
@@ -1554,7 +1651,7 @@ function parser.stat_expr_assignment(p, start, first_lhs, options)
   local op
   -- Hack: Terra's lexer doesn't understand += as a single operator so
   -- for the moment read it as + followed by =.
-  if p:lookahead("=") then
+  if p:lookaheadif("=") then
     op = p:reduction_op(true)
     p:expect("=")
   else
@@ -1567,20 +1664,20 @@ function parser.stat_expr_assignment(p, start, first_lhs, options)
       op = op,
       lhs = lhs,
       rhs = rhs,
-      options = options,
+      annotations = annotations,
       span = ast.span(start, p),
     }
   else
     return ast.unspecialized.stat.Assignment {
       lhs = lhs,
       rhs = rhs,
-      options = options,
+      annotations = annotations,
       span = ast.span(start, p),
     }
   end
 end
 
-function parser.stat_expr_escape(p, options)
+function parser.stat_expr_escape(p, annotations)
   local start = ast.save(p)
 
   p:expect("[")
@@ -1589,18 +1686,18 @@ function parser.stat_expr_escape(p, options)
 
   return ast.unspecialized.expr.Escape {
     expr = value,
-    options = ast.default_options(),
+    annotations = ast.default_annotations(),
     span = ast.span(start, p),
   }
 end
 
-function parser.stat_expr(p, options)
+function parser.stat_expr(p, annotations)
   local start = ast.save(p)
 
   local quoted_maybe_stat = false
   local first_lhs
   if p:matches("[") then
-    first_lhs = p:stat_expr_escape(start, options)
+    first_lhs = p:stat_expr_escape(start, annotations)
     if p:matches(".") or p:matches("[") or p:matches(":") or
       p:matches("(") or p:matches("{") or p:matches(p.string)
     then
@@ -1614,71 +1711,71 @@ function parser.stat_expr(p, options)
 
   if p:matches(",") or
     p:matches("=") or
-    (p:matches("+") and p:lookahead("=")) or
-    (p:matches("-") and p:lookahead("=")) or
-    (p:matches("*") and p:lookahead("=")) or
-    (p:matches("/") and p:lookahead("=")) or
-    (p:matches("max") and p:lookahead("=")) or
-    (p:matches("min") and p:lookahead("="))
+    (p:matches("+") and p:lookaheadif("=")) or
+    (p:matches("-") and p:lookaheadif("=")) or
+    (p:matches("*") and p:lookaheadif("=")) or
+    (p:matches("/") and p:lookaheadif("=")) or
+    (p:matches("max") and p:lookaheadif("=")) or
+    (p:matches("min") and p:lookaheadif("="))
   then
-    return p:stat_expr_assignment(start, first_lhs, options)
+    return p:stat_expr_assignment(start, first_lhs, annotations)
   elseif quoted_maybe_stat then
     return ast.unspecialized.stat.Escape {
       expr = first_lhs.expr,
-      options = options,
+      annotations = annotations,
       span = ast.span(start, p),
     }
   else
     return ast.unspecialized.stat.Expr {
       expr = first_lhs,
-      options = options,
+      annotations = annotations,
       span = ast.span(start, p),
     }
   end
 end
 
 function parser.stat(p)
-  local options = p:options(true, true)
-  if options:is(ast.unspecialized.expr) then
+  local annotations = p:annotations(true, true)
+  if annotations:is(ast.unspecialized.expr) then
     return ast.unspecialized.stat.Expr {
-      expr = options,
-      options = ast.default_options(),
-      span = options.span,
+      expr = annotations,
+      annotations = ast.default_annotations(),
+      span = annotations.span,
     }
   end
 
   if p:matches("if") then
-    return p:stat_if(options)
+    return p:stat_if(annotations)
 
   elseif p:matches("while") then
-    return p:stat_while(options)
+    return p:stat_while(annotations)
 
   elseif p:matches("for") then
-    return p:stat_for(options)
+    return p:stat_for(annotations)
 
   elseif p:matches("repeat") then
-    return p:stat_repeat(options)
+    return p:stat_repeat(annotations)
 
   elseif p:matches("must_epoch") then
-    return p:stat_must_epoch(options)
+    return p:stat_must_epoch(annotations)
 
   elseif p:matches("do") then
-    return p:stat_block(options)
+    return p:stat_block(annotations)
 
   elseif p:matches("var") then
-    return p:stat_var(options)
+    return p:stat_var(annotations)
 
   elseif p:matches("return") then
-    return p:stat_return(options)
+    return p:stat_return(annotations)
 
   elseif p:matches("break") then
-    return p:stat_break(options)
+    return p:stat_break(annotations)
 
   elseif p:matches("__delete") then
-    return p:stat_raw_delete(options)
+    return p:stat_raw_delete(annotations)
 
   else
-    return p:stat_expr(options)
+    return p:stat_expr(annotations)
   end
 end
 
@@ -1696,13 +1793,20 @@ function parser.top_task_params(p)
   if not p:matches(")") then
     repeat
       local start = ast.save(p)
-      local param_name = p:expect(p.name).value
-      p:expect(":")
-      local param_type = p:luaexpr()
+      local param_name, param_type
+      if p:nextif("[") then
+        param_name = p:luaexpr()
+        param_type = false
+        p:expect("]")
+      else
+        param_name = p:expect(p.name).value
+        p:expect(":")
+        param_type = p:luaexpr()
+      end
       params:insert(ast.unspecialized.top.TaskParam {
           param_name = param_name,
           type_expr = param_type,
-          options = ast.default_options(),
+          annotations = ast.default_annotations(),
           span = ast.span(start, p),
       })
     until not p:nextif(",")
@@ -1719,37 +1823,34 @@ function parser.top_task_return(p)
 end
 
 function parser.top_task_effects(p)
-  local privileges = terralib.newlist()
-  local coherence_modes = terralib.newlist()
-  local flags = terralib.newlist()
-  local conditions = terralib.newlist()
-  local constraints = terralib.newlist()
+  local effect_exprs = terralib.newlist()
   if p:nextif("where") then
     repeat
-      if p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
+      if p:matches("[") then
+        effect_exprs:insert(p:effect())
+      elseif p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
         local privilege, coherence, flag = p:privilege_coherence_flags()
-        privileges:insert(privilege)
-        coherence_modes:insert(coherence)
-        flags:insert(flag)
+        effect_exprs:insert(privilege)
+        effect_exprs:insert(coherence)
+        effect_exprs:insert(flag)
       elseif p:is_condition_kind() then
-        conditions:insert(p:condition())
+        effect_exprs:insert(p:condition())
       else
-        constraints:insert(p:constraint())
+        effect_exprs:insert(p:constraint())
       end
     until not p:nextif(",")
     p:expect("do")
   end
-  return privileges, coherence_modes, flags, conditions, constraints
+  return effect_exprs
 end
 
-function parser.top_task(p, options)
+function parser.top_task(p, annotations)
   local start = ast.save(p)
   p:expect("task")
   local name = p:top_task_name()
   local params = p:top_task_params()
   local return_type = p:top_task_return()
-  local privileges, coherence_modes, flags, conditions, constraints =
-    p:top_task_effects()
+  local effects = p:top_task_effects()
   local body = p:block()
   p:expect("end")
 
@@ -1757,13 +1858,9 @@ function parser.top_task(p, options)
     name = name,
     params = params,
     return_type_expr = return_type,
-    privileges = privileges,
-    coherence_modes = coherence_modes,
-    flags = flags,
-    conditions = conditions,
-    constraints = constraints,
+    effect_exprs = effects,
     body = body,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
@@ -1780,7 +1877,7 @@ function parser.top_fspace_params(p)
         params:insert(ast.unspecialized.top.FspaceParam {
           param_name = param_name,
           type_expr = param_type,
-          options = ast.default_options(),
+          annotations = ast.default_annotations(),
           span = ast.span(start, p),
         })
       until not p:nextif(",")
@@ -1797,15 +1894,29 @@ function parser.top_fspace_fields(p)
     if p:matches("}") then break end
 
     local start = ast.save(p)
-    local field_name = p:expect(p.name).value
+    local field_names = terralib.newlist()
+    if p:nextif("{") then
+      repeat
+        if p:matches("}") then break end
+        field_names:insert(p:expect(p.name).value)
+      until not p:nextif(",")
+      p:expect("}")
+    else
+      field_names:insert(p:expect(p.name).value)
+    end
     p:expect(":")
     local field_type = p:luaexpr()
-    fields:insert(ast.unspecialized.top.FspaceField {
-      field_name = field_name,
-      type_expr = field_type,
-      options = ast.default_options(),
-      span = ast.span(start, p),
-    })
+
+    fields:insertall(
+      field_names:map(
+        function(field_name)
+          return ast.unspecialized.top.FspaceField {
+            field_name = field_name,
+            type_expr = field_type,
+            annotations = ast.default_annotations(),
+            span = ast.span(start, p),
+          }
+        end))
   until not p:sep()
   p:expect("}")
   return fields
@@ -1822,7 +1933,7 @@ function parser.top_fspace_constraints(p)
   return constraints
 end
 
-function parser.top_fspace(p, options)
+function parser.top_fspace(p, annotations)
   local start = ast.save(p)
   p:expect("fspace")
   local name = p:expect(p.name).value
@@ -1835,26 +1946,26 @@ function parser.top_fspace(p, options)
     params = params,
     fields = fields,
     constraints = constraints,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
 function parser.top_stat(p)
-  local options = p:options(false, true)
+  local annotations = p:annotations(false, true)
 
   if p:matches("task") then
-    return p:top_task(options)
+    return p:top_task(annotations)
 
   elseif p:matches("fspace") then
-    return p:top_fspace(options)
+    return p:top_fspace(annotations)
 
   else
     p:error("unexpected token in top-level statement")
   end
 end
 
-function parser.top_quote_expr(p, options)
+function parser.top_quote_expr(p, annotations)
   local start = ast.save(p)
   p:expect("rexpr")
   local expr = p:expr()
@@ -1862,12 +1973,12 @@ function parser.top_quote_expr(p, options)
 
   return ast.unspecialized.top.QuoteExpr {
     expr = expr,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
-function parser.top_quote_stat(p, options)
+function parser.top_quote_stat(p, annotations)
   local start = ast.save(p)
   p:expect("rquote")
   local block = p:block()
@@ -1875,19 +1986,19 @@ function parser.top_quote_stat(p, options)
 
   return ast.unspecialized.top.QuoteStat {
     block = block,
-    options = options,
+    annotations = annotations,
     span = ast.span(start, p),
   }
 end
 
 function parser.top_expr(p)
-  local options = p:options(false, true)
+  local annotations = p:annotations(false, true)
 
   if p:matches("rexpr") then
-    return p:top_quote_expr(options)
+    return p:top_quote_expr(annotations)
 
   elseif p:matches("rquote") then
-    return p:top_quote_stat(options)
+    return p:top_quote_stat(annotations)
 
   else
     p:error("unexpected token in top-level statement")

@@ -30,9 +30,10 @@
 // LegionRuntime::LowLevel. These versions are here to facilitate the
 // C API. If you are writing C++ code, use the namespaced versions.
 
-#define REALM_IDS_ARE_64BIT
 typedef unsigned long long legion_lowlevel_id_t;
 #define IDFMT "%llx"
+
+typedef long long legion_lowlevel_coord_t;
 
 typedef unsigned int legion_lowlevel_address_space_t;
 typedef unsigned legion_lowlevel_task_func_id_t;
@@ -50,6 +51,7 @@ typedef enum legion_lowlevel_processor_kind_t {
   UTIL_PROC, // Utility core
   IO_PROC, // I/O core
   PROC_GROUP, // Processor group
+  PROC_SET, // Set of Processors for OpenMP/Kokkos etc.
 } legion_lowlevel_processor_kind_t;
 
 // Different Memory types

@@ -131,6 +131,9 @@ namespace Realm {
     executing_thread = thread;
     thread->start_operation(this);
 
+    // set up any requested performance counters
+    thread->setup_perf_counters(measurements);
+
     // mark that we're starting the task, checking for cancellation
     bool ok_to_run = mark_started();
 
@@ -144,8 +147,11 @@ namespace Realm {
       if(measurements.wants_measurement<ProfilingMeasurements::OperationStatus>()) {
 	try {
 	  Thread::ExceptionHandlerPresence ehp;
+	  thread->start_perf_counters();
 	  get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	  thread->stop_perf_counters();
 	  thread->stop_operation(this);
+	  thread->record_perf_counters(measurements);
 	  mark_finished(true /*successful*/);
 	}
 	catch (const ExecutionException& e) {
@@ -157,8 +163,11 @@ namespace Realm {
 #endif
       {
 	// just run the task - if it completes, we assume it was successful
+	thread->start_perf_counters();
 	get_runtime()->get_processor_impl(p)->execute_task(func_id, args);
+	thread->stop_perf_counters();
 	thread->stop_operation(this);
+	thread->record_perf_counters(measurements);
 	mark_finished(true /*successful*/);
       }
 

@@ -67,7 +67,7 @@ template <unsigned DIM>
 static int volume(const Point<DIM>& p)
 {
   int v = 1;
-  for(int i = 0; i < DIM; i++)
+  for(unsigned i = 0; i < DIM; i++)
     v *= p.x[i];
   return v;
 }
@@ -363,12 +363,9 @@ void top_level_task(const Task *task,
   int use_tracing = 1;
   bool verbose = false;
 
-  for(int i = 0; i < 3; i++) {
-    grid_dim.x[i] = 1;
-    block_dim.x[i] = 1;
-  }
-  grid_dim.x[0] = 8;
-  block_dim.x[0] = 8;
+  // default is an 8^3 grid with 8 4^3 blocks
+  grid_dim.x[0] = grid_dim.x[1] = grid_dim.x[2] = 8;
+  block_dim.x[0] = block_dim.x[1] = block_dim.x[2] = 4;
 
   {
     const InputArgs &command_args = HighLevelRuntime::get_input_args();
@@ -436,9 +433,10 @@ void top_level_task(const Task *task,
     }
   }
 
-  // if the user hasn't set a max, a reasonable upper bound is the manhattan distance across the grid
+  // if the user hasn't set a max, a reasonable upper bound is based on the
+  //  manhattan distance across the grid
   if(max_iters == 0)
-    max_iters = grid_dim.x[0] + grid_dim.x[1] + grid_dim.x[2];
+    max_iters = 2 * (grid_dim.x[0] + grid_dim.x[1] + grid_dim.x[2]);
 
   // compute the number of blocks in each direction
   Point<3> blocks;
@@ -667,9 +665,22 @@ void top_level_task(const Task *task,
 
     log_app.info() << "waiting for spmd tasks";
 
-    fm.wait_all_results();
+    // make sure all shard returned successful results
+    bool ok = true;
+    for(int shard = 0; shard < num_shards; shard++) {
+      bool shard_ok = fm.get_result<bool>(DomainPoint::from_point<1>(shard));
+      if(!shard_ok) {
+	log_app.print() << "error returned from shard " << shard;
+	ok = false;
+      }
+    }
 
-    log_app.info() << "spmd tasks complete";
+    if(ok) {
+      log_app.print() << "spmd tasks complete";
+    } else {
+      log_app.fatal() << "one or more spmd tasks failed";
+      exit(1);
+    }
   }
 }
 
@@ -699,7 +710,7 @@ void spmd_init_task(const Task *task,
       PhaseBarrier pb_ready = runtime->create_phase_barrier(ctx, 1);
       PhaseBarrier pb_done = runtime->create_phase_barrier(ctx, neighbors);
 
-      log_app.print() << "pbs: shard=" << args.shard << " blk=" << pir.p << " neighbors=" << neighbors << " ready=" << pb_ready << " done=" << pb_done;
+      log_app.info() << "pbs: shard=" << args.shard << " blk=" << pir.p << " neighbors=" << neighbors << " ready=" << pb_ready << " done=" << pb_done;
 
       fa_ready[pir.p] = pb_ready;
       fa_done[pir.p] = pb_done;
@@ -736,9 +747,7 @@ struct AddFieldArgs {
   Rect<3> bounds;
 };
 
-
-
-void spmd_main_task(const Task *task,
+bool spmd_main_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, HighLevelRuntime *runtime)
 {
@@ -821,7 +830,7 @@ void spmd_main_task(const Task *task,
 	    r_subset.lo.x[dir] = r_subset.hi.x[dir];  // just 1 plane
 	  else
 	    r_subset.hi.x[dir] = r_subset.lo.x[dir];  // just 1 plane
-	  std::cout << "dir=" << dir << " side=" << side << " -> " << r_parent << " -> " << r_subset << "\n";
+	  //std::cout << "dir=" << dir << " side=" << side << " -> " << r_parent << " -> " << r_subset << "\n";
 	  DomainColoring dc;
 	  dc[0] = Domain::from_rect<3>(r_subset);
 	  IndexPartition ip = runtime->create_index_partition(ctx,
@@ -853,16 +862,16 @@ void spmd_main_task(const Task *task,
   //  don't interfere with child task launches
   runtime->unmap_all_regions(ctx);
 
-  std::cout << "my block count = " << myblocks.size() << "\n";
+  log_app.info() << "my block count = " << myblocks.size();
   for(std::map<Point<3>, BlockMetadata>::const_iterator it = myblocks.begin();
       it != myblocks.end();
       it++)
-    std::cout << "  " << it->first << ": " << it->second << "\n";
+    log_app.info() << "  " << it->first << ": " << it->second;
 
   // this shouldn't be necessary, but it seems to avoid some sort of memory corruption when
   //  a shard has no work
   if(myblocks.empty())
-    return;
+    return true;
 
   // initialize x, b
   for(std::map<Point<3>, BlockMetadata>::iterator it = myblocks.begin();
@@ -927,7 +936,7 @@ void spmd_main_task(const Task *task,
   if(args.show_residuals > 0) {
     double resold = f_resold.get_result<double>();
     if(shard == 0)
-      std::cout << "resold = " << resold << "\n";
+      log_app.info() << "resold = " << resold;
   }
 
   Future f_restarget = Future::from_value<double>(runtime, 1e-10);
@@ -935,6 +944,7 @@ void spmd_main_task(const Task *task,
   Predicate p_notdone = Predicate::TRUE_PRED;
 
   int iter = 0;
+  bool ok = false;
   while(true) {
     iter++;
 
@@ -1058,17 +1068,18 @@ void spmd_main_task(const Task *task,
       double resnew = f.get_result<double>();
       ++res_iter;
       if((shard == 0) && (args.show_residuals > 0) && ((res_iter % args.show_residuals) == 0))
-	std::cout << "iter " << res_iter << ": resnew = " << resnew << "\n";
+	log_app.info() << "iter " << res_iter << ": resnew = " << resnew;
 
       if(resnew < 1e-10) {
 	if(shard == 0)
-	  std::cout << "converged after " << res_iter << " iterations\n";
+	  log_app.info() << "converged after " << res_iter << " iterations";
+	ok = true;
 	break;
       }
 
       if(res_iter >= args.max_iters) {
 	if(shard == 0)
-	  std::cout << "failed to converge after " << res_iter << " iterations\n";
+	  log_app.warning() << "failed to converge after " << res_iter << " iterations";
 	break;
       }
     }
@@ -1076,7 +1087,7 @@ void spmd_main_task(const Task *task,
     // never speculate past max_iters
     if(iter >= args.max_iters) {
       if(shard == 0)
-	std::cout << "not speculating past " << iter << " iterations\n";
+	log_app.info() << "not speculating past " << iter << " iterations";
       break;
     }
 
@@ -1220,6 +1231,8 @@ void spmd_main_task(const Task *task,
     PrintField::compute(myblocks, runtime, ctx,
 			"check", fid_sol_Ap, true /*private*/,
 			1e-5);
+
+  return ok;
 }
 
 void init_field_task(const Task *task,
@@ -1338,7 +1351,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar tvr(SPMD_MAIN_TASK_ID, "spmd_main_task");
     tvr.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-    Runtime::preregister_task_variant<spmd_main_task>(tvr, "spmd_main_task");
+    Runtime::preregister_task_variant<bool, spmd_main_task>(tvr, "spmd_main_task");
   }
 
   {

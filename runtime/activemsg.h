@@ -98,15 +98,22 @@ namespace Realm {
 //  single-node-only stubs
 #ifdef USE_GASNET
 
+// for uint64_t
+#include <stdint.h>
+
 // so OpenMPI borrowed gasnet's platform-detection code and didn't change
 //  the define names - work around it by undef'ing anything set via mpi.h
 //  before we include gasnet.h
 #undef __PLATFORM_COMPILER_GNU_VERSION_STR
 
+#ifndef GASNET_PAR
 #define GASNET_PAR
+#endif
 #include <gasnet.h>
 
+#ifndef GASNETT_THREAD_SAFE
 #define GASNETT_THREAD_SAFE
+#endif
 #include <gasnet_tools.h>
 
 #ifdef CHECK_REENTRANT_MESSAGES
@@ -528,13 +535,13 @@ struct MessageRawArgs<MSGTYPE, MSGID, SHORT_HNDL_PTR, MED_HNDL_PTR, n> { \
       HANDLERARG_COPY_ ## n(imsg->u);				\
       /* save a copy of the srcptr - imsg may be freed any time*/ \
       /*  after we enqueue it */                                \
-      intptr_t srcptr = reinterpret_cast<intptr_t>(imsg->u.typed.srcptr); \
+      uint64_t srcptr = reinterpret_cast<uintptr_t>(imsg->u.typed.srcptr); \
       enqueue_incoming(src, imsg);				\
       /* we can (and should) release the srcptr immediately */	\
       if(srcptr) {				\
 	assert(nbytes > 0); \
         record_message(src, true); \
-	CHECK_GASNET( gasnet_AMReplyShort2(token, MSGID_RELEASE_SRCPTR, (unsigned)srcptr, (unsigned)(srcptr >> 32)) ); \
+	CHECK_GASNET( gasnet_AMReplyShort2(token, MSGID_RELEASE_SRCPTR, (gasnet_handlerarg_t)srcptr, (gasnet_handlerarg_t)(srcptr >> 32)) ); \
       } else \
         record_message(src, false);				\
     } else \
@@ -563,10 +570,16 @@ SPECIALIZED_RAW_ARGS(16);
 void record_am_handler(int msgid, const char *description, bool reply = false);
 #endif
 
+template <typename T>
+union AtLeastEightBytes {
+  T data;
+  uint64_t padding;
+};
+
 template <int MSGID, class MSGTYPE, void (*FNPTR)(MSGTYPE)>
 class ActiveMessageShortNoReply {
  public:
-  typedef MessageRawArgs<MSGTYPE,MSGID,FNPTR,dummy_medium_handler,(sizeof(MSGTYPE)+3)/4> MessageRawArgsType;
+  typedef MessageRawArgs<MSGTYPE,MSGID,FNPTR,dummy_medium_handler,(sizeof(AtLeastEightBytes<MSGTYPE>)+3)/4> MessageRawArgsType;
 
   static void request(gasnet_node_t dest, MSGTYPE args)
   {
@@ -605,7 +618,7 @@ class ActiveMessageShortNoReply {
 template <int MSGID, class MSGTYPE, void (*FNPTR)(MSGTYPE, const void *, size_t)>
 class ActiveMessageMediumNoReply {
  public:
-  typedef MessageRawArgs<MSGTYPE,MSGID,dummy_short_handler,FNPTR,(sizeof(MSGTYPE)+3)/4> MessageRawArgsType;
+  typedef MessageRawArgs<MSGTYPE,MSGID,dummy_short_handler,FNPTR,(sizeof(AtLeastEightBytes<MSGTYPE>)+3)/4> MessageRawArgsType;
 
   static void request(gasnet_node_t dest, /*const*/ MSGTYPE &args, 
                       const void *data, size_t datalen,

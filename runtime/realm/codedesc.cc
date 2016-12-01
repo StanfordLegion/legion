@@ -202,7 +202,7 @@ namespace Realm {
 
 #ifdef REALM_USE_DLADDR
   namespace {
-    extern "C" { int main(int argc, const char *argv[]); };
+    extern "C" { int main(int argc, const char *argv[]) __attribute__((weak)); };
 
     DSOReferenceImplementation *dladdr_helper(void *ptr, bool quiet)
     {
@@ -223,20 +223,25 @@ namespace Realm {
       }
 
       // try to detect symbols that are in the base executable and change the filename to ""
-      const char *fname = inf.dli_fname;
-      {
-	static std::string local_fname;
-	if(local_fname.empty()) {
-	  Dl_info inf2;
-	  ret = dladdr((void *)main, &inf2);
-	  assert(ret != 0);
-	  local_fname = inf2.dli_fname;
+      // only do this if the weak 'main' reference found an actual main
+      if(((void *)main) != 0) {
+	const char *fname = inf.dli_fname;
+	{
+	  static std::string local_fname;
+	  if(local_fname.empty()) {
+	    Dl_info inf2;
+	    ret = dladdr((void *)main, &inf2);
+	    assert(ret != 0);
+	    local_fname = inf2.dli_fname;
+	  }
+	  if(local_fname.compare(fname) == 0)
+	    fname = "";
 	}
-	if(local_fname.compare(fname) == 0)
-	  fname = "";
+
+	return new DSOReferenceImplementation(fname, inf.dli_sname);
       }
 
-      return new DSOReferenceImplementation(fname, inf.dli_sname);
+      return 0;
     }
   };
 #endif
@@ -267,9 +272,11 @@ namespace Realm {
     const std::vector<CodeImplementation *>& impls = source_codedesc.implementations();
     for(std::vector<CodeImplementation *>::const_iterator it = impls.begin();
 	it != impls.end();
-	it++)
-      if(can_translate(typeid(**it), target_impl_type))
+	it++) {
+      CodeImplementation &impl = **it;
+      if(can_translate(typeid(impl), target_impl_type))
 	return true;
+    }
 
     return false;
   }
@@ -281,9 +288,11 @@ namespace Realm {
     const std::vector<CodeImplementation *>& impls = source_codedesc.implementations();
     for(std::vector<CodeImplementation *>::const_iterator it = impls.begin();
 	it != impls.end();
-	it++)
-      if(can_translate(typeid(**it), target_impl_type))
+	it++) {
+      CodeImplementation &impl = **it;
+      if(can_translate(typeid(impl), target_impl_type))
 	return translate(*it, target_impl_type);
+    }
 
     return 0;
   }

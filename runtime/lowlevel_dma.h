@@ -155,6 +155,8 @@ namespace LegionRuntime {
       InstPairCopier(void);
       virtual ~InstPairCopier(void);
     public:
+      virtual bool copy_all_fields(Domain d) { return false; }
+
       virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
                               unsigned offset_index) = 0;
 

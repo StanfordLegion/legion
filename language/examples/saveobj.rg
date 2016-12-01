@@ -17,7 +17,9 @@ import "regent"
 local c = regentlib.c
 
 task hello()
-  c.printf("hello world\n")
+  var args = c.legion_runtime_get_input_args()
+  regentlib.assert(args.argc > 0, "no args")
+  c.printf("hello world from %s\n", args.argv[0])
 end
 
 task main()
@@ -27,8 +29,19 @@ end
 local exe = os.tmpname()
 regentlib.saveobj(main, exe, "executable")
 print("Saved executable to " .. exe)
--- If this were using regentlib.start, there's no way you'd ever call
--- main() three times. (Legion is not re-entrant.)
-assert(os.execute(exe) == 0)
-assert(os.execute(exe) == 0)
-assert(os.execute(exe) == 0)
+
+-- Hack: On macOS, the child process isn't inheriting the parent's
+-- environment, for some reason.
+local env = ""
+if os.getenv("DYLD_LIBRARY_PATH") then
+  env = "DYLD_LIBRARY_PATH=" .. os.getenv("DYLD_LIBRARY_PATH") .. " "
+end
+
+-- Pass the arguments along so that the child process is able to
+-- complete the execution of the parent.
+local args = ""
+for _, arg in ipairs(rawget(_G, "arg")) do
+  args = args .. " " .. arg
+end
+
+assert(os.execute(env .. exe .. args) == 0)

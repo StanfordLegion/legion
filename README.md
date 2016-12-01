@@ -1,12 +1,30 @@
-Legion [![Build Status](https://travis-ci.org/StanfordLegion/legion.svg?branch=master)](https://travis-ci.org/StanfordLegion/legion)
-==================================================================================
+# Legion 
 
-The Legion homepage is now at [legion.stanford.edu](http://legion.stanford.edu).
 
-Publicly visible repository for the Legion parallel programming project at Stanford University.
+[Legion](http://legion.stanford.edu) is a parallel programming model
+for distributed, heterogeneous machines.
 
-Overview
-==================================================================================
+## Branches
+
+The Legion team uses this repository for active development, so please make sure you're
+using the right branch for your needs:
+
+  * stable [![Build Status](https://travis-ci.org/StanfordLegion/legion.svg?branch=stable)](https://travis-ci.org/StanfordLegion/legion/branches) - This is the default branch if you clone the
+repository.  It is generally about a month behind the master branch, allowing us to get some
+mileage on larger changes before foisting them on everybody.  Most users of Legion should use this
+branch, although you should be prepared to try the master branch if you run into issues.
+Updates are moved to the stable branch roughly monthly, although important bug fixes may be
+applied directly when needed.  Each batch of updates is given a "version" number, and
+[CHANGES.txt](https://github.com/StanfordLegion/legion/blob/stable/CHANGES.txt) lists the
+major changes.
+  * master [![Build Status](https://travis-ci.org/StanfordLegion/legion.svg?branch=master)](https://travis-ci.org/StanfordLegion/legion/branches) - This is the "mainline" used by the Legion team,
+and contains changes and bug fixes that may not have made it into the stable branch yet.  If you
+are a user of "bleeding-edge" Legion functionality, you will probably need to be using this branch.
+  * lots of other feature branches - These exist as necessary for larger changes, and users will
+generally want to steer clear of them.  :)
+
+## Overview
+
 Legion is a programming model and runtime system designed for decoupling the specification
 of parallel algorithms from their mapping onto distributed heterogeneous architectures.  Since
 running on the target class of machines requires distributing not just computation but data
@@ -80,135 +98,177 @@ we refer to you to our Supercomputing paper.
 
 http://theory.stanford.edu/~aiken/publications/papers/sc12.pdf
 
-The Legion repository is separated into directories described below:
+## Contents
 
-runtime: The runtime directory contains all of the source code for the Legion runtime
-system.  The primary files that most users will be interested in are 'legion.h' and
-'lowlevel.h' which represent the interfaces to the high-level and low-level runtime
-systems for Legion respectively.
+This repository includes the following contents:
 
-apps: The applications directory currently contains two applications: saxpy and circuit.
-Saxpy is an unoptimized implementation of the saxpy kernel for illustrating
-different features of Legion.  The circuit directory contains the source code for the
-circuit simulation used in our paper on Legion.  We plan to release additional
-application examples once we figure out the necessary licensing constraints.
+  * `tutorial`: Source code for the [tutorials](http://legion.stanford.edu/tutorial/).
+  * `examples`: Larger examples for advanced programming techniques.
+  * `apps`: Several complete Legion applications.
+  * `language`: The [Regent programming language](http://regent-lang.org/) compiler and examples.
+  * `runtime`: The core runtime components:
+      * `legion`: The Legion runtime itself (see `legion.h`).
+      * `realm`: The Realm low-level runtime (see `realm.h`).
+      * `mappers`: Several mappers, including the default mapper (see `default_mapper.h`).
+  * `tools`: Miscellaneous tools:
+      * `legion_spy.py`: A [visualization tool](http://legion.stanford.edu/debugging/#legion-spy) for task dependencies.
+      * `legion_prof.py`: A task-level [profiler](http://legion.stanford.edu/profiling/#legion-prof).
 
-tools: The tools directory contains the source code for the 'legion_spy' debugging
-tool that we use for doing correctness and performance debugging in Legion.  We also
-have a 'legion_prof' tool that does performance profiling of Legion application
-runs and can be used for generating both statistics and execution diagrams.
+## Dependencies
 
-Dependencies
-==================================================================================
-We have only tested Legion running on Linux based systems.  An implementation of
-the POSIX threads library is required for running all Legion applications.  For
-running applications on clusters and GPUs, we require at least CUDA 4.2 and
-and an installation of GASNET.  Verify that the correct locations of these installations
-are set in 'runtime/runtime.mk'.  At least Python 2.4 is required to run the
-'legion_spy' debugging tool.
+To get started with Legion, you'll need:
 
-Running Programs
-==================================================================================
-When running applications users must set the 'LG_RT_DIR' environment variable to 
-point to the 'runtime' directory for the repository.  Makefiles will report an error
-if the environment variable is not set.
+  * Linux, macOS, or another Unix
+  * A C++ 98 (or newer) compiler (GCC, Clang, Intel, or PGI) and GNU Make
+  * *Optional*: Python 2.7 (used for profiling/debugging tools)
+  * *Optional*: CUDA 5.0 or newer (for NVIDIA GPUs)
+  * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking, see
+     [installation instructions](http://legion.stanford.edu/gasnet/))
+  * *Optional*: LLVM 3.5 (for dynamic code generation)
+  * *Optional*: HDF5 (for file I/O)
 
-Each application has a Makefile in its directory that is used to control the 
-compilation of the application.  At the top of the Makefile there are several
-different variables that can be used to control how the application is built.
-By default, applications are compiled in debug mode.  This can be changed by
-commenting out the 'DEBUG' variable.  Users can statically control the minimum
-level of logging information printed by the runtime by setting the 'OUTPUT_LEVEL'
-variable.  Choices for 'OUTPUT_LEVEL' can be seen at the top of 'runtime/utilities.h'.
-The 'SHARED_LOWLEVEL' runtime variable controls whether the application is compiled
-to run on the shared-low-level runtime, or if the variable is not set, the application
-will be targeted at the GASNET-GPU generic low-level runtime.
+## Installing
 
-After compilation, programs are launched differently depending on their target
-platform.  Applications targeted at the shared-low-level runtime can be run
-as a regular process, while applications targeted at the general low-level runtime
-must be launched using the 'gasnetrun' command (see GASNET documentation).
+Legion is currently compiled with each application. To try a Legion
+application, just call `make` in the directory in question. The
+`LG_RT_DIR` variable is used to locate the Legion `runtime`
+directory. For example:
 
-Both the low-level and high-level runtime have flags for controlling execution.
-Below are some of the more commonly used flags:
+```bash
+git clone https://github.com/StanfordLegion/legion.git
+export LG_RT_DIR="$PWD/legion/runtime"
+cd legion/examples/full_circuit
+make
+./ckt_sim
+```
 
--cat <logger_name>[,logger_name]*  restricts logging to the comma separated list of loggers
+## Makefile Variables
 
--level <int>    dynamically restrict the logging level to all statements at
-                   the given level number and above.  See 'runtime/utilities.h' for
-                   how the numbers associated with each level.
+The Legion Makefile includes several variables which influence the
+build. These may either be set in the environment (e.g. `DEBUG=0
+make`) or at the top of each application's Makefile.
 
--ll:cpu <int>   the number of CPU processors to create per process
+  * `DEBUG=<0,1>`: controls optimization level and enables various
+    dynamic checks which are too expensive for release builds.
+  * `OUTPUT_LEVEL=<level_name>`: controls the compile-time [logging
+    level](http://legion.stanford.edu/debugging/#logging-infrastructure).
+  * `USE_CUDA=<0,1>`: enables CUDA support.
+  * `USE_GASNET=<0,1>`: enables GASNet support (see [installation instructions](http://legion.stanford.edu/gasnet/)).
+  * `USE_LLVM=<0,1>`: enables LLVM support.
+  * `USE_HDF=<0,1>`: enables HDF5 support.
 
--ll:gpu <int>   number of GPU Processors to create per process
+## Build Flags
 
--ll:csize <int>   size of DRAM Memory per process in MB
+In addition to Makefile variables, compilation is influenced by a
+number of build flags. These flags may be added to the environment
+variable `CC_FLAGS` (or again set inside the Makefile).
 
--ll:gsize <int>    size of GASNET registered RDMA memory available per process in MB
+  * `CC_FLAGS=-DLEGION_SPY`: enables [Legion Spy](http://legion.stanford.edu/debugging/#legion-spy).
+  * `CC_FLAGS=-DPRIVILEGE_CHECKS`: enables [extra privilege checks](http://legion.stanford.edu/debugging/#privilege-checks).
+  * `CC_FLAGS=-DBOUNDS_CHECKS`: enables [dynamic bounds checks](http://legion.stanford.edu/debugging/#bounds-checks).
 
--ll:fsize <int>    size of framebuffer memory for each GPU in MB
+## Command-Line Flags
 
--ll:zsize <int>    size of zero-copy memory for each GPU in MB
+Legion and Realm accept command-line arguments for various runtime
+parameters. Below are some of the more commonly used flags:
 
--ll:util <int>     specify the number of utility processors created per process
-
--hl:window <int>   specify the maximum number of tasks that can be created in a parent task window
-
--hl:sched <int>    minimum number of tasks to try to schedule for each invocation of the scheduler
+  * `-level <category>=<int>`:
+    sets [logging level](http://legion.stanford.edu/debugging/#logging-infrastructure) for `category`
+  * `-logfile <filename>`:
+    directs [logging output](http://legion.stanford.edu/debugging/#logging-infrastructure) to `filename`
+  * `-ll:cpu <int>`: CPU processors to create per process
+  * `-ll:gpu <int>`: GPU processors to create per process
+  * `-ll:cpu <int>`: utility processors to create per process
+  * `-ll:csize <int>`: size of CPU DRAM memory per process (in MB)
+  * `-ll:gsize <int>`: size of GASNET global memory available per process (in MB)
+  * `-ll:rsize <int>`: size of GASNET registered RDMA memory available per process (in MB)
+  * `-ll:fsize <int>`: size of framebuffer memory for each GPU (in MB)
+  * `-ll:zsize <int>`: size of zero-copy memory for each GPU (in MB)
+  * `-hl:window <int>`: maximum number of tasks that can be created in a parent task window
+  * `-hl:sched <int>`: minimum number of tasks to try to schedule for each invocation of the scheduler
 
 The default mapper also has several flags for controlling the default mapping.
-See default_mapper.cc for more details.
+See `default_mapper.cc` for more details.
 
-Developing Programs
-==================================================================================
-To develop a new legion application, begin by creating a new directory in the
-applications directory.  Make a copy of the 'Makefile.template' file in the
-'apps' directory to use as the Makefile.  Fill in the appropriate fields
-at the top of the Makefile so that they contain the file names for each of
-the different files needed for your application.
+## Developing Programs
 
-To begin writing Legion applications you should only need to include the 
-'legion.h' header file.  The Makefile guarantees this file will be in the
-include path for you application when compiling.  More documentation of
-the 'legion.h' header file is currently in progress.
+To start a new Legion application, make a new directory and copy
+`apps/Makefile.template` into your directory under the name
+`Makefile`. Fill in the appropriate fields at the top of the Makefile
+with the filenames needed for your application.
 
-To extend the default mapper, you will also need to include 'default_mapper.h'
-into whatever file has the declaration for your custom mapper.
+Most Legion APIs are described in `legion.h`; a smaller number are
+described in the various header files in the `runtime/realm`
+directory. The default mapper is available in `default_mapper.h`.
 
-Debugging Programs
-==================================================================================
-Legion currently has two primary tools for doing debugging.  The first is the 
-'legion_spy' tool contained in the 'tools' directory.  To use legion spy, first
-add the '-DLEGION_SPY' flag to 'CC_FLAGS' in the Makefile of your application
-and recompile in DEBUG mode.  The run your application with the following flags
-'-cat legion_spy -level 1' and dump the results of standard error to a file.  
-Then run legion spy as follows:
+## Debugging
 
-python legion_spy -l -p <file>
+Legion has a number of tools to aid in debugging programs.
 
-The legion spy tool will parse the results of the log file.  The '-l' flag will
-check the results of the logical region dependence analysis.  If there are any 
-errors they should be reported to the Legion developers.  The '-p' file will
-dump event graphs corresponding to all of the low-level runtime event dependencies
-between any tasks, copies, reductions, or inline mapping operations.  These graphs
-are useful for illustrating the actual dependencies computed in the physical states
-of the region trees.
+### Extended Correctness Checks
 
-The other tool available in Legion for debugging is the log files capturing the
-physical state of all region trees on every instance of the high-level runtime.
-For applications compiled in DEBUG mode, simply pass the '-hl:tree' flag as input
-to dump the files.
+Compile with `DEBUG=1 CC_FLAGS="-DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+make` and rerun the application. This enables dynamic checks for
+privilege and out-of-bounds errors in the application. (These checks
+are not enabled by default because they are relatively expensive.) If
+the application runs without terminating with an error, then continue
+on to Legion Spy.
 
-Other Features
-==================================================================================
-- Bounds Checks: Users can enable dynamic pointer checks of all physical region
-accesses by compiling with the '-DBOUNDS_CHECKS' flag.
+### Legion Spy
 
-- Inorder Execution: Users can force the high-level runtime to execute all tasks
-in program order by compiling with the '-DINORDER_EXECUTION' flag and then passing
-'-hl:inorder' flag as an input to the application.
+Legion provides a task-level visualization tool called Legion
+Spy. This captures the logical and physical dependence graphs. These
+may help, for example, as a sanity check to ensure that the correct
+sequence of tasks is being launched (and the tasks have the correct
+dependencies). Legion Spy also has a self-checking mode which can
+validate the correctness of the runtime's logical and physical
+dependence algorithms.
 
-- Dynamic Independence Tests: Users can request the high-level runtime perform 
-dynamic independence tests between regions and partitions by compiling with
-the '-DDYNAMIC_TESTS' flag and then passing '-hl:dynamic' flag as input.
+To capture a trace, invoke the application with `-hl:spy -logfile
+spy_%.log`. (No special compile-time flags are required.) This will
+produce a log file per node. Call the post-processing script to render
+PDF files of the dependence graphs:
 
+```bash
+./app -hl:spy -logfile spy_%.log
+$LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log
+```
+
+To run Legion Spy's self-checking mode, Legion must be built with the
+flag `-DLEGION_SPY`. Following this, the application can be run again,
+and the script used to validate (or render) the trace.
+
+```bash
+DEBUG=1 CC_FLAGS="-DLEGION_SPY" make
+./app -hl:spy -logfile spy_%.log
+$LG_RT_DIR/../tools/legion_spy.py -lpa spy_*.log
+$LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log
+```
+
+## Profiling
+
+Legion contains a task-level profiler. No special compile-time flags
+are required. However, it is recommended to build with `DEBUG=0 make`
+to avoid any undesired performance issues.
+
+Run the application with `-hl:prof <N> -logfile prof_%.log` where `N`
+is the number of nodes to be profiled. (`N` can be less than the total
+node count---this profiles a subset of the nodes.) This will produce a
+log file per node. The profiler itself runs offline and produces an
+HTML file which can be loaded in a web browser.
+
+```bash
+DEBUG=0 make
+./app -hl:prof 1 -logfile prof_%.log
+$LG_RT_DIR/../tools/legion_prof.py prof_*.log
+```
+
+## Other Features
+
+- Inorder Execution: Users can force the high-level runtime to execute
+all tasks in program order by passing `-hl:inorder` flag on the
+command-line.
+
+- Dynamic Independence Tests: Users can request the high-level runtime
+perform dynamic independence tests between regions and partitions by
+passing `-hl:dynamic` flag on the command-line.

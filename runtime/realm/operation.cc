@@ -223,9 +223,7 @@ namespace Realm {
   void Operation::trigger_finish_event(bool poisoned)
   {
     if(finish_event.exists())
-      get_runtime()->get_genevent_impl(finish_event)->trigger(finish_event.gen,
-                                                              gasnet_mynode(),
-							      poisoned);
+      GenEventImpl::trigger(finish_event, poisoned);
   }
 
   void Operation::clear_profiling(void)
@@ -456,9 +454,9 @@ namespace Realm {
 
     if(!found) {
       // not found - who owns this event?
-      int owner = ID(finish_event).node();
+      int owner = ID(finish_event).event.creator_node;
 
-      if(owner == gasnet_mynode()) {
+      if(owner == (int)gasnet_mynode()) {
 	// if we're the owner, it's probably for an event that already completed successfully,
 	//  so ignore the request
 	log_optable.info() << "event " << finish_event << " cancellation ignored - not in table";

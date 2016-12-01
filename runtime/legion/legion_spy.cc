@@ -89,7 +89,7 @@ namespace Legion {
     void TreeStateLogger::start_block(const char *fmt, ...)
     //--------------------------------------------------------------------------
     {
-      Event lock_event = logger_lock.acquire(0, true/*exclusive*/);
+      RtEvent lock_event(logger_lock.acquire(0, true/*exclusive*/));
       lock_event.wait();
       va_list args;
       va_start(args, fmt);

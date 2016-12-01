@@ -61,8 +61,17 @@ namespace Legion {
         DependenceType dtype;
         FieldMask dependent_mask;
       };
+      struct AliasChildren {
+      public:
+        AliasChildren(unsigned req_idx, unsigned dep, const FieldMask &m)
+          : req_index(req_idx), depth(dep), mask(m) { }
+      public:
+        unsigned req_index;
+        unsigned depth;
+        FieldMask mask;
+      };
     public:
-      LegionTrace(TraceID tid, SingleTask *ctx);
+      LegionTrace(TraceID tid, TaskContext *ctx);
       LegionTrace(const LegionTrace &rhs);
       ~LegionTrace(void);
     public:
@@ -85,20 +94,22 @@ namespace Legion {
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
                                     const FieldMask &dependent_mask);
-      void record_aliased_requirements(unsigned idx1, unsigned idx2);
+      void record_aliased_children(unsigned req_index, unsigned depth,
+                                   const FieldMask &aliased_mask);
+      void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
     protected:
       std::vector<std::pair<Operation*,GenerationID> > operations;
       // Only need this backwards lookup for recording dependences
       std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
-      // Close operations have a nasty interaction with traces because
-      // we can generate different sets of close operations each time we
+      // Internal operations have a nasty interaction with traces because
+      // we can generate different sets of internal operations each time we
       // run the trace depending on the state of the logical region tree.
-      // Therefore, we keep track of closes done when capturing the trace
+      // Therefore, we keep track of internal ops done when capturing the trace
       // record transitive dependences on the other operations in the
-      // trace that we would have interfered with had the close operations
+      // trace that we would have interfered with had the internal operations
       // not been necessary.
-      std::map<std::pair<Operation*,GenerationID>,
-               LegionVector<DependenceRecord>::aligned> close_dependences;
+      std::map<std::pair<InternalOp*,GenerationID>,
+               LegionVector<DependenceRecord>::aligned> internal_dependences;
     protected:
       // This is the generalized form of the dependences
       // For each operation, we remember a list of operations that
@@ -107,12 +118,12 @@ namespace Legion {
       // We also need a data structure to record when there are
       // aliased but non-interfering region requirements. This should
       // be pretty sparse so we'll make it a map
-      std::map<unsigned,std::vector<std::pair<unsigned,unsigned> > > alias_reqs;
+      std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
       // Metadata for checking the validity of a trace when it is replayed
       std::vector<OperationInfo> op_info;
     protected:
       const TraceID tid;
-      SingleTask *const ctx;
+      TaskContext *const ctx;
       bool fixed;
       bool tracing;
 #ifdef LEGION_SPY
@@ -139,13 +150,15 @@ namespace Legion {
     public:
       TraceCaptureOp& operator=(const TraceCaptureOp &rhs);
     public:
-      void initialize_capture(SingleTask *ctx);
+      void initialize_capture(TaskContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+    protected:
+      LegionTrace *local_trace;
     };
 
     /**
@@ -166,13 +179,15 @@ namespace Legion {
     public:
       TraceCompleteOp& operator=(const TraceCompleteOp &rhs);
     public:
-      void initialize_complete(SingleTask *ctx);
+      void initialize_complete(TaskContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void);
-      virtual OpKind get_operation_kind(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+    protected:
+      LegionTrace *local_trace;
     };
 
   }; // namespace Internal 

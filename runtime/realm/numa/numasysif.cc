@@ -71,7 +71,7 @@ namespace Realm {
   {
 #ifdef __linux__
     int policy;
-    unsigned long nmask;
+    unsigned long nmask = 0;
     int ret = get_mempolicy(&policy, &nmask, 8*sizeof(nmask), 0, MPOL_F_MEMS_ALLOWED);
     if((ret != 0) || (nmask == 0)) {
       fprintf(stderr, "get_mempolicy() returned: ret=%d nmask=%08lx\n", ret, nmask);

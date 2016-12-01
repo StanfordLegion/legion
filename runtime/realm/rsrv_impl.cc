@@ -226,7 +226,7 @@ namespace Realm {
       // see if the freelist has an event we can reuse
       ReservationImpl *impl = get_runtime()->local_reservation_free_list->alloc_entry();
       assert(impl);
-      assert(ID(impl->me).type() == ID::ID_LOCK);
+      assert(ID(impl->me).is_reservation());
       if(impl) {
 	AutoHSLLock al(impl->mutex);
 
@@ -290,8 +290,8 @@ namespace Realm {
       log_reservation.info() << "reservation destroyed: rsrv=" << *this;
 
       // a lock has to be destroyed on the node that created it
-      if(ID(*this).node() != gasnet_mynode()) {
-	DestroyLockMessage::send_request(ID(*this).node(), *this);
+      if(ID(*this).rsrv.creator_node != gasnet_mynode()) {
+	DestroyLockMessage::send_request(ID(*this).rsrv.creator_node, *this);
 	return;
       }
 
@@ -381,7 +381,7 @@ namespace Realm {
 
 	// it'd be bad if somebody tried to take a lock that had been 
 	//   deleted...  (info is only valid on a lock's home node)
-	assert((ID(impl->me).node() != gasnet_mynode()) ||
+	assert((ID(impl->me).rsrv.creator_node != gasnet_mynode()) ||
 	       impl->in_use);
 
 	// case 2: we're the owner, and nobody is holding the lock, so grant
@@ -390,8 +390,8 @@ namespace Realm {
            (impl->remote_sharer_mask.empty())) {
           assert(impl->remote_waiter_mask.empty());
 
-	  log_reservation.debug(              "granting reservation request: reservation=" IDFMT ", node=%d, mode=%d",
-		   args.lock.id, args.node, args.mode);
+	  log_reservation.debug("granting reservation request: reservation=" IDFMT ", node=%d, mode=%d",
+				args.lock.id, args.node, args.mode);
 	  grant_target = args.node;
           copy_waiters = impl->remote_waiter_mask;
 
@@ -402,8 +402,8 @@ namespace Realm {
 	// case 3: we're the owner, but we can't grant the lock right now -
 	//  just set a bit saying that the node is waiting and get back to
 	//  work
-	log_reservation.debug(            "deferring reservation request: reservation=" IDFMT ", node=%d, mode=%d (count=%d cmode=%d)",
-		 args.lock.id, args.node, args.mode, impl->count, impl->mode);
+	log_reservation.debug("deferring reservation request: reservation=" IDFMT ", node=%d, mode=%d (count=%d cmode=%d)",
+			      args.lock.id, args.node, args.mode, impl->count, impl->mode);
         impl->remote_waiter_mask.add(args.node);
       } while(0);
 
@@ -551,7 +551,7 @@ namespace Realm {
 
 	// it'd be bad if somebody tried to take a lock that had been 
 	//   deleted...  (info is only valid on a lock's home node)
-	assert((ID(me).node() != gasnet_mynode()) ||
+	assert((ID(me).rsrv.creator_node != gasnet_mynode()) ||
 	       in_use);
 
 	// if this is just a placeholder nonblocking acquire, update the retry_count and

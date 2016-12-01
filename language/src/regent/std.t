@@ -12,36 +12,41 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Standard Library
+-- Regent Standard Library
 
+local ast = require("regent/ast")
+local base = require("regent/std_base")
 local config = require("regent/config")
-local data = require("regent/data")
-local log = require("regent/log")
-local cudahelper
+local data = require("common/data")
+local report = require("common/report")
+local pretty = require("regent/pretty")
+local cudahelper = require("regent/cudahelper")
 
 local std = {}
 
-std.config, std.args = config.parse_args()
+std.config, std.args = config.args()
 
--- #####################################
--- ## Legion Bindings
--- #################
-
-terralib.linklibrary("liblegion_terra.so")
-local c = terralib.includecstring([[
-#include "legion_c.h"
-#include "legion_terra.h"
-#include "legion_terra_partitions.h"
-#include <stdio.h>
-#include <stdlib.h>
-]])
+local c = base.c
 std.c = c
 
-if std.config["cuda"] then cudahelper = require("regent/cudahelper") end
+std.file_read_only = c.LEGION_FILE_READ_ONLY
+std.file_read_write = c.LEGION_FILE_READ_WRITE
+std.file_create = c.LEGION_FILE_CREATE
+std.check_cuda_available = cudahelper.check_cuda_available
 
 -- #####################################
 -- ## Utilities
 -- #################
+
+terra std.assert_error(x : bool, message : rawstring)
+  if not x then
+    var stderr = c.fdopen(2, "w")
+    c.fprintf(stderr, "Errors reported during runtime.\n%s\n", message)
+    -- Just because it's stderr doesn't mean it's unbuffered...
+    c.fflush(stderr)
+    c.abort()
+  end
+end
 
 terra std.assert(x : bool, message : rawstring)
   if not x then
@@ -90,11 +95,107 @@ terra std.domain_from_bounds_3d(start : c.legion_point_3d_t,
 end
 
 -- #####################################
--- ## Privilege Helpers
+-- ## Kinds
+-- #################
+
+-- Privileges
+
+std.reads = ast.privilege_kind.Reads {}
+std.writes = ast.privilege_kind.Writes {}
+function std.reduces(op)
+  local ops = {
+    ["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true,
+    ["max"] = true, ["min"] = true,
+  }
+  assert(ops[op])
+  return ast.privilege_kind.Reduces { op = op }
+end
+
+function std.is_reduce(privilege)
+  return privilege:is(ast.privilege_kind.Reduces)
+end
+
+-- Coherence Modes
+
+std.exclusive = ast.coherence_kind.Exclusive {}
+std.atomic = ast.coherence_kind.Atomic {}
+std.simultaneous = ast.coherence_kind.Simultaneous {}
+std.relaxed = ast.coherence_kind.Relaxed {}
+
+-- Flags
+
+std.no_access_flag = ast.flag_kind.NoAccessFlag {}
+
+-- Conditions
+
+std.arrives = ast.condition_kind.Arrives {}
+std.awaits = ast.condition_kind.Awaits {}
+
+-- Constraints
+
+std.subregion = ast.constraint_kind.Subregion {}
+std.disjointness = ast.constraint_kind.Disjointness {}
+
+-- #####################################
+-- ## Privileges
+-- #################
+
+function std.privilege(privilege, region, field_path)
+  assert(privilege:is(ast.privilege_kind), "privilege expected argument 1 to be a privilege kind")
+  assert(std.is_symbol(region), "privilege expected argument 2 to be a symbol")
+
+  if field_path == nil then
+    field_path = data.newtuple()
+  elseif type(field_path) == "string" then
+    field_path = data.newtuple(field_path)
+  end
+  assert(data.is_tuple(field_path), "privilege expected argument 3 to be a field")
+
+  return ast.privilege.Privilege {
+    region = region,
+    field_path = field_path,
+    privilege = privilege,
+  }
+end
+
+function std.privileges(privilege, regions_fields)
+  local privileges = terralib.newlist()
+  for _, region_fields in ipairs(regions_fields) do
+    local region, fields
+    if std.is_symbol(region_fields) then
+      region = region_fields
+      fields = terralib.newlist({data.newtuple()})
+    else
+      region = region_fields.region
+      fields = region_fields.fields
+    end
+    assert(std.is_symbol(region) and terralib.islist(fields))
+    for _, field in ipairs(fields) do
+      privileges:insert(std.privilege(privilege, region, field))
+    end
+  end
+  return privileges
+end
+
+-- #####################################
+-- ## Constraints
+-- #################
+
+function std.constraint(lhs, rhs, op)
+  assert(op:is(ast.constraint_kind))
+  return ast.constraint.Constraint {
+    lhs = lhs,
+    rhs = rhs,
+    op = op,
+  }
+end
+
+-- #####################################
+-- ## Privilege and Constraint Helpers
 -- #################
 
 function std.add_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string")
+  assert(privilege:is(ast.privilege_kind))
   assert(std.type_supports_privileges(region))
   assert(data.is_tuple(field_path))
   if not cx.privileges[privilege] then
@@ -143,7 +244,7 @@ end
 function std.add_constraints(cx, constraints)
   for _, constraint in ipairs(constraints) do
     local lhs, rhs, op = constraint.lhs, constraint.rhs, constraint.op
-    local symmetric = op == "*"
+    local symmetric = op == std.disjointness
     std.add_constraint(cx, lhs:gettype(), rhs:gettype(), op, symmetric)
   end
 end
@@ -158,8 +259,8 @@ function std.search_constraint_predicate(cx, region, visited, predicate)
   end
   visited[region] = true
 
-  if cx.constraints["<="] and cx.constraints["<="][region] then
-    for subregion, _ in pairs(cx.constraints["<="][region]) do
+  if cx.constraints[std.subregion] and cx.constraints[std.subregion][region] then
+    for subregion, _ in pairs(cx.constraints[std.subregion][region]) do
       local result = std.search_constraint_predicate(
         cx, subregion, visited, predicate)
       if result then return result end
@@ -169,7 +270,7 @@ function std.search_constraint_predicate(cx, region, visited, predicate)
 end
 
 function std.search_privilege(cx, privilege, region, field_path, visited)
-  assert(type(privilege) == "string")
+  assert(privilege:is(ast.privilege_kind))
   assert(std.type_supports_privileges(region))
   assert(data.is_tuple(field_path))
   return std.search_constraint_predicate(
@@ -182,7 +283,7 @@ function std.search_privilege(cx, privilege, region, field_path, visited)
 end
 
 function std.check_privilege(cx, privilege, region, field_path)
-  assert(type(privilege) == "string")
+  assert(privilege:is(ast.privilege_kind))
   assert(std.type_supports_privileges(region))
   assert(data.is_tuple(field_path))
   for i = #field_path, 0, -1 do
@@ -256,7 +357,7 @@ end
 
 function std.check_constraint(cx, constraint)
   local lhs = constraint.lhs
-  if lhs == wild then
+  if lhs == std.wild then
     return true
   elseif std.is_symbol(lhs) then
     lhs = lhs:gettype()
@@ -265,7 +366,7 @@ function std.check_constraint(cx, constraint)
   assert(std.type_supports_constraints(lhs))
 
   local rhs = constraint.rhs
-  if rhs == wild then
+  if rhs == std.wild then
     return true
   elseif std.is_symbol(rhs) then
     rhs = rhs:gettype()
@@ -280,8 +381,8 @@ function std.check_constraint(cx, constraint)
   }
   return std.search_constraint(
     cx, constraint.lhs, constraint, {},
-    constraint.op == "<=" --[[ reflexive ]],
-    constraint.op == "*" --[[ symmetric ]])
+    constraint.op == std.subregion --[[ reflexive ]],
+    constraint.op == std.disjointness --[[ symmetric ]])
 end
 
 function std.check_constraints(cx, constraints, mapping)
@@ -301,6 +402,21 @@ function std.check_constraints(cx, constraints, mapping)
   end
   return true
 end
+
+
+-- #####################################
+-- ## Physical Privilege Helpers
+-- #################
+
+-- Physical privileges describe the privileges used by the actual
+-- Legion runtime, rather than the privileges used by Regent (as
+-- above). Some important differences from normal privileges:
+--
+--  * Physical privileges are strings (at least for the moment)
+--  * Unlike normal privileges, physical privileges form a lattice
+--    (with a corresponding meet operator)
+--  * "reads_writes" is a physical privilege (not a normal privilege),
+--    and is the top of the physical privilege lattice
 
 function std.meet_privilege(a, b)
   if a == b then
@@ -343,10 +459,12 @@ function std.meet_flag(a, b)
 end
 
 function std.is_reduction_op(privilege)
+  assert(type(privilege) == "string")
   return string.sub(privilege, 1, string.len("reduces ")) == "reduces "
 end
 
 function std.get_reduction_op(privilege)
+  assert(type(privilege) == "string")
   return string.sub(privilege, string.len("reduces ") + 1)
 end
 
@@ -361,7 +479,7 @@ local function find_field_privilege(privileges, coherence_modes, flags,
         field_path:starts_with(privilege.field_path)
       then
         field_privilege = std.meet_privilege(field_privilege,
-                                             privilege.privilege)
+                                             tostring(privilege.privilege))
       end
     end
   end
@@ -370,7 +488,7 @@ local function find_field_privilege(privileges, coherence_modes, flags,
   if coherence_modes[region_type] then
     for prefix, coherence in coherence_modes[region_type]:items() do
       if field_path:starts_with(prefix) then
-        coherence_mode = coherence
+        coherence_mode = tostring(coherence)
       end
     end
   end
@@ -380,7 +498,7 @@ local function find_field_privilege(privileges, coherence_modes, flags,
     for prefix, flag_fields in flags[region_type]:items() do
       if field_path:starts_with(prefix) then
         for _, flag_kind in flag_fields:keys() do
-          flag = std.meet_flag(flag, flag_kind)
+          flag = std.meet_flag(flag, tostring(flag_kind))
         end
       end
     end
@@ -463,15 +581,26 @@ function std.find_task_privileges(region_type, privileges, coherence_modes, flag
     grouped_coherence_modes, grouped_flags
 end
 
-function std.group_task_privileges_by_field_path(privileges, privilege_field_paths)
+function std.group_task_privileges_by_field_path(privileges, privilege_field_paths,
+                                                 privilege_field_types,
+                                                 privilege_coherence_modes,
+                                                 privilege_flags)
   local privileges_by_field_path = {}
+  local coherence_modes_by_field_path
+  if privilege_coherence_modes ~= nil then
+    coherence_modes_by_field_path = {}
+  end
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     for _, field_path in ipairs(field_paths) do
       privileges_by_field_path[field_path:hash()] = privilege
+      if coherence_modes_by_field_path ~= nil then
+        coherence_modes_by_field_path[field_path:hash()] =
+          privilege_coherence_modes[i]
+      end
     end
   end
-  return privileges_by_field_path
+  return privileges_by_field_path, coherence_modes_by_field_path
 end
 
 local privilege_modes = {
@@ -525,6 +654,10 @@ end
 
 function std.is_index_type(t)
   return terralib.types.istype(t) and rawget(t, "is_index_type")
+end
+
+function std.is_rect_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_rect_type")
 end
 
 function std.is_ispace(t)
@@ -600,12 +733,13 @@ function std.type_supports_constraints(t)
     std.is_list_of_regions(t) or std.is_list_of_partitions(t)
 end
 
-function std.is_ctor(t)
-  return terralib.types.istype(t) and rawget(t, "is_ctor")
+function std.type_is_opaque_to_field_accesses(t)
+  return std.is_region(t) or std.is_partition(t) or
+    std.is_cross_product(t) or std.is_list(t)
 end
 
-function std.is_fspace(x)
-  return getmetatable(x) == fspace
+function std.is_ctor(t)
+  return terralib.types.istype(t) and rawget(t, "is_ctor")
 end
 
 function std.is_fspace_instance(t)
@@ -637,6 +771,17 @@ function std.type_sub(t, mapping)
     return std.ref(std.type_sub(t.pointer_type, mapping), unpack(t.field_path))
   elseif terralib.types.istype(t) and t:ispointer() then
     return &std.type_sub(t.type, mapping)
+  elseif std.is_partition(t) then
+    local parent_region_symbol = mapping[t.parent_region_symbol] or t.parent_region_symbol
+    local colors_symbol = mapping[t.colors_symbol] or t.colors_symbol
+    if parent_region_symbol == t.parent_region_symbol and
+       colors_symbol == t.colors_symbol then
+       return t
+    else
+      return std.partition(t.disjointness, parent_region_symbol, colors_symbol)
+    end
+  elseif terralib.types.istype(t) and t:isarray() then
+    return std.type_sub(t.type, mapping)[t.N]
   else
     return t
   end
@@ -654,16 +799,26 @@ function std.type_eq(a, b, mapping)
   elseif mapping[a] == b or mapping[b] == a then
     return true
   elseif std.is_symbol(a) and std.is_symbol(b) then
-    if a == wild or b == wild then
+    if a == std.wild or b == std.wild then
       return true
     end
     return std.type_eq(a:gettype(), b:gettype(), mapping)
+  elseif a == std.wild_type and std.is_region(b) then
+    return true
+  elseif b == std.wild_type and std.is_region(a) then
+    return true
   elseif std.is_bounded_type(a) and std.is_bounded_type(b) then
+    if not std.type_eq(a.index_type, b.index_type, mapping) then
+      return false
+    end
     if not std.type_eq(a.points_to_type, b.points_to_type, mapping) then
       return false
     end
-    local a_bounds = a:bounds()
-    local b_bounds = b:bounds()
+    -- FIXME: pass in bounds properly for type_eq
+    local a_bounds, a_error_message = a:bounds()
+    if a_bounds == nil then report.error({ span = ast.trivial_span() }, a_error_message) end
+    local b_bounds, b_error_message = b:bounds()
+    if b_bounds == nil then report.error({ span = ast.trivial_span() }, b_error_message) end
     if #a_bounds ~= #b_bounds then
       return false
     end
@@ -862,7 +1017,7 @@ end
 local function reconstruct_param_as_arg_symbol(param_type, mapping)
   local param_as_arg_symbol = mapping[param_type]
   for k, v in pairs(mapping) do
-    if std.is_symbol(v) and v:gettype() == mapping[param_type] then
+    if std.is_symbol(v) and (v:gettype() == param_type or v:gettype() == mapping[param_type]) then
       param_as_arg_symbol = v
     end
   end
@@ -915,7 +1070,7 @@ end
 
 function std.validate_args(node, params, args, isvararg, return_type, mapping, strict)
   if (#args < #params) or (#args > #params and not isvararg) then
-    log.error(node, "expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
+    report.error(node, "expected " .. tostring(#params) .. " arguments but got " .. tostring(#args))
   end
 
   -- FIXME: All of these calls are being done with the order backwards
@@ -933,6 +1088,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
     mapping = {}
   end
 
+  local need_cast = terralib.newlist()
   for i, param in ipairs(params) do
     local arg = args[i]
     local param_type = param:gettype()
@@ -947,6 +1103,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       mapping[param_type] == arg_type
     then
       -- Ok
+      need_cast[i] = false
     elseif type_compatible(param_type, arg_type) then
       -- Regions (and other unique types) require a special pass here 
 
@@ -961,7 +1118,7 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
             param_as_arg_type = v
           end
         end
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
+        report.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg))
       end
@@ -973,18 +1130,65 @@ function std.validate_args(node, params, args, isvararg, return_type, mapping, s
       mapping[param_type] = arg_type
       if not type_isomorphic(param_type, arg_type, check, mapping) then
         local param_as_arg_type = reconstruct_param_as_arg_type(param_type, mapping)
-        log.error(node, "type mismatch in argument " .. tostring(i) ..
+        report.error(node, "type mismatch in argument " .. tostring(i) ..
                     ": expected " .. tostring(param_as_arg_type) ..
                     " but got " .. tostring(arg_type))
       end
+      need_cast[i] = false
     elseif not check(arg_type, param_type, mapping) then
       local param_as_arg_type = std.type_sub(param_type, mapping)
-      log.error(node, "type mismatch in argument " .. tostring(i) ..
+      report.error(node, "type mismatch in argument " .. tostring(i) ..
                   ": expected " .. tostring(param_as_arg_type) ..
                   " but got " .. tostring(arg_type))
+    else
+      need_cast[i] = not std.type_eq(arg_type, param_type, mapping)
     end
   end
-  return reconstruct_return_as_arg_type(return_type, mapping)
+  return reconstruct_return_as_arg_type(return_type, mapping), need_cast
+end
+
+local function unpack_type(old_type, mapping)
+  if std.is_ispace(old_type) then
+    local index_type = std.type_sub(old_type.index_type, mapping)
+    return std.ispace(index_type), true
+  elseif std.is_region(old_type) then
+    local ispace_type
+    if not mapping[old_type:ispace()] then
+      ispace_type = unpack_type(old_type:ispace(), mapping)
+    else
+      ispace_type = std.type_sub(old_type:ispace(), mapping)
+    end
+    local fspace_type = std.type_sub(old_type.fspace_type, mapping)
+    return std.region(std.newsymbol(ispace_type, old_type.ispace_symbol:hasname()), fspace_type), true
+  elseif std.is_partition(old_type) then
+    local parent_region_type = std.type_sub(old_type:parent_region(), mapping)
+    local colors_type = std.type_sub(old_type:colors(), mapping)
+    local parent_region_symbol = old_type.parent_region_symbol
+    local colors_symbol = old_type.colors_symbol
+    assert(not mapping[parent_region_symbol] or
+           mapping[parent_region_symbol]:gettype() == parent_region_type)
+    assert(not mapping[colors_symbol] or
+           mapping[colors_symbol]:gettype() == colors_type)
+    return std.partition(
+      old_type.disjointness,
+      mapping[parent_region_symbol] or
+      std.newsymbol(parent_region_type, parent_region_symbol:hasname()),
+      mapping[colors_symbol] or
+      std.newsymbol(colors_type, colors_symbol:hasname())), true
+  elseif std.is_cross_product(old_type) then
+    local partitions = data.zip(old_type:partitions(), old_type.partition_symbols):map(
+      function(pair)
+        local old_partition_type, old_partition_symbol = unpack(pair)
+        return std.newsymbol(
+          std.type_sub(old_partition_type, mapping),
+          old_partition_symbol:getname())
+    end)
+    return std.cross_product(unpack(partitions)), true
+  elseif std.is_list_of_regions(old_type) then
+    return std.list(unpack_type(old_type.element_type, mapping)), true
+  else
+    return std.type_sub(old_type, mapping), false
+  end
 end
 
 function std.validate_fields(fields, constraints, params, args)
@@ -992,20 +1196,16 @@ function std.validate_fields(fields, constraints, params, args)
   for i, param in ipairs(params) do
     local arg = args[i]
     mapping[param] = arg
+    mapping[param:gettype()] = arg:gettype()
   end
 
   local new_fields = terralib.newlist()
   for _, old_field in ipairs(fields) do
     local old_symbol, old_type = old_field.field, old_field.type
     local new_symbol = std.newsymbol(old_symbol:getname())
-    local new_type
-    if std.is_region(old_type) then
-      mapping[old_symbol] = new_symbol
-      local new_fspace_type = std.type_sub(old_type.fspace_type, mapping)
-      new_type = std.region(new_fspace_type)
-    else
-      new_type = std.type_sub(old_type, mapping)
-    end
+    mapping[old_symbol] = new_symbol
+    local new_type = unpack_type(old_type, mapping)
+    mapping[old_type] = new_type
     new_symbol:settype(new_type)
     new_fields:insert({
         field = new_symbol:getname(),
@@ -1075,8 +1275,17 @@ function std.unpack_fields(fs, symbols)
   fs:complete() -- Need fields
   local old_symbols = std.struct_entries_symbols(fs)
 
+  -- give an identity mapping for field space arguments
+  -- to avoid having two different symbols of the same name
+  -- (which can later seriously confuse type substitution)
   local mapping = {}
+  for i, arg in ipairs(fs.args) do
+    mapping[arg] = arg
+    mapping[arg:gettype()] = arg:gettype()
+  end
+
   local new_fields = terralib.newlist()
+  local new_constraints = terralib.newlist()
   local needs_unpack = false
   for i, old_field in ipairs(fs:getentries()) do
     local old_symbol, old_type = old_symbols[i], old_field.type
@@ -1087,18 +1296,18 @@ function std.unpack_fields(fs, symbols)
     else
       new_symbol = std.newsymbol(old_symbol:getname())
     end
-    local new_type
-    if std.is_region(old_type) then
-      mapping[old_symbol] = new_symbol
-      local fspace_type = std.type_sub(old_type.fspace_type, mapping)
-      new_type = std.region(fspace_type)
-      needs_unpack = true
-    else
-      new_type = std.type_sub(old_type, mapping)
-      if std.is_fspace_instance(new_type) then
-        new_type = std.unpack_fields(new_type)
-      end
+
+    mapping[old_symbol] = new_symbol
+    local new_type, is_unpack = unpack_type(old_type, mapping)
+    mapping[old_type] = new_type
+    needs_unpack = needs_unpack or is_unpack
+
+    if std.is_fspace_instance(new_type) then
+      local sub_type, sub_constraints = std.unpack_fields(new_type)
+      new_type = sub_type
+      new_constraints:insertall(sub_constraints)
     end
+
     new_symbol:settype(new_type)
     new_fields:insert({
         field = new_symbol:getname(),
@@ -1111,7 +1320,6 @@ function std.unpack_fields(fs, symbols)
   end
 
   local constraints = fs:getconstraints()
-  local new_constraints = terralib.newlist()
   for _, constraint in ipairs(constraints) do
     local lhs = mapping[constraint.lhs] or constraint.lhs
     local rhs = mapping[constraint.rhs] or constraint.rhs
@@ -1123,7 +1331,7 @@ function std.unpack_fields(fs, symbols)
     })
   end
 
-  local result_type = std.ctor(new_fields)
+  local result_type = std.ctor_named(new_fields)
   result_type.is_unpack_result = true
 
   return result_type, new_constraints
@@ -1152,12 +1360,14 @@ function std.check_read(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, field_path = t:bounds(), t.field_path
+    local region_types, error_message = t:bounds()
+    if region_types == nil then report.error(node, error_message) end
+    local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
       if not std.check_privilege(cx, std.reads, region_type, field_path) then
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
-        log.error(node, "invalid privilege reads(" ..
+        report.error(node, "invalid privilege reads(" ..
                   (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
@@ -1170,12 +1380,14 @@ function std.check_write(cx, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, field_path = t:bounds(), t.field_path
+    local region_types, error_message = t:bounds()
+    if region_types == nil then report.error(node, error_message) end
+    local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
       if not std.check_privilege(cx, std.writes, region_type, field_path) then
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
-        log.error(node, "invalid privilege writes(" ..
+        report.error(node, "invalid privilege writes(" ..
                   (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
@@ -1184,7 +1396,7 @@ function std.check_write(cx, node)
   elseif std.is_rawref(t) then
     return std.as_read(t)
   else
-    log.error(node, "type mismatch: write expected an lvalue but got " .. tostring(t))
+    report.error(node, "type mismatch: write expected an lvalue but got " .. tostring(t))
   end
 end
 
@@ -1192,12 +1404,14 @@ function std.check_reduce(cx, op, node)
   local t = node.expr_type
   assert(terralib.types.istype(t))
   if std.is_ref(t) then
-    local region_types, field_path = t:bounds(), t.field_path
+    local region_types, error_message = t:bounds()
+    if region_types == nil then report.error(node, error_message) end
+    local field_path = t.field_path
     for i, region_type in ipairs(region_types) do
       if not std.check_privilege(cx, std.reduces(op), region_type, field_path) then
         local regions = t.bounds_symbols
         local ref_as_ptr = t.pointer_type.index_type(t.refers_to_type, unpack(regions))
-        log.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
+        report.error(node, "invalid privilege " .. tostring(std.reduces(op)) .. "(" ..
                   (data.newtuple(regions[i]) .. field_path):mkstring(".") ..
                   ") for dereference of " .. tostring(ref_as_ptr))
       end
@@ -1206,7 +1420,7 @@ function std.check_reduce(cx, op, node)
   elseif std.is_rawref(t) then
     return std.as_read(t)
   else
-    log.error(node, "type mismatch: reduce expected an lvalue but got " .. tostring(t))
+    report.error(node, "type mismatch: reduce expected an lvalue but got " .. tostring(t))
   end
 end
 
@@ -1263,36 +1477,42 @@ function std.get_field_path(value_type, field_path)
   return field_type
 end
 
+local function type_requires_force_cast(a, b)
+  return (std.is_ispace(a) and std.is_ispace(b)) or
+    (std.is_region(a) and std.is_region(b)) or
+    (std.is_partition(a) and std.is_partition(b)) or
+    (std.is_cross_product(a) and std.is_cross_product(b)) or
+    (std.is_list_of_regions(a) and std.is_list_of_regions(b)) or
+    (std.is_bounded_type(a) and std.is_bounded_type(b)) or
+    (std.is_fspace_instance(a) and std.is_fspace_instance(b))
+end
+
 function std.implicit_cast(from, to, expr)
-   assert(not (std.is_ref(from) or std.is_rawref(from)))
-   if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_list_of_regions(to) or
-     std.is_bounded_type(to) or std.is_fspace_instance(to)
-  then
+  assert(not (std.is_ref(from) or std.is_rawref(from)))
+  if type_requires_force_cast(from, to) then
     return to:force_cast(from, to, expr)
-  elseif std.is_index_type(to) then
-    return `([to](expr))
   else
-    return quote var v : to = [expr] in v end
+    return `([to]([expr]))
   end
 end
 
 function std.explicit_cast(from, to, expr)
-   if std.is_ispace(to) or std.is_region(to) or std.is_partition(to) or
-     std.is_cross_product(to) or std.is_list_of_regions(to) or
-     std.is_bounded_type(to) or std.is_fspace_instance(to)
-   then
+  assert(not (std.is_ref(from) or std.is_rawref(from)))
+  if type_requires_force_cast(from, to) then
     return to:force_cast(from, to, expr)
   else
-    return `([to](expr))
+    return `([to]([expr]))
   end
 end
 
-function std.flatten_struct_fields(struct_type)
+function std.flatten_struct_fields(struct_type, pred)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()
-  if struct_type:isstruct() or std.is_fspace_instance(struct_type) then
+  if pred ~= nil and pred(struct_type) then
+    field_paths:insert(data.newtuple())
+    field_types:insert(struct_type)
+  elseif struct_type:isstruct() or std.is_fspace_instance(struct_type) then
     local entries = struct_type:getentries()
     for _, entry in ipairs(entries) do
       local entry_name = entry[1] or entry.field
@@ -1300,7 +1520,7 @@ function std.flatten_struct_fields(struct_type)
       assert(type(entry_name) == "string")
       local entry_type = entry[2] or entry.type
       local entry_field_paths, entry_field_types =
-        std.flatten_struct_fields(entry_type)
+        std.flatten_struct_fields(entry_type, pred)
       field_paths:insertall(
         entry_field_paths:map(
           function(entry_field_path)
@@ -1335,14 +1555,14 @@ end
 -- ## Serialization Helpers
 -- #################
 
-function std.compute_serialized_size(value_type, value)
+local function compute_serialized_size_inner(value_type, value)
   if std.is_list(value_type) then
     local result = terralib.newsymbol(c.size_t, "result")
     local element_type = value_type.element_type
     local element = terralib.newsymbol(&element_type)
 
-    local size_actions, size_value = std.compute_serialized_size(
-      element_type, element)
+    local size_actions, size_value = compute_serialized_size_inner(
+      element_type, `(@element))
     local actions = quote
       var [result] = 0
       for i = 0, [value].__size do
@@ -1357,7 +1577,27 @@ function std.compute_serialized_size(value_type, value)
   end
 end
 
-function std.serialize(value_type, value, fixed_ptr, data_ptr)
+local compute_serialized_size_helper = terralib.memoize(function(value_type)
+  local value = terralib.newsymbol(value_type, "value")
+  local actions, result = compute_serialized_size_inner(value_type, value)
+  local terra compute_serialized_size([value]) : c.size_t
+    [actions];
+    return [result]
+  end
+  compute_serialized_size:setinlined(false)
+  return compute_serialized_size
+end)
+
+function std.compute_serialized_size(value_type, value)
+  local helper = compute_serialized_size_helper(value_type)
+  local result = terralib.newsymbol(c.size_t, "result")
+  local actions = quote
+    var [result] = helper([value])
+  end
+  return actions, result
+end
+
+local function serialize_inner(value_type, value, fixed_ptr, data_ptr)
   -- Force unaligned access because malloc does not provide
   -- blocks aligned for all purposes (e.g. SSE vectors).
   local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
@@ -1388,7 +1628,27 @@ function std.serialize(value_type, value, fixed_ptr, data_ptr)
   return actions
 end
 
-function std.deserialize(value_type, fixed_ptr, data_ptr)
+local serialize_helper = terralib.memoize(function(value_type)
+  local value = terralib.newsymbol(value_type, "value")
+  local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
+  local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
+  local actions = serialize_inner(value_type, value, fixed_ptr, data_ptr)
+  local terra serialize([value], [fixed_ptr], [data_ptr])
+    [actions]
+  end
+  serialize:setinlined(false)
+  return serialize
+end)
+
+function std.serialize(value_type, value, fixed_ptr, data_ptr)
+  local helper = serialize_helper(value_type)
+  local actions = quote
+    helper([value], [fixed_ptr], [data_ptr])
+  end
+  return actions
+end
+
+local function deserialize_inner(value_type, fixed_ptr, data_ptr)
   -- Force unaligned access because malloc does not provide
   -- blocks aligned for all purposes (e.g. SSE vectors).
   local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
@@ -1403,7 +1663,7 @@ function std.deserialize(value_type, fixed_ptr, data_ptr)
     local element_type = value_type.element_type
     local element_ptr = terralib.newsymbol(&element_type)
 
-    local deser_actions, deser_value = std.deserialize(
+    local deser_actions, deser_value = deserialize_inner(
       element_type, element_ptr, data_ptr)
     actions = quote
       [actions]
@@ -1419,6 +1679,27 @@ function std.deserialize(value_type, fixed_ptr, data_ptr)
     end
   end
 
+  return actions, result
+end
+
+local deserialize_helper = terralib.memoize(function(value_type)
+  local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
+  local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
+  local actions, result = deserialize_inner(value_type, fixed_ptr, data_ptr)
+  local terra deserialize([fixed_ptr], [data_ptr])
+    [actions];
+    return [result]
+  end
+  deserialize:setinlined(false)
+  return deserialize
+end)
+
+function std.deserialize(value_type, fixed_ptr, data_ptr)
+  local helper = deserialize_helper(value_type)
+  local result = terralib.newsymbol(value_type, "result")
+  local actions = quote
+    var [result] = helper([fixed_ptr], [data_ptr])
+  end
   return actions, result
 end
 
@@ -1471,20 +1752,21 @@ do
   local next_id = 1
   function std.newsymbol(symbol_type, symbol_name)
     -- Swap around the arguments to allow either one to be optional.
-    if type(symbol_type) == "string" then
+    if type(symbol_type) == "string" and symbol_name == nil then
       symbol_type, symbol_name = nil, symbol_type
-    elseif terralib.types.istype(symbol_name) then
+    elseif symbol_type == nil and terralib.types.istype(symbol_name) then
       symbol_type, symbol_name = symbol_name, nil
     end
-    assert(symbol_type == nil or terralib.types.istype(symbol_type))
-    assert(symbol_name == nil or type(symbol_name) == "string")
+    assert(symbol_type == nil or terralib.types.istype(symbol_type), "newsymbol expected argument 1 to be a type")
+    assert(symbol_name == nil or type(symbol_name) == "string", "newsymbol expected argument 2 to be a string")
 
     local id = next_id
     next_id = next_id + 1
     return setmetatable({
       symbol_type = symbol_type or false,
       symbol_name = symbol_name or false,
-      symbol_value = false,
+      symbol_symbol = false,
+      symbol_label = false,
       symbol_id = id,
     }, symbol)
   end
@@ -1504,7 +1786,7 @@ function symbol:getname()
 end
 
 function symbol:hastype()
-  return self.symbol_type
+  return self.symbol_type or nil
 end
 
 function symbol:gettype()
@@ -1512,24 +1794,39 @@ function symbol:gettype()
   return self.symbol_type
 end
 
-function symbol:settype(type, force)
+function symbol:settype(type)
   assert(terralib.types.istype(type))
-  assert(force or not self.symbol_type)
-  if self.symbol_type then assert(not self.symbol_value) end
+  assert(not self.symbol_type)
+  assert(not self.symbol_symbol)
   self.symbol_type = type
 end
 
 function symbol:getsymbol()
   assert(self.symbol_type)
-  if not self.symbol_value then
-    self.symbol_value = terralib.newsymbol(self.symbol_type, self.symbol_name)
+  if not self.symbol_symbol then
+    self.symbol_symbol = terralib.newsymbol(self.symbol_type, self.symbol_name)
   end
-  return self.symbol_value
+  return self.symbol_symbol
+end
+
+function symbol:getlabel()
+  if not self.symbol_label then
+    self.symbol_label = terralib.newlabel(self.symbol_name)
+  end
+  return self.symbol_label
+end
+
+function symbol:hash()
+  return self
 end
 
 function symbol:__tostring()
   if self:hasname() then
-    return "$" .. tostring(self:getname())
+    if std.config["debug"] then
+      return "$" .. tostring(self:getname()) .. "#" .. tostring(self.symbol_id)
+    else
+      return "$" .. tostring(self:getname())
+    end
   else
     return "$" .. tostring(self.symbol_id)
   end
@@ -1571,8 +1868,204 @@ function rquote:__tostring()
 end
 
 -- #####################################
+-- ## Codegen Helpers
+-- #################
+
+local gen_optimal = terralib.memoize(
+  function(op, lhs_type, rhs_type)
+    return terra(lhs : lhs_type, rhs : rhs_type)
+      if [std.quote_binary_op(op, lhs, rhs)] then
+        return lhs
+      else
+        return rhs
+      end
+    end
+  end)
+
+std.fmax = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = std.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
+std.fmin = macro(
+  function(lhs, rhs)
+    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
+    local result_type = std.type_meet(lhs_type, rhs_type)
+    assert(result_type)
+    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
+  end)
+
+function std.quote_unary_op(op, rhs)
+  if op == "-" then
+    return `(-[rhs])
+  elseif op == "not" then
+    return `(not [rhs])
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
+end
+
+function std.quote_binary_op(op, lhs, rhs)
+  if op == "*" then
+    return `([lhs] * [rhs])
+  elseif op == "/" then
+    return `([lhs] / [rhs])
+  elseif op == "%" then
+    return `([lhs] % [rhs])
+  elseif op == "+" then
+    return `([lhs] + [rhs])
+  elseif op == "-" then
+    return `([lhs] - [rhs])
+  elseif op == "<" then
+    return `([lhs] < [rhs])
+  elseif op == ">" then
+    return `([lhs] > [rhs])
+  elseif op == "<=" then
+    return `([lhs] <= [rhs])
+  elseif op == ">=" then
+    return `([lhs] >= [rhs])
+  elseif op == "==" then
+    return `([lhs] == [rhs])
+  elseif op == "~=" then
+    return `([lhs] ~= [rhs])
+  elseif op == "and" then
+    return `([lhs] and [rhs])
+  elseif op == "or" then
+    return `([lhs] or [rhs])
+  elseif op == "max" then
+    return `([std.fmax]([lhs], [rhs]))
+  elseif op == "min" then
+    return `([std.fmin]([lhs], [rhs]))
+  else
+    assert(false, "unknown operator " .. tostring(op))
+  end
+end
+
+-- #####################################
 -- ## Types
 -- #################
+
+local arithmetic_combinators = {
+  ["__add"] = function(a, b) return `([a] + [b]) end,
+  ["__sub"] = function(a, b) return `([a] - [b]) end,
+  ["__mul"] = function(a, b) return `([a] * [b]) end,
+  ["__div"] = function(a, b) return `([a] / [b]) end,
+  ["__mod"] = function(a, b) return `([a] % [b]) end,
+}
+
+local function generate_arithmetic_metamethod_body(ty, method, e1, e2)
+  local combinator = arithmetic_combinators[method]
+  if ty:isprimitive() then
+    return combinator(e1, e2)
+  elseif ty:isstruct() then
+    if ty.metamethods[method] then
+      return combinator(e1, e2)
+    end
+    local entries = ty:getentries():map(function(entry)
+      return generate_arithmetic_metamethod_body(entry.type, method,
+                                                 `(e1.[entry.field]),
+                                                 `(e2.[entry.field]))
+    end)
+    return `([ty] { [entries] })
+  elseif ty:isarray() then
+    local entries = terralib.newlist()
+    for idx = 0, ty.N - 1 do
+      entries:insert(
+        generate_arithmetic_metamethod_body(ty.type, method,
+                                            `(e1[ [idx] ]),
+                                            `(e2[ [idx] ])))
+    end
+    return `(arrayof([ty.type], [entries]))
+  end
+  assert(false)
+end
+
+function std.generate_arithmetic_metamethod(ty, method)
+  local a = terralib.newsymbol(ty, "a")
+  local b = terralib.newsymbol(ty, "b")
+  local body = generate_arithmetic_metamethod_body(ty, method, a, b)
+  return terra([a], [b]) : ty return [body] end
+end
+
+function std.generate_arithmetic_metamethods(ty)
+  local methods = {}
+  for method, _ in pairs(arithmetic_combinators) do
+    methods[method] = std.generate_arithmetic_metamethod(ty, method)
+  end
+  return methods
+end
+
+local and_combinator = function(a, b) return `(([a]) and ([b])) end
+local or_combinator = function(a, b) return `(([a]) and ([b])) end
+local conditional_combinators = {
+  ["__eq"] = { elem_comb = function(a, b) return `([a] == [b]) end,
+               res_comb = and_combinator, },
+  ["__ne"] = { elem_comb = function(a, b) return `([a] ~= [b]) end,
+               res_comb = or_combinator, },
+  ["__le"] = { elem_comb = function(a, b) return `([a] <= [b]) end,
+               res_comb = and_combinator, },
+  ["__lt"] = { elem_comb = function(a, b) return `([a] < [b]) end,
+               res_comb = and_combinator, },
+  ["__ge"] = { elem_comb = function(a, b) return `([a] >= [b]) end,
+               res_comb = and_combinator, },
+  ["__gt"] = { elem_comb = function(a, b) return `([a] > [b]) end,
+               res_comb = and_combinator, },
+}
+
+local function generate_conditional_metamethod_body(ty, method, e1, e2)
+  local combinators = conditional_combinators[method]
+  if ty:isprimitive() then
+    return combinators.elem_comb(e1, e2)
+  elseif ty:isstruct() then
+    local res
+    local entries = ty:getentries():map(function(entry)
+      local entry =
+        generate_conditional_metamethod_body(entry.type, method,
+                                            `(e1.[entry.field]),
+                                            `(e2.[entry.field]))
+      if not res then res = entry
+      else res = combinators.res_comb(res, entry) end
+    end)
+    return res
+  elseif ty:isarray() then
+    local entries = terralib.newlist()
+    local res
+    for idx = 0, ty.N - 1 do
+      local entry =
+        generate_conditional_metamethod_body(ty.type, method,
+                                            `(e1[ [idx] ]),
+                                            `(e2[ [idx] ]))
+      if not res then res = entry
+      else res = combinators.res_comb(res, entry) end
+    end
+    return res
+  end
+  assert(false)
+end
+
+function std.generate_conditional_metamethod(ty, method)
+  return macro(function(a, b)
+    if a:gettype() == b:gettype() then
+      return generate_conditional_metamethod_body(ty, method, a, b)
+    elseif method == "__le" or method == "__lt" then
+      local combinators = conditional_combinators[method]
+      local lhs = generate_conditional_metamethod_body(ty, method, `([b].lo), a)
+      local rhs = generate_conditional_metamethod_body(ty, method, a, `([b].hi))
+      return combinators.res_comb(lhs, rhs)
+    end
+  end)
+end
+
+function std.generate_conditional_metamethods(ty)
+  local methods = {}
+  for method, _ in pairs(conditional_combinators) do
+    methods[method] = std.generate_conditional_metamethod(ty, method)
+  end
+  return methods
+end
 
 -- WARNING: Bounded types are NOT unique. If two regions are aliased
 -- then it is possible for two different pointer types to be equal:
@@ -1648,11 +2141,14 @@ local bounded_type = terralib.memoize(function(index_type, ...)
         bound = std.as_read(bound)
       end
       if not (terralib.types.istype(bound) and
-              (std.is_ispace(bound) or std.is_region(bound)))
+              (bound == std.wild_type or std.is_ispace(bound) or std.is_region(bound)))
       then
-        log.error(nil, tostring(self.index_type) ..
+        --report.error(nil, tostring(self.index_type) ..
+        --            " expected an ispace or region as argument " ..
+        --            tostring(i+1) .. ", got " .. tostring(bound))
+        return nil, tostring(self.index_type) ..
                     " expected an ispace or region as argument " ..
-                    tostring(i+1) .. ", got " .. tostring(bound))
+                    tostring(i+1) .. ", got " .. tostring(bound)
       end
       if std.is_region(bound) and
         not (std.type_eq(bound.fspace_type, self.points_to_type) or
@@ -1660,16 +2156,20 @@ local bounded_type = terralib.memoize(function(index_type, ...)
               std.type_eq(bound.fspace_type, self.points_to_type.type)) or
              std.is_unpack_result(self.points_to_type))
       then
-        log.error(nil, tostring(self.index_type) .. " expected region(" ..
+        --report.error(nil, tostring(self.index_type) .. " expected region(" ..
+        --            tostring(self.points_to_type) .. ") as argument " ..
+        --            tostring(i+1) .. ", got " .. tostring(bound))
+        return nil, tostring(self.index_type) .. " expected region(" ..
                     tostring(self.points_to_type) .. ") as argument " ..
-                    tostring(i+1) .. ", got " .. tostring(bound))
+                    tostring(i+1) .. ", got " .. tostring(bound)
       end
       if std.is_ispace(bound) then is_ispace = true end
       if std.is_region(bound) then is_region = true end
       bounds:insert(bound)
     end
     if is_ispace and is_region then
-      log.error(nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions")
+      --report.error(nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions")
+      return nil, tostring(self.index_type) .. " bounds may not mix ispaces and regions"
     end
     return bounds
   end
@@ -1697,8 +2197,21 @@ local bounded_type = terralib.memoize(function(index_type, ...)
 
   -- Important: This has to downgrade the type, because arithmetic
   -- isn't guarranteed to stay within bounds.
-  terra st.metamethods.__add(a : st.index_type, b : st.index_type) : st.index_type
-    return a + b
+  for method, _ in pairs(arithmetic_combinators) do
+    st.metamethods[method] =
+      std.generate_arithmetic_metamethod(st.index_type, method)
+  end
+  for method, _ in pairs(conditional_combinators) do
+    st.metamethods[method] =
+      std.generate_conditional_metamethod(st.index_type, method)
+  end
+
+  terra st:to_point()
+    return ([index_type](@self)):to_point()
+  end
+
+  terra st:to_domain_point()
+    return ([index_type](@self)):to_domain_point()
   end
 
   function st:force_cast(from, to, expr)
@@ -1711,7 +2224,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     end
   end
 
-  if std.config["debug"] then
+  if false then -- std.config["debug"] then
     function st.metamethods:__typename()
       local bounds = self.bounds_symbols
 
@@ -1776,6 +2289,62 @@ do
   index_type.__metatable = getmetatable(st)
 end
 
+std.rect_type = terralib.memoize(function(index_type)
+  local st = terralib.types.newstruct("rect" .. tostring(index_type.dim) .. "d")
+  assert(not index_type:is_opaque())
+  st.entries = terralib.newlist({
+      { "lo", index_type },
+      { "hi", index_type },
+  })
+
+  st.is_rect_type = true
+  st.index_type = index_type
+  st.dim = index_type.dim
+
+  st.metamethods.__eq = macro(function(a, b)
+    return `([a].lo == [b].lo and [a].hi == [b].hi)
+  end)
+
+  st.metamethods.__ne = macro(function(a, b)
+    return `([a].lo ~= [b].lo and [a].hi ~= [b].hi)
+  end)
+
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_rect_type(from) then
+      if std.type_eq(to, c["legion_rect_" .. tostring(st.dim) .. "d_t"]) then
+        local ty = to.entries[1].type
+        return `([to] { lo = [ty]([expr].lo),
+                        hi = [ty]([expr].hi) })
+      elseif std.type_eq(to, c.legion_domain_t) then
+        return `([expr]:to_domain())
+      end
+    end
+    assert(false)
+  end
+
+  terra st:to_domain()
+    return [c["legion_domain_from_rect_" .. tostring(st.dim) .. "d"]](@self)
+  end
+
+  terra st:size()
+    return self.hi - self.lo + [st.index_type:const(1)]
+  end
+
+  if index_type.fields then
+    terra st:volume()
+      var size = self:size()
+      return [data.reduce(
+        function(result, field) return `([result] * ([size].__ptr.[field])) end,
+        index_type.fields, `(1))]
+    end
+  else
+    terra st:volume()
+      return int(self:size().__ptr)
+    end
+  end
+
+  return st
+end)
 function std.index_type(base_type, displayname)
   local impl_type, dim, fields = validate_index_base_type(base_type)
 
@@ -1796,47 +2365,56 @@ function std.index_type(base_type, displayname)
 
   function st.metamethods.__cast(from, to, expr)
     if std.is_index_type(to) then
-      if to:is_opaque() and std.validate_implicit_cast(from, int) then
+      if std.type_eq(from, c.legion_domain_point_t) then
+        return `([to.from_domain_point]([expr]))
+      elseif to:is_opaque() and std.validate_implicit_cast(from, int) then
         return `([to]{ __ptr = c.legion_ptr_t { value = [expr] } })
       elseif not to:is_opaque() and std.validate_implicit_cast(from, to.base_type) then
         return `([to]{ __ptr = [expr] })
       end
     elseif std.is_index_type(from) then
-      if from:is_opaque() and std.validate_implicit_cast(int, to) then
-        return `([to]([expr].__ptr.value))
-      elseif not from:is_opaque() and std.validate_implicit_cast(from.base_type, to) then
-        return `([to]([expr].__ptr))
+      if std.type_eq(to, c.legion_domain_point_t) then
+        return `([expr]:to_domain_point())
+      elseif from:is_opaque() then
+        if std.validate_implicit_cast(int, to) then
+          return `([to]([expr].__ptr.value))
+        end
+      else
+        assert(not from:is_opaque())
+        if std.type_eq(to, c["legion_point_" .. tostring(st.dim) .. "d_t"]) then
+          return `([expr]:to_point())
+        elseif std.validate_implicit_cast(from.base_type, to) then
+          return `([to]([expr].__ptr))
+        end
       end
     end
     assert(false)
   end
 
-  if st:is_opaque() then
-    terra st.metamethods.__add(a : st, b : st) : st
-      return st { __ptr = c.legion_ptr_t { value = a.__ptr.value + b.__ptr.value } }
-    end
-  else
-    terra st.metamethods.__add(a : st, b : st) : st
-      return st { __ptr = a.__ptr + b.__ptr }
-    end
-  end
-
-  function st:zero()
+  function st:const(v)
     assert(self.dim >= 1)
     local fields = self.fields
     local pt = c["legion_point_" .. tostring(self.dim) .. "d_t"]
 
     if fields then
-      return `(self { __ptr = [self.impl_type] { [fields:map(function(_) return 0 end)] } })
+      return `(self { __ptr = [self.impl_type] { [fields:map(function(_) return v end)] } })
     else
-      return `(self({ __ptr = [self.impl_type](0) }))
+      return `(self({ __ptr = [self.impl_type](v) }))
     end
   end
 
-  function st:to_point(expr)
-    assert(self.dim >= 1)
-    local fields = self.fields
-    local pt = c["legion_point_" .. tostring(self.dim) .. "d_t"]
+  function st:zero()
+    return st:const(0)
+  end
+
+  function st:nil_index()
+    return st:const(-(2^31 - 1))
+  end
+
+  local function make_point(expr)
+    local dim = data.max(st.dim, 1)
+    local fields = st.fields
+    local pt = c["legion_point_" .. tostring(dim) .. "d_t"]
 
     if fields then
       return quote
@@ -1849,12 +2427,16 @@ function std.index_type(base_type, displayname)
     end
   end
 
-  function st:to_domain_point(expr)
-    local index = terralib.newsymbol(self.impl_type)
+  terra st:to_point()
+    return [make_point(self)]
+  end
+
+  local function make_domain_point(expr)
+    local index = terralib.newsymbol(st.impl_type)
 
     local values
-    if self.fields then
-      values = self.fields:map(function(field) return `(index.[field]) end)
+    if st.fields then
+      values = st.fields:map(function(field) return `(index.[field]) end)
     else
       values = terralib.newlist({index})
     end
@@ -1866,28 +2448,105 @@ function std.index_type(base_type, displayname)
       var [index] = [expr].__ptr
     in
       c.legion_domain_point_t {
-        dim = [data.max(self.dim, 1)],
+        dim = [data.max(st.dim, 1)],
         point_data = arrayof(c.coord_t, [values]),
       }
     end
   end
 
+  terra st:to_domain_point()
+    return [make_domain_point(self)]
+  end
+
+  -- Generate `from_domain_point` function.
+  local function make_from_domain_point(pt_expr)
+    local fields = st.fields
+
+    local dimensionality_match_cond
+    if st.dim <= 1 then  -- We regard 0-dim and 1-dim points as interchangeable.
+      dimensionality_match_cond = `([pt_expr].dim <= 1)
+    else
+      dimensionality_match_cond = `([pt_expr].dim == [st.dim])
+    end
+    local error_message =
+      "from_domain_point (" .. tostring(st) .. "): dimensionality mismatch"
+    local nil_case = quote end
+    if st.dim >= 1 then
+      nil_case = quote
+        if [pt_expr].dim == -1 then return [st:nil_index()] end
+      end
+    end
+    if fields then
+      return quote
+        [nil_case]
+        std.assert([dimensionality_match_cond], [error_message])
+        return st { __ptr = [st.impl_type] {
+          [data.mapi(function(i) return `([pt_expr].point_data[ [i-1] ]) end, st.fields)] } }
+      end
+    else
+      return quote
+        [nil_case]
+        std.assert([dimensionality_match_cond], [error_message])
+        return st { __ptr = [st.impl_type]([pt_expr].point_data[0]) }
+      end
+    end
+  end
+  terra st.from_domain_point(pt : c.legion_domain_point_t)
+    [make_from_domain_point(pt)]
+  end
+
+  for method_name, method in pairs(std.generate_arithmetic_metamethods(st)) do
+    st.metamethods[method_name] = method
+  end
+  for method_name, method in pairs(std.generate_conditional_metamethods(st)) do
+    st.metamethods[method_name] = method
+  end
+  if not st:is_opaque() then
+    st.metamethods.__mod = terralib.overloadedfunction(
+      "__mod", {
+        st.metamethods.__mod,
+        terra(a : st, b : std.rect_type(st)) : st
+          var sz = b:size()
+          return (a + sz) % sz
+        end
+      })
+  end
+
+  -- Makes a Terra function that performs an operation element-wise on two
+  -- values of this index type.
+  local function make_element_wise_op(op)
+    local fields = st.fields
+    if fields then
+      return terra(i1 : st, i2 : st)
+        var p1, p2 = i1.__ptr, i2.__ptr
+        return [st] { __ptr = [st.impl_type]
+          { [fields:map(function(field) return `([op](p1.[field], p2.[field])) end)] } }
+      end
+    else
+      return terra(i1 : st, i2 : st)
+        return [st] { __ptr = [st.impl_type]([op](i1.__ptr, i2.__ptr)) }
+      end
+    end
+  end
+  -- Element-wise min and max.
+  st.elem_min = make_element_wise_op(std.fmin)
+  st.elem_max = make_element_wise_op(std.fmax)
+
   return setmetatable(st, index_type)
 end
 
 local struct __int2d { x : int, y : int }
-terra __int2d.metamethods.__add(a : __int2d, b : __int2d) : __int2d
-  return __int2d { x = a.x + b.x, y = a.y + b.y }
-end
 local struct __int3d { x : int, y : int, z : int }
-terra __int3d.metamethods.__add(a : __int3d, b : __int3d) : __int3d
-  return __int3d { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z }
-end
 std.ptr = std.index_type(opaque, "ptr")
 std.int1d = std.index_type(int, "int1d")
 std.int2d = std.index_type(__int2d, "int2d")
 std.int3d = std.index_type(__int3d, "int3d")
 
+std.rect1d = std.rect_type(std.int1d)
+std.rect2d = std.rect_type(std.int2d)
+std.rect3d = std.rect_type(std.int3d)
+
+local next_ispace_id = 1
 function std.ispace(index_type)
   assert(terralib.types.istype(index_type) and std.is_index_type(index_type),
          "Ispace type requires index type")
@@ -1910,8 +2569,16 @@ function std.ispace(index_type)
     return `([to] { impl = [expr].impl })
   end
 
-  function st.metamethods.__typename(st)
-    return "ispace(" .. tostring(st.index_type) .. ")"
+  if std.config["debug"] then
+    local id = next_ispace_id
+    next_ispace_id = next_ispace_id + 1
+    function st.metamethods.__typename(st)
+      return "ispace#" .. tostring(id) .. "(" .. tostring(st.index_type) .. ")"
+    end
+  else
+    function st.metamethods.__typename(st)
+      return "ispace(" .. tostring(st.index_type) .. ")"
+    end
   end
 
   return st
@@ -1999,10 +2666,11 @@ function std.region(ispace_symbol, fspace_type)
   return st
 end
 
-std.wild = std.newsymbol(std.untyped, "wild")
+std.wild_type = terralib.types.newstruct("wild_type")
+std.wild = std.newsymbol(std.wild_type, "wild")
 
-std.disjoint = terralib.types.newstruct("disjoint")
-std.aliased = terralib.types.newstruct("aliased")
+std.disjoint = ast.disjointness_kind.Disjoint {}
+std.aliased = ast.disjointness_kind.Aliased {}
 
 function std.partition(disjointness, region_symbol, colors_symbol)
   if colors_symbol == nil then
@@ -2012,7 +2680,7 @@ function std.partition(disjointness, region_symbol, colors_symbol)
     colors_symbol = std.newsymbol(colors_symbol)
   end
 
-  assert(disjointness == std.disjoint or disjointness == std.aliased,
+  assert(disjointness:is(ast.disjointness_kind),
          "Partition type requires disjointness to be one of disjoint or aliased")
   assert(std.is_symbol(region_symbol),
          "Partition type requires region to be a symbol")
@@ -2041,7 +2709,7 @@ function std.partition(disjointness, region_symbol, colors_symbol)
   st.subregions = {}
 
   function st:is_disjoint()
-    return self.disjointness == std.disjoint
+    return self.disjointness:is(ast.disjointness_kind.Disjoint)
   end
 
   function st:partition()
@@ -2196,7 +2864,8 @@ function std.cross_product(...)
     region_type = region_type or self:subregion_dynamic()
     assert(std.is_region(region_type))
     local region_symbol = std.newsymbol(region_type)
-    local partition = std.partition(self:partition(2).disjointness, region_symbol)
+    local partition = std.partition(self:partition(2).disjointness, region_symbol,
+                                    self:partition(2).colors_symbol)
     if #partition_symbols > 2 then
       local partition_symbol = std.newsymbol(partition)
       local subpartition_symbols = terralib.newlist({partition_symbol})
@@ -2265,13 +2934,18 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
     for i, region_symbol in ipairs(self.bounds_symbols) do
       local region = region_symbol:gettype()
       if not (terralib.types.istype(region) and std.is_region(region)) then
-        log.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region.type))
+        --report.error(nil, "vptr expected a region as argument " .. tostring(i+1) ..
+        --            ", got " .. tostring(region.type))
+        return nil, "vptr expected a region as argument " .. tostring(i+1) ..
+                    ", got " .. tostring(region.type)
       end
       if not std.type_eq(region.fspace_type, points_to_type) then
-        log.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
+        --report.error(nil, "vptr expected region(" .. tostring(points_to_type) ..
+        --            ") as argument " .. tostring(i+1) ..
+        --            ", got " .. tostring(region))
+        return nil, "vptr expected region(" .. tostring(points_to_type) ..
                     ") as argument " .. tostring(i+1) ..
-                    ", got " .. tostring(region))
+                    ", got " .. tostring(region)
       end
       bounds:insert(region)
     end
@@ -2305,6 +2979,8 @@ std.sov = terralib.memoize(function(struct_type, width)
     local entry_type = entry[2] or entry.type
     if entry_type:isprimitive() then
       st.entries:insert{entry_field, vector(entry_type, width)}
+    elseif entry_type:isarray() then
+      st.entries:insert{entry_field, vector(entry_type.type, width)[entry_type.N]}
     else
       st.entries:insert{entry_field, std.sov(entry_type, width)}
     end
@@ -2625,16 +3301,14 @@ do
     return field["type"] or field[2]
   end
 
-  function std.ctor(fields)
+  function std.ctor_named(fields)
     local st = terralib.types.newstruct()
     st.entries = fields
     st.is_ctor = true
     st.metamethods.__cast = function(from, to, expr)
-      if std.is_index_type(to) then
-        return `([to]{ __ptr = [to.impl_type](expr)})
-      elseif to:isstruct() then
+      if to:isstruct() then
         local from_fields = {}
-        for _, from_field in ipairs(to:getentries()) do
+        for _, from_field in ipairs(from:getentries()) do
           from_fields[field_name(from_field)] = field_type(from_field)
         end
         local mapping = terralib.newlist()
@@ -2642,8 +3316,8 @@ do
           local to_field_name = field_name(to_field)
           local to_field_type = field_type(to_field)
           local from_field_type = from_fields[to_field_name]
-          if not (from_field_type and to_field_type == from_field_type) then
-            error()
+          if not from_field_type then
+            error("type mismatch: ctor cast missing field " .. tostring(to_field_name))
           end
           mapping:insert({from_field_type, to_field_type, to_field_name})
         end
@@ -2664,455 +3338,57 @@ do
     end
     return st
   end
-end
 
--- #####################################
--- ## Privileges
--- #################
-
-std.reads = "reads"
-std.writes = "writes"
-function std.reduces(op)
-  local ops = {
-    ["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true,
-    ["max"] = true, ["min"] = true,
-  }
-  assert(ops[op])
-  return "reduces " .. tostring(op)
-end
-
-function std.is_reduce(privilege)
-  local base = "reduces "
-  return string.sub(privilege, 1, string.len(base)) == base
-end
-
-function std.privilege(privilege, regions_fields)
-  local privileges = terralib.newlist()
-  for _, region_fields in ipairs(regions_fields) do
-    local region, fields
-    if std.is_symbol(region_fields) then
-      region = region_fields
-      fields = terralib.newlist({data.newtuple()})
-    else
-      region = region_fields.region
-      fields = region_fields.fields
+  function std.ctor_tuple(fields)
+    local st = terralib.types.newstruct()
+    st.entries = terralib.newlist()
+    for i, field in ipairs(fields) do
+      st.entries:insert({"_" .. tostring(i), field})
     end
-    assert(std.is_symbol(region) and terralib.islist(fields))
-    for _, field in ipairs(fields) do
-      privileges:insert(data.map_from_table {
-        node_type = "privilege",
-        region = region,
-        field_path = field,
-        privilege = privilege,
-      })
+    st.is_ctor = true
+    st.metamethods.__cast = function(from, to, expr)
+      if to:isstruct() then
+        local from_fields = {}
+        for i, from_field in ipairs(from:getentries()) do
+          from_fields[i] = field_type(from_field)
+        end
+        local mapping = terralib.newlist()
+        for i, to_field in ipairs(to:getentries()) do
+          local to_field_type = field_type(to_field)
+          local from_field_type = from_fields[i]
+          if not from_field_type then
+            error("type mismatch: ctor cast has insufficient fields")
+          end
+          mapping:insert({from_field_type, to_field_type, i})
+        end
+
+        local v = terralib.newsymbol(from)
+        local fields = mapping:map(
+          function(field_mapping)
+            local from_field_type, to_field_type, i = unpack(
+              field_mapping)
+            return std.implicit_cast(
+              from_field_type, to_field_type, `([v].["_" .. tostring(i)]))
+          end)
+
+        return quote var [v] = [expr] in [to]({ [fields] }) end
+      else
+        error("ctor must cast to a struct")
+      end
     end
+    return st
   end
-  return privileges
-end
-
--- #####################################
--- ## Coherence Modes
--- #################
-
-std.exclusive = "exclusive"
-std.atomic = "atomic"
-std.simultaneous = "simultaneous"
-std.relaxed = "relaxed"
-
--- #####################################
--- ## Flags
--- #################
-
-std.no_access_flag = "no_access_flag"
-
--- #####################################
--- ## Conditions
--- #################
-
-std.arrives = "arrives"
-std.awaits = "awaits"
-
--- #####################################
--- ## Constraints
--- #################
-
-function std.constraint(lhs, rhs, op)
-  return {
-    lhs = lhs,
-    rhs = rhs,
-    op = op,
-  }
 end
 
 -- #####################################
 -- ## Tasks
 -- #################
 
-local task = {}
-function task:__index(field)
-  local value = task[field]
-  if value ~= nil then return value end
-  error("task has no field '" .. field .. "' (in lookup)", 2)
-end
+std.newtask = base.newtask
+std.is_task = base.is_task
 
-function task:__newindex(field, value)
-  error("task has no field '" .. field .. "' (in assignment)", 2)
-end
-
-function task:set_param_symbols(symbols, force)
-  assert(force or not self.param_symbols)
-  self.param_symbols = symbols
-end
-
-function task:get_param_symbols()
-  assert(self.param_symbols)
-  return self.param_symbols
-end
-
-function task:set_params_struct(t)
-  assert(not self.params_struct)
-  self.params_struct = t
-end
-
-function task:get_params_struct()
-  self:complete()
-  assert(self.params_struct)
-  return self.params_struct
-end
-
-function task:set_params_map_type(t)
-  assert(not self.params_map_type)
-  assert(t)
-  self.params_map_type = t
-end
-
-function task:has_params_map_type()
-  self:complete()
-  return self.params_map_type
-end
-
-function task:get_params_map_type()
-  self:complete()
-  assert(self.params_map_type)
-  return self.params_map_type
-end
-
-function task:set_params_map_label(label)
-  assert(not self.params_map_label)
-  assert(label)
-  self.params_map_label = label
-end
-
-function task:has_params_map_label()
-  self:complete()
-  return self.params_map_label
-end
-
-function task:get_params_map_label()
-  self:complete()
-  assert(self.params_map_label)
-  return self.params_map_label
-end
-
-function task:set_params_map_symbol(symbol)
-  assert(not self.params_map_symbol)
-  assert(symbol)
-  self.params_map_symbol = symbol
-end
-
-function task:has_params_map_symbol()
-  self:complete()
-  return self.params_map_symbol
-end
-
-function task:get_params_map_symbol()
-  self:complete()
-  assert(self.params_map_symbol)
-  return self.params_map_symbol
-end
-
-function task:set_field_id_param_labels(t)
-  assert(not self.field_id_param_labels)
-  self.field_id_param_labels = t
-end
-
-function task:get_field_id_param_labels()
-  self:complete()
-  assert(self.field_id_param_labels)
-  return self.field_id_param_labels
-end
-
-function task:set_field_id_param_symbols(t)
-  assert(not self.field_id_param_symbols)
-  self.field_id_param_symbols = t
-end
-
-function task:get_field_id_param_symbols()
-  self:complete()
-  assert(self.field_id_param_symbols)
-  return self.field_id_param_symbols
-end
-
-function task:setcuda(cuda)
-  self.cuda = cuda
-end
-
-function task:getcuda()
-  return self.cuda
-end
-
-function task:setinline(inline)
-  self.inline = inline
-end
-
-function task:getinline()
-  return self.inline
-end
-
-local global_kernel_id = 1
-function task:addcudakernel(kernel)
-  if not self.cudakernels then
-    self.cudakernels = {}
-  end
-  local kernel_id = global_kernel_id
-  local kernel_name = self.name:concat("_") .. "_cuda" .. tostring(kernel_id)
-  self.cudakernels[kernel_id] = {
-    name = kernel_name,
-    kernel = kernel,
-  }
-  global_kernel_id = global_kernel_id + 1
-  return kernel_id
-end
-
-function task:getcudakernels()
-  assert(self.cudakernels)
-  return self.cudakernels
-end
-
-function task:settype(type, force)
-  assert(force or not self.type)
-  self.type = type
-end
-
-function task:gettype()
-  assert(self.type)
-  return self.type
-end
-
-function task:setprivileges(t)
-  assert(not self.privileges)
-  self.privileges = t
-end
-
-function task:getprivileges()
-  assert(self.privileges)
-  return self.privileges
-end
-
-function task:set_coherence_modes(t)
-  assert(not self.coherence_modes)
-  self.coherence_modes = t
-end
-
-function task:get_coherence_modes()
-  assert(self.coherence_modes)
-  return self.coherence_modes
-end
-
-function task:set_flags(t)
-  assert(not self.flags)
-  self.flags = t
-end
-
-function task:get_flags()
-  assert(self.flags)
-  return self.flags
-end
-
-function task:set_conditions(conditions)
-  assert(not self.conditions)
-  assert(conditions)
-  self.conditions = conditions
-end
-
-function task:get_conditions()
-  assert(self.conditions)
-  return self.conditions
-end
-
-function task:set_param_constraints(t)
-  assert(not self.param_constraints)
-  self.param_constraints = t
-end
-
-function task:get_param_constraints()
-  assert(self.param_constraints)
-  return self.param_constraints
-end
-
-function task:set_constraints(t)
-  assert(not self.constraints)
-  self.constraints = t
-end
-
-function task:get_constraints()
-  assert(self.constraints)
-  return self.constraints
-end
-
-function task:set_region_universe(t)
-  assert(not self.region_universe)
-  self.region_universe = t
-end
-
-function task:get_region_universe()
-  assert(self.region_universe)
-  return self.region_universe
-end
-
-function task:set_config_options(t)
-  assert(not self.config_options)
-  self.config_options = t
-end
-
-function task:get_config_options()
-  assert(self.config_options)
-  return self.config_options
-end
-
-function task:gettaskid()
-  return self.taskid
-end
-
-function task:getname()
-  return self.name
-end
-
-function task:getdefinition()
-  self:complete()
-  assert(self.definition)
-  return self.definition
-end
-
-function task:setdefinition(definition)
-  assert(not self.definition)
-  self.definition = definition
-end
-
-function task:setast(ast)
-  assert(not self.ast)
-  self.ast = ast
-end
-
-function task:hasast()
-  return self.ast
-end
-
-function task:getast()
-  assert(self.ast)
-  return self.ast
-end
-
-function task:is_variant_task()
-  if self.source_variant then
-    return true
-  else
-    return false
-  end
-end
-
-function task:set_source_variant(source_variant)
-  assert(not self.source_variant)
-  self.source_variant = source_variant
-end
-
-function task:get_source_variant()
-  assert(self.source_variant)
-  return self.source_variant
-end
-
-function task:make_variant()
-  local variant_task = std.newtask(self.name)
-  variant_task:settaskid(self:gettaskid())
-  variant_task:settype(self:gettype())
-  variant_task:setprivileges(self:getprivileges())
-  variant_task:set_coherence_modes(self:get_coherence_modes())
-  variant_task:set_conditions(self:get_conditions())
-  variant_task:set_param_constraints(self:get_param_constraints())
-  variant_task:set_flags(self:get_flags())
-  variant_task:set_constraints(self:get_constraints())
-  variant_task:set_source_variant(self)
-  return variant_task
-end
-
-function task:set_complete_thunk(complete_thunk)
-  assert(not self.complete_thunk)
-  self.complete_thunk = complete_thunk
-end
-
-function task:complete()
-  assert(self.complete_thunk)
-  if not self.is_complete then
-    self.is_complete = true
-    return self.complete_thunk()
-  end
-end
-
-function task:printpretty()
-  return self:getdefinition():printpretty()
-end
-
-function task:compile()
-  return self:getdefinition():compile()
-end
-
-function task:disas()
-  return self:getdefinition():disas()
-end
-
-function task:__tostring()
-  return tostring(self:getname())
-end
-
-do
-  local next_task_id = 1
-  function std.newtask(name)
-    assert(data.is_tuple(name))
-    local task_id = next_task_id
-    next_task_id = next_task_id + 1
-    return setmetatable({
-      name = name,
-      taskid = terralib.constant(c.legion_task_id_t, task_id),
-      ast = false,
-      definition = false,
-      cuda = false,
-      inline = false,
-      cudakernels = false,
-      param_symbols = false,
-      params_struct = false,
-      params_map_type = false,
-      params_map_label = false,
-      params_map_symbol = false,
-      field_id_param_labels = false,
-      field_id_param_symbols = false,
-      type = false,
-      privileges = false,
-      coherence_modes = false,
-      flags = false,
-      conditions = false,
-      param_constraints = false,
-      constraints = false,
-      region_universe = false,
-      config_options = false,
-      source_variant = false,
-      complete_thunk = false,
-      is_complete = false,
-    }, task)
-  end
-end
-
-function std.is_task(x)
-  return getmetatable(x) == task
+function base.task:printpretty()
+  print(pretty.entry(self:getast()))
 end
 
 -- #####################################
@@ -3198,83 +3474,6 @@ function std.newfspace(node, name, has_params)
 end
 
 -- #####################################
--- ## Codegen Helpers
--- #################
-
-local gen_optimal = terralib.memoize(
-  function(op, lhs_type, rhs_type)
-    return terra(lhs : lhs_type, rhs : rhs_type)
-      if [std.quote_binary_op(op, lhs, rhs)] then
-        return lhs
-      else
-        return rhs
-      end
-    end
-  end)
-
-std.fmax = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal(">", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-std.fmin = macro(
-  function(lhs, rhs)
-    local lhs_type, rhs_type = lhs:gettype(), rhs:gettype()
-    local result_type = std.type_meet(lhs_type, rhs_type)
-    assert(result_type)
-    return `([gen_optimal("<", lhs_type, rhs_type)]([lhs], [rhs]))
-  end)
-
-function std.quote_unary_op(op, rhs)
-  if op == "-" then
-    return `(-[rhs])
-  elseif op == "not" then
-    return `(not [rhs])
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
-end
-
-function std.quote_binary_op(op, lhs, rhs)
-  if op == "*" then
-    return `([lhs] * [rhs])
-  elseif op == "/" then
-    return `([lhs] / [rhs])
-  elseif op == "%" then
-    return `([lhs] % [rhs])
-  elseif op == "+" then
-    return `([lhs] + [rhs])
-  elseif op == "-" then
-    return `([lhs] - [rhs])
-  elseif op == "<" then
-    return `([lhs] < [rhs])
-  elseif op == ">" then
-    return `([lhs] > [rhs])
-  elseif op == "<=" then
-    return `([lhs] <= [rhs])
-  elseif op == ">=" then
-    return `([lhs] >= [rhs])
-  elseif op == "==" then
-    return `([lhs] == [rhs])
-  elseif op == "~=" then
-    return `([lhs] ~= [rhs])
-  elseif op == "and" then
-    return `([lhs] and [rhs])
-  elseif op == "or" then
-    return `([lhs] or [rhs])
-  elseif op == "max" then
-    return `([std.fmax]([lhs], [rhs]))
-  elseif op == "min" then
-    return `([std.fmin]([lhs], [rhs]))
-  else
-    assert(false, "unknown operator " .. tostring(op))
-  end
-end
-
--- #####################################
 -- ## Main
 -- #################
 
@@ -3328,49 +3527,130 @@ do
   end
 end
 
+local function make_task_wrapper(task_body)
+  local return_type = task_body:gettype().returntype
+  local return_type_bucket = std.type_size_bucket_type(return_type)
+  if return_type_bucket == terralib.types.unit then
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_lowlevel_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      task_body(task, regions, num_regions, ctx, runtime)
+      c.legion_task_postamble(runtime, ctx, nil, 0)
+    end
+  elseif return_type_bucket == c.legion_task_result_t then
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_lowlevel_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      var return_value = task_body(task, regions, num_regions, ctx, runtime)
+      var buffer_size = c.legion_task_result_buffer_size(return_value)
+      var buffer = c.malloc(buffer_size)
+      std.assert(buffer ~= nil, "malloc failed in task wrapper")
+      c.legion_task_result_serialize(return_value, buffer)
+      c.legion_task_postamble(runtime, ctx, buffer, buffer_size)
+      c.free(buffer)
+      c.legion_task_result_destroy(return_value)
+    end
+  else
+    return terra(data : &opaque, datalen : c.size_t,
+                 userdata : &opaque, userlen : c.size_t,
+                 proc_id : c.legion_lowlevel_id_t)
+      var task : c.legion_task_t,
+          regions : &c.legion_physical_region_t,
+          num_regions : uint32,
+          ctx : c.legion_context_t,
+          runtime : c.legion_runtime_t
+      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
+      var return_value = task_body(task, regions, num_regions, ctx, runtime)
+      c.legion_task_postamble(runtime, ctx, [&opaque](&return_value), terralib.sizeof(return_type))
+    end
+  end
+end
+
+local function make_normal_layout()
+  local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
+  return layout_id, quote
+    var layout = c.legion_layout_constraint_set_create()
+
+    -- SOA, Fortran array order
+    var dims : c.legion_dimension_kind_t[4]
+    dims[0] = c.DIM_X
+    dims[1] = c.DIM_Y
+    dims[2] = c.DIM_Z
+    dims[3] = c.DIM_F
+    c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
+
+    -- Normal instance
+    c.legion_layout_constraint_set_add_specialized_constraint(
+      layout, c.NORMAL_SPECIALIZE, 0)
+
+    var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "SOA")
+    c.legion_layout_constraint_set_destroy(layout)
+  end
+end
+
+local function make_virtual_layout()
+  local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
+  return layout_id, quote
+    var layout = c.legion_layout_constraint_set_create()
+
+    -- Virtual instance
+    c.legion_layout_constraint_set_add_specialized_constraint(
+      layout, c.VIRTUAL_SPECIALIZE, 0)
+
+    var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "virtual")
+    c.legion_layout_constraint_set_destroy(layout)
+  end
+end
+
+local function make_unconstrained_layout()
+  local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
+  return layout_id, quote
+    var layout = c.legion_layout_constraint_set_create()
+
+    c.legion_layout_constraint_set_add_specialized_constraint(
+      layout, c.NO_SPECIALIZE, 0)
+
+    var [layout_id] = c.legion_layout_constraint_set_preregister(layout, "unconstrained")
+    c.legion_layout_constraint_set_destroy(layout)
+  end
+end
+
+local function make_reduction_layout(op_id)
+  local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
+  return layout_id, quote
+    var layout = c.legion_layout_constraint_set_create()
+
+    -- SOA, Fortran array order
+    var dims : c.legion_dimension_kind_t[4]
+    dims[0] = c.DIM_X
+    dims[1] = c.DIM_Y
+    dims[2] = c.DIM_Z
+    dims[3] = c.DIM_F
+    c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
+
+    -- Reduction fold instance
+    c.legion_layout_constraint_set_add_specialized_constraint(
+      layout, c.REDUCTION_FOLD_SPECIALIZE, [op_id])
+
+    var [layout_id] = c.legion_layout_constraint_set_preregister(layout, ["SOA(" .. tostring(op_id) .. ")"])
+    c.legion_layout_constraint_set_destroy(layout)
+  end
+end
+
 function std.setup(main_task, extra_setup_thunk)
   assert(std.is_task(main_task))
-  local task_registrations = tasks:map(
-    function(task)
-      local return_type = task:getdefinition():gettype().returntype
-      local result_type_bucket = std.type_size_bucket_name(return_type)
-      local register = c["legion_runtime_register_task" .. result_type_bucket]
-
-      local options = task:get_config_options()
-
-      local proc_type = c.LOC_PROC
-      if task:getcuda() then proc_type = c.TOC_PROC end
-
-      return quote [register](
-        [task:gettaskid()],
-        proc_type,
-        true,
-        true,
-        4294967295 --[[ AUTO_GENERATE_ID ]],
-        c.legion_task_config_options_t {
-          leaf = options.leaf,
-          inner = options.inner,
-          idempotent = options.idempotent,
-        },
-        [task:getname():concat(".")],
-        [task:getdefinition()])
-      end
-    end)
-  if std.config["cuda"] and cudahelper.check_cuda_available() then
-    cudahelper.link_driver_library()
-    local all_kernels = {}
-    tasks:map(function(task)
-      if task:getcuda() then
-        local kernels = task:getcudakernels()
-        if kernels ~= nil then
-          for k, v in pairs(kernels) do
-            all_kernels[k] = v
-          end
-        end
-      end
-    end)
-    cudahelper.jit_compile_kernels_and_register(all_kernels)
-  end
 
   local reduction_registrations = terralib.newlist()
   for _, op in ipairs(reduction_ops) do
@@ -3384,6 +3664,120 @@ function std.setup(main_task, extra_setup_thunk)
     end
   end
 
+  local layout_registrations = terralib.newlist()
+  local layout_normal
+  do
+    local layout_id, layout_actions = make_normal_layout()
+    layout_registrations:insert(layout_actions)
+    layout_normal = layout_id
+  end
+
+  local layout_virtual
+  do
+    local layout_id, layout_actions = make_virtual_layout()
+    layout_registrations:insert(layout_actions)
+    layout_virtual = layout_id
+  end
+
+  local layout_unconstrained
+  do
+    local layout_id, layout_actions = make_unconstrained_layout()
+    layout_registrations:insert(layout_actions)
+    layout_unconstrained = layout_id
+  end
+
+  local layout_reduction = data.new_recursive_map(1)
+  for _, op in ipairs(reduction_ops) do
+    for _, op_type in ipairs(reduction_types) do
+      local op_id = std.reduction_op_ids[op.op][op_type]
+      local layout_id, layout_actions = make_reduction_layout(op_id)
+      layout_registrations:insert(layout_actions)
+      layout_reduction[op.op][op_type] = layout_id
+    end
+  end
+
+  local task_registrations = tasks:map(
+    function(task)
+      local options = task:get_config_options()
+
+      local proc_type = c.LOC_PROC
+      if task:getcuda() then proc_type = c.TOC_PROC end
+
+      local wrapped_task = make_task_wrapper(task:getdefinition())
+
+      local layout_constraints = terralib.newsymbol(
+        c.legion_task_layout_constraint_set_t, "layout_constraints")
+      local layout_constraint_actions = terralib.newlist()
+      if std.config["layout-constraints"] then
+        local fn_type = task:gettype()
+        local param_types = fn_type.parameters
+        local region_i = 0
+        for _, param_i in ipairs(std.fn_param_regions_by_index(fn_type)) do
+          local param_type = param_types[param_i]
+          local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
+            std.find_task_privileges(param_type, task:getprivileges(),
+                                     task:get_coherence_modes(), task:get_flags())
+          for i, privilege in ipairs(privileges) do
+            local field_types = privilege_field_types[i]
+
+            local layout = layout_normal
+            if std.is_reduction_op(privilege) then
+              local op = std.get_reduction_op(privilege)
+              assert(#field_types == 1)
+              local field_type = field_types[1]
+              layout = layout_reduction[op][field_type]
+            end
+            if options.inner then
+              -- No layout constraints for inner tasks
+              layout = layout_unconstrained
+            end
+            layout_constraint_actions:insert(
+              quote
+                c.legion_task_layout_constraint_set_add_layout_constraint(
+                  [layout_constraints], [region_i], [layout])
+              end)
+            region_i = region_i + 1
+          end
+        end
+      end
+
+      return quote
+        var execution_constraints = c.legion_execution_constraint_set_create()
+        c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, proc_type)
+        var [layout_constraints] = c.legion_task_layout_constraint_set_create()
+        [layout_constraint_actions]
+        var options = c.legion_task_config_options_t {
+          leaf = [ options.leaf and std.config["legion-leaf"] ],
+          inner = [ options.inner and std.config["legion-inner"] ],
+          idempotent = options.idempotent,
+        }
+
+        c.legion_runtime_preregister_task_variant_fnptr(
+          [task:gettaskid()],
+          [task:getname():concat(".")],
+          execution_constraints, layout_constraints, options,
+          [wrapped_task], nil, 0)
+        c.legion_execution_constraint_set_destroy(execution_constraints)
+        c.legion_task_layout_constraint_set_destroy(layout_constraints)
+      end
+    end)
+  local cuda_setup = quote end
+  if std.config["cuda"] and cudahelper.check_cuda_available() then
+    cudahelper.link_driver_library()
+    local all_kernels = {}
+    tasks:map(function(task)
+      if task:getcuda() then
+        local kernels = task:getcudakernels()
+        if kernels ~= nil then
+          for k, v in pairs(kernels) do
+            all_kernels[k] = v
+          end
+        end
+      end
+    end)
+    cuda_setup = cudahelper.jit_compile_kernels_and_register(all_kernels)
+  end
+
   local extra_setup = quote end
   if extra_setup_thunk then
     extra_setup = quote
@@ -3392,8 +3786,10 @@ function std.setup(main_task, extra_setup_thunk)
   end
 
   local terra main(argc : int, argv : &rawstring)
-    [task_registrations];
     [reduction_registrations];
+    [layout_registrations];
+    [task_registrations];
+    [cuda_setup];
     [extra_setup];
     c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
     return c.legion_runtime_start(argc, argv, false)
@@ -3403,10 +3799,10 @@ function std.setup(main_task, extra_setup_thunk)
   return main, names
 end
 
-function std.start(main_task)
+function std.start(main_task, extra_setup_thunk)
   if std.config["pretty"] then os.exit() end
 
-  local main = std.setup(main_task)
+  local main = std.setup(main_task, extra_setup_thunk)
 
   local args = std.args
   local argc = #args
@@ -3425,14 +3821,17 @@ function std.start(main_task)
   wrapper()
 end
 
-function std.saveobj(main_task, filename, filetype)
-  local main, names = std.setup(main_task)
+function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
+  local main, names = std.setup(main_task, extra_setup_thunk)
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
 
+  local flags = terralib.newlist()
+  if link_flags then flags:insertall(link_flags) end
+  flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
   if filetype ~= nil then
-    terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-llegion_terra"})
+    terralib.saveobj(filename, filetype, names, flags)
   else
-    terralib.saveobj(filename, names, {"-L" .. lib_dir, "-llegion_terra"})
+    terralib.saveobj(filename, names, flags)
   end
 end
 
@@ -3457,7 +3856,7 @@ do
     end)
   end
 
-  local supported_math_ops = {
+  local supported_math_ops = { -- math operators supported by ISA
     "ceil",
     "cos",
     "exp",
@@ -3472,8 +3871,29 @@ do
     "trunc"
   }
 
+  local cmath_ops = { -- math operators backed by standard library
+    "acos",
+    "asin",
+    "atan",
+    "cbrt",
+    "tan",
+    "pow",
+    "fmod",
+  }
+
   for _, fname in pairs(supported_math_ops) do
     std[fname] = math_op_factory(fname)
+    if std.config["cuda"] and cudahelper.check_cuda_available() then
+      cudahelper.register_builtin(fname, std[fname](double))
+    end
+  end
+
+  local cmath = terralib.includec("math.h")
+  for _, fname in pairs(cmath_ops) do
+    std[fname] = function(arg_type) return cmath[fname] end
+    if std.config["cuda"] and cudahelper.check_cuda_available() then
+      cudahelper.register_builtin(fname, std[fname](double))
+    end
   end
 
   function std.is_math_op(op)
@@ -3523,4 +3943,3 @@ do
 end
 
 return std
-

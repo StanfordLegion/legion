@@ -43,8 +43,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!stopped) mark_stop();
-      log_prof.info("Prof User Info " IDFMT " %llu %llu %s", proc.id,
-          start, stop, name);
+      log_prof.print("Prof User Info " IDFMT " %llu %llu %s", proc.id,
+		     start, stop, name);
     }
 
     //--------------------------------------------------------------------------
@@ -89,13 +89,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::register_task_kind(TaskID task_id,
-                                                const char *name)
+                                                const char *name,bool overwrite)
     //--------------------------------------------------------------------------
     {
       task_kinds.push_back(TaskKind());
       TaskKind &kind = task_kinds.back();
       kind.task_id = task_id;
       kind.task_name = strdup(name);
+      kind.overwrite = overwrite;
     }
 
     //--------------------------------------------------------------------------
@@ -252,37 +253,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::process_inst(UniqueID op_id,
-                  Realm::ProfilingMeasurements::InstanceTimeline *timeline,
+    void LegionProfInstance::process_inst_create(UniqueID op_id,
+		  PhysicalInstance inst, unsigned long long create)
+    //--------------------------------------------------------------------------
+    {
+      inst_create_infos.push_back(InstCreateInfo());
+      InstCreateInfo &info = inst_create_infos.back();
+      info.op_id = op_id;
+      info.inst = inst;
+      info.create = create;
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::process_inst_usage(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage)
     //--------------------------------------------------------------------------
     {
-      inst_infos.push_back(InstInfo());
-      InstInfo &info = inst_infos.back();
+      inst_usage_infos.push_back(InstUsageInfo());
+      InstUsageInfo &info = inst_usage_infos.back();
       info.op_id = op_id;
       info.inst = usage->instance;
       info.mem = usage->memory;
       info.total_bytes = usage->bytes;
-      info.create = timeline->create_time;
-      info.destroy = timeline->delete_time;
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::record_instance_creation(PhysicalInstance instance,
-                       Memory memory, UniqueID op_id, unsigned long long create)
+    void LegionProfInstance::process_inst_timeline(UniqueID op_id,
+                  Realm::ProfilingMeasurements::InstanceTimeline *timeline)
     //--------------------------------------------------------------------------
     {
-      // A special kind of instance info that legion prof will know how
-      // to interpret as an instance that was create but never destroyed
-      // unless it sees a later logging output for the same instance
-      inst_infos.push_back(InstInfo());
-      InstInfo &info = inst_infos.back();
+      inst_timeline_infos.push_back(InstTimelineInfo());
+      InstTimelineInfo &info = inst_timeline_infos.back();
       info.op_id = op_id;
-      info.inst = instance;
-      info.mem = memory;
-      info.total_bytes = 0;
-      info.create = create;
-      info.destroy = 0;
+      info.inst = timeline->instance;
+      info.create = timeline->create_time;
+      info.destroy = timeline->delete_time;
     }
 
     //--------------------------------------------------------------------------
@@ -350,105 +355,117 @@ namespace Legion {
       for (std::deque<TaskKind>::const_iterator it = task_kinds.begin();
             it != task_kinds.end(); it++)
       {
-        log_prof.info("Prof Task Kind %u %s", it->task_id, it->task_name);
+        log_prof.print("Prof Task Kind %u %s %d", it->task_id, it->task_name, 
+                        (it->overwrite ? 1 : 0));
         free(const_cast<char*>(it->task_name));
       }
       for (std::deque<TaskVariant>::const_iterator it = task_variants.begin();
             it != task_variants.end(); it++)
       {
-        log_prof.info("Prof Task Variant %u %lu %s", it->task_id,
-            it->variant_id, it->variant_name);
+        log_prof.print("Prof Task Variant %u %lu %s", it->task_id,
+		       it->variant_id, it->variant_name);
         free(const_cast<char*>(it->variant_name));
       }
       for (std::deque<OperationInstance>::const_iterator it = 
             operation_instances.begin(); it != operation_instances.end(); it++)
       {
-        log_prof.info("Prof Operation %llu %u", it->op_id, it->op_kind);
+        log_prof.print("Prof Operation %llu %u", it->op_id, it->op_kind);
       }
       for (std::deque<MultiTask>::const_iterator it = 
             multi_tasks.begin(); it != multi_tasks.end(); it++)
       {
-        log_prof.info("Prof Multi %llu %u", it->op_id, it->task_id);
+        log_prof.print("Prof Multi %llu %u", it->op_id, it->task_id);
       }
       for (std::deque<SliceOwner>::const_iterator it = 
             slice_owners.begin(); it != slice_owners.end(); it++)
       {
-        log_prof.info("Prof Slice Owner %llu %llu", it->parent_id, it->op_id);
+        log_prof.print("Prof Slice Owner %llu %llu", it->parent_id, it->op_id);
       }
       for (std::deque<TaskInfo>::const_iterator it = task_infos.begin();
             it != task_infos.end(); it++)
       {
-        log_prof.info("Prof Task Info %llu %lu " IDFMT " %llu %llu %llu %llu",
-                      it->op_id, it->variant_id, it->proc.id, 
-                      it->create, it->ready, it->start, it->stop);
+        log_prof.print("Prof Task Info %llu %lu " IDFMT " %llu %llu %llu %llu",
+		       it->op_id, it->variant_id, it->proc.id, 
+		       it->create, it->ready, it->start, it->stop);
         for (std::deque<WaitInfo>::const_iterator wit =
              it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
         {
-          log_prof.info("Prof Task Wait Info %llu %lu %llu %llu %llu",
-                        it->op_id, it->variant_id, wit->wait_start, wit->wait_ready,
-                        wit->wait_end);
+          log_prof.print("Prof Task Wait Info %llu %lu %llu %llu %llu",
+			 it->op_id, it->variant_id, wit->wait_start, 
+                         wit->wait_ready, wit->wait_end);
         }
       }
       for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
             it != meta_infos.end(); it++)
       {
-        log_prof.info("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
-                      it->op_id, it->hlr_id, it->proc.id,
-                      it->create, it->ready, it->start, it->stop);
+        log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
+		       it->op_id, it->hlr_id, it->proc.id,
+		       it->create, it->ready, it->start, it->stop);
         for (std::deque<WaitInfo>::const_iterator wit =
              it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
         {
-          log_prof.info("Prof Meta Wait Info %llu %u %llu %llu %llu",
-                        it->op_id, it->hlr_id, wit->wait_start, wit->wait_ready,
-                        wit->wait_end);
+          log_prof.print("Prof Meta Wait Info %llu %u %llu %llu %llu",
+                       it->op_id, it->hlr_id, wit->wait_start, wit->wait_ready,
+                       wit->wait_end);
         }
       }
       for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
             it != copy_infos.end(); it++)
       {
-        log_prof.info("Prof Copy Info %llu " IDFMT " " IDFMT " %llu"
-                      " %llu %llu %llu %llu", it->op_id, it->source.id,
-                    it->target.id, it->size, it->create, it->ready, it->start,
-                    it->stop);
+        log_prof.print("Prof Copy Info %llu " IDFMT " " IDFMT " %llu"
+		       " %llu %llu %llu %llu", it->op_id, it->source.id,
+                     it->target.id, it->size, it->create, it->ready, it->start,
+                     it->stop);
       }
       for (std::deque<FillInfo>::const_iterator it = fill_infos.begin();
             it != fill_infos.end(); it++)
       {
-        log_prof.info("Prof Fill Info %llu " IDFMT 
-                      " %llu %llu %llu %llu", it->op_id, it->target.id, 
-                            it->create, it->ready, it->start, it->stop);
+        log_prof.print("Prof Fill Info %llu " IDFMT 
+		       " %llu %llu %llu %llu", it->op_id, it->target.id, 
+		       it->create, it->ready, it->start, it->stop);
       }
-      for (std::deque<InstInfo>::const_iterator it = inst_infos.begin();
-            it != inst_infos.end(); it++)
+      for (std::deque<InstCreateInfo>::const_iterator it = 
+            inst_create_infos.begin(); it != inst_create_infos.end(); it++)
       {
-        log_prof.info("Prof Inst Info %llu " IDFMT " " IDFMT " %lu %llu %llu",
-                      it->op_id, it->inst.id, it->mem.id, it->total_bytes,
-                      it->create, it->destroy);
+        log_prof.print("Prof Inst Create %llu " IDFMT " %llu",
+		       it->op_id, it->inst.id, it->create);
+      }
+      for (std::deque<InstUsageInfo>::const_iterator it = 
+            inst_usage_infos.begin(); it != inst_usage_infos.end(); it++)
+      {
+        log_prof.print("Prof Inst Usage %llu " IDFMT " " IDFMT " %zu",
+		       it->op_id, it->inst.id, it->mem.id, it->total_bytes);
+      }
+      for (std::deque<InstTimelineInfo>::const_iterator it = 
+            inst_timeline_infos.begin(); it != inst_timeline_infos.end(); it++)
+      {
+        log_prof.print("Prof Inst Timeline %llu " IDFMT " %llu %llu",
+		       it->op_id, it->inst.id, it->create, it->destroy);
       }
       for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
             it != message_infos.end(); it++)
       {
-        log_prof.info("Prof Message Info %u " IDFMT " %llu %llu",
-                      it->kind, it->proc.id, it->start, it->stop);
+        log_prof.print("Prof Message Info %u " IDFMT " %llu %llu",
+		       it->kind, it->proc.id, it->start, it->stop);
       }
       for (std::deque<MapperCallInfo>::const_iterator it = 
             mapper_call_infos.begin(); it != mapper_call_infos.end(); it++)
       {
-        log_prof.info("Prof Mapper Call Info %u " IDFMT " %llu %llu %llu",
-            it->kind, it->proc.id, it->op_id, it->start, it->stop);
+        log_prof.print("Prof Mapper Call Info %u " IDFMT " %llu %llu %llu",
+		       it->kind, it->proc.id, it->op_id, it->start, it->stop);
       }
       for (std::deque<RuntimeCallInfo>::const_iterator it = 
             runtime_call_infos.begin(); it != runtime_call_infos.end(); it++)
       {
-        log_prof.info("Prof Runtime Call Info %u " IDFMT " %llu %llu",
-            it->kind, it->proc.id, it->start, it->stop);
+        log_prof.print("Prof Runtime Call Info %u " IDFMT " %llu %llu",
+		       it->kind, it->proc.id, it->start, it->stop);
       }
 #ifdef LEGION_PROF_SELF_PROFILE
-      for (std::deque<ProfTaskInfo>::const_iterator it = prof_task_infos.begin();
-            it != prof_task_infos.end(); it++)
+      for (std::deque<ProfTaskInfo>::const_iterator it = 
+            prof_task_infos.begin(); it != prof_task_infos.end(); it++)
       {
-        log_prof.info("Prof ProfTask Info " IDFMT " %llu %llu %llu",
-                      it->proc.id, it->op_id, it->start, it->stop);
+        log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu",
+		       it->proc.id, it->op_id, it->start, it->stop);
       }
 #endif
       task_kinds.clear();
@@ -458,7 +475,9 @@ namespace Legion {
       task_infos.clear();
       meta_infos.clear();
       copy_infos.clear();
-      inst_infos.clear();
+      inst_create_infos.clear();
+      inst_usage_infos.clear();
+      inst_timeline_infos.clear();
       message_infos.clear();
       mapper_call_infos.clear();
     }
@@ -476,12 +495,12 @@ namespace Legion {
       profiler_lock = Reservation::create_reservation();
       for (unsigned idx = 0; idx < num_meta_tasks; idx++)
       {
-        log_prof.info("Prof Meta Desc %u %s", idx, task_descriptions[idx]);
+        log_prof.print("Prof Meta Desc %u %s", idx, task_descriptions[idx]);
       }
       for (unsigned idx = 0; idx < num_operation_kinds; idx++)
       {
-        log_prof.info("Prof Op Desc %u %s", 
-                        idx, operation_kind_descriptions[idx]);
+        log_prof.print("Prof Op Desc %u %s", 
+		       idx, operation_kind_descriptions[idx]);
       }
       // Log all the processors and memories
       std::set<Processor> all_procs;
@@ -489,15 +508,15 @@ namespace Legion {
       for (std::set<Processor>::const_iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
-        log_prof.info("Prof Proc Desc " IDFMT " %d", it->id, it->kind());
+        log_prof.print("Prof Proc Desc " IDFMT " %d", it->id, it->kind());
       }
       std::set<Memory> all_mems;
       machine.get_all_memories(all_mems);
       for (std::set<Memory>::const_iterator it = all_mems.begin();
             it != all_mems.end(); it++)
       {
-        log_prof.info("Prof Mem Desc " IDFMT " %d %ld", 
-                      it->id, it->kind(), it->capacity());
+        log_prof.print("Prof Mem Desc " IDFMT " %d %zd", 
+		       it->id, it->kind(), it->capacity());
       }
     }
 
@@ -533,12 +552,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::register_task_kind(TaskID task_id,
-                                            const char *task_name)
+                                          const char *task_name, bool overwrite)
     //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->register_task_kind(task_id, task_name);
+      thread_local_profiling_instance->register_task_kind(task_id, task_name,
+                                                          overwrite);
     }
 
     //--------------------------------------------------------------------------
@@ -591,7 +611,7 @@ namespace Legion {
       info.op_id = task->get_unique_id();
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -602,7 +622,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_meta_request(Realm::ProfilingRequestSet &requests,
-                                          HLRTaskID tid, Operation *op)
+                                          LgTaskID tid, Operation *op)
     //--------------------------------------------------------------------------
     {
       increment_total_outstanding_requests();
@@ -611,7 +631,7 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -630,7 +650,7 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -650,7 +670,7 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -667,7 +687,7 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                 Realm::ProfilingMeasurements::InstanceTimeline>();
       req.add_measurement<
@@ -685,7 +705,7 @@ namespace Legion {
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -696,7 +716,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_meta_request(Realm::ProfilingRequestSet &requests,
-                                          HLRTaskID tid, UniqueID uid)
+                                          LgTaskID tid, UniqueID uid)
     //--------------------------------------------------------------------------
     {
       increment_total_outstanding_requests();
@@ -705,7 +725,7 @@ namespace Legion {
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -724,7 +744,7 @@ namespace Legion {
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -744,7 +764,7 @@ namespace Legion {
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
                         ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -759,13 +779,18 @@ namespace Legion {
       ProfilingInfo info(LEGION_PROF_INST); 
       // No ID here
       info.op_id = uid;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists()) 
-                        ? target_proc : Processor::get_executing_processor(),
-                        HLR_LEGION_PROFILING_ID, &info, sizeof(info));
-      req.add_measurement<
-                Realm::ProfilingMeasurements::InstanceTimeline>();
-      req.add_measurement<
-                Realm::ProfilingMeasurements::InstanceMemoryUsage>();
+      // Instances use two profiling requests so that we can get MemoryUsage
+      // right away - the Timeline doesn't come until we delete the instance
+      Processor p = (target_proc.exists() 
+                        ? target_proc : Processor::get_executing_processor());
+      Realm::ProfilingRequest &req1 = requests.add_request(p,
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+      req1.add_measurement<
+                 Realm::ProfilingMeasurements::InstanceMemoryUsage>();
+      Realm::ProfilingRequest &req2 = requests.add_request(p,
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+      req2.add_measurement<
+                 Realm::ProfilingMeasurements::InstanceTimeline>();
     }
 
     //--------------------------------------------------------------------------
@@ -878,22 +903,28 @@ namespace Legion {
           }
         case LEGION_PROF_INST:
           {
-#ifdef DEBUG_LEGION
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::InstanceTimeline>());
-            assert(response.has_measurement<
-                Realm::ProfilingMeasurements::InstanceMemoryUsage>());
-#endif
-            Realm::ProfilingMeasurements::InstanceTimeline *timeline = 
-              response.get_measurement<
-                    Realm::ProfilingMeasurements::InstanceTimeline>();
-            Realm::ProfilingMeasurements::InstanceMemoryUsage *usage = 
-              response.get_measurement<
-                    Realm::ProfilingMeasurements::InstanceMemoryUsage>();
-            thread_local_profiling_instance->process_inst(info->op_id,
-                                                          timeline, usage);
-            delete timeline;
-            delete usage;
+	    // Record data based on which measurements we got back this time
+	    if (response.has_measurement<
+                Realm::ProfilingMeasurements::InstanceTimeline>())
+	    {
+	      Realm::ProfilingMeasurements::InstanceTimeline *timeline = 
+                response.get_measurement<
+                      Realm::ProfilingMeasurements::InstanceTimeline>();
+	      thread_local_profiling_instance->process_inst_timeline(
+								info->op_id,
+								timeline);
+	      delete timeline;
+	    }
+	    if (response.has_measurement<
+                Realm::ProfilingMeasurements::InstanceMemoryUsage>())
+	    {
+	      Realm::ProfilingMeasurements::InstanceMemoryUsage *usage = 
+                response.get_measurement<
+                      Realm::ProfilingMeasurements::InstanceMemoryUsage>();
+	      thread_local_profiling_instance->process_inst_usage(info->op_id,
+								  usage);
+	      delete usage;
+	    }
             break;
           }
         default:
@@ -922,8 +953,7 @@ namespace Legion {
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->record_instance_creation(inst, memory, 
-                                                                op_id, create);
+      thread_local_profiling_instance->process_inst_create(op_id, inst, create);
     }
 
     //--------------------------------------------------------------------------
@@ -933,7 +963,7 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < num_message_kinds; idx++)
       {
-        log_prof.info("Prof Message Desc %u %s", idx, message_names[idx]);
+        log_prof.print("Prof Message Desc %u %s", idx, message_names[idx]);
       }
     }
 
@@ -957,7 +987,7 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < num_mapper_calls; idx++)
       {
-        log_prof.info("Prof Mapper Call Desc %u %s",idx,mapper_call_names[idx]);
+        log_prof.print("Prof Mapper Call Desc %u %s",idx,mapper_call_names[idx]);
       }
     }
 
@@ -980,8 +1010,8 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < num_runtime_calls; idx++)
       {
-        log_prof.info("Prof Runtime Call Desc %u %s", 
-                      idx, runtime_call_names[idx]);
+        log_prof.print("Prof Runtime Call Desc %u %s", 
+		       idx, runtime_call_names[idx]);
       }
     }
 

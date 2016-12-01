@@ -29,6 +29,10 @@
 #include "event_impl.h"
 #include "rsrv_impl.h"
 
+#ifdef USE_HDF
+#include <hdf5.h>
+#endif
+
 namespace Realm {
 
   class RegionInstanceImpl;
@@ -319,75 +323,9 @@ namespace Realm {
     public:
       std::vector<int> file_vec;
       pthread_mutex_t vector_lock;
+      off_t next_offset;
+      std::map<off_t, int> offset_map;
     };
-
-#ifdef USE_HDF
-    class HDFMemory : public MemoryImpl {
-    public:
-      static const size_t ALIGNMENT = 256;
-
-      HDFMemory(Memory _me);
-
-      virtual ~HDFMemory(void);
-
-      virtual RegionInstance create_instance(IndexSpace is,
-                                             const int *linearization_bits,
-                                             size_t bytes_needed,
-                                             size_t block_size,
-                                             size_t element_size,
-                                             const std::vector<size_t>& field_sizes,
-                                             ReductionOpID redopid,
-                                             off_t list_size,
-                                             const ProfilingRequestSet &reqs,
-                                             RegionInstance parent_inst);
-
-      RegionInstance create_instance(IndexSpace is,
-                                     const int *linearization_bits,
-                                     size_t bytes_needed,
-                                     size_t block_size,
-                                     size_t element_size,
-                                     const std::vector<size_t>& field_sizes,
-                                     ReductionOpID redopid,
-                                     off_t list_size,
-                                     const ProfilingRequestSet &reqs,
-                                     RegionInstance parent_inst,
-                                     const char* file,
-                                     const std::vector<const char*>& path_names,
-                                     Domain domain,
-                                     bool read_only);
-
-      virtual void destroy_instance(RegionInstance i,
-                                    bool local_destroy);
-
-      virtual off_t alloc_bytes(size_t size);
-
-      virtual void free_bytes(off_t offset, size_t size);
-
-      virtual void get_bytes(off_t offset, void *dst, size_t size);
-      void get_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, void *dst, size_t size);
-
-      virtual void put_bytes(off_t offset, const void *src, size_t size);
-      void put_bytes(ID::IDType inst_id, const DomainPoint& dp, int fid, const void *src, size_t size);
-
-      virtual void apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
-                                       size_t count, const void *entry_buffer);
-
-      virtual void *get_direct_ptr(off_t offset, size_t size);
-      virtual int get_home_node(off_t offset, size_t size);
-
-    public:
-      struct HDFMetadata {
-        int lo[3];
-        hsize_t dims[3];
-        int ndims;
-        hid_t type_id;
-        hid_t file_id;
-        std::vector<hid_t> dataset_ids;
-        std::vector<hid_t> datatype_ids;
-      };
-      std::vector<HDFMetadata*> hdf_metadata;
-    };
-#endif
 
     class RemoteMemory : public MemoryImpl {
     public:

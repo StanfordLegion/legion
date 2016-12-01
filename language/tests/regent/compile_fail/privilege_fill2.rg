@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_fill2.rg:24: invalid privileges in copy: reads($r)
+-- privilege_fill2.rg:24: invalid privileges in fill: reads($r)
 --   fill(r, 0)
 --      ^
 

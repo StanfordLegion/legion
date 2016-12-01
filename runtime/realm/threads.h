@@ -36,7 +36,20 @@
 #include <deque>
 #include <iostream>
 
+#ifdef REALM_USE_PAPI
+// string.h is not used here, but if this is included by somebody else after
+//  we include papi.h, mismatches occur because ffsll() is declared with __THROW!?
+#include <string.h>
+#include <papi.h>
+#endif
+
 namespace Realm {
+
+  namespace Threading {
+    // calls to initialize and cleanup any global state for the threading subsystem
+    bool initialize(void);
+    bool cleanup(void);
+  };
 
   class Operation;
 
@@ -57,6 +70,13 @@ namespace Realm {
   class ThreadLaunchParameters;
   class ThreadScheduler;
   class CoreReservation;
+
+  // from profiling.h
+  class ProfilingMeasurementCollection;
+
+#ifdef REALM_USE_PAPI
+  class PAPICounters;
+#endif
 
   //template <class CONDTYPE> class ThreadWaker;
 
@@ -163,6 +183,12 @@ namespace Realm {
       ~ExceptionHandlerPresence(void);
     };
 
+    // per-thread performance counters
+    void setup_perf_counters(const ProfilingMeasurementCollection& pmc);
+    void start_perf_counters(void);
+    void stop_perf_counters(void);
+    void record_perf_counters(ProfilingMeasurementCollection& pmc);
+
   protected:
     friend class ThreadScheduler;
 
@@ -186,6 +212,10 @@ namespace Realm {
     int signal_count;
     GASNetHSL signal_mutex;
     std::deque<Signal> signal_queue;
+
+#ifdef REALM_USE_PAPI
+    PAPICounters *papi_counters;
+#endif
   };
 
   // Finally, a Thread may operate as a co-routine, "yielding" intermediate values and 
@@ -348,7 +378,12 @@ namespace Realm {
     friend std::ostream& operator<<(std::ostream& os, const CoreMap& cm);
 
     // in general, you'll want to discover the core map rather than set it up yourself
-    static CoreMap *discover_core_map(void);
+    // hyperthread_sharing - if true, hyperthreads are considered to share a core, which prevents
+    //                         them both from being if a reservation asks for exclusive access to the
+    //                         core
+    //                       if false, hyperthreads are considered to be separate cores, making more
+    //                         cores available, but potentially exposing the app to contention issues
+    static CoreMap *discover_core_map(bool hyperthread_sharing);
 
     // creates a simple synthetic core map - it is symmetric and hierarchical:
     //   numa domains -> cores -> fp clusters (shared fpu) -> hyperthreads (shared alu/ldst)
@@ -375,7 +410,7 @@ namespace Realm {
   class CoreReservationSet {
   public:
     // if constructed without a CoreMap, it'll attempt to discover one itself
-    CoreReservationSet(void);
+    CoreReservationSet(bool hyperthread_sharing);
     CoreReservationSet(const CoreMap* _cm);
 
     ~CoreReservationSet(void);
@@ -478,6 +513,29 @@ namespace Realm {
   protected:
     ThreadReservation(void) {}
     ~ThreadReservation(void) {}
+  };
+#endif
+
+#ifdef REALM_USE_PAPI
+  class PAPICounters {
+  protected:
+    PAPICounters(void);
+    ~PAPICounters(void);
+
+  public:
+    static PAPICounters *setup_counters(const ProfilingMeasurementCollection& pmc);
+    void cleanup(void);
+
+    void start(void);
+    void suspend(void);
+    void resume(void);
+    void stop(void);
+    void record(ProfilingMeasurementCollection& pmc);
+
+  protected:
+    int papi_event_set;
+    std::map<int, size_t> event_codes;
+    std::vector<long long> event_counts;
   };
 #endif
 

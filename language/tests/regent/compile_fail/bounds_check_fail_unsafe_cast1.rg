@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- assertion failed: pointer ptr(int32, $t) is out-of-bounds
+-- bounds_check_fail_unsafe_cast1.rg:24: pointer ptr(int32, $t) is out-of-bounds
 
 import "regent"
 

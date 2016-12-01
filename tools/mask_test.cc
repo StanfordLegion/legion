@@ -21,7 +21,33 @@
 
 #include "legion_utilities.h"
 
-using namespace LegionRuntime::HighLevel;
+#ifdef __MACH__
+#include <mach/clock.h>
+#include <mach/mach.h>
+#else
+#include <time.h>
+#endif
+
+using namespace Legion;
+
+enum OpKind {
+  EQ_OP,
+  NEG_OP,
+  OR_OP,
+  AND_OP,
+  XOR_OP,
+  ORA_OP,
+  ANDA_OP,
+  XORA_OP,
+  DIS_OP,
+  DIFF_OP,
+  DIFFA_OP,
+  EMPTY_OP,
+  SL_OP,
+  SR_OP,
+  SLA_OP,
+  SRA_OP,
+};
 
 class BaseMask {
 public:
@@ -727,6 +753,644 @@ void test_mask(const int num_iterations, const char *name)
   test_shift_right_assign<BITMASK,MAX>(num_iterations, name);
 }
 
+template<int MAX, int SCALE, typename BITMASK>
+void initialize_perf_masks(BITMASK *masks, const int num_masks)
+{
+  for (int idx = 0; idx < num_masks; idx++)
+  {
+    new (masks+idx) BITMASK();
+    const int num_bits = lrand48() % (MAX/SCALE); 
+    for (int i = 0; i < num_bits; i++)
+      masks[idx].set_bit(lrand48() % MAX);
+  }
+}
+
+template<typename BITMASK>
+void delete_perf_masks(BITMASK *masks, const int num_masks)
+{
+  for (int idx = 0; idx < num_masks; idx++)
+    masks[idx].~BITMASK();
+}
+
+template<int MAX>
+void initialize_int_array(int *array, const int num_elements)
+{
+  for (int idx = 0; idx < num_elements; idx++)
+    array[idx] = lrand48() % MAX;
+}
+
+inline unsigned long long current_time_in_nanoseconds(void)
+{
+#ifdef __MACH__
+  mach_timespec_t ts;
+  clock_serv_t cclock;
+  host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+  clock_get_time(cclock, &ts);
+  mach_port_deallocate(mach_task_self(), cclock);
+#else
+  struct timespec ts;
+  clock_gettime(absolute ? CLOCK_REALTIME : CLOCK_MONOTONIC, &ts);
+#endif
+  long long t = (1000000000LL * ts.tv_sec) + ts.tv_nsec;
+  return t;
+}
+
+template<int MAX, int SCALE, OpKind OP, typename BITMASK>
+void test_mask_operation(const int num_iterations, const char *mask_name)
+{
+  unsigned long long start=0, stop=0;
+  switch (OP)
+  {
+    case EQ_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
+        int counter = 0;
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          (masks[2*idx] == masks[2*idx+1]) ? counter++ : counter--;
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 2*num_iterations);
+        free(masks);
+        break;
+      }
+    case NEG_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[2*idx+1] = ~masks[2*idx];
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 2*num_iterations);
+        free(masks);
+        break;
+      }
+    case OR_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(3*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 3*num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[3*idx+2] = masks[3*idx] | masks[3*idx+1];
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 3*num_iterations);
+        free(masks);
+        break;
+      }
+    case AND_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(3*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 3*num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[3*idx+2] = masks[3*idx] & masks[3*idx+1];
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 3*num_iterations);
+        free(masks);
+        break;
+      }
+    case XOR_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(3*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 3*num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[3*idx+2] = masks[3*idx] ^ masks[3*idx+1];
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 3*num_iterations);
+        free(masks);
+        break;
+      }
+    case ORA_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+        initialize_perf_masks<MAX,SCALE>(masks, 2*num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[2*idx+1] |= masks[2*idx];
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 2*num_iterations);
+        free(masks);
+        break;
+      }
+    case ANDA_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+        initialize_perf_masks<MAX,SCALE>(masks, 2*num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[2*idx+1] &= masks[2*idx];
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 2*num_iterations);
+        free(masks);
+        break;
+      }
+    case XORA_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+        initialize_perf_masks<MAX,SCALE>(masks, 2*num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[2*idx+1] ^= masks[2*idx];
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 2*num_iterations);
+        free(masks);
+        break;
+      }
+    case DIS_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
+        int counter = 0;
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          (masks[2*idx] * masks[2*idx+1]) ? counter++ : counter--;
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 2*num_iterations);
+        free(masks);
+        break;
+      }
+    case DIFF_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(3*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 3*num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[3*idx+2] = masks[3*idx] - masks[3*idx+1];
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 3*num_iterations);
+        free(masks);
+        break;
+      }
+    case DIFFA_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[2*idx+1] -= masks[2*idx];
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, 2*num_iterations);
+        free(masks);
+        break;
+      }
+    case EMPTY_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, num_iterations);
+        int counter = 0;
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          (!masks[idx]) ? counter++ : counter--;
+        stop = current_time_in_nanoseconds();
+        delete_perf_masks<BITMASK>(masks, num_iterations);
+        free(masks);
+        break;
+      }
+    case SL_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
+        int *shift = (int*)malloc(num_iterations*sizeof(int));
+        initialize_int_array<MAX>(shift, num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[2*idx+1] = masks[2*idx] << shift[idx];
+        stop = current_time_in_nanoseconds(); 
+        delete_perf_masks<BITMASK>(masks, 2*num_iterations);
+        free(masks);
+        free(shift);
+        break;
+      }
+    case SR_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(2*num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, 2*num_iterations);
+        int *shift = (int*)malloc(num_iterations*sizeof(int));
+        initialize_int_array<MAX>(shift, num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[2*idx+1] = masks[2*idx] >> shift[idx];
+        stop = current_time_in_nanoseconds(); 
+        delete_perf_masks<BITMASK>(masks, 2*num_iterations);
+        free(masks);
+        free(shift);
+        break;
+      }
+    case SLA_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, num_iterations);
+        int *shift = (int*)malloc(num_iterations*sizeof(int));
+        initialize_int_array<MAX>(shift, num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[idx] <<= shift[idx];
+        stop = current_time_in_nanoseconds(); 
+        delete_perf_masks<BITMASK>(masks, num_iterations);
+        free(masks);
+        free(shift);
+        break;
+      }
+    case SRA_OP:
+      {
+        BITMASK *masks = (BITMASK*)Internal::legion_alloc_aligned<sizeof(BITMASK), 
+            Internal::AlignmentTrait<BITMASK>::AlignmentOf, false>(num_iterations);
+        initialize_perf_masks<MAX,SCALE,BITMASK>(masks, num_iterations);
+        int *shift = (int*)malloc(num_iterations*sizeof(int));
+        initialize_int_array<MAX>(shift, num_iterations);
+        start = current_time_in_nanoseconds();
+        for (int idx = 0; idx < num_iterations; idx++)
+          masks[idx] >>= shift[idx];
+        stop = current_time_in_nanoseconds(); 
+        delete_perf_masks<BITMASK>(masks, num_iterations);
+        free(masks);
+        free(shift);
+        break;
+      }
+    default:
+      assert(false);
+  }
+  unsigned long long total = stop - start;
+  unsigned long long avg = total / num_iterations; 
+  printf("    Mask %s: %lld ns (total=%lld)\n", mask_name, avg, total);
+}
+
+template<OpKind OP>
+void print_operation_prefix(void)
+{
+  switch (OP)
+  {
+    case EQ_OP:
+      {
+        printf("  Perf of == operator:\n");
+        break;
+      }
+    case NEG_OP:
+      {
+        printf("  Perf of ~ operator:\n");
+        break;
+      }
+    case OR_OP:
+      {
+        printf("  Perf of | operator:\n");
+        break;
+      }
+    case AND_OP:
+      {
+        printf("  Perf of & operator:\n");
+        break;
+      }
+    case XOR_OP:
+      {
+        printf("  Perf of ^ operator:\n");
+        break;
+      }
+    case ORA_OP:
+      {
+        printf("  Perf of |= operator:\n");
+        break;
+      }
+    case ANDA_OP:
+      {
+        printf("  Perf of &= operator:\n");
+        break;
+      }
+    case XORA_OP:
+      {
+        printf("  Perf of ^= operator:\n");
+        break;
+      }
+    case DIS_OP:
+      {
+        printf("  Perf of * operator:\n");
+        break;
+      }
+    case DIFF_OP:
+      {
+        printf("  Perf of - operator:\n");
+        break;
+      }
+    case DIFFA_OP:
+      {
+        printf("  Perf of -= operator:\n");
+        break;
+      }
+    case EMPTY_OP:
+      {
+        printf("  Perf of ! operator:\n");
+        break;
+      }
+    case SL_OP:
+      {
+        printf("  Perf of << operator:\n");
+        break;
+      }
+    case SR_OP:
+      {
+        printf("  Perf of >> operator:\n");
+        break;
+      }
+    case SLA_OP:
+      {
+        printf("  Perf of <<= operator:\n");
+        break;
+      }
+    case SRA_OP:
+      {
+        printf("  Perf of >>= operator:\n");
+        break;
+      }
+    default:
+      assert(false);
+  }
+}
+
+template<int SCALE, OpKind OP>
+void test_operation_64(const int num_iterations)
+{
+  print_operation_prefix<OP>();  
+  const int MAX = 64;
+  test_mask_operation<MAX,SCALE,OP,
+    BitMask<uint64_t,MAX,6,0x3F> >(num_iterations, "BitMask");
+  test_mask_operation<MAX,SCALE,OP,
+    TLBitMask<uint64_t,MAX,6,0x3F> >(num_iterations, "TLBitMask");
+
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+        num_iterations, "CompoundBitMask<BitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+        num_iterations, "CompoundBitMask<BitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+        num_iterations, "CompoundBitMask<BitMask<6> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+        num_iterations, "CompoundBitMask<BitMask<8> >");
+
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+        num_iterations, "CompoundBitMask<TLBitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+        num_iterations, "CompoundBitMask<TLBitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+        num_iterations, "CompoundBitMask<TLBitMask<6> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+        num_iterations, "CompoundBitMask<TLBitMask<8> >");
+}
+
+template<int SCALE, OpKind OP>
+void test_operation_128(const int num_iterations)
+{
+  print_operation_prefix<OP>();  
+  const int MAX = 128;
+  test_mask_operation<MAX,SCALE,OP,
+    BitMask<uint64_t,MAX,6,0x3F> >(num_iterations, "BitMask");
+  test_mask_operation<MAX,SCALE,OP,
+    TLBitMask<uint64_t,MAX,6,0x3F> >(num_iterations, "TLBitMask");
+#ifdef __SSE2__
+  test_mask_operation<MAX,SCALE,OP,SSEBitMask<MAX> >(num_iterations, "SSEBitMask");
+  test_mask_operation<MAX,SCALE,OP,SSETLBitMask<MAX> >(num_iterations, "SSETLBitMask");
+#endif
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+        num_iterations, "CompoundBitMask<BitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+        num_iterations, "CompoundBitMask<BitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+        num_iterations, "CompoundBitMask<BitMask<6> >");
+    test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+        num_iterations, "CompoundBitMask<BitMask<8> >");
+
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+        num_iterations, "CompoundBitMask<TLBitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+        num_iterations, "CompoundBitMask<TLBitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+        num_iterations, "CompoundBitMask<TLBitMask<6> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+        num_iterations, "CompoundBitMask<TLBitMask<8> >");
+
+#ifdef __SSE2__
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSEBitMask<MAX>,MAX,2> >(
+        num_iterations, "CompoundBitMask<SSEBitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSEBitMask<MAX>,MAX,4> >(
+        num_iterations, "CompoundBitMask<SSEBitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSEBitMask<MAX>,MAX,6> >(
+        num_iterations, "CompoundBitMask<SSEBitMask<6> >");
+    test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSEBitMask<MAX>,MAX,8> >(
+        num_iterations, "CompoundBitMask<SSEBitMask<8> >");
+
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSETLBitMask<MAX>,MAX,2> >(
+        num_iterations, "CompoundBitMask<SSETLBitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSETLBitMask<MAX>,MAX,4> >(
+        num_iterations, "CompoundBitMask<SSETLBitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSETLBitMask<MAX>,MAX,6> >(
+        num_iterations, "CompoundBitMask<SSETLBitMask<6> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSETLBitMask<MAX>,MAX,8> >(
+        num_iterations, "CompoundBitMask<SSETLBitMask<8> >");
+#endif
+}
+
+template<int MAX, int SCALE, OpKind OP>
+void test_operation(const int num_iterations)
+{
+  print_operation_prefix<OP>();  
+  test_mask_operation<MAX,SCALE,OP,
+    BitMask<uint64_t,MAX,6,0x3F> >(num_iterations, "BitMask");
+  test_mask_operation<MAX,SCALE,OP,
+    TLBitMask<uint64_t,MAX,6,0x3F> >(num_iterations, "TLBitMask");
+#ifdef __SSE2__
+  test_mask_operation<MAX,SCALE,OP,SSEBitMask<MAX> >(num_iterations, "SSEBitMask");
+  test_mask_operation<MAX,SCALE,OP,SSETLBitMask<MAX> >(num_iterations, "SSETLBitMask");
+#endif
+#ifdef __AVX__
+  test_mask_operation<MAX,SCALE,OP,AVXBitMask<MAX> >(num_iterations, "AVXBitMask");
+  test_mask_operation<MAX,SCALE,OP,AVXTLBitMask<MAX> >(num_iterations, "AVXTLBitMask");
+#endif
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+        num_iterations, "CompoundBitMask<BitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+        num_iterations, "CompoundBitMask<BitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+        num_iterations, "CompoundBitMask<BitMask<6> >");
+    test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<BitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+        num_iterations, "CompoundBitMask<BitMask<8> >");
+
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,2> >(
+        num_iterations, "CompoundBitMask<TLBitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,4> >(
+        num_iterations, "CompoundBitMask<TLBitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,6> >(
+        num_iterations, "CompoundBitMask<TLBitMask<6> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<TLBitMask<uint64_t,MAX,6,0x3F>,MAX,8> >(
+        num_iterations, "CompoundBitMask<TLBitMask<8> >");
+
+#ifdef __SSE2__
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSEBitMask<MAX>,MAX,2> >(
+        num_iterations, "CompoundBitMask<SSEBitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSEBitMask<MAX>,MAX,4> >(
+        num_iterations, "CompoundBitMask<SSEBitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSEBitMask<MAX>,MAX,6> >(
+        num_iterations, "CompoundBitMask<SSEBitMask<6> >");
+    test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSEBitMask<MAX>,MAX,8> >(
+        num_iterations, "CompoundBitMask<SSEBitMask<8> >");
+
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSETLBitMask<MAX>,MAX,2> >(
+        num_iterations, "CompoundBitMask<SSETLBitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSETLBitMask<MAX>,MAX,4> >(
+        num_iterations, "CompoundBitMask<SSETLBitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSETLBitMask<MAX>,MAX,6> >(
+        num_iterations, "CompoundBitMask<SSETLBitMask<6> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<SSETLBitMask<MAX>,MAX,8> >(
+        num_iterations, "CompoundBitMask<SSETLBitMask<8> >");
+#endif
+#ifdef __AVX__
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<AVXBitMask<MAX>,MAX,2> >(
+        num_iterations, "CompoundBitMask<AVXBitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<AVXBitMask<MAX>,MAX,4> >(
+        num_iterations, "CompoundBitMask<AVXBitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<AVXBitMask<MAX>,MAX,6> >(
+        num_iterations, "CompoundBitMask<AVXBitMask<6> >");
+    test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<AVXBitMask<MAX>,MAX,8> >(
+        num_iterations, "CompoundBitMask<AVXBitMask<8> >");
+
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<AVXTLBitMask<MAX>,MAX,2> >(
+        num_iterations, "CompoundBitMask<AVXTLBitMask<2> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<AVXTLBitMask<MAX>,MAX,4> >(
+        num_iterations, "CompoundBitMask<AVXTLBitMask<4> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<AVXTLBitMask<MAX>,MAX,6> >(
+        num_iterations, "CompoundBitMask<AVXTLBitMask<6> >");
+  test_mask_operation<MAX,SCALE,OP,
+    CompoundBitMask<AVXTLBitMask<MAX>,MAX,8> >(
+        num_iterations, "CompoundBitMask<AVXTLBitMask<8> >");
+#endif
+}
+
+template<int SCALE>
+void test_perf_64(const int num_iterations)
+{
+  printf("Running perf for MAX=64,SCALE=%d...\n", SCALE);
+  test_operation_64<SCALE,EQ_OP>(num_iterations);
+  test_operation_64<SCALE,NEG_OP>(num_iterations);
+  test_operation_64<SCALE,OR_OP>(num_iterations);
+  test_operation_64<SCALE,AND_OP>(num_iterations);
+  test_operation_64<SCALE,XOR_OP>(num_iterations);
+  test_operation_64<SCALE,ORA_OP>(num_iterations);
+  test_operation_64<SCALE,ANDA_OP>(num_iterations);
+  test_operation_64<SCALE,XORA_OP>(num_iterations);
+  test_operation_64<SCALE,DIS_OP>(num_iterations);
+  test_operation_64<SCALE,DIFF_OP>(num_iterations);
+  test_operation_64<SCALE,DIFFA_OP>(num_iterations);
+  test_operation_64<SCALE,EMPTY_OP>(num_iterations);
+  test_operation_64<SCALE,SL_OP>(num_iterations);
+  test_operation_64<SCALE,SR_OP>(num_iterations);
+  test_operation_64<SCALE,SLA_OP>(num_iterations);
+  test_operation_64<SCALE,SRA_OP>(num_iterations);
+}
+
+template<int SCALE>
+void test_perf_128(const int num_iterations)
+{
+  printf("Running perf for MAX=128,SCALE=%d...\n", SCALE);
+  test_operation_128<SCALE,EQ_OP>(num_iterations);
+  test_operation_128<SCALE,NEG_OP>(num_iterations);
+  test_operation_128<SCALE,OR_OP>(num_iterations);
+  test_operation_128<SCALE,AND_OP>(num_iterations);
+  test_operation_128<SCALE,XOR_OP>(num_iterations);
+  test_operation_128<SCALE,ORA_OP>(num_iterations);
+  test_operation_128<SCALE,ANDA_OP>(num_iterations);
+  test_operation_128<SCALE,XORA_OP>(num_iterations);
+  test_operation_128<SCALE,DIS_OP>(num_iterations);
+  test_operation_128<SCALE,DIFF_OP>(num_iterations);
+  test_operation_128<SCALE,DIFFA_OP>(num_iterations);
+  test_operation_128<SCALE,EMPTY_OP>(num_iterations);
+  test_operation_128<SCALE,SL_OP>(num_iterations);
+  test_operation_128<SCALE,SR_OP>(num_iterations);
+  test_operation_128<SCALE,SLA_OP>(num_iterations);
+  test_operation_128<SCALE,SRA_OP>(num_iterations);
+}
+
+template<int MAX, int SCALE>
+void test_perf(const int num_iterations)
+{
+  printf("Running perf for MAX=%d,SCALE=%d...\n", MAX, SCALE);
+  test_operation<MAX,SCALE,EQ_OP>(num_iterations);
+  test_operation<MAX,SCALE,NEG_OP>(num_iterations);
+  test_operation<MAX,SCALE,OR_OP>(num_iterations);
+  test_operation<MAX,SCALE,AND_OP>(num_iterations);
+  test_operation<MAX,SCALE,XOR_OP>(num_iterations);
+  test_operation<MAX,SCALE,ORA_OP>(num_iterations);
+  test_operation<MAX,SCALE,ANDA_OP>(num_iterations);
+  test_operation<MAX,SCALE,XORA_OP>(num_iterations);
+  test_operation<MAX,SCALE,DIS_OP>(num_iterations);
+  test_operation<MAX,SCALE,DIFF_OP>(num_iterations);
+  test_operation<MAX,SCALE,DIFFA_OP>(num_iterations);
+  test_operation<MAX,SCALE,EMPTY_OP>(num_iterations);
+  test_operation<MAX,SCALE,SL_OP>(num_iterations);
+  test_operation<MAX,SCALE,SR_OP>(num_iterations);
+  test_operation<MAX,SCALE,SLA_OP>(num_iterations);
+  test_operation<MAX,SCALE,SRA_OP>(num_iterations);
+}
+
 int main(int argc, const char **argv)
 {
   int num_iterations = 1024;
@@ -797,6 +1461,139 @@ int main(int argc, const char **argv)
   test_mask<AVXTLBitMask<1536> >(num_iterations,"AVXTLBitMask<1536>");
   test_mask<AVXTLBitMask<2048> >(num_iterations,"AVXTLBitMask<2048>");
 #endif
+
+  printf("\nCompoundBitMask Tests\n");
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,2> >(
+                              num_iterations,"CompoundBitMask<64,2>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,3> >(
+                              num_iterations,"CompoundBitMask<64,3>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,4> >(
+                              num_iterations,"CompoundBitMask<64,4>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,5> >(
+                              num_iterations,"CompoundBitMask<64,5>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,6> >(
+                              num_iterations,"CompoundBitMask<64,6>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,7> >(
+                              num_iterations,"CompoundBitMask<64,7>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,64,6,0x3F>,64,8> >(
+                              num_iterations,"CompoundBitMask<64,8>");
+
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,2> >(
+                              num_iterations,"CompoundBitMask<128,2>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,3> >(
+                              num_iterations,"CompoundBitMask<128,3>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,4> >(
+                              num_iterations,"CompoundBitMask<128,4>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,5> >(
+                              num_iterations,"CompoundBitMask<128,5>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,6> >(
+                              num_iterations,"CompoundBitMask<128,6>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,7> >(
+                              num_iterations,"CompoundBitMask<128,7>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,128,6,0x3F>,128,8> >(
+                              num_iterations,"CompoundBitMask<128,8>");
+
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,2> >(
+                              num_iterations,"CompoundBitMask<192,2>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,3> >(
+                              num_iterations,"CompoundBitMask<192,3>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,4> >(
+                              num_iterations,"CompoundBitMask<192,4>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,5> >(
+                              num_iterations,"CompoundBitMask<192,5>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,6> >(
+                              num_iterations,"CompoundBitMask<192,6>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,7> >(
+                              num_iterations,"CompoundBitMask<192,7>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,192,6,0x3F>,192,8> >(
+                              num_iterations,"CompoundBitMask<192,8>");
+
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,2> >(
+                              num_iterations,"CompoundBitMask<256,2>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,3> >(
+                              num_iterations,"CompoundBitMask<256,3>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,4> >(
+                              num_iterations,"CompoundBitMask<256,4>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,5> >(
+                              num_iterations,"CompoundBitMask<256,5>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,6> >(
+                              num_iterations,"CompoundBitMask<256,6>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,7> >(
+                              num_iterations,"CompoundBitMask<256,7>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,256,6,0x3F>,256,8> >(
+                              num_iterations,"CompoundBitMask<256,8>");
+
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,2> >(
+                              num_iterations,"CompoundBitMask<512,2>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,3> >(
+                              num_iterations,"CompoundBitMask<512,3>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,4> >(
+                              num_iterations,"CompoundBitMask<512,4>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,5> >(
+                              num_iterations,"CompoundBitMask<512,5>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,6> >(
+                              num_iterations,"CompoundBitMask<512,6>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,7> >(
+                              num_iterations,"CompoundBitMask<512,7>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,512,6,0x3F>,512,8> >(
+                              num_iterations,"CompoundBitMask<512,8>");
+
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,2> >(
+                              num_iterations,"CompoundBitMask<1024,2>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,3> >(
+                              num_iterations,"CompoundBitMask<1024,3>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,4> >(
+                              num_iterations,"CompoundBitMask<1024,4>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,5> >(
+                              num_iterations,"CompoundBitMask<1024,5>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,6> >(
+                              num_iterations,"CompoundBitMask<1024,6>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,7> >(
+                              num_iterations,"CompoundBitMask<1024,7>");
+  test_mask<CompoundBitMask<BitMask<uint64_t,1024,6,0x3F>,1024,8> >(
+                              num_iterations,"CompoundBitMask<1024,8>");
+
+#if 0
+  test_perf_64<8>(num_iterations);
+  test_perf_64<4>(num_iterations);
+  test_perf_64<2>(num_iterations);
+#endif
+  test_perf_64<1>(num_iterations);
+
+#if 0
+  test_perf_128<8>(num_iterations);
+  test_perf_128<4>(num_iterations);
+  test_perf_128<2>(num_iterations);
+#endif
+  test_perf_128<1>(num_iterations);
+
+#if 0
+  test_perf<256,8>(num_iterations);
+  test_perf<256,4>(num_iterations);
+  test_perf<256,2>(num_iterations);
+#endif
+  test_perf<256,1>(num_iterations);
+
+#if 0
+  test_perf<512,8>(num_iterations);
+  test_perf<512,4>(num_iterations);
+  test_perf<512,2>(num_iterations);
+#endif
+  test_perf<512,1>(num_iterations);
+
+#if 0
+  test_perf<1024,8>(num_iterations);
+  test_perf<1024,4>(num_iterations);
+  test_perf<1024,2>(num_iterations);
+#endif
+  test_perf<1024,1>(num_iterations);
+
+#if 0
+  test_perf<2048,8>(num_iterations);
+  test_perf<2048,4>(num_iterations);
+  test_perf<2048,2>(num_iterations);
+#endif
+  test_perf<2048,1>(num_iterations);
 
   return 0;
 }

@@ -28,7 +28,7 @@ namespace Legion {
                       Operation *op = NULL); 
     public:
       MapperManager*const               manager;
-      UserEvent                         resume;
+      RtUserEvent                         resume;
       MappingCallKind                   kind;
       Operation*                        operation;
       std::map<PhysicalManager*,
@@ -46,16 +46,11 @@ namespace Legion {
      */
     class MapperManager {
     public:
-      struct MapperContinuationArgs {
+      struct FinishMapperCallContinuationArgs : 
+        public LgTaskArgs<FinishMapperCallContinuationArgs> {
       public:
-        HLRTaskID hlr_id;
-        MapperManager *manager;
-        MappingCallKind call;
-        void *arg1, *arg2, *arg3;
-      };
-      struct FinishMapperCallContinuationArgs {
+        static const LgTaskID TASK_ID = LG_FINISH_MAPPER_CONTINUATION_TASK_ID;
       public:
-        HLRTaskID hlr_id;
         MapperManager *manager;
         MappingCallInfo *info;
       };
@@ -64,11 +59,13 @@ namespace Legion {
         std::set<PhysicalManager*> instances;
         std::vector<bool> results;
       };
-      struct DeferMessageArgs {
+      struct DeferMessageArgs : public LgTaskArgs<DeferMessageArgs> {
       public:
-        HLRTaskID hlr_id;
+        static const LgTaskID TASK_ID = LG_DEFER_MAPPER_MESSAGE_TASK_ID;
+      public:
         MapperManager *manager;
         Processor sender;
+        unsigned kind;
         void *message;
         size_t size;
         bool broadcast;
@@ -109,6 +106,11 @@ namespace Legion {
                                       Mapper::SelectTaskSrcOutput *output,
                                       bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
+      void invoke_task_create_temporary(TaskOp *task,
+                                      Mapper::CreateTaskTemporaryInput *input,
+                                      Mapper::CreateTaskTemporaryOutput *output,
+                                      bool first_invocation = true,
+                                      MappingCallInfo *info = NULL);
       void invoke_task_speculate(TaskOp *task, 
                                  Mapper::SpeculativeOutput *output,
                                  bool first_invocation = true,
@@ -127,6 +129,11 @@ namespace Legion {
                                         Mapper::SelectInlineSrcOutput *output,
                                         bool first_invocation = true,
                                         MappingCallInfo *info = NULL);
+      void invoke_inline_create_temporary(MapOp *op,
+                                    Mapper::CreateInlineTemporaryInput *input,
+                                    Mapper::CreateInlineTemporaryOutput *output,
+                                    bool first_invocation = true,
+                                    MappingCallInfo *info = NULL);
       void invoke_inline_report_profiling(MapOp *op, 
                                           Mapper::InlineProfilingInfo *input,
                                           bool first_invocation = true,
@@ -142,6 +149,11 @@ namespace Legion {
                                       Mapper::SelectCopySrcOutput *output,
                                       bool first_invocation = true,
                                       MappingCallInfo *info = NULL);
+      void invoke_copy_create_temporary(CopyOp *op,
+                                  Mapper::CreateCopyTemporaryInput *input,
+                                  Mapper::CreateCopyTemporaryOutput *output,
+                                  bool first_invocation = true,
+                                  MappingCallInfo *info = NULL);
       void invoke_copy_speculate(CopyOp *op, Mapper::SpeculativeOutput *output,
                                  bool first_invocation = true,
                                  MappingCallInfo *info = NULL);
@@ -160,6 +172,11 @@ namespace Legion {
                                        Mapper::SelectCloseSrcOutput *output,
                                        bool first_invocation = true,
                                        MappingCallInfo *info = NULL);
+      void invoke_close_create_temporary(CloseOp *op,
+                                     Mapper::CreateCloseTemporaryInput *input,
+                                     Mapper::CreateCloseTemporaryOutput *output,
+                                     bool first_invocation = true,
+                                     MappingCallInfo *info = NULL);
       void invoke_close_report_profiling(CloseOp *op,
                                          Mapper::CloseProfilingInfo *input,
                                          bool first_invocation = true,
@@ -189,6 +206,11 @@ namespace Legion {
                                          Mapper::SelectReleaseSrcOutput *output,
                                          bool first_invocation = true,
                                          MappingCallInfo *info = NULL);
+      void invoke_release_create_temporary(ReleaseOp *op,
+                                  Mapper::CreateReleaseTemporaryInput *input,
+                                  Mapper::CreateReleaseTemporaryOutput *output,
+                                  bool first_invocation = true,
+                                  MappingCallInfo *info = NULL);
       void invoke_release_speculate(ReleaseOp *op,
                                     Mapper::SpeculativeOutput *output,
                                     bool first_invocation = true,
@@ -248,7 +270,7 @@ namespace Legion {
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
                                  Operation *op, bool first_invocation, 
-                                 Event &precondition) = 0;
+                                 RtEvent &precondition) = 0;
       virtual void pause_mapper_call(MappingCallInfo *info) = 0;
       virtual void resume_mapper_call(MappingCallInfo *info) = 0;
       virtual void finish_mapper_call(MappingCallInfo *info,
@@ -258,9 +280,15 @@ namespace Legion {
                           const FinishMapperCallContinuationArgs *args);
     public:
       void send_message(MappingCallInfo *info, Processor target, 
-                        const void *message, size_t message_size);
+                        const void *message, size_t message_size, 
+                        unsigned message_kind);
       void broadcast(MappingCallInfo *info, const void *message, 
-                     size_t message_size, int radix);
+                     size_t message_size, unsigned message_kind, int radix);
+    public:
+      void pack_physical_instance(MappingCallInfo *info, Serializer &rez,
+                                  MappingInstance instance);
+      void unpack_physical_instance(MappingCallInfo *info, Deserializer &derez,
+                                    MappingInstance &instance);
     public:
       MapperEvent create_mapper_event(MappingCallInfo *ctx);
       bool has_mapper_event_triggered(MappingCallInfo *ctx, MapperEvent event);
@@ -404,6 +432,9 @@ namespace Legion {
                                       IndexSpace handle);
       IndexPartition get_parent_index_partition(MappingCallInfo *info,
                                                 IndexSpace handle);
+      unsigned get_index_space_depth(MappingCallInfo *info, IndexSpace handle);
+      unsigned get_index_partition_depth(MappingCallInfo *info, 
+                                         IndexPartition handle);
     public:
       size_t get_field_size(MappingCallInfo *info, 
                             FieldSpace handle, FieldID fid);
@@ -416,6 +447,9 @@ namespace Legion {
       LogicalPartition get_logical_partition_by_color(MappingCallInfo *info,
                                                       LogicalRegion parent, 
                                                       Color color);
+      LogicalPartition get_logical_partition_by_color(MappingCallInfo *info,
+                                                      LogicalRegion parent,
+                                                      const DomainPoint &color);
       LogicalPartition get_logical_partition_by_tree(MappingCallInfo *info,
                                                      IndexPartition handle, 
                                            FieldSpace fspace, RegionTreeID tid);
@@ -425,11 +459,16 @@ namespace Legion {
       LogicalRegion get_logical_subregion_by_color(MappingCallInfo *info,
                                                    LogicalPartition parent, 
                                                    Color color);
+      LogicalRegion get_logical_subregion_by_color(MappingCallInfo *info,
+                                                   LogicalPartition parent,
+                                                   const DomainPoint &color);
       LogicalRegion get_logical_subregion_by_tree(MappingCallInfo *info,
                                                   IndexSpace handle, 
                                           FieldSpace fspace, RegionTreeID tid);
       Color get_logical_region_color(MappingCallInfo *info, 
                                      LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(MappingCallInfo *info, 
+                                                 LogicalRegion handle);
       Color get_logical_partition_color(MappingCallInfo *info,
                                         LogicalPartition handle);
       LogicalRegion get_parent_logical_region(MappingCallInfo *info,
@@ -439,25 +478,25 @@ namespace Legion {
       LogicalPartition get_parent_logical_partition(MappingCallInfo *info,
                                                     LogicalRegion handle);
     public:
-      void retrieve_semantic_information(MappingCallInfo *ctx, TaskID task_id,
+      bool retrieve_semantic_information(MappingCallInfo *ctx, TaskID task_id,
           SemanticTag tag, const void *&result, size_t &size, 
           bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx,IndexSpace handle,
+      bool retrieve_semantic_information(MappingCallInfo *ctx,IndexSpace handle,
           SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx, 
+      bool retrieve_semantic_information(MappingCallInfo *ctx, 
           IndexPartition handle, SemanticTag tag, const void *&result,
           size_t &size, bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
+      bool retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
           SemanticTag tag, const void *&result, size_t &size, 
           bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
+      bool retrieve_semantic_information(MappingCallInfo *ctx,FieldSpace handle,
           FieldID fid, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx, 
+      bool retrieve_semantic_information(MappingCallInfo *ctx, 
           LogicalRegion handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail, bool wait_until_ready);
-      void retrieve_semantic_information(MappingCallInfo *ctx,
+      bool retrieve_semantic_information(MappingCallInfo *ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result,
           size_t &size, bool can_fail, bool wait_until_ready);
     public:
@@ -496,7 +535,7 @@ namespace Legion {
       std::vector<MappingCallInfo*> available_infos;
     protected:
       unsigned next_mapper_event;
-      std::map<unsigned,UserEvent> mapper_events;
+      std::map<unsigned,RtUserEvent> mapper_events;
     };
 
     /**
@@ -525,7 +564,7 @@ namespace Legion {
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
                                  Operation *op, bool first_invocation, 
-                                 Event &precondition);
+                                 RtEvent &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info,
@@ -577,14 +616,14 @@ namespace Legion {
     protected:
       virtual MappingCallInfo* begin_mapper_call(MappingCallKind kind,
                                  Operation *op, bool first_invocation, 
-                                 Event &precondition);
+                                 RtEvent &precondition);
       virtual void pause_mapper_call(MappingCallInfo *info);
       virtual void resume_mapper_call(MappingCallInfo *info);
       virtual void finish_mapper_call(MappingCallInfo *info,
                                       bool first_invocation = true);
     protected:
       // Must be called while holding the lock
-      void release_lock(std::vector<UserEvent> &to_trigger); 
+      void release_lock(std::vector<RtUserEvent> &to_trigger); 
     protected:
       LockState lock_state;
       std::set<MappingCallInfo*> current_holders;
@@ -598,15 +637,17 @@ namespace Legion {
      */
     class MapperContinuation {
     public:
-      struct ContinuationArgs {
-        HLRTaskID hlr_id;
+      struct ContinuationArgs : public LgTaskArgs<ContinuationArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MAPPER_CONTINUATION_TASK_ID;
+      public:
         MapperContinuation *continuation;
       };
     public:
       MapperContinuation(MapperManager *manager,
                          MappingCallInfo *info);
     public:
-      void defer(Runtime *runtime, Event precondition, Operation *op = NULL);
+      void defer(Runtime *runtime, RtEvent precondition, Operation *op = NULL);
     public:
       virtual void execute(void) = 0;
     public:

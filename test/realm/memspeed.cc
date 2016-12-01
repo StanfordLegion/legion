@@ -143,6 +143,45 @@ void memspeed_cpu_task(const void *args, size_t arglen,
   log_app.info() << " on proc " << p << " latency:" << latency;
 }
 
+#ifdef USE_CUDA
+extern "C" {
+  double gpu_seqwr_test(void *buffer, size_t reps, size_t elements);
+  double gpu_seqrd_test(void *buffer, size_t reps, size_t elements);
+  double gpu_rndwr_test(void *buffer, size_t reps, size_t elements);
+  double gpu_rndrd_test(void *buffer, size_t reps, size_t elements);
+  double gpu_latency_test(void *buffer, size_t reps, size_t elements);
+}
+
+void memspeed_gpu_task(const void *args, size_t arglen, 
+		       const void *userdata, size_t userlen, Processor p)
+{
+  const SpeedTestArgs& cargs = *(const SpeedTestArgs *)args;
+
+  RegionAccessor<AccessorType::Generic> ra_untyped = cargs.inst.get_accessor();
+  RegionAccessor<AccessorType::Affine<1>, void *> ra = ra_untyped.typeify<void *>().convert<AccessorType::Affine<1> >();
+
+  // sequential write test
+  double seqwr_bw = gpu_seqwr_test(&ra[0], cargs.reps, cargs.elements);
+
+  // sequential read test
+  double seqrd_bw = gpu_seqrd_test(&ra[0], cargs.reps, cargs.elements);
+
+  // random write test
+  double rndwr_bw = gpu_rndwr_test(&ra[0], cargs.reps, cargs.elements);
+
+  // random read test
+  double rndrd_bw = gpu_rndrd_test(&ra[0], cargs.reps, cargs.elements);
+
+  // latency test
+  double latency = gpu_latency_test(&ra[0], cargs.reps, cargs.elements);
+
+  log_app.info() << " on proc " << p << " seqwr:" << seqwr_bw << " seqrd:" << seqrd_bw;
+  log_app.info() << " on proc " << p << " rndwr:" << rndwr_bw << " rndrd:" << rndrd_bw;
+  log_app.info() << " on proc " << p << " latency:" << latency;
+}
+#endif
+
+std::set<Processor::Kind> supported_proc_kinds;
 
 void top_level_task(const void *args, size_t arglen, 
 		    const void *userdata, size_t userlen, Processor p)
@@ -159,6 +198,10 @@ void top_level_task(const void *args, size_t arglen,
     size_t capacity = m.capacity();
     if(capacity < buffer_size) {
       log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - insufficient capacity";
+      continue;
+    }
+    if(m.kind() == Memory::GLOBAL_MEM) {
+      log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - slow global memory";
       continue;
     }
 
@@ -188,6 +231,14 @@ void top_level_task(const void *args, size_t arglen,
       cargs.reps = 8;
       bool ok = machine.has_affinity(p, m, &cargs.affinity);
       assert(ok);
+
+      log_app.info() << "  Affinity: " << p << " BW: " << cargs.affinity.bandwidth
+		     << " Latency: " << cargs.affinity.latency;
+
+      if(supported_proc_kinds.count(p.kind()) == 0) {
+	log_app.info() << "processor " << p << " is of unsupported kind " << p.kind() << " - skipping";
+	continue;
+      }
 
       Event e = p.spawn(MEMSPEED_TASK, &cargs, sizeof(cargs));
 
@@ -219,16 +270,30 @@ int main(int argc, char **argv)
 				   CodeDescriptor(memspeed_cpu_task),
 				   ProfilingRequestSet(),
 				   0, 0).wait();
+  supported_proc_kinds.insert(Processor::LOC_PROC);
+
   Processor::register_task_by_kind(Processor::UTIL_PROC, false /*!global*/,
 				   MEMSPEED_TASK,
 				   CodeDescriptor(memspeed_cpu_task),
 				   ProfilingRequestSet(),
 				   0, 0).wait();
+  supported_proc_kinds.insert(Processor::UTIL_PROC);
+
   Processor::register_task_by_kind(Processor::IO_PROC, false /*!global*/,
 				   MEMSPEED_TASK,
 				   CodeDescriptor(memspeed_cpu_task),
 				   ProfilingRequestSet(),
 				   0, 0).wait();
+  supported_proc_kinds.insert(Processor::IO_PROC);
+
+#ifdef USE_CUDA
+  Processor::register_task_by_kind(Processor::TOC_PROC, false /*!global*/,
+				   MEMSPEED_TASK,
+				   CodeDescriptor(memspeed_gpu_task),
+				   ProfilingRequestSet(),
+				   0, 0).wait();
+  supported_proc_kinds.insert(Processor::TOC_PROC);
+#endif
 
   // select a processor to run the top level task on
   Processor p = Machine::ProcessorQuery(Machine::get_machine())

@@ -16,10 +16,19 @@
 #
 
 from __future__ import print_function
-import argparse, multiprocessing, os, platform, subprocess, sys
+import argparse, json, multiprocessing, os, platform, subprocess, sys
 
 # Requires:
 #   * Terra-compatible LLVM installation on PATH
+
+_version = sys.version_info.major
+
+if _version == 2: # Python 2.x:
+    _input = raw_input
+elif _version == 3: # Python 3.x:
+    _input = input
+else:
+    raise Exception('Incompatible Python version')
 
 os_name = platform.system()
 
@@ -46,6 +55,57 @@ def git_update(repo_dir):
     subprocess.check_call(
         ['git', 'pull', '--ff-only'],
         cwd = repo_dir)
+
+def git_submodule_update(repo_dir):
+    subprocess.check_call(
+        ['git', 'submodule', 'update', '--init'],
+        cwd = repo_dir)
+
+def load_json_config(filename):
+    try:
+        with open(filename, 'r') as f:
+            return json.load(f)
+    except IOError:
+        return None
+
+def dump_json_config(filename, value):
+    with open(filename, 'w') as f:
+        return json.dump(value, f)
+
+prompt_text = '''
+RDIR is an optional compiler plugin for Regent which provides support
+for dataflow optimizations (most notably control replication). RDIR
+support is opt-in because RDIR's license is different from that of
+Regent (thus this prompt). Specifically:
+
+  * portions of RDIR are licensed under BSD
+  * other portions of RDIR are dual-licensed under BSD and Apache
+
+(Regent itself is licensed entirely under Apache.)
+
+You may choose to use RDIR automatically (select "auto" below),
+manually, or not at all. Your preference will be saved. You can change
+your mind at any time by re-running this script with the "--rdir"
+parameter.
+'''
+
+def install_rdir(rdir, legion_dir, regent_dir):
+    config_filename = os.path.join(regent_dir, '.rdir.json')
+    if rdir is None:
+        rdir = load_json_config(config_filename)
+        if rdir is None: rdir = 'prompt'
+
+    if rdir == 'prompt':
+        print(prompt_text)
+        while rdir not in ['auto', 'manual', 'never']:
+            rdir = _input('Enable RDIR? (auto/manual/never) ')
+    assert rdir in ['auto', 'manual', 'skip', 'never']
+
+    if rdir == 'auto':
+        git_submodule_update(legion_dir)
+
+    if rdir != 'skip':
+        dump_json_config(config_filename, rdir)
 
 def build_terra(terra_dir, thread_count):
     subprocess.check_call(
@@ -92,7 +152,7 @@ def symlink(from_path, to_path):
         os.symlink(from_path, to_path)
 
 def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
-                     cuda, gasnet, gasnet_dir, clean_first, thread_count, extra_flags):
+                     cuda, hdf, spy, gasnet, gasnet_dir, clean_first, thread_count, extra_flags):
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
         ('TERRA_DIR', terra_dir),                           # for bindings
@@ -103,6 +163,8 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
          'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1),
          'USE_CUDA=%s' % (1 if cuda else 0),
          'USE_GASNET=%s' % (1 if gasnet else 0),
+         'USE_HDF=%s' % (1 if hdf else 0),
+         'USE_SPY=%s' % (1 if spy else 0),
          ] +
         extra_flags +
         (['GASNET=%s' % gasnet_dir] if gasnet_dir is not None else []) +
@@ -142,11 +204,11 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
              '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
              os.path.join(bindings_dir, 'liblegion_terra.so')])
 
-def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
-            external_terra_dir=None, gasnet_dir=None, debug=False,
+def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False, hdf=False,
+            spy=False, rdir=None, external_terra_dir=None, gasnet_dir=None, debug=False,
             clean_first=True, thread_count=None, extra_flags=[]):
-    if shared_llr and general_llr:
-        raise Exception('Shared LLR is mutually exclusive with general LLR.')
+    if shared_llr:
+        raise Exception('Shared LLR is deprecated. Please use general LLR.')
 
     general = not shared_llr
 
@@ -156,12 +218,15 @@ def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
     if cuda and not general:
         raise Exception('General LLR is required for CUDA.')
 
+    if spy and not debug:
+        raise Exception('Debugging mode is required for detailed Legion Spy.')
+
     thread_count = thread_count
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
 
-    root_dir = os.path.dirname(os.path.realpath(__file__))
-    legion_dir = os.path.dirname(root_dir)
+    regent_dir = os.path.dirname(os.path.realpath(__file__))
+    legion_dir = os.path.dirname(regent_dir)
 
     # Grab LG_RT_DIR from the environment if available, otherwise
     # assume we're running relative to our own location.
@@ -169,19 +234,21 @@ def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
     if 'LG_RT_DIR' in os.environ:
         runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
 
-    terra_dir = os.path.join(root_dir, 'terra')
+    install_rdir(rdir, legion_dir, regent_dir)
+
+    terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, external_terra_dir, thread_count)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
-                     general, cuda, gasnet, gasnet_dir, clean_first,
+                     general, cuda, hdf, spy, gasnet, gasnet_dir, clean_first,
                      thread_count, extra_flags)
 
 def driver():
     parser = argparse.ArgumentParser(
         description = 'Install Regent front end.')
     parser.add_argument(
-        '--with-terra', dest = 'external_terra_dir', required = False,
+        '--with-terra', dest = 'external_terra_dir', metavar = 'DIR', required = False,
         help = 'Path to Terra installation directory (optional).')
     parser.add_argument(
         '--debug', dest = 'debug', action = 'store_true', required = False,
@@ -194,10 +261,24 @@ def driver():
         help = 'Build Legion with the general low-level runtime.')
     parser.add_argument(
         '--gasnet', dest = 'gasnet', action = 'store_true', required = False,
+        default = 'USE_GASNET' in os.environ and os.environ['USE_GASNET'] == '1',
         help = 'Build Legion with GASNet.')
     parser.add_argument(
         '--cuda', dest = 'cuda', action = 'store_true', required = False,
+        default = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1',
         help = 'Build Legion with CUDA.')
+    parser.add_argument(
+        '--hdf', dest = 'hdf', action = 'store_true', required = False,
+        default = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1',
+        help = 'Build Legion with HDF.')
+    parser.add_argument(
+        '--spy', dest = 'spy', action = 'store_true', required = False,
+        default = 'USE_SPY' in os.environ and os.environ['USE_SPY'] == '1',
+        help = 'Build Legion with the detailed Legion Spy enabled.')
+    parser.add_argument(
+        '--rdir', dest = 'rdir', required = False,
+        choices = ['prompt', 'auto', 'manual', 'skip', 'never'], default = None,
+        help = 'Enable RDIR compiler plugin.')
     parser.add_argument(
         '--noclean', dest = 'clean_first', action = 'store_false', required = False,
         default = True,

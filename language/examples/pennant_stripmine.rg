@@ -15,20 +15,15 @@
 -- runs-with:
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
---   ["pennant.tests/sedovsmall/sedovsmall.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-absolute", "1e-6", "-relative", "1e-6", "-relative_absolute", "1e-9"],
---   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
+--    "-fflow-spmd", "1"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
+--    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
+--    "-fflow-spmd", "1"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0"],
---   ["pennant.tests/leblanc/leblanc.pnt",
---    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0"]
+--    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
+--    "-fflow-spmd", "1"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -1030,265 +1025,6 @@ task continue_simulation(warmup : bool,
   return warmup or (cycle < cstop and time < tstop)
 end
 
-task simulate(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
-              rz_spans_p : partition(disjoint, rz_all),
-              rz_spans : cross_product(rz_all_p, rz_spans_p),
-              rp_all : region(point),
-              rp_all_private : region(point),
-              rp_all_private_p : partition(disjoint, rp_all_private),
-              rp_all_ghost : region(point),
-              rp_all_ghost_p : partition(aliased, rp_all_ghost),
-              rp_all_shared_p : partition(disjoint, rp_all_ghost),
-              rp_spans_p : partition(disjoint, rp_all),
-              rp_spans_private : cross_product(rp_all_private_p, rp_spans_p),
-              rp_spans_shared : cross_product(rp_all_shared_p, rp_spans_p),
-              rs_all : region(side(wild, wild, wild, wild)),
-              rs_all_p : partition(disjoint, rs_all),
-              rs_spans_p : partition(disjoint, rs_all),
-              rs_spans : cross_product(rs_all_p, rs_spans_p),
-              conf : config) : double
-where
-  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  rp_all_private * rp_all_ghost
-do
-  var alfa = conf.alfa
-  var cfl = conf.cfl
-  var cflv = conf.cflv
-  var cstop = conf.cstop
-  var dtfac = conf.dtfac
-  var dtinit = conf.dtinit
-  var dtmax = conf.dtmax
-  var gamma = conf.gamma
-  var q1 = conf.q1
-  var q2 = conf.q2
-  var qgamma = conf.qgamma
-  var ssmin = conf.ssmin
-  var tstop = conf.tstop
-  var uinitradial = conf.uinitradial
-  var vfix = {x = 0.0, y = 0.0}
-
-  var enable = conf.enable and not conf.warmup
-  var warmup = conf.warmup and conf.enable
-  var print_ts = conf.print_ts
-
-  var interval = 100
-  var start_time = c.legion_get_current_time_in_micros()/1.e6
-  var last_time = start_time
-
-  var time = 0.0
-  var cycle : int64 = 0
-  var dt = dtmax
-  var dthydro = dtmax
-  while continue_simulation(warmup, cycle, cstop, time, tstop) do
-    if warmup and cycle > 0 then
-      wait_for(dthydro)
-      enable = true
-      warmup = false
-      time = 0.0
-      cycle = 0
-      dt = dtmax
-      dthydro = dtmax
-      start_time = c.legion_get_current_time_in_micros()/1.e6
-      last_time = start_time
-    end
-
-    c.legion_runtime_begin_trace(__runtime(), __context(), 0)
-
-    dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
-
-    if cycle > 0 and cycle % interval == 0 then
-      var current_time = c.legion_get_current_time_in_micros()/1.e6
-      c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
-               cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
-      last_time = current_time
-    end
-
-    print_ts = conf.print_ts and cycle == 0
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      adv_pos_half(rp_all_private_p[i],
-                   rp_spans_private[i],
-                   dt,
-                   conf.nspans_points,
-                   enable, print_ts)
-    end
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      adv_pos_half(rp_all_shared_p[i],
-                   rp_spans_shared[i],
-                   dt,
-                   conf.nspans_points,
-                   enable, print_ts)
-    end
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      calc_everything(rz_all_p[i],
-                      rp_all_private_p[i],
-                      rp_all_ghost_p[i],
-                      rs_all_p[i],
-                      rz_spans[i],
-                      rs_spans[i],
-                      alfa, gamma, ssmin, dt,
-                      q1, q2,
-                      conf.nspans_zones,
-                      enable)
-    end
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      adv_pos_full(rp_all_private_p[i],
-                   rp_spans_private[i],
-                   dt,
-                   conf.nspans_points,
-                   enable)
-    end
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      adv_pos_full(rp_all_shared_p[i],
-                   rp_spans_shared[i],
-                   dt,
-                   conf.nspans_points,
-                   enable)
-    end
-
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      calc_everything_full(rz_all_p[i],
-                           rp_all_private_p[i],
-                           rp_all_ghost_p[i],
-                           rs_all_p[i],
-                           rz_spans[i],
-                           rs_spans[i],
-                           dt,
-                           conf.nspans_zones,
-                           enable)
-    end
-
-    print_ts = conf.print_ts and cycle == cstop - 1
-
-    dthydro = dtmax
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      dthydro min= calc_dt_hydro(rz_all_p[i],
-                                 rz_spans[i],
-                                 dt, dtmax, cfl, cflv,
-                                 conf.nspans_zones,
-                                 enable, print_ts)
-    end
-
-    cycle += 1
-    time += dt
-
-    c.legion_runtime_end_trace(__runtime(), __context(), 0)
-  end
-
-  if enable then
-    wait_for(dthydro)
-    var end_time = c.legion_get_current_time_in_micros()/1.e6
-    c.printf("Elapsed time = %.6e\n", end_time - start_time)
-  end
-
-  return time
-end
-
-task initialize(rz_all : region(zone), rz_all_p : partition(disjoint, rz_all),
-                rz_spans_p : partition(disjoint, rz_all),
-                rz_spans : cross_product(rz_all_p, rz_spans_p),
-                rp_all : region(point),
-                rp_all_private : region(point),
-                rp_all_private_p : partition(disjoint, rp_all_private),
-                rp_all_ghost : region(point),
-                rp_all_ghost_p : partition(aliased, rp_all_ghost),
-                rp_all_shared_p : partition(disjoint, rp_all_ghost),
-                rp_spans_p : partition(disjoint, rp_all),
-                rp_spans_private : cross_product(rp_all_private_p, rp_spans_p),
-                rp_spans_shared : cross_product(rp_all_shared_p, rp_spans_p),
-                rs_all : region(side(wild, wild, wild, wild)),
-                rs_all_p : partition(disjoint, rs_all),
-                rs_spans_p : partition(disjoint, rs_all),
-                rs_spans : cross_product(rs_all_p, rs_spans_p),
-                conf : config) : double
-where
-  reads writes(rz_all, rp_all_private, rp_all_ghost, rs_all),
-  rp_all_private * rp_all_ghost
-do
-  var einit = conf.einit
-  var einitsub = conf.einitsub
-  var rinit = conf.rinit
-  var rinitsub = conf.rinitsub
-  var subregion = conf.subregion
-  var uinitradial = conf.uinitradial
-
-  var enable = true
-
-  for i = 0, conf.npieces do
-    init_pointers(
-      rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
-      rs_all_p[i], rs_spans[i], conf.nspans_zones)
-  end
-
-  for i = 0, conf.npieces do
-    init_mesh_zones(
-      rz_all_p[i], rz_spans[i], conf.nspans_zones)
-  end
-
-  for i = 0, conf.npieces do
-    calc_centers_full(
-      rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
-      rs_all_p[i], rs_spans[i], conf.nspans_zones,
-      enable)
-  end
-
-  for i = 0, conf.npieces do
-    calc_volumes_full(
-      rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
-      rs_all_p[i], rs_spans[i], conf.nspans_zones,
-      enable)
-  end
-
-  for i = 0, conf.npieces do
-    init_side_fracs(
-      rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
-      rs_all_p[i], rs_spans[i], conf.nspans_zones)
-  end
-
-  for i = 0, conf.npieces do
-    init_hydro(
-      rz_all_p[i], rz_spans[i],
-      rinit, einit, rinitsub, einitsub,
-      subregion[0], subregion[1], subregion[2], subregion[3],
-      conf.nspans_zones)
-  end
-
-  for i = 0, conf.npieces do
-    init_radial_velocity(
-      rp_all_private_p[i], rp_spans_private[i],
-      uinitradial, conf.nspans_points)
-  end
-  for i = 0, conf.npieces do
-    init_radial_velocity(
-      rp_all_shared_p[i], rp_spans_shared[i],
-      uinitradial, conf.nspans_points)
-  end
-
-  if conf.warmup then
-    -- Do one iteration to warm up the runtime.
-    var conf_warmup = conf
-    conf_warmup.cstop = 1
-    conf_warmup.enable = false
-    return simulate(
-      rz_all, rz_all_p, rz_spans_p, rz_spans,
-      rp_all, rp_all_private, rp_all_private_p,
-      rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
-      rp_spans_p, rp_spans_private, rp_spans_shared,
-      rs_all, rs_all_p, rs_spans_p, rs_spans,
-      conf_warmup)
-  end
-  return 1.0
-end
-
 task read_input_sequential(rz_all : region(zone),
                            rp_all : region(point),
                            rs_all : region(side(wild, wild, wild, wild)),
@@ -1313,6 +1049,11 @@ where reads(rz_all, rp_all, rs_all) do
     __physical(rp_all), __fields(rp_all),
     __physical(rs_all), __fields(rs_all),
     conf)
+end
+
+task dummy(rz : region(zone), rpp : region(point)) : int
+where reads writes(rz, rpp) do
+  return 1
 end
 
 terra unwrap(x : mesh_colorings) return x end
@@ -1403,36 +1144,223 @@ task test()
     disjoint, rs_all, colorings.rs_spans_c)
   var rs_spans = cross_product(rs_all_p, rs_spans_p)
 
-  if conf.par_init then
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      initialize_topology(conf, i, rz_all_p[i],
-                          rp_all_private_p[i],
-                          rp_all_shared_p[i],
-                          rp_all_ghost_p[i],
-                          rs_all_p[i])
+  var par_init = [int64](conf.par_init)
+
+  var einit = conf.einit
+  var einitsub = conf.einitsub
+  var rinit = conf.rinit
+  var rinitsub = conf.rinitsub
+  var subregion = conf.subregion
+
+  var npieces = conf.npieces
+  var nspans_zones = conf.nspans_zones
+  var nspans_points = conf.nspans_points
+
+  var subregion_0, subregion_1, subregion_2, subregion_3 = conf.subregion[0], conf.subregion[1], conf.subregion[2], conf.subregion[3]
+
+  var alfa = conf.alfa
+  var cfl = conf.cfl
+  var cflv = conf.cflv
+  var cstop = conf.cstop
+  var dtfac = conf.dtfac
+  var dtinit = conf.dtinit
+  var dtmax = conf.dtmax
+  var gamma = conf.gamma
+  var q1 = conf.q1
+  var q2 = conf.q2
+  var qgamma = conf.qgamma
+  var ssmin = conf.ssmin
+  var tstop = conf.tstop
+  var uinitradial = conf.uinitradial
+  var vfix = {x = 0.0, y = 0.0}
+
+  var enable = conf.enable and not conf.warmup
+  var warmup = conf.warmup and conf.enable
+  var requested_print_ts = conf.print_ts
+  var print_ts = requested_print_ts
+
+  var interval = 100
+  var start_time = c.legion_get_current_time_in_micros()/1.e6
+  var last_time = start_time
+
+  var time = 0.0
+  var cycle : int64 = 0
+  var dt = dtmax
+  var dthydro = dtmax
+
+  __demand(__spmd)
+  do
+    -- Initialization
+    for _ = 0, par_init do
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        initialize_topology(conf, i, rz_all_p[i],
+                            rp_all_private_p[i],
+                            rp_all_shared_p[i],
+                            rp_all_ghost_p[i],
+                            rs_all_p[i])
+      end
+    end
+
+    for i = 0, npieces do
+      init_pointers(
+        rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
+        rs_all_p[i], rs_spans[i], nspans_zones)
+    end
+
+    for i = 0, npieces do
+      init_mesh_zones(
+        rz_all_p[i], rz_spans[i], nspans_zones)
+    end
+
+    for i = 0, npieces do
+      calc_centers_full(
+        rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
+        rs_all_p[i], rs_spans[i], nspans_zones,
+        true)
+    end
+
+    for i = 0, npieces do
+      calc_volumes_full(
+        rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
+        rs_all_p[i], rs_spans[i], nspans_zones,
+        true)
+    end
+
+    for i = 0, npieces do
+      init_side_fracs(
+        rz_all_p[i], rp_all_private_p[i], rp_all_ghost_p[i],
+        rs_all_p[i], rs_spans[i], nspans_zones)
+    end
+
+    for i = 0, npieces do
+      init_hydro(
+        rz_all_p[i], rz_spans[i],
+        rinit, einit, rinitsub, einitsub,
+        subregion_0, subregion_1, subregion_2, subregion_3,
+        nspans_zones)
+    end
+
+    for i = 0, npieces do
+      init_radial_velocity(
+        rp_all_private_p[i], rp_spans_private[i],
+        uinitradial, nspans_points)
+    end
+    for i = 0, npieces do
+      init_radial_velocity(
+        rp_all_shared_p[i], rp_spans_shared[i],
+        uinitradial, nspans_points)
     end
   end
 
-  c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-  wait_for(initialize(rz_all, rz_all_p, rz_spans_p, rz_spans,
-                      rp_all,
-                      rp_all_private, rp_all_private_p,
-                      rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
-                      rp_spans_p, rp_spans_private, rp_spans_shared,
-                      rs_all, rs_all_p, rs_spans_p, rs_spans,
-                      conf))
-  c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-  var start_time = c.legion_get_current_time_in_micros()/1.e6
-  wait_for(simulate(rz_all, rz_all_p, rz_spans_p, rz_spans,
-                    rp_all,
-                    rp_all_private, rp_all_private_p,
-                    rp_all_ghost, rp_all_ghost_p, rp_all_shared_p,
-                    rp_spans_p, rp_spans_private, rp_spans_shared,
-                    rs_all, rs_all_p, rs_spans_p, rs_spans,
-                    conf))
-  var stop_time = c.legion_get_current_time_in_micros()/1.e6
-  c.printf("Outer simulation time = %.6e\n", stop_time - start_time)
+  __demand(__spmd)
+  do
+    -- Main Simulation Loop
+    while continue_simulation(warmup, cycle, cstop, time, tstop) do
+      -- if warmup and cycle > 0 then
+      --   wait_for(dthydro)
+      --   enable = true
+      --   warmup = false
+      --   time = 0.0
+      --   cycle = 0
+      --   dt = dtmax
+      --   dthydro = dtmax
+      --   start_time = c.legion_get_current_time_in_micros()/1.e6
+      --   last_time = start_time
+      -- end
+
+      -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
+
+      dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
+
+      -- if cycle > 0 and cycle % interval == 0 then
+      --   var current_time = c.legion_get_current_time_in_micros()/1.e6
+      --   c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+      --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+      --   last_time = current_time
+      -- end
+
+      print_ts = requested_print_ts and cycle == 0
+
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        adv_pos_half(rp_all_private_p[i],
+                     rp_spans_private[i],
+                     dt,
+                     nspans_points,
+                     enable, print_ts)
+      end
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        adv_pos_half(rp_all_shared_p[i],
+                     rp_spans_shared[i],
+                     dt,
+                     nspans_points,
+                     enable, print_ts)
+      end
+
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        calc_everything(rz_all_p[i],
+                        rp_all_private_p[i],
+                        rp_all_ghost_p[i],
+                        rs_all_p[i],
+                        rz_spans[i],
+                        rs_spans[i],
+                        alfa, gamma, ssmin, dt,
+                        q1, q2,
+                        nspans_zones,
+                        enable)
+      end
+
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        adv_pos_full(rp_all_private_p[i],
+                     rp_spans_private[i],
+                     dt,
+                     nspans_points,
+                     enable)
+      end
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        adv_pos_full(rp_all_shared_p[i],
+                     rp_spans_shared[i],
+                     dt,
+                     nspans_points,
+                     enable)
+      end
+
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        calc_everything_full(rz_all_p[i],
+                             rp_all_private_p[i],
+                             rp_all_ghost_p[i],
+                             rs_all_p[i],
+                             rz_spans[i],
+                             rs_spans[i],
+                             dt,
+                             nspans_zones,
+                             enable)
+      end
+
+      print_ts = requested_print_ts and cycle == cstop - 1
+
+      dthydro = dtmax
+      -- __demand(__parallel)
+      for i = 0, npieces do
+        dthydro min= calc_dt_hydro(rz_all_p[i],
+                                   rz_spans[i],
+                                   dt, dtmax, cfl, cflv,
+                                   nspans_zones,
+                                   enable, print_ts)
+      end
+
+      cycle += 1
+      time += dt
+
+      -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
+    end
+  end
 
   if conf.seq_init then
     validate_output_sequential(
@@ -1449,19 +1377,8 @@ task toplevel()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local function saveobj(main_task, filename, filetype, extra_setup_thunk)
-    local main, names = regentlib.setup(main_task, extra_setup_thunk)
-    local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
-
-    if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra"})
-    else
-      terralib.saveobj(filename, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra"})
-    end
-  end
-
-  saveobj(toplevel, "pennant", "executable", cpennant.register_mappers)
+  local link_flags = {"-L" .. root_dir, "-lpennant"}
+  regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
 else
-  cpennant.register_mappers()
-  regentlib.start(toplevel)
+  regentlib.start(toplevel, cpennant.register_mappers)
 end

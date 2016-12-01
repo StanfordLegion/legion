@@ -79,7 +79,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShimMapper::Task::Task(const Legion::Task &t, TaskVariantCollection *var)
       : Legion::Task(t), variants(var), unique_id(t.get_unique_id()), 
-        depth(t.get_depth()), task_name(t.get_task_name())
+        context_index(t.get_context_index()), depth(t.get_depth()), 
+        task_name(t.get_task_name())
     //--------------------------------------------------------------------------
     {
       inline_task = false;
@@ -139,6 +140,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned ShimMapper::Task::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
     int ShimMapper::Task::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -155,7 +163,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShimMapper::Inline::Inline(const Legion::InlineMapping &m)
       : Legion::InlineMapping(m), unique_id(m.get_unique_id()), 
-        depth(m.get_depth())
+        context_index(m.get_context_index()), depth(m.get_depth())
     //--------------------------------------------------------------------------
     {
       requirement = m.requirement;
@@ -205,6 +213,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    unsigned ShimMapper::Inline::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
     int ShimMapper::Inline::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -213,7 +228,8 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     ShimMapper::Copy::Copy(const Legion::Copy &c)
-      : Legion::Copy(c)
+      : Legion::Copy(c), unique_id(c.get_unique_id()), 
+        context_index(c.get_context_index()), depth(c.get_depth())
     //--------------------------------------------------------------------------
     {
       // fill in our region requirements by copying, sucks but whatever
@@ -267,6 +283,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return unique_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ShimMapper::Copy::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
     }
 
     //--------------------------------------------------------------------------
@@ -372,6 +395,7 @@ namespace Legion {
                            Processor local, const char *name/*=NULL*/)
       : DefaultMapper(mrt, m, local,(name == NULL) ? 
           create_shim_name(local) : name),
+        mapper_runtime(mrt),
         local_kind(local.kind()), machine(m), runtime(rt),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
@@ -424,6 +448,7 @@ namespace Legion {
     ShimMapper::ShimMapper(const ShimMapper &rhs)
       : DefaultMapper(rhs.mapper_runtime, Machine::get_machine(), 
           Processor::NO_PROC),
+        mapper_runtime(rhs.mapper_runtime),
         local_kind(Processor::LOC_PROC), machine(rhs.machine), runtime(NULL),
         machine_interface(Utilities::MachineQueryInterface(rhs.machine))
     //--------------------------------------------------------------------------
@@ -756,7 +781,7 @@ namespace Legion {
             break;
           }
           if (!convert_requirement_mapping(ctx,local_copy.dst_requirements[idx],
-                                           output.src_instances[idx]))
+                                           output.dst_instances[idx]))
           {
             success = false;
             break;
@@ -1019,6 +1044,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShimMapper::select_tunable_value(const MapperContext         ctx,
+					  const Legion::Task&         task,
+					  const SelectTunableInput&   input,
+                                                SelectTunableOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      log_shim.spew("Shim mapper select_tunable_value in %s", get_mapper_name());
+      // Wrap the task with one of our tasks
+      Task local_task(task, find_task_variant_collection(ctx, task.task_id,
+                                                         task.get_task_name()));
+      // Save the current context before doing any old calls
+      current_ctx = ctx;
+      // call old version - returns int directly, but we'll store as size_t
+      //  for consistency with the new DefaultMapper tunables
+      size_t *result = (size_t*)malloc(sizeof(size_t));
+      output.value = result;
+      output.size = sizeof(size_t);
+      *result = get_tunable_value(&local_task,
+				  input.tunable_id,
+				  input.mapping_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    int ShimMapper::get_tunable_value(const Task *task, 
+				      TunableID tid, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      log_shim.fatal("Shim mapper doesn't support any tunables directly!");
+      assert(0);
+      //should never happen, but function needs return statement
+      return(STATIC_MAX_FAILED_MAPPINGS);
+    }
+
+    //--------------------------------------------------------------------------
     void ShimMapper::handle_message(const MapperContext ctx,
                                     const MapperMessage& message)
     //--------------------------------------------------------------------------
@@ -1065,6 +1124,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return mapper_runtime->get_parent_logical_region(current_ctx, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShimMapper::get_field_space_fields(FieldSpace handle, std::set<FieldID> &fields)
+    //--------------------------------------------------------------------------
+    {
+      return mapper_runtime->get_field_space_fields(current_ctx, handle, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1233,7 +1299,7 @@ namespace Legion {
       {
         assert(all_fields.size() == 1);
         constraints.add_constraint(SpecializedConstraint(
-              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, redop))
+                                      REDUCTION_FOLD_SPECIALIZE, redop))
           .add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
                                           true/*inorder*/));
       }
@@ -1264,7 +1330,7 @@ namespace Legion {
       {
         assert(all_fields.size() == 1);
         constraints.add_constraint(SpecializedConstraint(
-              SpecializedConstraint::REDUCTION_FOLD_SPECIALIZE, redop)).
+                                    REDUCTION_FOLD_SPECIALIZE, redop)).
           add_constraint(FieldConstraint(all_fields, true/*contiguous*/,
                                          true/*inorder*/));
       }

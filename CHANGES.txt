@@ -1,0 +1,50 @@
+This file lists the major changes as they appear in the stable branch.  No
+attempt is made to keep this list accurate for the master branch.
+
+Version 16.10.0 (October 7, 2016)
+  * Realm
+    - HDF5 support: moved to Realm module, added DMA channels
+    - PAPI support: basic profiling (instructions, caches, branches) added
+  * Build flow
+    - Fixes to support compilation in 32-bit mode
+    - Numerous improvements to CMake build
+  * Regent
+    - Improvements to vectorization of structured codes
+  * Apps
+    - Removed bit-rotted applications - some have been replaced by examples
+        or Regent applications
+  * Tests
+    - New test infrastructure and top-level test script `test.py`
+
+Version 16.08.0 (August 30, 2016)
+  * Realm
+    - Critical-enough ("error" and "fatal" by default, controlled with
+        -errlevel) logging messages are mirrored to stderr when -logfile is
+        used
+    - Command-line options for logging (-error and new -errlevel) support
+        English names of logging levels (spew, debug, info, print,
+        warn/warning, error, fatal, none) as well as integers
+  * Legion
+    - Rewrite of the Legion shutdown algorithm for improved scalability
+      and avoiding O(N^2) behavior in the number of nodes
+  * Regent
+    - Installer now prompts for RDIR installation
+  * Tools
+    - Important Legion Spy performance improvements involving transitive
+        reductions
+
+Version 16.06.0 (June 15, 2016)
+  * Legion
+    - New mapper API:
+        use ShimMapper for limited backwards compatibility
+    - New task variant registration API
+        supports specifying layout constraints for region requirements
+        old interface is still available but deprecated
+    - Several large bug fixes for internal version numbering computation
+  * C API
+    - The context parameter for many API calls has been removed
+  * Tools
+    - Total re-write of Legion Spy
+
+Version 16.05.0 (May 2, 2016)
+  * Lots of stuff - we weren't itemizing things before this point.

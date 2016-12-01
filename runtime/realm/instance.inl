@@ -1,4 +1,4 @@
-/* Copyright 2015 Stanford University, NVIDIA Corporation
+/* Copyright 2016 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,17 +29,17 @@ namespace Realm {
   //
   // class RegionInstance
 
-  inline bool RegionInstance::operator<(const RegionInstance &rhs) const
+  inline bool RegionInstance::operator<(const RegionInstance& rhs) const
   {
     return id < rhs.id;
   }
 
-  inline bool RegionInstance::operator==(const RegionInstance &rhs) const
+  inline bool RegionInstance::operator==(const RegionInstance& rhs) const
   {
     return id == rhs.id;
   }
 
-  inline bool RegionInstance::operator!=(const RegionInstance &rhs) const
+  inline bool RegionInstance::operator!=(const RegionInstance& rhs) const
   {
     return id != rhs.id;
   }
@@ -68,5 +68,19 @@ namespace Realm {
   }
 #endif
 		
-}; // namespace Realm
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RegionInstance::DestroyedField
+
+
+  inline RegionInstance::DestroyedField::DestroyedField(void) 
+    : offset(0), size(0), serdez_id(0)
+  { }
+
+  inline RegionInstance::DestroyedField::DestroyedField(unsigned o, unsigned s, CustomSerdezID sid)
+    : offset(o), size(s), serdez_id(sid)
+  { }
+
+
+}; // namespace Realm  

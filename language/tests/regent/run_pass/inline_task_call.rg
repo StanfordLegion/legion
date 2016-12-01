@@ -14,15 +14,23 @@
 
 import "regent"
 
-task f(s : region(int), y : ptr(int, s)) : int
+local c = regentlib.c
+
+struct ret
+{
+  v : int,
+  id : uint64,
+}
+
+task f(s : region(int), y : ptr(int, s)) : ret
 where reads(s) do
-  return @y
+  return ret { v = @y, id = c.legion_context_get_unique_id(__context()) }
 end
 
-task h(s : region(int), y : ptr(int, s)) : int
+task h(s : region(int), y : ptr(int, s)) : ret
 where reads(s), writes(s) do
   @y += 100
-  return @y
+  return ret { v = @y, id = c.legion_context_get_unique_id(__context()) }
 end
 
 __demand(__inline)
@@ -30,12 +38,15 @@ task id(x : int) : int
   return x
 end
 
-task g() : int
+task g() : ret
+  var id_g = c.legion_context_get_unique_id(__context())
   var r = region(ispace(ptr, 5), int)
   var x = new(ptr(int, r))
   @x = 5
-  __demand(__inline, f(r, x))
-  __demand(__inline, h(r, x))
+  var ret_f = __demand(__inline, f(r, x))
+  regentlib.assert(id_g == ret_f.id, "test failed")
+  var ret_h = __demand(__inline, h(r, x))
+  regentlib.assert(id_g == ret_h.id, "test failed")
   f(r, x)
   for i = 0, 5 do
     h(r, x)
@@ -44,6 +55,7 @@ task g() : int
 end
 
 task main()
-  regentlib.assert(g() == 605, "test failed")
+  var ret_g = g()
+  regentlib.assert(ret_g.v == 605, "test failed")
 end
 regentlib.start(main)

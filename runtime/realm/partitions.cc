@@ -1044,7 +1044,7 @@ namespace Realm {
       if(precise) {
 	if(!this->entries_valid) {
 	  // do we need to request the data?
-	  if((ID(me).node() != gasnet_mynode()) && !precise_requested) {
+	  if((ID(me).sparsity.creator_node != gasnet_mynode()) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -1062,7 +1062,7 @@ namespace Realm {
       } else {
 	if(!this->approx_valid) {
 	  // do we need to request the data?
-	  if((ID(me).node() != gasnet_mynode()) && !approx_requested) {
+	  if((ID(me).sparsity.creator_node != gasnet_mynode()) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -1078,7 +1078,7 @@ namespace Realm {
     }
     
     if(request_approx || request_precise)
-      RemoteSparsityRequestMessage::send_request(ID(me).node(), me,
+      RemoteSparsityRequestMessage::send_request(ID(me).sparsity.creator_node, me,
 						 request_approx,
 						 request_precise);
 
@@ -1095,7 +1095,7 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::set_contributor_count(int count)
   {
-    if(ID(me).node() == gasnet_mynode()) {
+    if(ID(me).sparsity.creator_node == gasnet_mynode()) {
       // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
       //  immediately finalize - the contributions happened before we got here
       // just increment the count atomically
@@ -1104,14 +1104,14 @@ namespace Realm {
 	finalize();
     } else {
       // send the contributor count to the owner node
-      SetContribCountMessage::send_request(ID(me).node(), me, count);
+      SetContribCountMessage::send_request(ID(me).sparsity.creator_node, me, count);
     }
   }
 
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_nothing(void)
   {
-    gasnet_node_t owner = ID(me).node();
+    gasnet_node_t owner = ID(me).sparsity.creator_node;
 
     if(owner != gasnet_mynode()) {
       // send (the lack of) data to the owner to collect
@@ -1130,7 +1130,7 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_dense_rect_list(const std::vector<ZRect<N,T> >& rects)
   {
-    gasnet_node_t owner = ID(me).node();
+    gasnet_node_t owner = ID(me).sparsity.creator_node;
 
     if(owner != gasnet_mynode()) {
       // send the data to the owner to collect
@@ -1304,7 +1304,7 @@ namespace Realm {
     }
 
     if(last) {
-      if(ID(me).node() == gasnet_mynode()) {
+      if(ID(me).sparsity.creator_node == gasnet_mynode()) {
 	// we're the owner, so remaining_contributor_count tracks our expected contributions
 	// count is allowed to go negative if we get contributions before we know the total expected
 	int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
@@ -1340,7 +1340,7 @@ namespace Realm {
 	  precise_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((ID(me).node() != gasnet_mynode()) && !precise_requested) {
+	  if((ID(me).sparsity.creator_node != gasnet_mynode()) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -1353,7 +1353,7 @@ namespace Realm {
 	  approx_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((ID(me).node() != gasnet_mynode()) && !approx_requested) {
+	  if((ID(me).sparsity.creator_node != gasnet_mynode()) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -1362,7 +1362,7 @@ namespace Realm {
     }
 
     if(request_approx || request_precise)
-      RemoteSparsityRequestMessage::send_request(ID(me).node(), me,
+      RemoteSparsityRequestMessage::send_request(ID(me).sparsity.creator_node, me,
 						 request_approx,
 						 request_precise);
 
@@ -1373,7 +1373,7 @@ namespace Realm {
   void SparsityMapImpl<N,T>::remote_data_request(gasnet_node_t requestor, bool send_precise, bool send_approx)
   {
     // first sanity check - we should be the owner of the data
-    assert(ID(me).node() == gasnet_mynode());
+    assert(ID(me).sparsity.creator_node == gasnet_mynode());
 
     // take the long to determine atomically if we can send data or if we need to register as a listener
     bool reply_precise = false;
@@ -1551,7 +1551,7 @@ namespace Realm {
     }
 
     // now that we've got our entries nice and tidy, build a bounded approximation of them
-    if(true /*ID(me).node() == gasnet_mynode()*/) {
+    if(true /*ID(me).sparsity.creator_node == gasnet_mynode()*/) {
       assert(!this->approx_valid);
       compute_approximation(this->entries, this->approx_rects, cfg_max_rects_in_approximation);
       this->approx_valid = true;
@@ -2007,7 +2007,7 @@ namespace Realm {
   void ByFieldMicroOp<N,T,FT>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // a ByFieldMicroOp should always be executed on whichever node the field data lives
-    gasnet_node_t exec_node = ID(inst).node();
+    gasnet_node_t exec_node = ID(inst).sparsity.creator_node;
 
     if(exec_node != gasnet_mynode()) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -2293,7 +2293,7 @@ namespace Realm {
   void ImageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // an ImageMicroOp should always be executed on whichever node the field data lives
-    gasnet_node_t exec_node = ID(inst).node();
+    gasnet_node_t exec_node = ID(inst).sparsity.creator_node;
 
     if(exec_node != gasnet_mynode()) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -2474,7 +2474,7 @@ namespace Realm {
   void PreimageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // a PreimageMicroOp should always be executed on whichever node the field data lives
-    gasnet_node_t exec_node = ID(inst).node();
+    gasnet_node_t exec_node = ID(inst).sparsity.creator_node;
 
     if(exec_node != gasnet_mynode()) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -3025,7 +3025,7 @@ namespace Realm {
   void UnionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    gasnet_node_t exec_node = ID(sparsity_output).node();
+    gasnet_node_t exec_node = ID(sparsity_output).sparsity.creator_node;
 
     if(exec_node != gasnet_mynode()) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -3195,7 +3195,7 @@ namespace Realm {
   void IntersectionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    gasnet_node_t exec_node = ID(sparsity_output).node();
+    gasnet_node_t exec_node = ID(sparsity_output).sparsity.creator_node;
 
     if(exec_node != gasnet_mynode()) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -3435,7 +3435,7 @@ namespace Realm {
   void DifferenceMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    gasnet_node_t exec_node = ID(sparsity_output).node();
+    gasnet_node_t exec_node = ID(sparsity_output).sparsity.creator_node;
 
     if(exec_node != gasnet_mynode()) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -3833,6 +3833,11 @@ namespace Realm {
       os << "DeferredPartitioningOp(" << (void *)op << ")";
     }
 
+    virtual Event get_finish_event(void) const
+    {
+      return op->get_finish_event();
+    }
+
   protected:
     PartitioningOperation *op;
   };
@@ -3887,7 +3892,7 @@ namespace Realm {
     subspace.bounds = parent.bounds;
 
     // get a sparsity ID by round-robin'ing across the nodes that have field data
-    int target_node = ID(field_data[colors.size() % field_data.size()].inst).node();
+    int target_node = ID(field_data[colors.size() % field_data.size()].inst).sparsity.creator_node;
     SparsityMap<N,T> sparsity;
     if(target_node == gasnet_mynode()) {
       SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
@@ -3960,9 +3965,9 @@ namespace Realm {
     // get a sparsity ID by round-robin'ing across the nodes that have field data
     int target_node;
     if(!source.dense())
-      target_node = ID(source.sparsity).node();
+      target_node = ID(source.sparsity).sparsity.creator_node;
     else
-      target_node = ID(field_data[sources.size() % field_data.size()].inst).node();
+      target_node = ID(field_data[sources.size() % field_data.size()].inst).sparsity.creator_node;
     SparsityMap<N,T> sparsity;
     if(target_node == gasnet_mynode()) {
       SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
@@ -3993,9 +3998,9 @@ namespace Realm {
     // get a sparsity ID by round-robin'ing across the nodes that have field data
     int target_node;
     if(!source.dense())
-      target_node = ID(source.sparsity).node();
+      target_node = ID(source.sparsity).sparsity.creator_node;
     else
-      target_node = ID(field_data[sources.size() % field_data.size()].inst).node();
+      target_node = ID(field_data[sources.size() % field_data.size()].inst).sparsity.creator_node;
     SparsityMap<N,T> sparsity;
     if(target_node == gasnet_mynode()) {
       SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
@@ -4136,9 +4141,9 @@ namespace Realm {
     // get a sparsity ID by round-robin'ing across the nodes that have field data
     int target_node;
     if(!target.dense())
-      target_node = ID(target.sparsity).node();
+      target_node = ID(target.sparsity).sparsity.creator_node;
     else
-      target_node = ID(field_data[targets.size() % field_data.size()].inst).node();
+      target_node = ID(field_data[targets.size() % field_data.size()].inst).sparsity.creator_node;
     SparsityMap<N,T> sparsity;
     if(target_node == gasnet_mynode()) {
       SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
@@ -4331,14 +4336,14 @@ namespace Realm {
       if(rhs.dense()) {
 	target_node = gasnet_mynode();  // operation will be cheap anyway
       } else {
-	target_node = ID(rhs.sparsity).node();
+	target_node = ID(rhs.sparsity).sparsity.creator_node;
       }
     } else {
       if(rhs.dense()) {
-	target_node = ID(lhs.sparsity).node();
+	target_node = ID(lhs.sparsity).sparsity.creator_node;
       } else {
-	int lhs_node = ID(lhs.sparsity).node();
-	int rhs_node = ID(rhs.sparsity).node();
+	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
+	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
 	//if(lhs_node != rhs_node)
 	//  std::cout << "UNION PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
@@ -4381,7 +4386,7 @@ namespace Realm {
       int node_count = 0;
       for(size_t i = 0; i < ops.size(); i++)
 	if(!ops[i].dense()) {
-	  int node = ID(ops[i].sparsity).node();
+	  int node = ID(ops[i].sparsity).sparsity.creator_node;
 	  if(node_count == 0) {
 	    node_count = 1;
 	    target_node = node;
@@ -4455,14 +4460,14 @@ namespace Realm {
 	if(rhs.dense()) {
 	  target_node = gasnet_mynode();  // operation will be cheap anyway
 	} else {
-	  target_node = ID(rhs.sparsity).node();
+	  target_node = ID(rhs.sparsity).sparsity.creator_node;
 	}
       } else {
 	if(rhs.dense()) {
-	  target_node = ID(lhs.sparsity).node();
+	  target_node = ID(lhs.sparsity).sparsity.creator_node;
 	} else {
-	  int lhs_node = ID(lhs.sparsity).node();
-	  int rhs_node = ID(rhs.sparsity).node();
+	  int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
+	  int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
 	  //if(lhs_node != rhs_node)
 	  //  std::cout << "ISECT PICK " << lhs_node << " or " << rhs_node << "\n";
 	  // if they're different, and lhs is us, choose rhs to load-balance maybe
@@ -4506,7 +4511,7 @@ namespace Realm {
       int node_count = 0;
       for(size_t i = 0; i < ops.size(); i++)
 	if(!ops[i].dense()) {
-	  int node = ID(ops[i].sparsity).node();
+	  int node = ID(ops[i].sparsity).sparsity.creator_node;
 	  if(node_count == 0) {
 	    node_count = 1;
 	    target_node = node;
@@ -4585,14 +4590,14 @@ namespace Realm {
       if(rhs.dense()) {
 	target_node = gasnet_mynode();  // operation will be cheap anyway
       } else {
-	target_node = ID(rhs.sparsity).node();
+	target_node = ID(rhs.sparsity).sparsity.creator_node;
       }
     } else {
       if(rhs.dense()) {
-	target_node = ID(lhs.sparsity).node();
+	target_node = ID(lhs.sparsity).sparsity.creator_node;
       } else {
-	int lhs_node = ID(lhs.sparsity).node();
-	int rhs_node = ID(rhs.sparsity).node();
+	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
+	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
 	//if(lhs_node != rhs_node)
 	//  std::cout << "DIFF PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe

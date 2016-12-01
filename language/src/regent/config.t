@@ -12,77 +12,67 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Configuration and Command Line Parsing
+-- Regent Configuration and Command Line Parsing
+
+local common_config = require("common/config")
 
 local config = {}
 
 local default_options = {
-  ["aligned-instances"] = false,
+  -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
-  ["cached-iterators"] = false,
+
+  -- Main user-facing optimization flags:
   ["cuda"] = true,
+  ["index-launch"] = true,
+  ["inline"] = true,
+  ["future"] = true,
+  ["leaf"] = true,
+  ["mapping"] = true,
+  ["vectorize"] = true,
+
+  -- Legion runtime optimization flags:
+  ["legion-leaf"] = true,
+  ["legion-inner"] = true,
+
+  -- Dataflow optimization flags:
+  ["flow"] = os.getenv('USE_RDIR') == '1' or false,
+  ["flow-spmd"] = false,
+  ["flow-spmd-shardsize"] = 1,
+
+  -- Experimental auto-parallelization flags:
+  ["parallelize"] = true,
+  ["parallelize-dop"] = "4",
+  ["parallelize-global"] = true,
+
+  -- Miscellaneous, internal or special-purpose flags:
+  ["aligned-instances"] = false,
+  ["cached-iterators"] = false,
   ["debug"] = false,
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
   ["pretty"] = false,
-  ["index-launches"] = true,
-  ["futures"] = true,
-  ["inlines"] = true,
-  ["leaf"] = true,
+  ["layout-constraints"] = true,
   ["trace"] = true,
-  ["vectorize"] = true,
-  ["task-inlines"] = true,
+  ["validate"] = true,
+
+  -- Need this here to make the logger happy.
+  ["log"] = "",
 }
 
-local option = {
-  __index = function(t, k)
-    error("no such option " .. tostring(k), 2)
-  end,
-  __newindex = function(t, k, v)
-    error("options should only be set at startup time", 2)
-  end,
-}
-
-function config.parse_args()
-  local rawargs = rawget(_G, "arg")
-
-  local options = {}
-  for k, v in pairs(default_options) do
-    options[k] = v
+local function make_default_options(prefix, options)
+  local result = terralib.newlist()
+  for k, v in pairs(options) do
+    result:insert(
+      common_config.make_default_option(prefix .. k, k, type(v), v))
   end
+  return result
+end
 
-  local args = terralib.newlist()
-
-  if not rawargs then
-    return setmetatable(options, option), args
-  end
-
-  local i = 0
-  local arg_i = 1
-  while rawargs[i] do
-    local arg = rawargs[i]
-    if string.sub(arg, 1, 2) == "-f" then
-      local k = string.sub(rawargs[i], 3)
-      if default_options[k] == nil then
-        error("unknown option " .. rawargs[i])
-      end
-      if rawargs[i+1] == nil or tonumber(rawargs[i+1]) == nil then
-        error("option " .. rawargs[i] .. " missing argument")
-      end
-      local v = tonumber(rawargs[i+1])
-      if type(default_options[k]) == "boolean" then
-        v = v~= 0
-      end
-      options[k] = v
-      i = i + 1
-    else
-      args[arg_i] = rawargs[i]
-      arg_i = arg_i + 1
-    end
-    i = i + 1
-  end
-
-  return setmetatable(options, option), args
+function config.args()
+  return common_config.args(
+    make_default_options("-f", default_options),
+    "-f")
 end
 
 return config

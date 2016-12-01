@@ -15,6 +15,9 @@
 
 -- Bishop Standard Libary
 
+local config = require("bishop/config")
+local log = require("bishop/log")
+
 local c = terralib.includecstring [[
 #include "legion_c.h"
 #include "bishop_c.h"
@@ -24,6 +27,16 @@ local c = terralib.includecstring [[
 
 local std = {}
 std.c = c
+
+std.config, std.args = config.args()
+
+function std.curry(f, a)
+  return function(...) return f(a, ...) end
+end
+
+function std.curry2(f, a, b)
+  return function(...) return f(a, b, ...) end
+end
 
 terra std.assert(x : bool, message : rawstring)
   if not x then
@@ -109,50 +122,56 @@ function std.quote_binary_op(op, lhs, rhs)
 end
 
 function std.register_bishop_mappers()
-  local mapper = __bishop_jit_mappers__()
+  if not rawget(_G, "__bishop_jit_mappers__") then
+    log.warn(nil, "No mapper is given. Ignoring register request...")
+    return
+  end
 
-  local task_rules = terralib.newsymbol(c.bishop_task_rule_t[ #mapper.task_rules ])
-  local region_rules = terralib.newsymbol(c.bishop_region_rule_t[ #mapper.region_rules ])
+  local mapper = __bishop_jit_mappers__()
+  local num_mapper_impls = #mapper.state_to_mapper_impl + 1
+  local mapper_impls =
+    terralib.newsymbol(c.bishop_mapper_impl_t[ num_mapper_impls ])
+  local num_transitions = #mapper.state_to_transition_impl + 1
+  local transitions =
+    terralib.newsymbol(c.bishop_transition_fn_t[ num_transitions ])
   local register_body = quote end
 
-  for i = 1, #mapper.task_rules do
-    local task_rule = mapper.task_rules[i]
+  register_body = quote
+    [register_body]
+    [mapper_impls][0] = c.bishop_mapper_impl_t {
+      select_task_options = [c.bishop_select_task_options_fn_t](0),
+      slice_task = [c.bishop_slice_task_fn_t](0),
+      map_task = [c.bishop_map_task_fn_t](0),
+    }
+  end
+  for i = 1, #mapper.state_to_mapper_impl do
+    local mapper_impl = mapper.state_to_mapper_impl[i]
     register_body = quote
-      [register_body];
-      [task_rules][ [i - 1] ] = c.bishop_task_rule_t {
-        matches =
-          [c.bishop_task_predicate_t]([task_rule.matches]),
-        select_task_options =
-          [c.bishop_task_callback_fn_t]([task_rule.select_task_options]),
-        select_target_for_point =
-          [c.bishop_assignment_fn_t]([task_rule.select_target_for_point]),
-        select_task_variant =
-          [c.bishop_task_callback_fn_t]([task_rule.select_task_variant]),
+      [register_body]
+      [mapper_impls][i] = c.bishop_mapper_impl_t {
+        select_task_options = [mapper_impl.select_task_options],
+        slice_task = [mapper_impl.slice_task],
+        map_task = [mapper_impl.map_task],
       }
     end
   end
 
-  for i = 1, #mapper.region_rules do
-    local region_rule = mapper.region_rules[i]
+  for i = 0, #mapper.state_to_transition_impl do
+    local transition = mapper.state_to_transition_impl[i]
     register_body = quote
-      [register_body];
-      [region_rules][ [i - 1] ] = c.bishop_region_rule_t {
-        pre_map_task =
-          [c.bishop_region_callback_fn_t]([region_rule.pre_map_task]),
-        map_task =
-          [c.bishop_region_callback_fn_t]([region_rule.map_task]),
-      }
+      [register_body]
+      [transitions][i] = [transition]
     end
   end
 
   local terra register()
-    var num_task_rules = [#mapper.task_rules]
-    var num_region_rules = [#mapper.region_rules]
-    var [task_rules]
-    var [region_rules]
+    var num_mapper_impls = [num_mapper_impls]
+    var num_transitions = [num_transitions]
+    var [mapper_impls]
+    var [transitions]
     [register_body]
-    c.register_bishop_mappers([task_rules], num_task_rules,
-                              [region_rules], num_region_rules,
+    c.register_bishop_mappers([mapper_impls], num_mapper_impls,
+                              [transitions], num_transitions,
                               [mapper.mapper_init])
   end
 

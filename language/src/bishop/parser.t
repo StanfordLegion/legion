@@ -24,19 +24,19 @@ function parser.value(p)
   local pos = ast.save(p)
   if p:matches(p.number) then
     local token = p:next(p.number)
-    value = ast.unspecialized.expr.Constant {
+    value = ast.untyped.expr.Constant {
       value = token.value,
       position = pos,
     }
   elseif p:nextif("$") then
     local token = p:next(p.name)
-    value = ast.unspecialized.expr.Variable {
+    value = ast.untyped.expr.Variable {
       value = token.value,
       position = pos,
     }
   elseif p:matches(p.name) then
     local token = p:next(p.name)
-    value = ast.unspecialized.expr.Keyword {
+    value = ast.untyped.expr.Keyword {
       value = token.value,
       position = pos,
     }
@@ -55,14 +55,29 @@ function parser.expr_complex(p)
     if p:nextif("[") then
       if p:matches(p.name) and p:lookahead("=") then
         local constraints = p:constraints()
-        expr = ast.unspecialized.expr.Filter {
+        expr = ast.untyped.expr.Filter {
           value = expr,
-          constraints = constraints,
+          constraints = constraints:map(function (constraint)
+            if constraint:is(ast.untyped.Constraint) then
+              return ast.untyped.FilterConstraint(constraint)
+            elseif constraint:is(ast.untyped.PatternMatch) then
+              return ast.untyped.FilterConstraint {
+                field = constraint.field,
+                value = ast.untyped.expr.Variable {
+                  value = constraint.binder,
+                  position = constraint.position,
+                },
+                position = constraint.position
+              }
+            else
+              assert(false, "unreachable")
+            end
+          end),
           position = expr.position,
         }
       else
         local value = p:expr()
-        expr = ast.unspecialized.expr.Index {
+        expr = ast.untyped.expr.Index {
           value = expr,
           index = value,
           position = expr.position,
@@ -71,7 +86,7 @@ function parser.expr_complex(p)
       p:expect("]")
     elseif p:nextif(".") then
       local token = p:next(p.name)
-      expr = ast.unspecialized.expr.Field {
+      expr = ast.untyped.expr.Field {
         value = expr,
         field = token.value,
         position = expr.position,
@@ -88,7 +103,7 @@ function parser.expr_unary(precedence)
     local position = ast.save(p)
     local op = p:next().type
     local rhs = p:expr(precedence)
-    return ast.unspecialized.expr.Unary {
+    return ast.untyped.expr.Unary {
       op = op,
       rhs = rhs,
       position = position,
@@ -100,7 +115,7 @@ function parser.expr_binary_left(p, lhs)
   local position = lhs.position
   local op = p:next().type
   local rhs = p:expr(op)
-  return ast.unspecialized.expr.Binary {
+  return ast.untyped.expr.Binary {
     op = op,
     lhs = lhs,
     rhs = rhs,
@@ -114,7 +129,7 @@ function parser.expr_ternary_left(p, cond)
   local true_expr = p:expr(op)
   p:expect(":")
   local false_expr = p:expr(op)
-  return ast.unspecialized.expr.Ternary {
+  return ast.untyped.expr.Ternary {
     cond = cond,
     true_expr = true_expr,
     false_expr = false_expr,
@@ -147,7 +162,7 @@ function parser.property(p)
   p:expect(":")
   local value = p:expr()
   p:expect(";")
-  return ast.unspecialized.Property {
+  return ast.untyped.Property {
     field = field.value,
     value = value,
     position = pos,
@@ -167,14 +182,14 @@ function parser.constraint(p)
   local field = p:next(p.name).value
   p:expect("=")
   local value = p:expr_complex()
-  if value:is(ast.unspecialized.expr.Variable) then
-    return ast.unspecialized.PatternMatch {
+  if value:is(ast.untyped.expr.Variable) then
+    return ast.untyped.PatternMatch {
       field = field,
       binder = value.value,
       position = pos,
     }
   else
-    return ast.unspecialized.Constraint {
+    return ast.untyped.Constraint {
       field = field,
       value = value,
       position = pos,
@@ -199,17 +214,17 @@ function parser.element(p)
   local tbl = {}
   local pos = ast.save(p)
   if p:nextif("task") then
-    ctor = ast.unspecialized.element.Task
+    ctor = ast.untyped.element.Task
   elseif p:nextif("region") then
-    ctor = ast.unspecialized.element.Region
+    ctor = ast.untyped.element.Region
   --elseif p:nextif("for") then
-  --  ctor = ast.unspecialized.element.BlockElement
+  --  ctor = ast.untyped.element.BlockElement
   --  tbl = { type = "for" }
   --elseif p:nextif("while") then
-  --  ctor = ast.unspecialized.element.BlockElement
+  --  ctor = ast.untyped.element.BlockElement
   --  tbl = { type = "while" }
   --elseif p:nextif("do") then
-  --  ctor = ast.unspecialized.element.BlockElement
+  --  ctor = ast.untyped.element.BlockElement
   --  tbl = { type = "do" }
   else
     p:error("unexpected element name")
@@ -240,8 +255,8 @@ function parser.element(p)
   tbl.constraints = terralib.newlist()
   tbl.patterns = terralib.newlist()
   constraints:map(function(c)
-    if c:is(ast.unspecialized.Constraint) then tbl.constraints:insert(c)
-    else assert(c:is(ast.unspecialized.PatternMatch)) tbl.patterns:insert(c) end
+    if c:is(ast.untyped.Constraint) then tbl.constraints:insert(c)
+    else assert(c:is(ast.untyped.PatternMatch)) tbl.patterns:insert(c) end
   end)
   tbl.position = pos
 
@@ -253,7 +268,7 @@ function parser.selector(p)
   repeat
     elements:insert(p:element())
   until p:matches(",") or p:matches("{")
-  return ast.unspecialized.Selector {
+  return ast.untyped.Selector {
     elements = elements,
     position = elements[1].position,
   }
@@ -276,7 +291,7 @@ function parser.rule(p)
   p:expect("{")
   local properties = p:properties()
   p:expect("}")
-  return ast.unspecialized.Rule {
+  return ast.untyped.Rule {
     selectors = selectors,
     properties = properties,
     position = selectors[1].position,
@@ -290,7 +305,7 @@ function parser.assignment(p)
   local binder = token.value
   p:expect("=")
   local value = p:expr()
-  return ast.unspecialized.Assignment {
+  return ast.untyped.Assignment {
     binder = binder,
     value = value,
     position = pos,
@@ -320,7 +335,7 @@ function parser.top(p)
   end
   p:expect("end")
 
-  return ast.unspecialized.Mapper {
+  return ast.untyped.Mapper {
     rules = rules,
     assignments = assignments,
     position = pos,

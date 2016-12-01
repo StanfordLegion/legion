@@ -41,8 +41,6 @@ namespace Realm {
 
       // Return the address space for this memory
       AddressSpace address_space(void) const;
-      // Return the local ID within the address space
-      id_t local_id(void) const;
 
       // Different Memory types
       enum Kind {

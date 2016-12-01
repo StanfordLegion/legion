@@ -14,6 +14,7 @@
 
 import "regent"
 
+__demand(__inline)
 task f(s : region(int)) : ptr(int, s)
   return new(ptr(int, s))
 end

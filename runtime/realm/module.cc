@@ -34,11 +34,15 @@
 //  to the build-system-controlled list of statically-linked Realm modules
 #include "realm/runtime_impl.h"
 #include "realm/numa/numa_module.h"
+#include "realm/procset/procset_module.h"
 #ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit_module.h"
+#endif
+#ifdef USE_HDF
+#include "realm/hdf5/hdf5_module.h"
 #endif
 
 namespace Realm {

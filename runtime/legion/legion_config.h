@@ -69,6 +69,10 @@
 #ifndef MAX_APPLICATION_TASK_ID
 #define MAX_APPLICATION_TASK_ID         (1<<20)
 #endif
+// Maximum ID for an application field ID
+#ifndef MAX_APPLICATION_FIELD_ID
+#define MAX_APPLICATION_FIELD_ID        (1<<20)
+#endif
 // Maximum ID for an application mapper ID
 #ifndef MAX_APPLICATION_MAPPER_ID
 #define MAX_APPLICATION_MAPPER_ID       (1<<20)
@@ -151,6 +155,18 @@
 #define LEGION_INIT_SEED                  0x221B
 #endif
 
+// The radix for the runtime to use when 
+// performing collective operations internally
+#ifndef LEGION_COLLECTIVE_RADIX
+#define LEGION_COLLECTIVE_RADIX           8
+#endif
+
+// The radix for the broadcast tree
+// when attempting to shutdown the runtime
+#ifndef LEGION_SHUTDOWN_RADIX
+#define LEGION_SHUTDOWN_RADIX             8
+#endif
+
 // Some helper macros
 
 // This statically computes an integer log base 2 for a number
@@ -173,8 +189,8 @@
 #define LEGION_STRINGIFY(x) #x
 #define LEGION_MACRO_TO_STRING(x) LEGION_STRINGIFY(x)
 
-#define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFUL
-#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFUL)
+#define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFULL
+#define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFULL)
 #define LEGION_DISTRIBUTED_HELP_DECODE(x)   ((x) >> 56)
 #define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | ((y) << 56))
 
@@ -335,6 +351,17 @@ typedef enum legion_error_t {
   ERROR_MAX_APPLICATION_MAPPER_ID_EXCEEDED = 149,
   ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME = 150,
   ERROR_INVALID_MAPPER_SYNCHRONIZATION = 151,
+  ERROR_ILLEGAL_PARTIAL_ACQUISITION = 152,
+  ERROR_ILLEGAL_INTERFERING_RESTRICTIONS = 153,
+  ERROR_ILLEGAL_PARTIAL_RESTRICTION = 154,
+  ERROR_ILLEGAL_INTERFERING_ACQUISITIONS = 155,
+  ERROR_UNRESTRICTED_ACQUIRE = 156,
+  ERROR_UNACQUIRED_RELEASE = 157,
+  ERROR_UNATTACHED_DETACH = 158,
+  ERROR_INVALID_PROJECTION_RESULT = 159,
+  ERROR_ILLEGAL_IMPLICIT_MAPPING = 160,
+  ERROR_INNER_TASK_VIOLATION = 161,
+  ERROR_REQUEST_FOR_EMPTY_FUTURE = 162,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -345,7 +372,6 @@ typedef enum legion_privilege_mode_t {
   WRITE_ONLY      = 0x00000002, // same as WRITE_DISCARD
   WRITE_DISCARD   = 0x00000002, // same as WRITE_ONLY
   REDUCE          = 0x00000004,
-  PROMOTED        = 0x00001000, // Internal use only
 } legion_privilege_mode_t;
 
 typedef enum legion_allocate_mode_t {
@@ -372,7 +398,7 @@ typedef enum legion_region_flags_t {
   NO_ACCESS_FLAG  = 0x00000002,
   RESTRICTED_FLAG = 0x00000004,
   MUST_PREMAP_FLAG= 0x00000008,
-} legion_region_flags_T;
+} legion_region_flags_t;
 
 typedef enum legion_index_space_kind_t {
   UNSTRUCTURED_KIND,
@@ -380,11 +406,13 @@ typedef enum legion_index_space_kind_t {
   DENSE_ARRAY_KIND,
 } legion_index_space_kind_t;
 
-typedef enum legion_handle_type_t {
+typedef enum legion_projection_type_t {
   SINGULAR, // a single logical region
   PART_PROJECTION, // projection from a partition
   REG_PROJECTION, // projection from a region
-} legion_handle_type_t;
+} legion_projection_type_t;
+// For backwards compatibility
+typedef legion_projection_type_t legion_handle_type_t;
 
 typedef enum legion_partition_kind_t {
   DISJOINT_KIND,
@@ -398,13 +426,120 @@ typedef enum legion_dependence_type_t {
   ANTI_DEPENDENCE = 2, // WAR or WAW with Write-Only privilege
   ATOMIC_DEPENDENCE = 3,
   SIMULTANEOUS_DEPENDENCE = 4,
-  PROMOTED_DEPENDENCE = 5,
 } legion_dependence_type_t;
 
 enum {
   NAME_SEMANTIC_TAG = 0,
   FIRST_AVAILABLE_SEMANTIC_TAG = 1,
 };
+
+typedef enum legion_execution_constraint_t {
+  ISA_CONSTRAINT = 0, // instruction set architecture
+  PROCESSOR_CONSTRAINT = 1, // processor kind constraint
+  RESOURCE_CONSTRAINT = 2, // physical resources
+  LAUNCH_CONSTRAINT = 3, // launch configuration
+  COLOCATION_CONSTRAINT = 4, // region requirements in same instance
+} legion_execution_constraint_t;
+
+typedef enum legion_layout_constraint_t {
+  SPECIALIZED_CONSTRAINT = 0, // normal or speicalized (e.g. reduction-fold)
+  MEMORY_CONSTRAINT = 1, // constraint on the kind of memory
+  FIELD_CONSTRAINT = 2, // ordering of fields
+  ORDERING_CONSTRAINT = 3, // ordering of dimensions
+  SPLITTING_CONSTRAINT = 4, // splitting of dimensions 
+  DIMENSION_CONSTRAINT = 5, // dimension size constraint
+  ALIGNMENT_CONSTRAINT = 6, // alignment of a field
+  OFFSET_CONSTRAINT = 7, // offset of a field
+  POINTER_CONSTRAINT = 8, // pointer of a field
+} legion_layout_constraint_t;
+
+typedef enum legion_equality_kind_t {
+  LT_EK = 0, // <
+  LE_EK = 1, // <=
+  GT_EK = 2, // >
+  GE_EK = 3, // >=
+  EQ_EK = 4, // ==
+  NE_EK = 5, // !=
+} legion_equality_kind_t;
+
+typedef enum legion_dimension_kind_t {
+  DIM_X = 0, // first logical index space dimension
+  DIM_Y = 1, // second logical index space dimension
+  DIM_Z = 2, // ...
+  DIM_F = 3, // field dimension
+  INNER_DIM_X = 4, // inner dimension for tiling X
+  OUTER_DIM_X = 5, // outer dimension for tiling X
+  INNER_DIM_Y = 6, // ...
+  OUTER_DIM_Y = 7,
+  INNER_DIM_Z = 8,
+  OUTER_DIM_Z = 9,
+} legion_dimension_kind_t;
+
+// Make all flags 1-hot encoding so we can logically-or them together
+typedef enum legion_isa_kind_t {
+  // Top-level ISA Kinds
+  X86_ISA   = 0x00000001,
+  ARM_ISA   = 0x00000002,
+  POW_ISA   = 0x00000004, // Power PC
+  PTX_ISA   = 0x00000008, // auto-launch by runtime
+  CUDA_ISA  = 0x00000010, // run on CPU thread bound to CUDA context
+  LUA_ISA   = 0x00000020, // run on Lua processor
+  TERRA_ISA = 0x00000040, // JIT to target processor kind
+  LLVM_ISA  = 0x00000080, // JIT to target processor kind
+  GL_ISA    = 0x00000100, // run on CPU thread with OpenGL context
+  // x86 Vector Instructions
+  SSE_ISA   = 0x00000200,
+  SSE2_ISA  = 0x00000400,
+  SSE3_ISA  = 0x00000800,
+  SSE4_ISA  = 0x00001000,
+  AVX_ISA   = 0x00002000,
+  AVX2_ISA  = 0x00004000,
+  FMA_ISA   = 0x00008000,
+  MIC_ISA   = 0x00010000,
+  // GPU variants
+  SM_10_ISA = 0x00020000,
+  SM_20_ISA = 0x00040000,
+  SM_30_ISA = 0x00080000,
+  SM_35_ISA = 0x00100000,
+  // ARM Vector Instructions
+  NEON_ISA  = 0x00200000,
+} legion_isa_kind_t;
+
+typedef enum legion_resource_constraint_t {
+  L1_CACHE_SIZE = 0,
+  L2_CACHE_SIZE = 1,
+  L3_CACHE_SIZE = 2,
+  L1_CACHE_ASSOCIATIVITY = 3,
+  L2_CACHE_ASSOCIATIVITY = 4,
+  L3_CACHE_ASSOCIATIVITY = 5,
+  REGISTER_FILE_SIZE = 6,
+  SHARED_MEMORY_SIZE = 7,
+  TEXTURE_CACHE_SIZE = 8,
+  CONSTANT_CACHE_SIZE = 9,
+  NAMED_BARRIERS = 10,
+  SM_COUNT = 11, // total SMs on the device
+  MAX_OCCUPANCY = 12, // max warps per SM
+} legion_resource_constraint_t;
+
+typedef enum legion_launch_constraint_t {
+  CTA_SHAPE = 0,
+  GRID_SHAPE = 1,
+  DYNAMIC_SHARED_MEMORY = 2,
+  REGISTERS_PER_THREAD = 3,
+  CTAS_PER_SM = 4,
+  NAMED_BARRIERS_PER_CTA = 5,
+} legion_launch_constraint_t;
+
+typedef enum legion_specialized_constraint_t {
+  NO_SPECIALIZE = 0,
+  NORMAL_SPECIALIZE = 1,
+  REDUCTION_FOLD_SPECIALIZE = 2,
+  REDUCTION_LIST_SPECIALIZE = 3,
+  VIRTUAL_SPECIALIZE = 4,
+  // All file types must go below here, everything else above
+  GENERIC_FILE_SPECIALIZE = 5,
+  HDF5_FILE_SPECIALIZE = 6,
+} legion_specialized_constraint_t;
 
 //==========================================================================
 //                                Types
@@ -436,12 +571,13 @@ typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
 typedef unsigned int legion_generator_id_t;
-typedef unsigned long legion_distributed_id_t;
+typedef unsigned long long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
 typedef unsigned long legion_variant_id_t;
 typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
+typedef unsigned long long legion_projection_epoch_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
 

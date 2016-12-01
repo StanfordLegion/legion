@@ -30,7 +30,10 @@
 #ifndef __MACH__
 #include <malloc.h>
 #endif
-#include "legion_types.h" // StaticAssert
+#include "legion_template_help.h" // StaticAssert
+#if __cplusplus == 201103L
+#include <utility>
+#endif
 
 namespace Legion {
   namespace Internal {
@@ -66,6 +69,7 @@ namespace Legion {
       POINT_TASK_ALLOC,
       INDEX_TASK_ALLOC,
       SLICE_TASK_ALLOC,
+      TOP_TASK_ALLOC,
       REMOTE_TASK_ALLOC,
       INLINE_TASK_ALLOC,
       MAP_OP_ALLOC,
@@ -73,6 +77,8 @@ namespace Legion {
       FENCE_OP_ALLOC,
       FRAME_OP_ALLOC,
       DELETION_OP_ALLOC,
+      OPEN_OP_ALLOC,
+      ADVANCE_OP_ALLOC,
       CLOSE_OP_ALLOC,
       DYNAMIC_COLLECTIVE_OP_ALLOC,
       FUTURE_PRED_OP_ALLOC,
@@ -126,8 +132,10 @@ namespace Legion {
       DIRECTORY_ALLOC,
       DENSE_INDEX_ALLOC,
       CURRENT_STATE_ALLOC,
+      VERSION_MANAGER_ALLOC,
       PHYSICAL_STATE_ALLOC,
       VERSION_STATE_ALLOC,
+      AGGREGATE_VERSION_ALLOC,
       TASK_IMPL_ALLOC,
       VARIANT_IMPL_ALLOC,
       LAYOUT_CONSTRAINTS_ALLOC,
@@ -888,6 +896,59 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15,
+             typename T16, typename T17>
+    inline T* legion_new(const T1 &arg1, const T2 &arg2,
+                         const T3 &arg3, const T4 &arg4, 
+                         const T5 &arg5, const T6 &arg6,
+                         const T7 &arg7, const T8 &arg8, 
+                         const T9 &arg9, const T10 &arg10, 
+                         const T11 &arg11, const T12 &arg12,
+                         const T13 &arg13, const T14 &arg14,
+                         const T15 &arg15, const T16 &arg16,
+                         const T17 &arg17)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      void *buffer = legion_alloc_aligned<T,false/*bytes*/>(1/*count*/);
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14, arg15, arg16, arg17);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T, typename T1, typename T2, typename T3, 
+             typename T4, typename T5, typename T6, typename T7,
+             typename T8, typename T9, typename T10, typename T11,
+             typename T12, typename T13, typename T14, typename T15,
+             typename T16, typename T17>
+    inline T* legion_new_in_place(void *buffer, const T1 &arg1, const T2 &arg2,
+                                  const T3 &arg3, const T4 &arg4, 
+                                  const T5 &arg5, const T6 &arg6,
+                                  const T7 &arg7, const T8 &arg8, 
+                                  const T9 &arg9, const T10 &arg10, 
+                                  const T11 &arg11, const T12 &arg12,
+                                  const T13 &arg13, const T14 &arg14,
+                                  const T15 &arg15, const T16 &arg16,
+                                  const T17 &arg17)
+    //--------------------------------------------------------------------------
+    {
+#ifdef TRACE_ALLOCATION
+      HandleAllocation<T,HasAllocType<T>::value>::trace_allocation();
+#endif
+      T *result = ::new (buffer) T(arg1, arg2, arg3, arg4, arg5, arg6,
+                                   arg7, arg8, arg9, arg10, arg11, arg12,
+                                   arg13, arg14, arg15, arg16, arg17);
+      return result;
+    }
+
     template<typename T>
     inline void legion_delete(T *to_free)
     {
@@ -1017,8 +1078,16 @@ namespace Legion {
         return std::numeric_limits<size_type>::max() / sizeof(T);
       }
     public:
+#if __cplusplus == 201103L
+      template<class U, class... Args>
+      inline void construct(U *p, Args&&... args) 
+        { ::new((void*)p) U(std::forward<Args>(args)...); }
+      template<class U>
+      inline void destroy(U *p) { p->~U(); }
+#else
       inline void construct(pointer p, const T &t) { new(p) T(t); }
       inline void destroy(pointer p) { p->~T(); }
+#endif
     public:
       inline bool operator==(LegionAllocator const&) const { return true; }
       inline bool operator!=(LegionAllocator const& a) const

@@ -104,7 +104,7 @@ namespace LegionRuntime {
 	    (*it)->print(os);
 	    os << "\n";
 	  }
-	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
+	  for(std::map<EventImpl::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
 	      it != e->future_local_waiters.end();
 	      it++) {
 	    for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
@@ -136,7 +136,7 @@ namespace LegionRuntime {
 
 	  os << "Barrier " << b->me << ": gen=" << b->generation
 	     << " subscr=" << b->gen_subscribed << "\n";
-          for (std::map<Event::gen_t, BarrierImpl::Generation*>::const_iterator git = 
+          for (std::map<EventImpl::gen_t, BarrierImpl::Generation*>::const_iterator git = 
                 b->generations.begin(); git != b->generations.end(); git++)
           {
             const std::vector<EventWaiter*> &waiters = git->second->local_waiters;
@@ -1177,8 +1177,22 @@ namespace LegionRuntime {
   namespace Accessor {
     using namespace LegionRuntime::LowLevel;
 
+    namespace DebugHooks {
+      // these are calls that can be implemented by a higher level (e.g. Legion) to
+      //  perform privilege/bounds checks on accessor reference and produce more useful
+      //  information for debug
+
+      /*extern*/ void (*check_bounds_ptr)(void *region, ptr_t ptr) = 0;
+      /*extern*/ void (*check_bounds_dpoint)(void *region, const Realm::DomainPoint &dp) = 0;
+
+      /*extern*/ const char *(*find_privilege_task_name)(void *region) = 0;
+    };
+
     void AccessorType::Generic::Untyped::read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset) const
     {
+#ifdef __OPTIMIZE__
+      issue_performance_warning();
+#endif
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
       // must have valid data by now - block if we have to
@@ -1188,7 +1202,8 @@ namespace LegionRuntime {
       check_privileges<ACCESSOR_READ>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, ptr);
+      if(DebugHooks::check_bounds_ptr)
+	(DebugHooks::check_bounds_ptr)(region, ptr);
 #endif
 #ifdef USE_HDF
       // HDF memory doesn't support 
@@ -1202,6 +1217,9 @@ namespace LegionRuntime {
     //bool debug_mappings = false;
     void AccessorType::Generic::Untyped::read_untyped(const DomainPoint& dp, void *dst, size_t bytes, off_t offset) const
     {
+#ifdef __OPTIMIZE__
+      issue_performance_warning();
+#endif
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
       // must have valid data by now - block if we have to
@@ -1211,9 +1229,10 @@ namespace LegionRuntime {
       check_privileges<ACCESSOR_READ>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, dp);
+      if(DebugHooks::check_bounds_dpoint)
+	(DebugHooks::check_bounds_dpoint)(region, dp);
 #endif
-#ifdef USE_HDF
+#ifdef OLD_USE_HDF
       // we can directly access HDF memory by domain point
       if (impl->memory.kind() == Memory::HDF_MEM) {
         HDFMemory* hdf = (HDFMemory*)get_runtime()->get_memory_impl(impl->memory);
@@ -1228,7 +1247,7 @@ namespace LegionRuntime {
           fid ++;
         }
         ID id(impl->me);
-        unsigned index = id.index_l();
+        unsigned index = id.instance.inst_idx;
         assert(dp.dim == hdf->hdf_metadata[index]->ndims);
         hdf->get_bytes(index, dp, fid, dst, bytes);
         return;
@@ -1246,6 +1265,9 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset) const
     {
+#ifdef __OPTIMIZE__
+      issue_performance_warning();
+#endif
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
       // must have valid data by now - block if we have to
@@ -1255,7 +1277,8 @@ namespace LegionRuntime {
       check_privileges<ACCESSOR_WRITE>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, ptr);
+      if(DebugHooks::check_bounds_ptr)
+	(DebugHooks::check_bounds_ptr)(region, ptr);
 #endif
 #ifdef USE_HDF
      // HDF memory doesn't support enumerate type
@@ -1269,6 +1292,9 @@ namespace LegionRuntime {
 
     void AccessorType::Generic::Untyped::write_untyped(const DomainPoint& dp, const void *src, size_t bytes, off_t offset) const
     {
+#ifdef __OPTIMIZE__
+      issue_performance_warning();
+#endif
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
       // must have valid data by now - block if we have to
@@ -1278,9 +1304,10 @@ namespace LegionRuntime {
       check_privileges<ACCESSOR_WRITE>(priv, region);
 #endif
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, dp);
+      if(DebugHooks::check_bounds_dpoint)
+	(DebugHooks::check_bounds_dpoint)(region, dp);
 #endif
-#ifdef USE_HDF
+#ifdef OLD_USE_HDF
       if (impl->memory.kind() == Memory::HDF_MEM) {
         HDFMemory* hdf = (HDFMemory*) get_runtime()->get_memory_impl(impl->memory);
         int fid = 0;
@@ -1294,7 +1321,7 @@ namespace LegionRuntime {
           fid ++;
         }
         ID id(impl->me);
-        unsigned index = id.index_l();
+        unsigned index = id.instance.inst_idx;
         assert(dp.dim == hdf->hdf_metadata[index]->ndims);
         hdf->put_bytes(index, dp, fid, src, bytes);
         return;
@@ -1444,7 +1471,8 @@ namespace LegionRuntime {
       assert(ok);
 
 #ifdef BOUNDS_CHECKS
-      check_bounds(region, ptr);
+      if(DebugHooks::check_bounds_ptr)
+	(DebugHooks::check_bounds_ptr)(region, ptr);
 #endif
 
       Arrays::Mapping<1, 1> *mapping = impl->metadata.linearization.get_mapping<1>();
@@ -1473,7 +1501,7 @@ namespace LegionRuntime {
       off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
 
-      if(impl->metadata.block_size == 1) {
+      if(impl->metadata.block_size <= 1) {
 	offset += index * impl->metadata.elmt_size + field_offset;
 	elmt_stride = impl->metadata.elmt_size;
       } else {

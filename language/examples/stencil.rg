@@ -26,26 +26,6 @@ fspace point {
   output : double,
 }
 
-terra make_bloated_rect(rect : c.legion_rect_2d_t, radius : int)
-  return c.legion_rect_2d_t {
-    lo = c.legion_point_2d_t {
-      x = arrayof(c.coord_t, rect.lo.x[0] - radius, rect.lo.x[1] - radius) },
-    hi = c.legion_point_2d_t {
-      x = arrayof(c.coord_t, rect.hi.x[0] - radius, rect.hi.x[1] - radius) },
-  }
-end
-
-terra to_domain_point(x : int2d) : c.legion_domain_point_t
-  return [int2d:to_domain_point(`x)]
-end
-
-terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
-  return c.legion_rect_2d_t {
-    lo = [int2d:to_point(`lo)],
-    hi = [int2d:to_point(`hi)],
-  }
-end
-
 task make_tile_partition(points : region(ispace(int2d), point),
                          tiles : ispace(int2d),
                          n : int64, nt : int64)
@@ -53,9 +33,8 @@ task make_tile_partition(points : region(ispace(int2d), point),
   for i in tiles do
     var lo = int2d { x = i.x * n / nt, y = i.y * n / nt }
     var hi = int2d { x = (i.x + 1) * n / nt - 1, y = (i.y + 1) * n / nt - 1 }
-    var rect = to_rect(lo, hi)
-    c.legion_domain_point_coloring_color_domain(
-      coloring, to_domain_point(i), c.legion_domain_from_rect_2d(rect))
+    var rect = rect2d { lo = lo, hi = hi }
+    c.legion_domain_point_coloring_color_domain(coloring, i, rect)
   end
   var p = partition(disjoint, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
@@ -69,9 +48,8 @@ task make_interior_partition(points : region(ispace(int2d), point),
   for i in tiles do
     var lo = int2d { x = max(radius, i.x * n / nt), y = max(radius, i.y * n / nt) }
     var hi = int2d { x = min(n - radius, (i.x + 1) * n / nt) - 1, y = min(n - radius, (i.y + 1) * n / nt) - 1 }
-    var rect = to_rect(lo, hi)
-    c.legion_domain_point_coloring_color_domain(
-      coloring, to_domain_point(i), c.legion_domain_from_rect_2d(rect))
+    var rect = rect2d { lo = lo, hi = hi }
+    c.legion_domain_point_coloring_color_domain(coloring, i, rect)
   end
   var p = partition(disjoint, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
@@ -85,33 +63,52 @@ task make_bloated_partition(points : region(ispace(int2d), point),
   var coloring = c.legion_domain_point_coloring_create()
   for i in tiles do
     var pts = private[i]
-    var rect = c.legion_domain_get_rect_2d(
-      c.legion_index_space_get_domain(
-        __runtime(), __context(), (__raw(pts)).index_space))
-    var bloated = make_bloated_rect(rect, radius)
-    c.legion_domain_point_coloring_color_domain(
-      coloring, to_domain_point(i), c.legion_domain_from_rect_2d(bloated))
+    var rect = pts.bounds
+    var bloated = rect2d { lo = rect.lo - { x = radius, y = radius },
+                           hi = rect.hi + { x = radius, y = radius } }
+    c.legion_domain_point_coloring_color_domain(coloring, i, bloated)
   end
   var p = partition(aliased, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
 
-__demand(__inline)
-task off(i : int2d, x : int, y : int)
-  return int2d { x = i.x - x, y = i.y - y }
+local function off(i, x, y)
+  return rexpr int2d { x = i.x + x, y = i.y + y } end
 end
 
-task stencil(private : region(ispace(int2d), point), ghost : region(ispace(int2d), point))
-where reads writes(private.output), reads(ghost.input) do
-  for i in private do
-    private[i].output = ghost[i].input +
-      -0.5*ghost[off(i, -1, -1)].input +
-      -0.5*ghost[off(i, -1,  1)].input +
-       0.5*ghost[off(i,  1, -1)].input +
-       0.5*ghost[off(i,  1,  1)].input
+local function make_stencil_pattern(points, index, off_x, off_y, radius)
+  local value
+  for i = 1, radius do
+    local neg = off_x < 0 or off_y < 0
+    local coeff = ((neg and -1) or 1)/(2*i*radius)
+    local x, y = off_x*i, off_y*i
+    local component = rexpr coeff*points[ [off(index, x, y)] ].input end
+    if value then
+      value = rexpr value + component end
+    else
+      value = rexpr component end
+    end
   end
+  return value
 end
+
+local function make_stencil(radius)
+  local task st(private : region(ispace(int2d), point), ghost : region(ispace(int2d), point))
+  where reads writes(private.output), reads(ghost.input) do
+    for i in private do
+      private[i].output = private[i].output +
+        [make_stencil_pattern(ghost, i,  0, -1, radius)] +
+        [make_stencil_pattern(ghost, i, -1,  0, radius)] +
+        [make_stencil_pattern(ghost, i,  1,  0, radius)] +
+        [make_stencil_pattern(ghost, i,  0,  1, radius)]
+    end
+  end
+  return st
+end
+
+local RADIUS = 2
+local stencil = make_stencil(RADIUS)
 
 task increment(points : region(ispace(int2d), point))
 where reads writes(points.input) do
@@ -120,17 +117,38 @@ where reads writes(points.input) do
   end
 end
 
-task check(points : region(ispace(int2d), point), ts : int64)
+task check(points : region(ispace(int2d), point), tsteps : int64, init : int64)
 where reads(points.{input, output}) do
+  var expect_in = init + tsteps
+  var expect_out = init
   for i in points do
-    regentlib.assert(points[i].input == ts, "test failed")
-    regentlib.assert(points[i].output == ts - 1, "test failed")
+    if points[i].input ~= expect_in then
+      for i2 in points do
+        c.printf("input (%lld,%lld): %.0f should be %lld\n",
+                 i2.x, i2.y, points[i2].input, expect_in)
+      end
+    end
+    regentlib.assert(points[i].input == expect_in, "test failed")
+    if points[i].output ~= expect_out then
+      for i2 in points do
+        c.printf("output (%lld,%lld): %.0f should be %lld\n",
+                 i2.x, i2.y, points[i2].output, expect_out)
+      end
+    end
+    regentlib.assert(points[i].output == expect_out, "test failed")
   end
 end
 
 task main()
-  var n : int64, nt : int64, ts : int64 = 10, 4, 10
-  var radius : int64 = 1
+  var nbloated : int64 = 12 -- Grid size along each dimension, including border.
+  var nt : int64 = 4
+  var tsteps : int64 = 10
+  var init : int64 = 1000
+
+  var n = nbloated -- Continue to use bloated grid size below.
+  regentlib.assert(n >= nt, "grid too small")
+
+  var radius : int64 = RADIUS
   var grid = ispace(int2d, { x = n, y = n })
   var tiles = ispace(int2d, { x = nt, y = nt })
 
@@ -139,9 +157,9 @@ task main()
   var interior = make_interior_partition(points, tiles, n, nt, radius)
   var ghost = make_bloated_partition(points, tiles, interior, radius)
 
-  fill(points.{input, output}, 0)
+  fill(points.{input, output}, init)
 
-  for t = 0, ts do
+  for t = 0, tsteps do
     for i in tiles do
       stencil(interior[i], ghost[i])
     end
@@ -151,7 +169,7 @@ task main()
   end
 
   for i in tiles do
-    check(interior[i], ts)
+    check(interior[i], tsteps, init)
   end
 end
 regentlib.start(main)

@@ -205,8 +205,8 @@ void top_level_task(const void *args, size_t arglen,
 
   // wait on all child tasks to finish before destroying barrier
   Event merged = Event::merge_events(task_events);
-  printf("merged event ID is " IDFMT "/%d - waiting on it...\n",
-	 merged.id, merged.gen);
+  printf("merged event ID is " IDFMT " - waiting on it...\n",
+	 merged.id);
   merged.wait();
 
   b.destroy_barrier();

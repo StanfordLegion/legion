@@ -47,10 +47,10 @@ namespace Legion {
     public:
       // A helper method for getting access to the runtime's
       // end_task method with private access
-      static inline void end_helper(Runtime *rt, Context ctx,
+      static inline void end_helper(Runtime *rt, InternalContext ctx,
           const void *result, size_t result_size, bool owned)
       {
-        rt->end_task(ctx, result, result_size, owned);
+        ctx->end_task(result, result_size, owned);
       }
       static inline Future from_value_helper(Runtime *rt, 
           const void *value, size_t value_size, bool owned)
@@ -67,7 +67,7 @@ namespace Legion {
       
       template<typename T, bool HAS_SERIALIZE>
       struct NonPODSerializer {
-        static inline void end_task(Runtime *rt, Context ctx, 
+        static inline void end_task(Runtime *rt, InternalContext ctx,
                                     T *result)
         {
           size_t buffer_size = result->legion_buffer_size();
@@ -93,7 +93,7 @@ namespace Legion {
 
       template<typename T>
       struct NonPODSerializer<T,false> {
-        static inline void end_task(Runtime *rt, Context ctx, 
+        static inline void end_task(Runtime *rt, InternalContext ctx,
                                     T *result)
         {
           end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
@@ -133,7 +133,7 @@ namespace Legion {
       template<typename T, bool IS_STRUCT>
       struct StructHandler {
         static inline void end_task(Runtime *rt, 
-                                    Context ctx, T *result)
+                                    InternalContext ctx, T *result)
         {
           // Otherwise this is a struct, so see if it has serialization methods 
           NonPODSerializer<T,HasSerialize<T>::value>::end_task(rt, ctx, result);
@@ -151,7 +151,7 @@ namespace Legion {
       // False case of template specialization
       template<typename T>
       struct StructHandler<T,false> {
-        static inline void end_task(Runtime *rt, Context ctx, 
+        static inline void end_task(Runtime *rt, InternalContext ctx, 
                                     T *result)
         {
           end_helper(rt, ctx, (void*)result, sizeof(T), false/*owned*/);
@@ -182,7 +182,7 @@ namespace Legion {
       // Figure out whether this is a struct or not 
       // and call the appropriate Finisher
       template<typename T>
-      static inline void end_task(Runtime *rt, Context ctx, T *result)
+      static inline void end_task(Runtime *rt, InternalContext ctx, T *result)
       {
         StructHandler<T,IsAStruct<T>::value>::end_task(rt, ctx, result);
       }
@@ -827,6 +827,7 @@ namespace Legion {
     inline void TaskLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -834,7 +835,23 @@ namespace Legion {
     inline void TaskLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void TaskLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void TaskLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
@@ -849,6 +866,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       predicate_false_result = arg;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void TaskLauncher::set_independent_requirements(bool independent)
+    //--------------------------------------------------------------------------
+    {
+      independent_requirements = independent;
     }
 
     //--------------------------------------------------------------------------
@@ -897,6 +921,7 @@ namespace Legion {
     inline void IndexLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -904,7 +929,23 @@ namespace Legion {
     inline void IndexLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
@@ -919,6 +960,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       predicate_false_result = arg;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexLauncher::set_independent_requirements(bool independent)
+    //--------------------------------------------------------------------------
+    {
+      independent_requirements = independent;
     }
 
     //--------------------------------------------------------------------------
@@ -973,6 +1021,7 @@ namespace Legion {
     inline void CopyLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -980,7 +1029,23 @@ namespace Legion {
     inline void CopyLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void CopyLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void CopyLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
@@ -1001,6 +1066,7 @@ namespace Legion {
     inline void AcquireLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -1008,7 +1074,24 @@ namespace Legion {
     inline void AcquireLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AcquireLauncher::add_wait_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AcquireLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
@@ -1029,6 +1112,7 @@ namespace Legion {
     inline void ReleaseLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       wait_barriers.push_back(bar);
     }
 
@@ -1036,7 +1120,24 @@ namespace Legion {
     inline void ReleaseLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
+      assert(bar.exists());
       arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ReleaseLauncher::add_wait_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void ReleaseLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
@@ -1071,6 +1172,7 @@ namespace Legion {
     inline void FillLauncher::add_wait_barrier(PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
+      assert(pb.exists());
       wait_barriers.push_back(pb);
     }
 
@@ -1078,7 +1180,23 @@ namespace Legion {
     inline void FillLauncher::add_arrival_barrier(PhaseBarrier pb)
     //--------------------------------------------------------------------------
     {
+      assert(pb.exists());
       arrive_barriers.push_back(pb);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void FillLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void FillLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
@@ -1255,27 +1373,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T Future::get_result(void)
+    inline T Future::get_result(bool silence_warnings) const
     //--------------------------------------------------------------------------
     {
       // Unpack the value using LegionSerialization in case
       // the type has an alternative method of unpacking
-      return LegionSerialization::unpack<T>(get_untyped_result());
+      return 
+        LegionSerialization::unpack<T>(get_untyped_result(silence_warnings));
     }
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline const T& Future::get_reference(void)
+    inline const T& Future::get_reference(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      return *((const T*)get_untyped_result());
+      return *((const T*)get_untyped_result(silence_warnings));
     }
 
     //--------------------------------------------------------------------------
-    inline const void* Future::get_untyped_pointer(void)
+    inline const void* Future::get_untyped_pointer(bool silence_warnings)
     //--------------------------------------------------------------------------
     {
-      return get_untyped_result();
+      return get_untyped_result(silence_warnings);
     }
 
     //--------------------------------------------------------------------------
@@ -1298,11 +1417,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T FutureMap::get_result(const DomainPoint &dp)
+    inline T FutureMap::get_result(const DomainPoint &dp, bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       Future f = get_future(dp);
-      return f.get_result<T>();
+      return f.get_result<T>(silence_warnings);
     }
 
     //--------------------------------------------------------------------------
@@ -1344,13 +1463,6 @@ namespace Legion {
         dp.point_data[idx] = point[idx];
       Future f = get_future(dp);
       return f.get_void_result();
-    }
-
-    //--------------------------------------------------------------------------
-    inline bool PhysicalRegion::is_mapped(void) const
-    //--------------------------------------------------------------------------
-    {
-      return (impl != NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -1578,6 +1690,34 @@ namespace Legion {
         Realm::CustomSerdezUntyped::create_custom_serdez<SERDEZ>();
     }
 
+    namespace Internal {
+      // Wrapper class for old projection functions
+      template<RegionProjectionFnptr FNPTR>
+      class RegionProjectionWrapper : public ProjectionFunctor {
+      public:
+        RegionProjectionWrapper(void) 
+          : ProjectionFunctor() { }
+        virtual ~RegionProjectionWrapper(void) { }
+      public:
+        virtual LogicalRegion project(Context ctx, Task *task,
+                                      unsigned index,
+                                      LogicalRegion upper_bound,
+                                      const DomainPoint &point)
+        {
+          return (*FNPTR)(upper_bound, point, runtime); 
+        }
+        virtual LogicalRegion project(Context ctx, Task *task,
+                                      unsigned index,
+                                      LogicalPartition upper_bound,
+                                      const DomainPoint &point)
+        {
+          assert(false);
+          return LogicalRegion::NO_REGION;
+        }
+        virtual bool is_exclusive(void) const { return false; }
+      };
+    };
+
     //--------------------------------------------------------------------------
     template<LogicalRegion (*PROJ_PTR)(LogicalRegion, const DomainPoint&,
                                        Runtime*)>
@@ -1585,9 +1725,38 @@ namespace Legion {
                                                             ProjectionID handle)
     //--------------------------------------------------------------------------
     {
-      return Runtime::register_region_projection_function(
-                                  handle, reinterpret_cast<void *>(PROJ_PTR));
+      Runtime::preregister_projection_functor(handle,
+          new Internal::RegionProjectionWrapper<PROJ_PTR>());
+      return handle;
     }
+
+    namespace Internal {
+      // Wrapper class for old projection functions
+      template<PartitionProjectionFnptr FNPTR>
+      class PartitionProjectionWrapper : public ProjectionFunctor {
+      public:
+        PartitionProjectionWrapper(void)
+          : ProjectionFunctor() { }
+        virtual ~PartitionProjectionWrapper(void) { }
+      public:
+        virtual LogicalRegion project(Context ctx, Task *task,
+                                      unsigned index,
+                                      LogicalRegion upper_bound,
+                                      const DomainPoint &point)
+        {
+          assert(false);
+          return LogicalRegion::NO_REGION;
+        }
+        virtual LogicalRegion project(Context ctx, Task *task,
+                                      unsigned index,
+                                      LogicalPartition upper_bound,
+                                      const DomainPoint &point)
+        {
+          return (*FNPTR)(upper_bound, point, runtime);
+        }
+        virtual bool is_exclusive(void) const { return false; }
+      };
+    };
 
     //--------------------------------------------------------------------------
     template<LogicalRegion (*PROJ_PTR)(LogicalPartition, const DomainPoint&,
@@ -1596,8 +1765,9 @@ namespace Legion {
                                                     ProjectionID handle)
     //--------------------------------------------------------------------------
     {
-      return Runtime::register_partition_projection_function(
-                                  handle, reinterpret_cast<void *>(PROJ_PTR));
+      Runtime::preregister_projection_functor(handle,
+          new Internal::PartitionProjectionWrapper<PROJ_PTR>());
+      return handle;
     }
 
     //--------------------------------------------------------------------------
@@ -1668,18 +1838,17 @@ namespace Legion {
       LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
       // Get the high level runtime
       Runtime *runtime = Runtime::get_runtime(p);
-
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
-      assert(arglen == sizeof(Context));
+      assert(arglen == sizeof(InternalContext));
 #endif
-      Context ctx = *((const Context*)args);
+      InternalContext ctx = *((const InternalContext*)args);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx);
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task();
 
       // Invoke the task with the given context
       T return_value = 
-        (*TASK_PTR)(reinterpret_cast<Task*>(ctx),regions,ctx,runtime);
+        (*TASK_PTR)(ctx->get_task(), regions, ctx->as_context(), runtime);
 
       // Send the return value back
       LegionSerialization::end_task<T>(runtime, ctx, &return_value);
@@ -1701,16 +1870,16 @@ namespace Legion {
 
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
-      assert(arglen == sizeof(Context));
+      assert(arglen == sizeof(InternalContext));
 #endif
-      Context ctx = *((const Context*)args);
+      InternalContext ctx = *((const InternalContext*)args);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx); 
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(); 
 
-      (*TASK_PTR)(reinterpret_cast<Task*>(ctx), regions, ctx, runtime);
+      (*TASK_PTR)(ctx->get_task(), regions, ctx->as_context(), runtime);
 
       // Send an empty return value back
-      runtime->end_task(ctx, NULL, 0);
+      ctx->end_task(NULL, 0, false);
     }
 
     //--------------------------------------------------------------------------
@@ -1734,17 +1903,17 @@ namespace Legion {
 
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
-      assert(arglen == sizeof(Context));
+      assert(arglen == sizeof(InternalContext));
 #endif
-      Context ctx = *((const Context*)args);
+      InternalContext ctx = *((const InternalContext*)args);
 
-      Task *task = reinterpret_cast<Task*>(ctx);
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx); 
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(); 
 
       // Invoke the task with the given context
-      T return_value = (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
+      T return_value = (*TASK_PTR)(ctx->get_task(), regions, 
+                                   ctx->as_context(), runtime, *user_data);
 
       // Send the return value back
       LegionSerialization::end_task<T>(runtime, ctx, &return_value);
@@ -1766,19 +1935,19 @@ namespace Legion {
 
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
-      assert(arglen == sizeof(Context));
+      assert(arglen == sizeof(InternalContext));
 #endif
-      Context ctx = *((const Context*)args);
+      InternalContext ctx = *((const InternalContext*)args);
 
-      Task *task = reinterpret_cast<Task*>(ctx);
       const UDT *user_data = reinterpret_cast<const UDT*>(userdata);
 
-      const std::vector<PhysicalRegion> &regions = runtime->begin_task(ctx); 
+      const std::vector<PhysicalRegion> &regions = ctx->begin_task(); 
 
-      (*TASK_PTR)(task, regions, ctx, runtime, *user_data);
+      (*TASK_PTR)(ctx->get_task(), regions, 
+                  ctx->as_context(), runtime, *user_data);
 
       // Send an empty return value back
-      runtime->end_task(ctx, NULL, 0);
+      ctx->end_task(NULL, 0, false);
     }
 
     //--------------------------------------------------------------------------
@@ -2143,10 +2312,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const LogicalPartition& lp)
+    //--------------------------------------------------------------------------
+    {
+      os << "LogicalPartition(" << lp.tree_id << "," 
+         << lp.index_partition << "," << lp.field_space << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
     inline std::ostream& operator<<(std::ostream& os, const IndexSpace& is)
     //--------------------------------------------------------------------------
     {
       os << "IndexSpace(" << is.id << "," << is.tid << ")";
+      return os;
+    }
+
+    //--------------------------------------------------------------------------
+    inline std::ostream& operator<<(std::ostream& os, const IndexPartition& ip)
+    //--------------------------------------------------------------------------
+    {
+      os << "IndexPartition(" << ip.id << "," << ip.tid << ")";
       return os;
     }
 
@@ -2199,6 +2385,7 @@ namespace LegionRuntime {
     typedef Legion::IndexIterator IndexIterator;
     typedef Legion::AcquireLauncher AcquireLauncher;
     typedef Legion::ReleaseLauncher ReleaseLauncher;
+    typedef Legion::TaskVariantRegistrar TaskVariantRegistrar;
     typedef Legion::MustEpochLauncher MustEpochLauncher;
     typedef Legion::MPILegionHandshake MPILegionHandshake;
     typedef Legion::Mappable Mappable;
@@ -2220,6 +2407,23 @@ namespace LegionRuntime {
     typedef Legion::TaskResult TaskResult;
     typedef Legion::CObjectWrapper CObjectWrapper;
     typedef Legion::ImmovableAutoLock AutoLock;
+    typedef Legion::ISAConstraint ISAConstraint;
+    typedef Legion::ProcessorConstraint ProcessorConstraint;
+    typedef Legion::ResourceConstraint ResourceConstraint;
+    typedef Legion::LaunchConstraint LaunchConstraint;
+    typedef Legion::ColocationConstraint ColocationConstraint;
+    typedef Legion::ExecutionConstraintSet ExecutionConstraintSet;
+    typedef Legion::SpecializedConstraint SpecializedConstraint;
+    typedef Legion::MemoryConstraint MemoryConstraint;
+    typedef Legion::FieldConstraint FieldConstraint;
+    typedef Legion::OrderingConstraint OrderingConstraint;
+    typedef Legion::SplittingConstraint SplittingConstraint;
+    typedef Legion::DimensionConstraint DimensionConstraint;
+    typedef Legion::AlignmentConstraint AlignmentConstraint;
+    typedef Legion::OffsetConstraint OffsetConstraint;
+    typedef Legion::PointerConstraint PointerConstraint;
+    typedef Legion::LayoutConstraintSet LayoutConstraintSet;
+    typedef Legion::TaskLayoutConstraintSet TaskLayoutConstraintSet;
     typedef Realm::Runtime RealmRuntime;
     typedef Realm::Machine Machine;
     typedef Realm::Domain Domain;
@@ -2297,7 +2501,7 @@ namespace LegionRuntime {
       PartitionProjectionTable;
     typedef void (*RealmFnptr)(const void*,size_t,
                                const void*,size_t,Processor);
-    typedef Legion::Internal::SingleTask* Context; 
+    typedef Legion::Internal::TaskContext* Context; 
   };
 };
 

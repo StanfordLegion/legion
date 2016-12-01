@@ -498,7 +498,8 @@ namespace Legion {
     {
       if (redop == 0)
       {
-        if ((kind != NORMAL_SPECIALIZE) && (kind != VIRTUAL_SPECIALIZE))
+        if ((kind == REDUCTION_FOLD_SPECIALIZE) ||
+            (kind == REDUCTION_LIST_SPECIALIZE))
         {
           fprintf(stderr,"Illegal specialize constraint with reduction op %d."
                          "Only reduction specialized constraints are "
@@ -526,6 +527,9 @@ namespace Legion {
     bool SpecializedConstraint::entails(const SpecializedConstraint &other)const
     //--------------------------------------------------------------------------
     {
+      // entails if the other doesn't have any specialization
+      if (other.kind == NO_SPECIALIZE)
+        return true;
       if (kind != other.kind)
         return false;
       if (redop != other.redop)
@@ -538,6 +542,10 @@ namespace Legion {
                                        const SpecializedConstraint &other) const
     //--------------------------------------------------------------------------
     {
+      if (kind == NO_SPECIALIZE)
+        return false;
+      if (other.kind == NO_SPECIALIZE)
+        return false;
       if (kind != other.kind)
         return true;
       if (redop != other.redop)
@@ -563,6 +571,35 @@ namespace Legion {
       if ((kind == REDUCTION_FOLD_SPECIALIZE) || 
           (kind == REDUCTION_LIST_SPECIALIZE))
         derez.deserialize(redop);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_normal(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (kind == NORMAL_SPECIALIZE);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_virtual(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (kind == VIRTUAL_SPECIALIZE);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_reduction(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ((kind == REDUCTION_FOLD_SPECIALIZE) || 
+              (kind == REDUCTION_LIST_SPECIALIZE));
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_file(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (GENERIC_FILE_SPECIALIZE <= kind);
     }
 
     /////////////////////////////////////////////////////////////

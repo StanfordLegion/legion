@@ -40,7 +40,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DebugMapper::DebugMapper(const DebugMapper &rhs)
-      : ReplayMapper(rhs.mapper_runtime, rhs.machine, rhs.local_proc, NULL)
+      : ReplayMapper(rhs.runtime, rhs.machine, rhs.local_proc, NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called

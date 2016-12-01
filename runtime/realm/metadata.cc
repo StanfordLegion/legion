@@ -229,16 +229,12 @@ namespace Realm {
     size_t datalen = 0;
     
     // switch on different types of objects that can have metadata
-    switch(ID(args.id).type()) {
-    case ID::ID_INSTANCE:
-      {
-	RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
-	impl->metadata.handle_request(args.node);
-	data = impl->metadata.serialize(datalen);
-	break;
-      }
-
-    default:
+    ID id(args.id);
+    if(id.is_instance()) {
+      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
+      impl->metadata.handle_request(args.node);
+      data = impl->metadata.serialize(datalen);
+    } else {
       assert(0);
     }
 
@@ -270,16 +266,12 @@ namespace Realm {
 		      args.id, datalen);
 
     // switch on different types of objects that can have metadata
-    switch(ID(args.id).type()) {
-    case ID::ID_INSTANCE:
-      {
-	RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
-	impl->metadata.deserialize(data, datalen);
-	impl->metadata.handle_response();
-	break;
-      }
-
-    default:
+    ID id(args.id);
+    if(id.is_instance()) {
+      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
+      impl->metadata.deserialize(data, datalen);
+      impl->metadata.handle_response();
+    } else {
       assert(0);
     }
   }
@@ -308,15 +300,11 @@ namespace Realm {
 
     //
     // switch on different types of objects that can have metadata
-    switch(ID(args.id).type()) {
-    case ID::ID_INSTANCE:
-      {
-	RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
-	impl->metadata.handle_invalidate();
-	break;
-      }
-
-    default:
+    ID id(args.id);
+    if(id.is_instance()) {
+      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
+      impl->metadata.handle_invalidate();
+    } else {
       assert(0);
     }
 
@@ -369,15 +357,11 @@ namespace Realm {
 
     // switch on different types of objects that can have metadata
     bool last_ack = false;
-    switch(ID(args.id).type()) {
-    case ID::ID_INSTANCE:
-      {
-	RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
-	last_ack = impl->metadata.handle_inval_ack(args.node);
-	break;
-      }
-
-    default:
+    ID id(args.id);
+    if(id.is_instance()) {
+      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.id);
+      last_ack = impl->metadata.handle_inval_ack(args.node);
+    } else {
       assert(0);
     }
 

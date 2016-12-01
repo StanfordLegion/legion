@@ -25,6 +25,7 @@ USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
 USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
 USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
+USE_SPY         ?= 0    # Include detailed Legion Spy support
 
 # The following flag controls whether the binding library is allowed
 # to include and link against Terra/Lua itself. This is required for
@@ -41,7 +42,7 @@ endif
 # Put the binary file name here
 OUTFILE		?= liblegion_terra.so
 # List all the application source files here
-GEN_SRC		?= legion_terra.cc legion_terra_partitions.cc #bishop_mapper.cc bishop_c.cc # .cc files
+GEN_SRC		?= legion_terra.cc legion_terra_partitions.cc bishop_mapper.cc bishop_c.cc # .cc files
 GEN_GPU_SRC	?=		# .cu files
 
 ifeq ($(strip $(BINDINGS_USE_TERRA)),1)
@@ -72,6 +73,10 @@ ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -Wl,-force_load,liblegion.a
 else
 	LD_FLAGS += -Wl,--whole-archive -llegion -Wl,--no-whole-archive
+endif
+
+ifeq ($(strip $(USE_SPY)),1)
+	CC_FLAGS += -DLEGION_SPY
 endif
 
 ###########################################################################

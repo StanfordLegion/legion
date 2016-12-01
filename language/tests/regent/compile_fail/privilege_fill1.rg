@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_fill1.rg:24: invalid privileges in copy: writes($r)
+-- privilege_fill1.rg:24: invalid privileges in fill: writes($r)
 --   fill(r, 0)
 --      ^
 

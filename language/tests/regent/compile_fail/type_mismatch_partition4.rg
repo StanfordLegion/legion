@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition4.rg:28: type mismatch in argument 4: expected ispace with 0 dimensions but got ispace(int2d)
+-- type_mismatch_partition4.rg:28: type mismatch in argument 3: expected legion_point_coloring_t but got legion_domain_point_coloring_t
 --   var p = partition(disjoint, r, s, t)
 --                   ^
 

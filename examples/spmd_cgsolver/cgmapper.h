@@ -1,11 +1,12 @@
 // mapper for SPMD CG solver
 
 #include "legion.h"
-#include "default_mapper.h"
+#include "shim_mapper.h"
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
+using namespace Legion::Mapping;
 
-class CGMapper : public DefaultMapper {
+class CGMapper : public ShimMapper {
 public:
   CGMapper(Machine machine, HighLevelRuntime *rt, Processor local);
   virtual ~CGMapper(void);
@@ -30,15 +31,22 @@ public:
 
   virtual bool pre_map_task(Task *task);
 
-  virtual bool map_must_epoch(const std::vector<Task*> &tasks,
-			      const std::vector<MappingConstraint> &constraints,
-			      MappingTagID tag);
-
   virtual void notify_mapping_result(const Mappable *mappable);
 
   virtual int get_tunable_value(const Task *task, 
 				TunableID tid,
 				MappingTagID tag);
+
+  // override DefaultMapper's policy for choosing locations for
+  // instances constrained by a must epoch launch
+  virtual Memory default_policy_select_constrained_instance_constraints(
+				    MapperContext ctx,
+				    const std::vector</*const*/ Legion::Task *> &tasks,
+				    const std::vector<unsigned> &req_indexes,
+				    const std::vector<Processor> &target_procs,
+				    const std::set<LogicalRegion> &needed_regions,
+				    const std::set<FieldID> &needed_fields,
+                                    LayoutConstraintSet &constraints);
 
 protected:
   bool shard_per_proc;

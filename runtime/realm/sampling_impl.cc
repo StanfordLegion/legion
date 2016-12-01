@@ -68,18 +68,34 @@ namespace Realm {
     hdr.packet_type = SampleFile::PacketHeader::PACKET_SAMPLES;
     hdr.packet_size = sizeof(SampleFile::PacketSamples) + samples_size + runlengths_size;
     ssize_t amt = write(fd, &hdr, sizeof(hdr));
+#ifdef NDEBUG
+    (void)amt;
+#else
     assert(amt == (ssize_t)sizeof(hdr));
+#endif
     SampleFile::PacketSamples pkt;
     pkt.gauge_id = sampler_id;
     pkt.compressed_len = compressed_len;
     pkt.first_sample = first_sample;
     pkt.last_sample = last_sample;
     amt = write(fd, &pkt, sizeof(pkt));
+#ifdef NDEBUG
+    (void)amt;
+#else
     assert(amt == (ssize_t)sizeof(pkt));
+#endif
     amt = write(fd, &samples[0], samples_size);
+#ifdef NDEBUG
+    (void)amt;
+#else
     assert(amt == (ssize_t)samples_size);
+#endif
     amt = write(fd, &run_lengths[0], runlengths_size);
+#ifdef NDEBUG
+    (void)amt;
+#else
     assert(amt == (ssize_t)runlengths_size);
+#endif
   }
 
 
@@ -397,9 +413,17 @@ namespace Realm {
       hdr.packet_type = SampleFile::PacketHeader::PACKET_NEWGAUGE;
       hdr.packet_size = sizeof(SampleFile::PacketNewGauge);
       ssize_t amt = write(output_fd, &hdr, sizeof(hdr));
+#ifdef NDEBUG
+      (void)amt;
+#else
       assert(amt == (ssize_t)sizeof(hdr));
+#endif
       amt = write(output_fd, *it, sizeof(SampleFile::PacketNewGauge));
+#ifdef NDEBUG
+      (void)amt;
+#else
       assert(amt == (ssize_t)sizeof(SampleFile::PacketNewGauge));
+#endif
       delete *it;
     }
     new_sampler_infos.clear();
@@ -444,7 +468,10 @@ namespace Realm {
     int nodes_profiled = 0;
     std::string logfile = "realmprof_%.dat";
 
-    bool ok = CommandLineParser()
+#ifndef NDEBUG
+    bool ok =
+#endif
+              CommandLineParser()
       .add_option_int("-realm:prof", nodes_profiled)
       .add_option_string("-realm:prof_file", logfile)
       .add_option_int("-realm:prof_buffer_size", cfg_buffer_size)
@@ -475,7 +502,10 @@ namespace Realm {
 	int sampler_id = __sync_fetch_and_add(&next_sampler_id, 1);
 	SampleFile::PacketNewGauge *info = new SampleFile::PacketNewGauge;
 	GaugeSampler *sampler = dga->create_sampler(sampler_id, this, info);
-	GaugeSampleBuffer *buffer = sampler->buffer_swap(cfg_buffer_size);
+#ifndef NDEBUG
+	GaugeSampleBuffer *buffer =
+#endif
+	                            sampler->buffer_swap(cfg_buffer_size);
 	assert(buffer == 0);
 	{
 	  AutoHSLLock al(mutex);
@@ -557,9 +587,17 @@ namespace Realm {
 	hdr.packet_type = SampleFile::PacketHeader::PACKET_NEWGAUGE;
 	hdr.packet_size = sizeof(SampleFile::PacketNewGauge);
 	ssize_t amt = write(output_fd, &hdr, sizeof(hdr));
+#ifdef NDEBUG
+	(void)amt;
+#else
 	assert(amt == (ssize_t)sizeof(hdr));
+#endif
 	amt = write(output_fd, *it, sizeof(SampleFile::PacketNewGauge));
+#ifdef NDEBUG
+	(void)amt;
+#else
 	assert(amt == (ssize_t)sizeof(SampleFile::PacketNewGauge));
+#endif
 	delete *it;
       }
       new_infos.clear();
@@ -702,7 +740,10 @@ namespace Realm {
     int sampler_id = __sync_fetch_and_add(&next_sampler_id, 1);
     SampleFile::PacketNewGauge *info = new SampleFile::PacketNewGauge;
     GaugeSampler *sampler = new GaugeSamplerImpl<T>(sampler_id, this, gauge, info);
-    GaugeSampleBuffer *buffer = sampler->buffer_swap(cfg_buffer_size);
+#ifndef NDEBUG
+    GaugeSampleBuffer *buffer =
+#endif
+                                sampler->buffer_swap(cfg_buffer_size);
     assert(buffer == 0);
     {
       AutoHSLLock al(mutex);

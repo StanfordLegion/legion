@@ -41,6 +41,7 @@ ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 SLIB_REALM      := librealm.a
 LEGION_LIBS     := -L. -llegion -lrealm
 else
+$(error Error: SHARED_LOWLEVEL=1 is no longer supported)
 SLIB_SHAREDLLR  := libsharedllr.a
 LEGION_LIBS     := -L. -llegion -lsharedllr
 endif
@@ -103,6 +104,16 @@ GPU_ARCH=k20
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
+ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
+CXX=CC
+F90=ftn
+# Cray's magic wrappers automatically provide LAPACK goodness?
+LAPACK_LIBS=
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+CONDUIT=aries
+LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
+endif
 
 ifneq (${MARCH},)
   CC_FLAGS += -march=${MARCH}
@@ -122,6 +133,19 @@ ifeq ($(strip $(USE_HWLOC)),1)
   CC_FLAGS        += -DREALM_USE_HWLOC
   INC_FLAGS   += -I$(HWLOC)/include
   LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
+endif
+
+ifeq ($(strip $(USE_PAPI)),1)
+  ifndef PAPI_ROOT
+    ifdef PAPI
+      PAPI_ROOT = $(PAPI)
+    else
+      $(error USE_PAPI set, but neither PAPI nor PAPI_ROOT is defined, aborting build)
+    endif
+  endif
+  CC_FLAGS        += -DREALM_USE_PAPI
+  INC_FLAGS   += -I$(PAPI_ROOT)/include
+  LEGION_LD_FLAGS += -L$(PAPI_ROOT)/lib -lpapi
 endif
 
 USE_LIBDL ?= 1
@@ -257,12 +281,13 @@ endif
 
 # general low-level doesn't use HDF by default
 USE_HDF ?= 0
+HDF_LIBNAME ?= hdf5
 ifeq ($(strip $(USE_HDF)), 1)
-  CC_FLAGS      += -DUSE_HDF
-  LEGION_LD_FLAGS      += -lhdf5
+  CC_FLAGS      += -DUSE_HDF -I/usr/include/hdf5/serial
+  LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
 endif
 
-SKIP_MACHINES= titan% daint%
+SKIP_MACHINES= titan% daint% excalibur%
 #Extra options for MPI support in GASNet
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
@@ -293,6 +318,9 @@ CC_FLAGS        += -Wall -Wno-strict-overflow
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 endif
+
+# fix for some systems that need this for printf formatting macros
+CC_FLAGS	+= -D__STDC_FORMAT_MACROS
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
@@ -325,6 +353,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
                    $(LG_RT_DIR)/lowlevel_disk.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/numa/numa_module.cc \
 		   $(LG_RT_DIR)/realm/numa/numasysif.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/procset/procset_module.cc
 ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
 		   $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
@@ -332,6 +361,10 @@ endif
 ifeq ($(strip $(USE_LLVM)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/llvmjit/llvmjit_module.cc \
                    $(LG_RT_DIR)/realm/llvmjit/llvmjit_internal.cc
+endif
+ifeq ($(strip $(USE_HDF)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
+		   $(LG_RT_DIR)/realm/hdf5/hdf5_internal.cc
 endif
 ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
@@ -352,7 +385,8 @@ MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/shim_mapper.cc \
 		   $(LG_RT_DIR)/mappers/test_mapper.cc \
 		   $(LG_RT_DIR)/mappers/replay_mapper.cc \
-		   $(LG_RT_DIR)/mappers/debug_mapper.cc
+		   $(LG_RT_DIR)/mappers/debug_mapper.cc \
+		   $(LG_RT_DIR)/mappers/wrapper_mapper.cc
 
 ifeq ($(strip $(ALT_MAPPERS)),1)
 MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
@@ -362,6 +396,7 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_c.cc \
 		    $(LG_RT_DIR)/legion/legion_ops.cc \
 		    $(LG_RT_DIR)/legion/legion_tasks.cc \
+		    $(LG_RT_DIR)/legion/legion_context.cc \
 		    $(LG_RT_DIR)/legion/legion_trace.cc \
 		    $(LG_RT_DIR)/legion/legion_spy.cc \
 		    $(LG_RT_DIR)/legion/legion_profiling.cc \

@@ -93,14 +93,14 @@ void find_memories(Processor cpu, Processor gpu,
         {
           system = *it;
           printf("System Memory " IDFMT " for CPU Processor " IDFMT 
-                 " has capacity %ld MB\n", it->id, cpu.id, 
+                 " has capacity %zd MB\n", it->id, cpu.id, 
                  (it->capacity() >> 20));
           break;
         }
       case Memory::Z_COPY_MEM:
         {
           printf("Zero-Copy Memory " IDFMT " for CPU Processor " IDFMT 
-                 " has capacity %ld MB\n", it->id, cpu.id, 
+                 " has capacity %zd MB\n", it->id, cpu.id, 
                  (it->capacity() >> 20));
           break;
         }
@@ -123,14 +123,14 @@ void find_memories(Processor cpu, Processor gpu,
           {
             framebuffer = *it;
             printf("Framebuffer Memory " IDFMT " for GPU Processor " IDFMT 
-                   " has capacity %ld MB\n", it->id, cpu.id, 
+                   " has capacity %zd MB\n", it->id, cpu.id, 
                    (it->capacity() >> 20));
             break;
           }
         case Memory::Z_COPY_MEM:
           {
             printf("Zero-Copy Memory " IDFMT " for GPU Processor " IDFMT 
-                   " has capacity %ld MB\n", it->id, cpu.id, 
+                   " has capacity %zd MB\n", it->id, cpu.id, 
                    (it->capacity() >> 20));
             break;
           }
@@ -250,7 +250,7 @@ void top_level_task(const void *args, size_t arglen,
   // Run our checker task
   Event done = first_cpu.spawn(CHECK_RESULT_TASK, &saxpy_args, 
                                 sizeof(saxpy_args), z_ready); 
-  printf("Done Event is (" IDFMT ",%d)\n\n", done.id, done.gen);
+  printf("Done Event is (" IDFMT ")\n\n", done.id);
   done.wait();
 }
 
@@ -297,13 +297,13 @@ void check_result_task(const void *args, size_t arglen,
     float expected = saxpy_args->alpha * ra_x[pir.p] + ra_y[pir.p];
     float actual = ra_z[pir.p];
 
-    // FMAs are too acurate
+    // FMAs are too accurate
     float diff = (actual >= expected) ? actual - expected : expected - actual;
     float relative = diff / expected;
     if (relative < 1e-6) {
       // ok
     } else {
-      printf("Index: %d Expected: %.8g Actual: %.8g\n", pir.p.x[0], expected, actual);
+      printf("Index: %lld Expected: %.8g Actual: %.8g\n", pir.p.x[0], expected, actual);
       success = false;
       break;
     }

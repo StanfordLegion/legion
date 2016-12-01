@@ -30,25 +30,15 @@ namespace Realm {
     class Event {
     public:
       typedef ::legion_lowlevel_id_t id_t;
-      typedef ::legion_lowlevel_event_gen_t gen_t;
 
       id_t id;
-      gen_t gen;
-      bool operator<(const Event& rhs) const 
-      { 
-        if (id < rhs.id)
-          return true;
-        else if (id > rhs.id)
-          return false;
-        else
-          return (gen < rhs.gen);
-      }
-      bool operator==(const Event& rhs) const { return (id == rhs.id) && (gen == rhs.gen); }
-      bool operator!=(const Event& rhs) const { return (id != rhs.id) || (gen != rhs.gen); }
+      bool operator<(const Event& rhs) const;
+      bool operator==(const Event& rhs) const;
+      bool operator!=(const Event& rhs) const;
 
       static const Event NO_EVENT;
 
-      bool exists(void) const { return id != 0; }
+      bool exists(void) const;
 
       // test whether an event has triggered without waiting
       bool has_triggered(void) const;
@@ -78,6 +68,7 @@ namespace Realm {
       // normal merged events propagate poison - this version ignores poison on
       //  inputs - use carefully!
       static Event merge_events_ignorefaults(const std::set<Event>& wait_for);
+      static Event ignorefaults(Event wait_for);
 
       // the following calls are used to give Realm bounds on when the UserEvent
       //  will be triggered - in addition to being useful for diagnostic purposes
@@ -88,8 +79,6 @@ namespace Realm {
       static void advise_event_ordering(const std::set<Event>& happens_before,
 					Event happens_after, bool all_must_trigger = true);
     };
-
-    inline std::ostream& operator<<(std::ostream& os, Event e) { return os << std::hex << e.id << std::dec << '/' << e.gen; }
 
     // A user level event has all the properties of event, except
     // it can be triggered by the user.  This prevents users from
@@ -134,7 +123,7 @@ namespace Realm {
 
 }; // namespace Realm
 
-//include "event.inl"
+#include "event.inl"
 
 #endif // ifndef REALM_EVENT_H
 

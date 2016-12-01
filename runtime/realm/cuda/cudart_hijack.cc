@@ -161,7 +161,14 @@ namespace Realm {
 	p->event_destroy(event);
 	return cudaSuccess;
       }
-	
+
+      cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start, cudaEvent_t end)
+      {
+	GPUProcessor *p = get_gpu_or_die("cudaEventElapsedTime");
+	p->event_elapsed_time(ms, start, end);
+	return cudaSuccess;
+      }
+
       cudaError_t cudaStreamCreate(cudaStream_t *stream)
       {
 	/*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamCreate");

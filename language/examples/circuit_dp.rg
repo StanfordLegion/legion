@@ -21,6 +21,7 @@ do
   local runtime_dir = root_dir .. "../../runtime"
   local legion_dir = root_dir .. "../../runtime/legion"
   local mapper_dir = root_dir .. "../../runtime/mappers"
+  local realm_dir = root_dir .. "../../runtime/realm"
   local circuit_cc = root_dir .. "circuit.cc"
   local circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
   local cxx = os.getenv('CXX') or 'c++'
@@ -36,7 +37,7 @@ do
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
                  " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                 circuit_cc .. " -o " .. circuit_so)
+                 " -I " .. realm_dir .. " " .. circuit_cc .. " -o " .. circuit_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. circuit_cc)
     assert(false)
@@ -672,7 +673,7 @@ local terra get_vec_node_voltage(current_wire : c.legion_ptr_t,
     elseif loc == 3 then
       voltages[i] = @[&float](c.legion_accessor_array_ref(ghost, node_ptr))
     else
-      assert(false)
+      regentlib.assert(false, "bad location")
     end
   end
   return vector(voltages[0], voltages[1], voltages[2], voltages[3])
@@ -694,7 +695,7 @@ local terra get_node_voltage(priv  : c.legion_accessor_array_t,
     c.legion_accessor_array_read(ghost, ptr, &tmp, sizeof(float))
     return tmp
   else
-    assert(false)
+    regentlib.assert(false, "bad location")
   end
 end
 

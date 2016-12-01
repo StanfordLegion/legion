@@ -28,6 +28,10 @@
 #include "atomics.h" // for __sync_fetch_and_add
 #endif
 
+#include <stdint.h>
+
+#include "lowlevel_config.h"
+
 #ifdef __CUDACC__
 #define CUDAPREFIX __host__ __device__
 #else
@@ -40,13 +44,14 @@ CUDAPREFIX static inline int imax(int a, int b) { return (a > b) ? a : b; }
 
 namespace LegionRuntime {
   namespace Arrays {
-    typedef long long int coord_t;
+    typedef ::legion_lowlevel_coord_t coord_t;
 
     template <unsigned DIM>
     class Point {
     public:
       CUDAPREFIX Point(void) {}
       CUDAPREFIX Point(const coord_t *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
+      CUDAPREFIX Point(const int *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
       CUDAPREFIX Point(const Point<DIM>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 
       CUDAPREFIX Point& operator=(const Point<DIM>& other) 
@@ -212,9 +217,13 @@ namespace LegionRuntime {
       enum { DIM = 1 };
       CUDAPREFIX Point(void) {}
       CUDAPREFIX Point(coord_t val) { x[0] = val; }
-      CUDAPREFIX Point(int val) { x[0] = val; }
+      CUDAPREFIX Point(int32_t val) { x[0] = val; }
+      CUDAPREFIX Point(uint32_t val) { x[0] = val; }
+      CUDAPREFIX Point(uint64_t val) { x[0] = val; }
+#ifdef __MACH__
+      // on Darwin, size_t is neither uint32_t nor uint64_t...
       CUDAPREFIX Point(size_t val) { x[0] = val; }
-      CUDAPREFIX Point(unsigned int val) { x[0] = val; }
+#endif
       CUDAPREFIX Point(const coord_t *vals) { for(unsigned i = 0; i < DIM; i++) x[i] = vals[i]; }
       CUDAPREFIX Point(const Point<1>& other) { for(unsigned i = 0; i < DIM; i++) x[i] = other.x[i]; }
 
@@ -325,6 +334,35 @@ namespace LegionRuntime {
 	return res;
       }
 
+      CUDAPREFIX Point<DIM>& operator+=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] += other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator-=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] -= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator*=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] *= other.x[i];
+        return *this;
+      }
+
+      CUDAPREFIX Point<DIM>& operator/=(const Point<DIM> &other)
+      {
+        for (unsigned i = 0; i < DIM; i++)
+          x[i] /= other.x[i];
+        return *this;
+      }
+
+
       CUDAPREFIX coord_t dot(const Point<DIM> other) const { return dot(*this, other); }
   
     public:
@@ -417,8 +455,8 @@ namespace LegionRuntime {
 
       CUDAPREFIX Rect<DIM>& operator-=(const Point<DIM> &translate)
       {
-        lo += translate;
-        hi += translate;
+        lo -= translate;
+        hi -= translate;
         return *this;
       }
 
@@ -921,11 +959,26 @@ namespace LegionRuntime {
 
       Rect<IDIM> preimage(const Point<ODIM> p) const
       {
-	assert(DIM == 1);
-	Rect<IDIM> r;
-	r.lo.x[0] = (p.x[0] - offset) / strides.x[0];
-	r.hi = r.lo;
-	return r;
+	// we only have enough information to do this in the 1-D case
+	if(IDIM == 1) {
+	  coord_t delta = p[0] - offset;
+	  Point<IDIM> lo, hi;
+	  // stride must divide evenly, otherwise p has no preimage
+	  if(strides[0] == 1) { // optimize for common divide-by-1 case
+	    lo.x[0] = delta;
+	    hi = lo;
+	  } else if((delta % strides[0]) == 0) {
+	    lo.x[0] = delta / strides[0];
+	    hi = lo;
+	  } else {
+	    lo.x[0] = 0;
+	    hi.x[0] = -1; // hi < lo means empty rectangle
+	  }
+	  return Rect<IDIM>(lo, hi);
+	} else {
+	  assert(0);
+	  return Rect<IDIM>();
+	}
       }
 
       bool preimage_is_dense(const Point<ODIM> p) const
@@ -970,13 +1023,23 @@ namespace LegionRuntime {
       typedef GenericPointInRectIterator<DIM> PointInOutputRectIterator;
 
       Blockify(void) {}
-      Blockify(Point<DIM> _block_size) : block_size(_block_size) {}
+      Blockify(Point<DIM> _block_size) :
+        block_size(_block_size),
+        offset(Point<DIM>::ZEROES())
+      {
+      }
+
+      Blockify(Point<DIM> _block_size, Point<DIM> _offset) :
+        block_size(_block_size),
+        offset(_offset)
+      {
+      }
 
       Point<DIM> image(const Point<DIM> p) const
       {
 	Point<DIM> q;
 	for(unsigned i = 0; i < DIM; i++)
-	  q.x[i] = p.x[i] / block_size.x[i];
+	  q.x[i] = (p.x[i] - offset.x[i]) / block_size.x[i];
 	return q;
       }
   
@@ -1007,7 +1070,7 @@ namespace LegionRuntime {
       {
 	Rect<DIM> q;
 	for(unsigned i = 0; i < DIM; i++) {
-	  q.lo.x[i] = p.x[i] * block_size.x[i];
+	  q.lo.x[i] = p.x[i] * block_size.x[i] + offset[i];
 	  q.hi.x[i] = q.lo.x[i] + (block_size.x[i] - 1);
 	}
 	return q;
@@ -1020,6 +1083,7 @@ namespace LegionRuntime {
 
     protected:
       Point<DIM> block_size;
+      Point<DIM> offset;
     };
   }; // namespace Arrays
 }; // namespace LegionRuntime

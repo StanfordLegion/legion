@@ -71,12 +71,7 @@ namespace Realm {
 
     AddressSpace RegionInstance::address_space(void) const
     {
-      return ID(id).node();
-    }
-
-    ID::IDType RegionInstance::local_id(void) const
-    {
-      return ID(id).index();
+      return ID(id).instance.owner_node;
     }
 
     Memory RegionInstance::get_location(void) const
@@ -116,7 +111,7 @@ namespace Realm {
     {
       // request metadata (if needed), but don't block on it yet
       RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);
-      Event e = i_impl->metadata.request_data(ID(id).node(), id);
+      Event e = i_impl->metadata.request_data(ID(id).instance.owner_node, id);
       if(!e.has_triggered())
 	log_inst.info("requested metadata in accessor creation: " IDFMT, id);
 	
@@ -226,7 +221,7 @@ namespace Realm {
 
       metadata.mark_valid();
 
-      lock.init(ID(me).convert<Reservation>(), ID(me).node());
+      lock.init(ID(me).convert<Reservation>(), ID(me).instance.owner_node);
       lock.in_use = true;
 
       if (!reqs.empty()) {
@@ -234,7 +229,6 @@ namespace Realm {
         measurements.import_requests(requests);
         if (measurements.wants_measurement<
                           ProfilingMeasurements::InstanceTimeline>()) {
-          timeline.instance = me;
           timeline.record_create_time();
         }
       }
@@ -244,7 +238,7 @@ namespace Realm {
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
       : me(_me), memory(_memory), lis(0)
     {
-      lock.init(ID(me).convert<Reservation>(), ID(me).node());
+      lock.init(ID(me).convert<Reservation>(), ID(me).instance.owner_node);
       lock.in_use = true;
     }
 
@@ -260,7 +254,10 @@ namespace Realm {
 	  it++) {
 	assert((*it) > 0);
 	if(byte_offset < (off_t)(*it)) {
-	  assert((off_t)(byte_offset + size) <= (off_t)(*it));
+	  if ((off_t)(byte_offset + size) > (off_t)(*it)) {
+            log_inst.error("Requested field does not match the expected field size");
+            assert(false);
+          }
 	  field_start = start;
 	  field_size = (*it);
 	  return;
@@ -269,6 +266,18 @@ namespace Realm {
 	byte_offset -= (*it);
       }
       assert(0);
+    }
+
+    void RegionInstanceImpl::record_instance_usage(void)
+    {
+      // can't do this in the constructor because our ID isn't right yet...
+      if(measurements.wants_measurement<ProfilingMeasurements::InstanceMemoryUsage>()) {
+	ProfilingMeasurements::InstanceMemoryUsage usage;
+	usage.instance = me;
+	usage.memory = memory;
+	usage.bytes = metadata.size;
+	measurements.add_measurement(usage);
+      }
     }
 
     bool RegionInstanceImpl::get_strided_parameters(void *&base, size_t &stride,
@@ -334,18 +343,10 @@ namespace Realm {
       if (!requests.empty()) {
         if (measurements.wants_measurement<
                           ProfilingMeasurements::InstanceTimeline>()) {
+	  // set the instance ID correctly now - it wasn't available at construction time
+          timeline.instance = me;
           timeline.record_delete_time();
           measurements.add_measurement(timeline);
-        }
-        if (measurements.wants_measurement<
-                          ProfilingMeasurements::InstanceMemoryUsage>()) {
-          ProfilingMeasurements::InstanceMemoryUsage usage;
-          usage.instance = me;
-          usage.memory = memory;
-          // Safe to read from meta-data here because we know we are
-          // on the owner node so it has up to date copy
-          usage.bytes = metadata.size;
-          measurements.add_measurement(usage);
         }
         measurements.send_responses(requests);
         requests.clear();

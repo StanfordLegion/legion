@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- assertion failed: pointer ptr(int32, $r) is out-of-bounds
+-- bounds_check_fail1.rg:33: pointer ptr(int32, $r) is out-of-bounds
 
 import "regent"
 

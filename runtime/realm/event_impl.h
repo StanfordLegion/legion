@@ -58,15 +58,17 @@ namespace Realm {
     // parent class of GenEventImpl and BarrierImpl
     class EventImpl {
     public:
+      typedef unsigned gen_t;
+
       // test whether an event has triggered without waiting
-      virtual bool has_triggered(Event::gen_t needed_gen, bool& poisoned) = 0;
+      virtual bool has_triggered(gen_t needed_gen, bool& poisoned) = 0;
 
       // causes calling thread to block until event has occurred
       //void wait(Event::gen_t needed_gen);
 
-      virtual void external_wait(Event::gen_t needed_gen, bool& poisoned) = 0;
+      virtual void external_wait(gen_t needed_gen, bool& poisoned) = 0;
 
-      virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
+      virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/) = 0;
 
       static bool add_waiter(Event needed, EventWaiter *waiter);
 
@@ -87,14 +89,14 @@ namespace Realm {
       Event current_event(void) const;
 
       // helper to create the Event for an arbitrary generation
-      Event make_event(Event::gen_t gen) const;
+      Event make_event(gen_t gen) const;
 
       // test whether an event has triggered without waiting
-      virtual bool has_triggered(Event::gen_t needed_gen, bool& poisoned);
+      virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
 
-      virtual void external_wait(Event::gen_t needed_gen, bool& poisoned);
+      virtual void external_wait(gen_t needed_gen, bool& poisoned);
 
-      virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter);
+      virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter);
 
       // creates an event that won't trigger until all input events have
       static Event merge_events(const std::set<Event>& wait_for,
@@ -102,16 +104,17 @@ namespace Realm {
       static Event merge_events(Event ev1, Event ev2,
 				Event ev3 = Event::NO_EVENT, Event ev4 = Event::NO_EVENT,
 				Event ev5 = Event::NO_EVENT, Event ev6 = Event::NO_EVENT);
+      static Event ignorefaults(Event wait_for);
 
       // record that the event has triggered and notify anybody who cares
-      void trigger(Event::gen_t gen_triggered, int trigger_node, bool poisoned);
+      void trigger(gen_t gen_triggered, int trigger_node, bool poisoned);
 
       // helper for triggering with an Event (which must be backed by a GenEventImpl)
       static void trigger(Event e, bool poisoned);
 
       // process an update message from the owner
-      void process_update(Event::gen_t current_gen,
-			  const Event::gen_t *new_poisoned_generations,
+      void process_update(gen_t current_gen,
+			  const gen_t *new_poisoned_generations,
 			  int new_poisoned_count);
 
     public: //protected:
@@ -120,11 +123,11 @@ namespace Realm {
       
       // these state variables are monotonic, so can be checked without a lock for
       //  early-out conditions
-      Event::gen_t generation, gen_subscribed;
+      gen_t generation, gen_subscribed;
       int num_poisoned_generations;
       bool has_local_triggers;
 
-      bool is_generation_poisoned(Event::gen_t gen) const; // helper function - linear search
+      bool is_generation_poisoned(gen_t gen) const; // helper function - linear search
 
       // this is only manipulated when the event is "idle"
       GenEventImpl *next_free;
@@ -137,7 +140,7 @@ namespace Realm {
       //  "future" generations (i.e. ones ahead of what we've heard about if we're
       //  not the owner)
       std::vector<EventWaiter *> current_local_waiters;
-      std::map<Event::gen_t, std::vector<EventWaiter *> > future_local_waiters;
+      std::map<gen_t, std::vector<EventWaiter *> > future_local_waiters;
 
       // remote waiters are kept in a bitmask for the current generation - this is
       //  only maintained on the owner, who never has to worry about more than one
@@ -153,13 +156,13 @@ namespace Realm {
       // we also can't use an STL vector because reallocation prevents us from reading the
       //  list without the lock - instead we'll allocate the max size if/when we need
       //  any space
-      Event::gen_t *poisoned_generations;
+      gen_t *poisoned_generations;
 
       // local triggerings - if we're not the owner, but we've triggered/poisoned events,
       //  we need to give consistent answers for those generations, so remember what we've
       //  done until our view of the distributed event catches up
       // value stored in map is whether generation was poisoned
-      std::map<Event::gen_t, bool> local_triggers;
+      std::map<gen_t, bool> local_triggers;
     };
 
     class BarrierImpl : public EventImpl {
@@ -177,32 +180,32 @@ namespace Realm {
       Barrier current_barrier(Barrier::timestamp_t timestamp = 0) const;
 
       // helper to create the Barrier for an arbitrary generation
-      Barrier make_barrier(Event::gen_t gen, Barrier::timestamp_t timestamp = 0) const;
+      Barrier make_barrier(gen_t gen, Barrier::timestamp_t timestamp = 0) const;
 
       static BarrierImpl *create_barrier(unsigned expected_arrivals, ReductionOpID redopid,
 					 const void *initial_value = 0, size_t initial_value_size = 0);
 
       // test whether an event has triggered without waiting
-      virtual bool has_triggered(Event::gen_t needed_gen, bool& poisoned);
-      virtual void external_wait(Event::gen_t needed_gen, bool& poisoned);
+      virtual bool has_triggered(gen_t needed_gen, bool& poisoned);
+      virtual void external_wait(gen_t needed_gen, bool& poisoned);
 
-      virtual bool add_waiter(Event::gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
+      virtual bool add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/);
 
       // used to adjust a barrier's arrival count either up or down
       // if delta > 0, timestamp is current time (on requesting node)
       // if delta < 0, timestamp says which positive adjustment this arrival must wait for
-      void adjust_arrival(Event::gen_t barrier_gen, int delta, 
+      void adjust_arrival(gen_t barrier_gen, int delta, 
 			  Barrier::timestamp_t timestamp, Event wait_on,
 			  gasnet_node_t sender, bool forwarded,
 			  const void *reduce_value, size_t reduce_value_size);
 
-      bool get_result(Event::gen_t result_gen, void *value, size_t value_size);
+      bool get_result(gen_t result_gen, void *value, size_t value_size);
 
     public: //protected:
       ID me;
       unsigned owner;
-      Event::gen_t generation, gen_subscribed;
-      Event::gen_t first_generation;
+      gen_t generation, gen_subscribed;
+      gen_t first_generation;
       BarrierImpl *next_free;
 
       GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible event)
@@ -226,12 +229,12 @@ namespace Realm {
 	void handle_adjustment(Barrier::timestamp_t ts, int delta);
       };
 
-      std::map<Event::gen_t, Generation *> generations;
+      std::map<gen_t, Generation *> generations;
 
       // a list of remote waiters and the latest generation they're interested in
       // also the latest generation that each node (that has ever subscribed) has been told about
-      std::map<unsigned, Event::gen_t> remote_subscribe_gens, remote_trigger_gens;
-      std::map<Event::gen_t, Event::gen_t> held_triggers;
+      std::map<unsigned, gen_t> remote_subscribe_gens, remote_trigger_gens;
+      std::map<gen_t, gen_t> held_triggers;
 
       unsigned base_arrival_count;
       ReductionOpID redop_id;
@@ -248,7 +251,7 @@ namespace Realm {
     struct RequestArgs {
       gasnet_node_t node;
       Event event;
-      Event::gen_t previous_subscribe_gen;
+      EventImpl::gen_t previous_subscribe_gen;
     };
 
     static void handle_request(RequestArgs args);
@@ -257,7 +260,7 @@ namespace Realm {
 				      RequestArgs,
 				      handle_request> Message;
 
-    static void send_request(gasnet_node_t target, Event event, Event::gen_t previous_gen);
+    static void send_request(gasnet_node_t target, Event event, EventImpl::gen_t previous_gen);
   };
 
   // EventTriggerMessage is used by non-owner nodes to trigger an event
@@ -294,9 +297,9 @@ namespace Realm {
 				       handle_request> Message;
 
     static void send_request(gasnet_node_t target, Event event,
-			     int num_poisoned, const Event::gen_t *poisoned_generations);
+			     int num_poisoned, const EventImpl::gen_t *poisoned_generations);
     static void broadcast_request(const NodeSet& targets, Event event,
-				  int num_poisoned, const Event::gen_t *poisoned_generations);
+				  int num_poisoned, const EventImpl::gen_t *poisoned_generations);
   };
 
     struct BarrierAdjustMessage {
@@ -323,7 +326,7 @@ namespace Realm {
       struct RequestArgs {
 	gasnet_node_t subscriber;
 	ID::IDType barrier_id;
-	Event::gen_t subscribe_gen;
+	EventImpl::gen_t subscribe_gen;
 	bool forwarded;
       };
 
@@ -334,7 +337,7 @@ namespace Realm {
 					handle_request> Message;
 
       static void send_request(gasnet_node_t target, ID::IDType barrier_id,
-			       Event::gen_t subscribe_gen,
+			       EventImpl::gen_t subscribe_gen,
 			       gasnet_node_t subscriber, bool forwarded);
     };
 
@@ -342,9 +345,9 @@ namespace Realm {
       struct RequestArgs : public BaseMedium {
 	gasnet_node_t node;
 	ID::IDType barrier_id;
-	Event::gen_t trigger_gen;
-	Event::gen_t previous_gen;
-	Event::gen_t first_generation;
+	EventImpl::gen_t trigger_gen;
+	EventImpl::gen_t previous_gen;
+	EventImpl::gen_t first_generation;
 	ReductionOpID redop_id;
 	gasnet_node_t migration_target;
 	unsigned base_arrival_count;
@@ -357,8 +360,8 @@ namespace Realm {
 					 handle_request> Message;
 
       static void send_request(gasnet_node_t target, ID::IDType barrier_id,
-			       Event::gen_t trigger_gen, Event::gen_t previous_gen,
-			       Event::gen_t first_generation, ReductionOpID redop_id,
+			       EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
+			       EventImpl::gen_t first_generation, ReductionOpID redop_id,
 			       gasnet_node_t migration_target, unsigned base_arrival_count,
 			       const void *data, size_t datalen);
     };

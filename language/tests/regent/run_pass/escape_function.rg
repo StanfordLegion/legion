@@ -14,22 +14,16 @@
 
 import "regent"
 
-x = false
-
-function g(y)
+terra g(y : int)
   regentlib.assert(y == 5, "test failed")
-  x = true
+  return y + 20
 end
-local tg = terralib.cast({int} -> {}, g)
 
 task f(z : int)
-  [tg](z)
+  return [g](z)
 end
 
 task main()
-  f(5)
+  regentlib.assert(f(5) == 25, "test failed")
 end
-
-regentlib.assert(not x, "test failed")
 regentlib.start(main)
-regentlib.assert(x, "test failed")

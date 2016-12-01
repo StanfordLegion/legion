@@ -30,7 +30,7 @@
 // if set, uses Linux's kernel-level io_submit interface, otherwise uses
 //  POSIX AIO for async file I/O
 #ifdef __linux__
-#define REALM_USE_KERNEL_AIO
+//define REALM_USE_KERNEL_AIO
 #endif
 
 // dynamic loading via dlfcn and a not-completely standard dladdr extension

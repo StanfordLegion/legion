@@ -145,8 +145,8 @@ void response_task(const void *args, size_t arglen,
       for(std::vector<OperationEventWaits::WaitInterval>::const_iterator it = op_waits->intervals.begin();
 	  it != op_waits->intervals.end();
 	  it++)
-	printf(" (%lld %lld %lld %llx/%d)",
-	       it->wait_start, it->wait_ready, it->wait_end, it->wait_event.id, it->wait_event.gen);
+	printf(" (%lld %lld %lld %llx)",
+	       it->wait_start, it->wait_ready, it->wait_end, it->wait_event.id);
       printf(" ]\n");
     } else
       printf("\n");

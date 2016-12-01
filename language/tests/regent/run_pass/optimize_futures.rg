@@ -61,7 +61,13 @@ task main()
   y += 30
   regentlib.assert(y == 35, "test failed")
 
-  f()
+  f() -- Do cleanups for raw function calls. DO NOT block.
+
+  y; y -- Don't do cleanups for raw variable references.
+
+  repeat
+    var w = f()
+  until w > 0 -- Future must be valid at condition.
 
   var a = g()
   var b : t

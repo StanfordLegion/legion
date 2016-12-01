@@ -18,6 +18,10 @@
 
 #include "legion_types.h"
 #include "legion_constraint.h"
+#include "legion.h"
+#include "realm/profiling.h"
+
+#include <iostream>
 
 namespace Legion {
   namespace Mapping { 
@@ -49,8 +53,12 @@ namespace Legion {
       // Get the location of this physical instance
       Memory get_location(void) const;
       unsigned long get_instance_id(void) const;
+      // Adds all fields that exist in instance to 'fields', unless
+      //  instance is virtual
+      void get_fields(std::set<FieldID> &fields) const;
     public:
       LogicalRegion get_logical_region(void) const;
+      LayoutConstraintID get_layout_id(void) const;
     public:
       // See if our instance still exists or if it has been
       // garbage collected, this is just a sample, using the
@@ -93,7 +101,8 @@ namespace Legion {
       PhysicalInstance(PhysicalInstanceImpl impl);
     protected:   
       PhysicalInstanceImpl impl;
-      std::set<FieldID>  fields;
+      friend std::ostream& operator<<(std::ostream& os,
+				      const PhysicalInstance& p);
     };
 
     /**
@@ -117,11 +126,74 @@ namespace Legion {
       unsigned mapper_event_id;
     };
 
-    // Set of profiling requests for task launches
-    // This struct will be filled out by the new faults
-    // branch so it's just here as a place holder for now
-    class ProfilingRequestSet {
-      // TODO fill this in with the kinds of profiling requests
+    namespace ProfilingMeasurements {
+      // import all the Realm measurements into this namespace too
+      using namespace Realm::ProfilingMeasurements;
+
+      struct RuntimeOverhead {
+	static const ProfilingMeasurementID ID = PMID_RUNTIME_OVERHEAD;
+        RuntimeOverhead(void);
+	// application, runtime, wait times all reported in nanoseconds
+	long long application_time;  // time spent in application code
+	long long runtime_time;      // time spent in runtime code
+	long long wait_time;         // time spent waiting
+      };
+    };
+
+    /**
+     * \class ProfilingRequest
+     * This definition shadows the Realm version, since it's the job of the
+     * Legion runtime to handle the actual callback part (and to divert any
+     * measurement requests not known to Realm)
+     */
+    class ProfilingRequest {
+    public:
+      ProfilingRequest(void);
+      ~ProfilingRequest(void);
+
+      template <typename T>
+      inline ProfilingRequest &add_measurement(void);
+
+      inline bool empty(void) const;
+
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      void populate_realm_profiling_request(Realm::ProfilingRequest& req);
+
+      std::set<ProfilingMeasurementID> requested_measurements;
+    };
+
+    /**
+     * \class ProfilingResponse
+     * Similarly, the profiling response wraps around the Realm version so
+     * that it can handle non-Realm measurements
+     */
+    class ProfilingResponse {
+    public:
+      // default constructor used because this appears in the
+      //  {...}ProfilingInfo structs below
+      ProfilingResponse(void);
+      ~ProfilingResponse(void);
+
+      // even if a measurement was requested, it may not have been performed -
+      //  use this to check
+      template <typename T>
+      inline bool has_measurement(void) const;
+
+      // extracts a measurement (if available), returning a dynamically
+      //  allocated result - caller should delete it when done
+      template <typename T>
+      inline T *get_measurement(void) const;
+
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      void attach_realm_profiling_response(
+          const Realm::ProfilingResponse& resp);
+      void attach_overhead(
+          ProfilingMeasurements::RuntimeOverhead *overhead);
+
+      const Realm::ProfilingResponse *realm_resp;
+      ProfilingMeasurements::RuntimeOverhead *overhead;
     };
 
     /**
@@ -135,7 +207,7 @@ namespace Legion {
       Mapper(MapperRuntime *rt);
       virtual ~Mapper(void);
     public:
-      MapperRuntime *const mapper_runtime;
+      MapperRuntime *const runtime;
     public:
       /**
        ** ----------------------------------------------------------------------
@@ -275,6 +347,7 @@ namespace Legion {
         std::map<unsigned,std::vector<PhysicalInstance> >  valid_instances;
       };
       struct PremapTaskOutput {
+        Processor                                          new_target_proc;
         std::map<unsigned,std::vector<PhysicalInstance> >  premapped_instances;
       };
       //------------------------------------------------------------------------
@@ -378,11 +451,10 @@ namespace Legion {
        * The mapper can also request profiling information about this
        * task as part of its execution. The mapper can specify a task
        * profiling request set in 'task_prof_requests' for profiling
-       * statistics about the execution of the task. Additionally,
-       * the mapper can request profiling information about any of the
-       * copy operations for necessary for mapping a physical instance
-       * by specifying a profiling request set for the appropritate
-       * region requirement in 'region_prof_requests'.
+       * statistics about the execution of the task. The mapper can
+       * also ask for profiling information for the copies generated
+       * as part of the mapping of the task through the 
+       * 'copy_prof_requests' field.
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> >     valid_instances;
@@ -392,8 +464,8 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
         std::vector<Processor>                          target_procs;
         VariantID                                       chosen_variant; // = 0 
-        ProfilingRequestSet                             task_prof_requests;
-        std::vector<ProfilingRequestSet>                region_prof_requests;
+        ProfilingRequest                                task_prof_requests;
+        ProfilingRequest                                copy_prof_requests;
         TaskPriority                                    task_priority;  // = 0
         bool                                            postmap_task; // = false
       };
@@ -496,6 +568,39 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a task. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The mapper
+       * is told which region requirement this instance creation request is
+       * with respect to and the resulting instance must have sufficient space
+       * for all the fields. The runtime will also provide the actual target
+       * instance where the data will be ultimately copied. The mapper can
+       * use this instance as a guide for where the data will ultimately
+       * be placed and laid out.
+       */
+      struct CreateTaskTemporaryInput {
+        unsigned                                region_requirement_index; 
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateTaskTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_task_temporary_instance(
+                                   const MapperContext              ctx,
+                                   const Task&                      task,
+                                   const CreateTaskTemporaryInput&  input,
+                                         CreateTaskTemporaryOutput& output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
        *  Speculate
        * ----------------------------------------------------------------------
        * The speculate mapper call asks the mapper to make a 
@@ -522,9 +627,13 @@ namespace Legion {
        * This mapper call will report the profiling information
        * requested either for the task execution and/or any copy
        * operations that were issued on behalf of mapping the task.
+       * If the 'task_response' field is set to true this is the
+       * profiling callback for the task itself, otherwise it is a
+       * callback for one of the copies for the task'.
        */
       struct TaskProfilingInfo {
-        // TODO: fill this in based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
+        bool                                    task_response;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext      ctx,
@@ -553,7 +662,7 @@ namespace Legion {
       };
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;
-        ProfilingRequestSet                     profiling_requests;
+        ProfilingRequest                        profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_inline(const MapperContext        ctx,
@@ -588,6 +697,36 @@ namespace Legion {
                                        const SelectInlineSrcInput&  input,
                                              SelectInlineSrcOutput& output) = 0;
       //------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a mapping. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The resulting 
+       * instance must have sufficient space for all the fields. The runtime 
+       * will also provide the actual target instance where the data will be 
+       * ultimately copied. The mapper can use this instance as a guide for 
+       * where the data will ultimately be placed and laid out.
+       */
+      struct CreateInlineTemporaryInput {
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateInlineTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_inline_temporary_instance(
+                                 const MapperContext                ctx,
+                                 const InlineMapping&               inline_op,
+                                 const CreateInlineTemporaryInput&  input,
+                                       CreateInlineTemporaryOutput& output) = 0;
+      //------------------------------------------------------------------------
 
       // No speculation for inline mappings
 
@@ -600,7 +739,7 @@ namespace Legion {
        * call will be invoked to inform the mapper of the result.
        */
       struct InlineProfilingInfo {
-        // TODO: fill this in based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext         ctx,
@@ -629,7 +768,7 @@ namespace Legion {
       struct MapCopyOutput {
         std::vector<std::vector<PhysicalInstance> >       src_instances;
         std::vector<std::vector<PhysicalInstance> >       dst_instances;
-        ProfilingRequestSet                               profiling_requests;
+        ProfilingRequest                                  profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_copy(const MapperContext      ctx,
@@ -669,6 +808,40 @@ namespace Legion {
                                        const SelectCopySrcInput&    input,
                                              SelectCopySrcOutput&   output) = 0;
       //------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a copy. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The mapper
+       * is told which region requirement this instance creation request is
+       * with respect to and the resulting instance must have sufficient space
+       * for all the fields. The runtime will also provide the actual target
+       * instance where the data will be ultimately copied. The mapper can
+       * use this instance as a guide for where the data will ultimately
+       * be placed and laid out.
+       */
+      struct CreateCopyTemporaryInput {
+        unsigned                                region_requirement_index; 
+        bool                                    src_requirement;
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateCopyTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_copy_temporary_instance(
+                                   const MapperContext              ctx,
+                                   const Copy&                      copy,
+                                   const CreateCopyTemporaryInput&  input,
+                                         CreateCopyTemporaryOutput& output) = 0;
+      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -695,7 +868,7 @@ namespace Legion {
        * copy operation then this call will return the profiling information.
        */
       struct CopyProfilingInfo {
-        // TODO: fill this in based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext      ctx,
@@ -731,7 +904,7 @@ namespace Legion {
       };
       struct MapCloseOutput {
         std::vector<PhysicalInstance>               chosen_instances;
-        ProfilingRequestSet                         profiling_requests;
+        ProfilingRequest                            profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_close(const MapperContext       ctx,
@@ -765,6 +938,36 @@ namespace Legion {
                                               SelectCloseSrcOutput& output) = 0;
       //------------------------------------------------------------------------
 
+      /**
+       * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a close. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The resulting 
+       * instance must have sufficient space for all the fields. The runtime 
+       * will also provide the actual target instance where the data will be 
+       * ultimately copied. The mapper can use this instance as a guide for 
+       * where the data will ultimately be placed and laid out.
+       */
+      struct CreateCloseTemporaryInput {
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateCloseTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_close_temporary_instance(
+                                  const MapperContext               ctx,
+                                  const Close&                      close,
+                                  const CreateCloseTemporaryInput&  input,
+                                        CreateCloseTemporaryOutput& output) = 0;
+      //------------------------------------------------------------------------
+
       // No speculation for close operations
 
       /**
@@ -776,7 +979,7 @@ namespace Legion {
        * for all the copy operations issued by the close operation.
        */
       struct CloseProfilingInfo {
-        // TODO: fill this in based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext       ctx,
@@ -797,7 +1000,7 @@ namespace Legion {
         // Nothing
       };
       struct MapAcquireOutput {
-        ProfilingRequestSet                         profiling_requests;
+        ProfilingRequest                            profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_acquire(const MapperContext         ctx,
@@ -830,7 +1033,7 @@ namespace Legion {
        * profiling data.
        */
       struct AcquireProfilingInfo {
-        // TODO: fill thisin based on low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext         ctx,
@@ -852,7 +1055,7 @@ namespace Legion {
         // Nothing
       };
       struct MapReleaseOutput {
-        ProfilingRequestSet                         profiling_requests;
+        ProfilingRequest                            profiling_requests;
       };
       //------------------------------------------------------------------------
       virtual void map_release(const MapperContext         ctx,
@@ -885,6 +1088,36 @@ namespace Legion {
                                      const SelectReleaseSrcInput&   input,
                                            SelectReleaseSrcOutput&  output) = 0;
       //------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a release. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The resulting 
+       * instance must have sufficient space for all the fields. The runtime 
+       * will also provide the actual target instance where the data will be 
+       * ultimately copied. The mapper can use this instance as a guide for 
+       * where the data will ultimately be placed and laid out.
+       */
+      struct CreateReleaseTemporaryInput {
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreateReleaseTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_release_temporary_instance(
+                                const MapperContext                 ctx,
+                                const Release&                      release,
+                                const CreateReleaseTemporaryInput&  input,
+                                      CreateReleaseTemporaryOutput& output) = 0;
+      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -912,7 +1145,7 @@ namespace Legion {
        * back to the mapper.
        */
       struct ReleaseProfilingInfo {
-        // TODO: fill this in based on the low-level profiling interface
+	ProfilingResponse                       profiling_responses;
       };
       //------------------------------------------------------------------------
       virtual void report_profiling(const MapperContext         ctx,
@@ -1002,12 +1235,10 @@ namespace Legion {
        * mapped to the same physical instance. The mapper is also given 
        * the mapping tag passed at the callsite in 'mapping_tag'.
        */
-      struct MappingConstraint{
-        const Task*                                 t1;
-        const Task*                                 t2;
-        unsigned                                    idx1;
-        unsigned                                    idx2;
-        DependenceType                              dtype;
+      struct MappingConstraint {
+        std::vector<Task*>                          constrained_tasks;
+        std::vector<unsigned>                       requirement_indexes;
+        // tasks.size() == requirement_indexes.size()
       };
       struct MapMustEpochInput {
         std::vector<const Task*>                    tasks;
@@ -1143,6 +1374,7 @@ namespace Legion {
        */
       struct MapperMessage {
         Processor                               sender;
+        unsigned                                kind;
         const void*                             message;
         size_t                                  size;
         bool                                    broadcast;
@@ -1208,10 +1440,18 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Methods for communicating with other mappers of the same kind
       //------------------------------------------------------------------------
-      void send_message(MapperContext ctx, Processor target, 
-                                const void *message, size_t message_size) const;
+      void send_message(MapperContext ctx, Processor target,const void *message,
+                        size_t message_size, unsigned message_kind = 0) const;
       void broadcast(MapperContext ctx, const void *message, 
-                               size_t message_size, int radix = 4) const;
+           size_t message_size, unsigned message_kind = 0, int radix = 4) const;
+    public:
+      //------------------------------------------------------------------------
+      // Methods for packing and unpacking physical instances
+      //------------------------------------------------------------------------
+      void pack_physical_instance(MapperContext ctx, Serializer &rez,
+                                  PhysicalInstance instance) const;
+      void unpack_physical_instance(MapperContext ctx, Deserializer &derez,
+                                    PhysicalInstance &instance) const;
     public:
       //------------------------------------------------------------------------
       // Methods for managing the execution of mapper tasks 
@@ -1404,6 +1644,12 @@ namespace Legion {
       
       IndexPartition get_parent_index_partition(MapperContext ctx,
                                                 IndexSpace handle) const;
+
+      unsigned get_index_space_depth(MapperContext ctx,
+                                     IndexSpace handle) const;
+
+      unsigned get_index_partition_depth(MapperContext ctx,
+                                         IndexPartition handle) const;
     public:
       //------------------------------------------------------------------------
       // Methods for introspecting field spaces 
@@ -1414,6 +1660,8 @@ namespace Legion {
 
       void get_field_space_fields(MapperContext ctx, 
            FieldSpace handle, std::vector<FieldID> &fields) const;
+      void get_field_space_fields(MapperContext ctx,
+           FieldSpace handle, std::set<FieldID> &fields) const;
     public:
       //------------------------------------------------------------------------
       // Methods for introspecting logical region trees
@@ -1421,8 +1669,10 @@ namespace Legion {
       LogicalPartition get_logical_partition(MapperContext ctx, 
                              LogicalRegion parent, IndexPartition handle) const;
 
-      LogicalPartition get_logical_partition_by_color(
-                    MapperContext ctx, LogicalRegion parent, Color color) const;
+      LogicalPartition get_logical_partition_by_color(MapperContext ctx, 
+                                       LogicalRegion parent, Color color) const;
+      LogicalPartition get_logical_partition_by_color(MapperContext ctx, 
+                          LogicalRegion parent, const DomainPoint &color) const;
 
       LogicalPartition get_logical_partition_by_tree(
                     MapperContext ctx, IndexPartition handle, 
@@ -1433,12 +1683,17 @@ namespace Legion {
 
       LogicalRegion get_logical_subregion_by_color(MapperContext ctx,
                                     LogicalPartition parent, Color color) const;
+      LogicalRegion get_logical_subregion_by_color(MapperContext ctx,
+                       LogicalPartition parent, const DomainPoint &color) const;
       
       LogicalRegion get_logical_subregion_by_tree(MapperContext ctx,
                   IndexSpace handle, FieldSpace fspace, RegionTreeID tid) const;
 
       Color get_logical_region_color(MapperContext ctx, 
                                      LogicalRegion handle) const;
+
+      DomainPoint get_logical_region_color_point(MapperContext ctx,
+                                                 LogicalRegion handle) const;
 
       Color get_logical_partition_color(MapperContext ctx,
                                                 LogicalPartition handle) const;
@@ -1455,31 +1710,31 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Methods for getting access to semantic info
       //------------------------------------------------------------------------
-      void retrieve_semantic_information(MapperContext ctx, 
+      bool retrieve_semantic_information(MapperContext ctx, 
           TaskID task_id, SemanticTag tag, const void *&result, size_t &size, 
           bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx, 
+      bool retrieve_semantic_information(MapperContext ctx, 
           IndexSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           IndexPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           FieldSpace handle, SemanticTag tag, const void *&result, size_t &size,
           bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx, 
+      bool retrieve_semantic_information(MapperContext ctx, 
           FieldSpace handle, FieldID fid, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           LogicalRegion handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
-      void retrieve_semantic_information(MapperContext ctx,
+      bool retrieve_semantic_information(MapperContext ctx,
           LogicalPartition handle, SemanticTag tag, const void *&result, 
           size_t &size, bool can_fail = false, bool wait_until_ready = false);
 
@@ -1519,6 +1774,8 @@ namespace Legion {
 
   }; // namespace Mapping
 }; // namespace Legion
+
+#include "legion_mapping.inl"
 
 #endif // __LEGION_MAPPING_H__
 

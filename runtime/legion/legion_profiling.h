@@ -55,6 +55,7 @@ namespace Legion {
       public:
         TaskID task_id;
         const char *task_name;
+        bool overwrite;
       };
       struct TaskVariant {
       public:
@@ -110,12 +111,23 @@ namespace Legion {
         Memory target;
         unsigned long long create, ready, start, stop;
       };
-      struct InstInfo {
+      struct InstCreateInfo {
       public:
-        UniqueID op_id; 
+	UniqueID op_id;
+        PhysicalInstance inst;
+	unsigned long long create; // time of HLR creation request
+      };
+      struct InstUsageInfo {
+      public:
+	UniqueID op_id;
         PhysicalInstance inst;
         Memory mem;
         size_t total_bytes;
+      };
+      struct InstTimelineInfo {
+      public:
+	UniqueID op_id;
+        PhysicalInstance inst;
         unsigned long long create, destroy;
       };
       struct MessageInfo {
@@ -152,7 +164,7 @@ namespace Legion {
     public:
       LegionProfInstance& operator=(const LegionProfInstance &rhs);
     public:
-      void register_task_kind(TaskID task_id, const char *name);
+      void register_task_kind(TaskID task_id, const char *name, bool overwrite);
       void register_task_variant(TaskID task_id,
                                  VariantID variant_id, 
                                  const char *variant_name);
@@ -160,7 +172,7 @@ namespace Legion {
       void register_multi_task(Operation *op, TaskID kind);
       void register_slice_owner(UniqueID pid, UniqueID id);
     public:
-      void process_task(size_t id, UniqueID op_id, 
+      void process_task(VariantID variant_id, UniqueID op_id, 
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
                   Realm::ProfilingMeasurements::OperationEventWaits *waits);
@@ -174,12 +186,13 @@ namespace Legion {
       void process_fill(UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
-      void process_inst(UniqueID op_id,
-                  Realm::ProfilingMeasurements::InstanceTimeline *timeline,
+      void process_inst_create(UniqueID op_id, PhysicalInstance inst,
+		  unsigned long long create);
+      void process_inst_usage(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
+      void process_inst_timeline(UniqueID op_id,
+                  Realm::ProfilingMeasurements::InstanceTimeline *timeline);
     public:
-      void record_instance_creation(PhysicalInstance inst, Memory memory,
-                                    UniqueID op_id, unsigned long long create);
       void record_message(Processor proc, MessageKind kind, 
                           unsigned long long start,
                           unsigned long long stop);
@@ -208,7 +221,9 @@ namespace Legion {
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
-      std::deque<InstInfo> inst_infos;
+      std::deque<InstCreateInfo> inst_create_infos;
+      std::deque<InstUsageInfo> inst_usage_infos;
+      std::deque<InstTimelineInfo> inst_timeline_infos;
     private:
       std::deque<MessageInfo> message_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
@@ -252,7 +267,8 @@ namespace Legion {
     public:
       // Dynamically created things must be registered at runtime
       // Tasks
-      void register_task_kind(TaskID task_id, const char *task_name);
+      void register_task_kind(TaskID task_id, const char *task_name, 
+                              bool overwrite);
       void register_task_variant(TaskID task_id,
                                  VariantID var_id,
                                  const char *variant_name);
@@ -264,7 +280,7 @@ namespace Legion {
       void add_task_request(Realm::ProfilingRequestSet &requests, 
                             TaskID tid, SingleTask *task);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
-                            HLRTaskID tid, Operation *op);
+                            LgTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
                             Operation *op);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
@@ -276,7 +292,7 @@ namespace Legion {
       void add_task_request(Realm::ProfilingRequestSet &requests, 
                             TaskID tid, UniqueID uid);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
-                            HLRTaskID tid, UniqueID uid);
+                            LgTaskID tid, UniqueID uid);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
                             UniqueID uid);
       void add_fill_request(Realm::ProfilingRequestSet &requests,

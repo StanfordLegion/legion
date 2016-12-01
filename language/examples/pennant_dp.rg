@@ -40,6 +40,7 @@ do
   local runtime_dir = root_dir .. "../../runtime"
   local legion_dir = root_dir .. "../../runtime/legion"
   local mapper_dir = root_dir .. "../../runtime/mappers"
+  local realm_dir = root_dir .. "../../runtime/realm"
   local pennant_cc = root_dir .. "pennant.cc"
   local pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
   local cxx = os.getenv('CXX') or 'c++'
@@ -55,7 +56,7 @@ do
 
   local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
                  " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
-                 pennant_cc .. " -o " .. pennant_so)
+                 " -I " .. realm_dir .. " " .. pennant_cc .. " -o " .. pennant_so)
   if os.execute(cmd) ~= 0 then
     print("Error: failed to compile " .. pennant_cc)
     assert(false)
@@ -104,13 +105,15 @@ terra vec2.metamethods.__sub(a : vec2, b : vec2) : vec2
   return vec2 { x = a.x - b.x, y = a.y - b.y }
 end
 
-terra vec2.metamethods.__mul(a : double, b : vec2) : vec2
-  return vec2 { x = a * b.x, y = a * b.y }
-end
-
-terra vec2.metamethods.__mul(a : vec2, b : double) : vec2
-  return vec2 { x = a.x * b, y = a.y * b }
-end
+vec2.metamethods.__mul = terralib.overloadedfunction(
+  "__mul", {
+    terra(a : double, b : vec2) : vec2
+      return vec2 { x = a * b.x, y = a * b.y }
+    end,
+    terra(a : vec2, b : double) : vec2
+      return vec2 { x = a.x * b, y = a.y * b }
+    end
+  })
 
 terra dot(a : vec2, b : vec2) : double
   return a.x*b.x + a.y*b.y

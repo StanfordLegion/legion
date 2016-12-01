@@ -15,9 +15,9 @@
 -- Regent Task Inliner
 
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
-local log = require("regent/log")
+local report = require("common/report")
 local symbol_table = require("regent/symbol_table")
 
 local inline_tasks = {}
@@ -47,18 +47,18 @@ local function expr_id(sym, node)
   return ast.typed.expr.ID {
     value = sym,
     expr_type = std.rawref(&sym:gettype()),
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
 
-local function make_block(stats, options, span)
+local function make_block(stats, annotations, span)
   return ast.typed.stat.Block {
     block = ast.typed.Block {
       stats = stats,
       span = span,
     },
-    options = options,
+    annotations = annotations,
     span = span,
   }
 end
@@ -75,7 +75,7 @@ local function stat_var(lhs, rhs, node)
     symbols = symbols,
     types = types,
     values = values,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -89,7 +89,7 @@ local function stat_asgn(lh, rh, node)
   return ast.typed.stat.Assignment {
     lhs = lhs,
     rhs = rhs,
-    options = node.options,
+    annotations = node.annotations,
     span = node.span,
   }
 end
@@ -155,27 +155,17 @@ local function find_self_recursion(prototype, node)
 end
 
 local function check_valid_inline_task(task)
-  --task.params:map(function(param)
-  --  local ty = param.param_type
-  --  if std.is_ispace(ty) or std.is_region(ty) or
-  --    std.is_partition(ty) or std.is_cross_product(ty) or
-  --    std.is_bounded_type(ty) or std.is_ref(ty) or std.is_rawref(ty) or
-  --    std.is_future(ty) or std.is_unpack_result(ty) then
-  --    log.error(param, "inline tasks cannot have a parameter of type " .. tostring(ty))
-  --  end
-  --end)
-
   local body = task.body
   local num_returns = count_returns(body)
   if num_returns > 1 then
-    log.error(task, "inline tasks cannot have multiple return statements")
+    report.error(task, "inline tasks cannot have multiple return statements")
   end
   if num_returns == 1 and not body.stats[#body.stats]:is(ast.typed.stat.Return) then
-    log.error(task, "the return statement in an inline task should be the last statement")
+    report.error(task, "the return statement in an inline task should be the last statement")
   end
 
   if find_self_recursion(task.prototype, body) then
-    log.error(task, "inline tasks cannot be recursive")
+    report.error(task, "inline tasks cannot be recursive")
   end
 end
 
@@ -212,11 +202,11 @@ function inline_tasks.expr(cx, node)
 
     local task = node.fn.value
     local task_ast = task:hasast()
-    if node.options.inline:is(ast.options.Demand) then
+    if node.annotations.inline:is(ast.annotation.Demand) then
       check_valid_inline_task(task_ast)
     elseif not task_ast or
-      not task_ast.options.inline:is(ast.options.Demand) or
-      node.options.inline:is(ast.options.Forbid)
+      not task_ast.annotations.inline:is(ast.annotation.Demand) or
+      node.annotations.inline:is(ast.annotation.Forbid)
     then
       return stats, node
     end
@@ -229,10 +219,9 @@ function inline_tasks.expr(cx, node)
     local params = task_ast.params:map(function(param) return param.symbol end)
     local param_types = params:map(function(param) return param:gettype() end)
     local task_body = task_ast.body
-    local return_var = std.newsymbol(task_ast.return_type)
-    local return_var_expr = expr_id(return_var, node)
+    local return_var
+    local return_var_expr
 
-    stats:insert(stat_var(return_var, nil, node))
     local new_block
     do
       local stats = terralib.newlist()
@@ -248,6 +237,10 @@ function inline_tasks.expr(cx, node)
           if std.is_region(param_type) then
             type_mapping[param_type] = std.as_read(arg.expr_type)
             type_mapping[param] = get_root_subregion(arg)
+            type_mapping[param_type.ispace_symbol] =
+              type_mapping[param_type].ispace_symbol
+            type_mapping[param_type:ispace()] =
+              type_mapping[param_type]:ispace()
           end
         else
           local new_var = std.newsymbol(std.as_read(arg.expr_type))
@@ -258,6 +251,10 @@ function inline_tasks.expr(cx, node)
           if std.is_region(param_type) then
             type_mapping[param] = new_var
             type_mapping[param_type] = new_var:gettype()
+            type_mapping[param_type.ispace_symbol] =
+              type_mapping[param_type].ispace_symbol
+            type_mapping[param_type:ispace()] =
+              type_mapping[param_type]:ispace()
           end
         end
       end)
@@ -267,31 +264,92 @@ function inline_tasks.expr(cx, node)
           symbols = new_local_params,
           types = new_local_param_types,
           values = new_args,
-          options = node.options,
+          annotations = node.annotations,
           span = node.span
         })
       end
-      local function subst(node)
+      local function subst_pre(node)
+        if node:is(ast.typed.stat.ForList) then
+          local old_type = node.symbol:gettype()
+          local new_type = std.type_sub(old_type, type_mapping)
+
+          if old_type ~= new_type then
+            local new_symbol = std.newsymbol(new_type, node.symbol:hasname())
+            expr_mapping[node.symbol] = new_symbol
+            return node { symbol = new_symbol }
+          else
+            return node
+          end
+        else
+          return node
+        end
+      end
+
+      local function subst_post(node)
         if rawget(node, "expr_type") then
           if node:is(ast.typed.expr.ID) and expr_mapping[node.value] then
             local tgt = expr_mapping[node.value]
             if rawget(tgt, "expr_type") then node = tgt
             else node = node { value = tgt } end
+          elseif node:is(ast.typed.expr.New) then
+            return node {
+              expr_type = std.type_sub(node.expr_type, type_mapping),
+              pointer_type = std.type_sub(node.pointer_type, type_mapping),
+            }
+          elseif node:is(ast.typed.expr.Ispace) then
+            local ispace = std.as_read(node.expr_type)
+            local new_ispace = std.ispace(ispace.index_type)
+            type_mapping[ispace] = new_ispace
+          elseif node:is(ast.typed.expr.Region) then
+            local region = std.as_read(node.expr_type)
+            local ispace =
+              std.type_sub(std.as_read(region:ispace()), type_mapping)
+            local fspace =
+              std.type_sub(std.as_read(region:fspace()), type_mapping)
+            local new_region = std.region(ispace, fspace)
+            type_mapping[region] = new_region
           end
           return node { expr_type = std.type_sub(node.expr_type, type_mapping) }
+        elseif node:is(ast.typed.stat.Var) then
+          local new_symbols = terralib.newlist()
+          local new_types = terralib.newlist()
+
+          for i = 1, #node.symbols do
+            local new_ty = std.type_sub(node.types[i], type_mapping)
+            if new_ty ~= node.types[i] then
+              local sym = node.symbols[i]
+              local new_sym = std.newsymbol(new_ty)
+              new_symbols:insert(new_sym)
+              new_types:insert(new_ty)
+              if std.is_region(new_ty) then
+                expr_mapping[sym] = new_sym
+                type_mapping[sym] = new_sym
+              end
+            else
+              new_symbols:insert(node.symbols[i])
+              new_types:insert(node.types[i])
+            end
+          end
+          return node {
+            symbols = new_symbols,
+            types = new_types,
+          }
         else
           return node
         end
       end
+      return_var = std.newsymbol(std.type_sub(task_ast.return_type, type_mapping))
+      return_var_expr = expr_id(return_var, node)
       stats:insertall(task_body.stats)
       if stats[#stats]:is(ast.typed.stat.Return) then
         local num_stats = #stats
         local return_stat = stats[num_stats]
         stats[num_stats] = stat_asgn(return_var_expr, return_stat.value, return_stat)
       end
-      stats = ast.map_node_postorder(subst, stats)
-      new_block = make_block(stats, node.options, node.span)
+      stats = ast.map_node_prepostorder(subst_pre, subst_post, stats)
+      new_block = make_block(stats, node.annotations, node.span)
     end
+    stats:insert(stat_var(return_var, nil, node))
     stats:insert(new_block)
 
     return stats, return_var_expr
@@ -307,6 +365,16 @@ function inline_tasks.expr(cx, node)
           stats:insertall(new_stats)
           fields[k] = new_node
 
+        elseif terralib.islist(field) then
+          fields[k] = field:map(function(field)
+            if ast.is_node(field) and field:is(ast.typed.expr) then
+              local new_stats, new_node = inline_tasks.expr(cx, field)
+              stats:insertall(new_stats)
+              return new_node
+            else
+              return field
+            end
+          end)
         else
           fields[k] = field
         end
@@ -389,7 +457,7 @@ end
 
 function inline_tasks.top(cx, node)
   if node:is(ast.typed.top.Task) then
-    if node.options.inline:is(ast.options.Demand) then
+    if node.annotations.inline:is(ast.annotation.Demand) then
       check_valid_inline_task(node)
     end
     local new_node = inline_tasks.top_task(cx, node)
@@ -399,10 +467,10 @@ function inline_tasks.top(cx, node)
   elseif node:is(ast.typed.top.Fspace) then
     return node
 
-  elseif node:is(ast.typed.top.QuoteExpr) then
+  elseif node:is(ast.specialized.top.QuoteExpr) then
     return node
 
-  elseif node:is(ast.typed.top.QuoteStat) then
+  elseif node:is(ast.specialized.top.QuoteStat) then
     return node
 
   else
@@ -415,5 +483,7 @@ function inline_tasks.entry(node)
   local cx = context:new_global_scope({})
   return inline_tasks.top(cx, node)
 end
+
+inline_tasks.pass_name = "inline_tasks"
 
 return inline_tasks

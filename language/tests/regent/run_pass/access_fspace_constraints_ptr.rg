@@ -28,14 +28,12 @@ end
 
 task h() : int
   var t = region(ispace(ptr, 5), int)
-  var tc = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(tc, 0)
-  var u = partition(disjoint, t, tc)
-  c.legion_coloring_destroy(tc)
-  var v = u[0]
-  var y = new(ptr(int, v))
+  var y = new(ptr(int, t))
   @y = 7
-  var z = [k(t)]{ s = v, x = y }
+  var u = partition(equal, t, ispace(int1d, 1))
+  var v = u[0]
+  var w = dynamic_cast(ptr(int, v), y)
+  var z = [k(t)]{ s = v, x = w }
   return g(t, z)
 end
 

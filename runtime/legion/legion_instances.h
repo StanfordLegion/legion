@@ -64,6 +64,7 @@ namespace Legion {
                                 PhysicalInstance inst,
                                 std::vector<Domain::CopySrcDstField> &fields);
     public:
+      void get_fields(std::set<FieldID> &fields) const;
       bool has_field(FieldID fid) const;
       void has_fields(std::map<FieldID,bool> &fields) const;
       void remove_space_fields(std::set<FieldID> &fields) const;
@@ -80,7 +81,6 @@ namespace Legion {
       void set_descriptor(FieldDataDescriptor &desc, FieldID fid) const;
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
-      void update_known_nodes(AddressSpaceID target);
       static LayoutDescription* handle_unpack_layout_description(
           Deserializer &derez, AddressSpaceID source, RegionNode *node);
     public:
@@ -100,7 +100,6 @@ namespace Legion {
       Reservation layout_lock; 
       std::map<LEGION_FIELD_MASK_FIELD_TYPE,
                LegionList<std::pair<FieldMask,FieldMask> >::aligned> comp_cache;
-      NodeSet known_nodes;
     }; 
  
     /**
@@ -125,6 +124,9 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const = 0;
     public:
+      void log_instance_creation(UniqueID creator_id, Processor proc,
+                     const std::vector<LogicalRegion> &regions) const;
+    public:
       inline bool is_reduction_manager(void) const;
       inline bool is_instance_manager(void) const;
       inline bool is_fold_manager(void) const;
@@ -137,16 +139,17 @@ namespace Legion {
       inline VirtualManager* as_virtual_manager(void) const;
     public:
       virtual size_t get_instance_size(void) const = 0;
-      virtual void notify_active(void);
-      virtual void notify_inactive(void);
-      virtual void notify_valid(void);
-      virtual void notify_invalid(void);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_manager(AddressSpaceID target) = 0; 
       static void handle_manager_request(Deserializer &derez, 
                           Runtime *runtime, AddressSpaceID source);
     public:
       // Support for mapper queries
+      virtual void get_fields(std::set<FieldID> &fields) const = 0;
       virtual bool has_field(FieldID fid) const = 0;
       virtual void has_fields(std::map<FieldID,bool> &fields) const = 0;
       virtual void remove_space_fields(std::set<FieldID> &fields) const = 0;
@@ -158,10 +161,10 @@ namespace Legion {
         { return is_virtual_manager(); }
     public:
       // Methods for creating/finding/destroying logical top views
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner) = 0;
-      void register_active_context(SingleTask *context);
-      void unregister_active_context(SingleTask *context);
+      void register_active_context(InnerContext *context);
+      void unregister_active_context(InnerContext *context);
     public:
       bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions,
@@ -180,7 +183,7 @@ namespace Legion {
       }
       inline Memory get_memory(void) const { return memory_manager->memory; }
     public:
-      void perform_deletion(Event deferred_event) const;
+      void perform_deletion(RtEvent deferred_event);
       void set_garbage_collection_priority(MapperID mapper_id, Processor p,
                                            GCPriority priority); 
       static void delete_physical_manager(PhysicalManager *manager);
@@ -201,7 +204,7 @@ namespace Legion {
       const bool own_domain;
       const PointerConstraint pointer_constraint;
     protected:
-      std::map<SingleTask*,GenerationID> active_contexts;
+      std::set<InnerContext*> active_contexts;
     };
 
     /**
@@ -231,19 +234,14 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = INSTANCE_MANAGER_ALLOC;
     public:
-      enum InstanceFlag {
-        NO_INSTANCE_FLAG = 0x00000000,
-        ATTACH_FILE_FLAG = 0x00000001,
-      };
-    public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
                       MemoryManager *memory, PhysicalInstance inst, 
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
-                      bool register_now, Event use_event, 
-                      InstanceFlag flag = NO_INSTANCE_FLAG);
+                      bool register_now, ApEvent use_event,
+                      Reservation read_only_mapping_reservation); 
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -258,9 +256,11 @@ namespace Legion {
     public:
       virtual size_t get_instance_size(void) const;
     public:
-      inline Event get_use_event(void) const { return use_event; }
+      inline ApEvent get_use_event(void) const { return use_event; }
+      inline Reservation get_read_only_mapping_reservation(void) const
+        { return read_only_mapping_reservation; }
     public:
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
       void compute_copy_offsets(const FieldMask &copy_mask,
                                 std::vector<Domain::CopySrcDstField> &fields);
@@ -274,6 +274,8 @@ namespace Legion {
                                     const std::vector<unsigned> &dst_indexes);
     public:
       // Interface to the mapper PhysicalInstance
+      virtual void get_fields(std::set<FieldID> &fields) const
+        { layout->get_fields(fields); }
       virtual bool has_field(FieldID fid) const
         { return layout->has_field(fid); }
       virtual void has_fields(std::map<FieldID,bool> &fields) const
@@ -292,14 +294,9 @@ namespace Legion {
     public:
       // Event that needs to trigger before we can start using
       // this physical instance.
-      const Event use_event;
+      const ApEvent use_event;
     protected:
-      // This is monotonic variable that once it becomes true
-      // will remain true for the duration of the instance lifetime.
-      // If set to true, it should prevent the instance from ever
-      // being collected before the context in which it was created
-      // is destroyed.
-      InstanceFlag instance_flags;
+      Reservation read_only_mapping_reservation;
     };
 
     /**
@@ -330,16 +327,17 @@ namespace Legion {
       virtual bool is_foldable(void) const = 0;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields) = 0;
-      virtual Event issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, Event precondition, bool reduction_fold,
+          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
           bool precise_domain, RegionTreeNode *intersect) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
-      virtual Event get_use_event(void) const = 0;
+      virtual ApEvent get_use_event(void) const = 0;
     public:
       // Support for mapper queries
+      virtual void get_fields(std::set<FieldID> &fields) const;
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
@@ -350,12 +348,25 @@ namespace Legion {
                                       AddressSpaceID source,
                                       Deserializer &derez);
     public:
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
+    public:
+      // This method is very important, it helps us prevent duplicate
+      // applications of a reduction to a target physical instance
+      //Domain compute_reduction_domain(PhysicalInstance target,
+      //                const Domain &copy_domain, ApEvent copy_domain_pre);
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
       const FieldID logical_field;
+    protected:
+      Reservation manager_lock;
+#if 0
+    protected:
+      // Need to deduplicate reductions to target instances
+      std::map<PhysicalInstance,std::vector<Domain> > reduction_domains;
+      std::vector<Realm::IndexSpace> created_index_spaces;
+#endif
     };
 
     /**
@@ -392,14 +403,14 @@ namespace Legion {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, Event precondition, bool reduction_fold,
+          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
           bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
-      virtual Event get_use_event(void) const;
+      virtual ApEvent get_use_event(void) const;
     protected:
       const Domain ptr_space;
     };
@@ -420,7 +431,7 @@ namespace Legion {
                            const PointerConstraint &constraint,
                            const Domain &inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
-                           const ReductionOp *op, Event use_event,
+                           const ReductionOp *op, ApEvent use_event,
                            bool register_now);
       FoldReductionManager(const FoldReductionManager &rhs);
       virtual ~FoldReductionManager(void);
@@ -438,16 +449,16 @@ namespace Legion {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<Domain::CopySrcDstField> &fields);
-      virtual Event issue_reduction(Operation *op,
+      virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, Event precondition, bool reduction_fold,
+          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
           bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
-      virtual Event get_use_event(void) const;
+      virtual ApEvent get_use_event(void) const;
     public:
-      const Event use_event;
+      const ApEvent use_event;
     };
 
     /**
@@ -475,10 +486,11 @@ namespace Legion {
     public: 
       virtual size_t get_instance_size(void) const;
       virtual void send_manager(AddressSpaceID target);
+      virtual void get_fields(std::set<FieldID> &fields) const;
       virtual bool has_field(FieldID fid) const;
       virtual void has_fields(std::map<FieldID,bool> &fields) const;
       virtual void remove_space_fields(std::set<FieldID> &fields) const;
-      virtual InstanceView* create_instance_top_view(SingleTask *context,
+      virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
     public:
       static inline VirtualManager* get_virtual_instance(void)
@@ -543,7 +555,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0UL);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL);
     }
 
     //--------------------------------------------------------------------------
@@ -551,7 +563,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1UL);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1ULL);
     }
 
     //--------------------------------------------------------------------------
@@ -559,7 +571,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2UL);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2ULL);
     }
 
     //--------------------------------------------------------------------------

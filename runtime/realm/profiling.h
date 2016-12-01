@@ -42,6 +42,17 @@ namespace Realm {
     PMID_OP_MEM_USAGE, // memories used by a copy
     PMID_INST_TIMELINE, // timeline for a physical instance
     PMID_INST_MEM_USAGE, // memory and size used by an instance
+    PMID_PCTRS_CACHE_L1I, // L1 I$ performance counters
+    PMID_PCTRS_CACHE_L1D, // L1 D$ performance counters
+    PMID_PCTRS_CACHE_L2, // L2 D$ performance counters
+    PMID_PCTRS_CACHE_L3, // L3 D$ performance counters
+    PMID_PCTRS_IPC,  // instructions/clocks performance counters
+    PMID_PCTRS_TLB,  // TLB miss counters
+    PMID_PCTRS_BP,   // branch predictor performance counters
+
+    // as the name suggests, this should always be last, allowing apps/runtimes
+    // sitting on top of Realm to use some of the ID space
+    PMID_REALM_LAST = 10000,
   };
 
   namespace ProfilingMeasurements {
@@ -163,6 +174,43 @@ namespace Realm {
       Memory memory;
       size_t bytes;
     };
+
+    // Processor cache stats
+    template <ProfilingMeasurementID _ID>
+    struct CachePerfCounters {
+      static const ProfilingMeasurementID ID = _ID;
+      long long accesses;
+      long long misses;
+    };
+
+    typedef CachePerfCounters<PMID_PCTRS_CACHE_L1I> L1ICachePerfCounters;
+    typedef CachePerfCounters<PMID_PCTRS_CACHE_L1D> L1DCachePerfCounters;
+    typedef CachePerfCounters<PMID_PCTRS_CACHE_L2> L2CachePerfCounters;
+    typedef CachePerfCounters<PMID_PCTRS_CACHE_L3> L3CachePerfCounters;
+
+    // instructions/cycles
+    struct IPCPerfCounters {
+      static const ProfilingMeasurementID ID = PMID_PCTRS_IPC;
+      long long total_insts;
+      long long total_cycles;
+      long long fp_insts;
+      long long ld_insts;
+      long long st_insts;
+      long long br_insts;
+    };
+
+    struct TLBPerfCounters {
+      static const ProfilingMeasurementID ID = PMID_PCTRS_TLB;
+      long long inst_misses;
+      long long data_misses;
+    };
+
+    struct BranchPredictionPerfCounters {
+      static const ProfilingMeasurementID ID = PMID_PCTRS_BP;
+      long long total_branches;
+      long long taken_branches;
+      long long mispredictions;
+    };
   };
 
   class ProfilingRequest {
@@ -178,6 +226,9 @@ namespace Realm {
 
     template <typename T>
     ProfilingRequest &add_measurement(void);
+
+    ProfilingRequest &add_measurement(ProfilingMeasurementID measurement_id);
+    ProfilingRequest &add_measurements(const std::set<ProfilingMeasurementID>& measurement_ids);
 
     template <typename S> static ProfilingRequest *deserialize_new(S &s);
 
@@ -226,17 +277,24 @@ namespace Realm {
     ~ProfilingMeasurementCollection(void);
 
     void import_requests(const ProfilingRequestSet& prs);
-    void send_responses(const ProfilingRequestSet& prs) const;
+    void send_responses(const ProfilingRequestSet& prs);
     void clear(void);
 
     template <typename T>
     bool wants_measurement(void) const;
 
     template <typename T>
-    void add_measurement(const T& data);
+    void add_measurement(const T& data, bool send_complete_responses = true);
 
   protected:
-    std::set<ProfilingMeasurementID> requested_measurements;
+    void send_response(const ProfilingRequest& pr) const;
+
+    // in order to efficiently send responses as soon as we have all the requested measurements, we
+    //  need to know which profiling requests are needed by a given measurement and how many more
+    //  measurements each request wants
+    std::map<ProfilingMeasurementID, std::vector<const ProfilingRequest *> > requested_measurements;
+    std::map<const ProfilingRequest *, int> measurements_left;
+    bool completed_requests_present;  // set if a request is completed but could not be sent right away
 
     std::map<ProfilingMeasurementID, ByteArray> measurements;
   };

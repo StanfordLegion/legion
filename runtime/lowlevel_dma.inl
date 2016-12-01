@@ -229,8 +229,8 @@ namespace LegionRuntime {
 	  // test depends on AOS (bsize == 1) vs (hybrid)SOA (bsize > 1)
 	  if(src_bsize == 1) {
 	    // for AOS, we need this field's offset to be the next byte
-	    if((src_offset2 != (src_offset + total_bytes)) ||
-	       (dst_offset2 != (dst_offset + total_bytes)))
+	    if((src_offset2 != (off_t)(src_offset + total_bytes)) ||
+	       (dst_offset2 != (off_t)(dst_offset + total_bytes)))
 	      break;
 
 	    // if tests pass, add this field's size to our total and keep going
