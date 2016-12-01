@@ -17,10 +17,10 @@
 
 from __future__ import print_function
 
+import argparse
 import sys, os, shutil
 import string, re, json
 from math import sqrt, log
-from getopt import getopt
 from cgi import escape
 from operator import itemgetter
 from os.path import dirname, exists, basename
@@ -2156,66 +2156,52 @@ class State(object):
         with open(scale_json_file_name, "w") as scale_json_file:
             json.dump(scale_data, scale_json_file)
 
-def usage():
-    print('Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+')
-    print('  -p : include processors in visualization')
-    print('  -i : include instances in visualization')
-    print('  -c : include channels in visualization')
-    print('  -s : print statistics')
-    print('  -v : print verbose profiling information')
-    print('  -o <out_dirname> : give the directory for the output')
-    print('  -f : force the creation of a new directory for legion_prof timelines (OVERWRITES OLD DIRECTORY)')
-    print('  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL))
-    sys.exit(1)
-
 def main():
-    opts, args = getopt(sys.argv[1:],'pcivfm:o:sCST')
-    opts = dict(opts)
-    if len(args) == 0:
-      usage()
-    file_names = args
-    # By default we show all
-    # If options are specified we only show what the user wants
-    show_all = True
-    show_procs = False
-    show_channels = False
-    show_instances = False
-    show_copy_matrix = False
-    force = False
-    output_dirname = 'legion_prof'
-    copy_output_prefix = 'legion_prof_copy'
-    print_stats = False
-    verbose = False
+    class MyParser(argparse.ArgumentParser):
+        def error(self, message):
+            self.print_usage(sys.stderr)
+            print('error: %s' % message, file=sys.stderr)
+            print('hint: invoke %s -h for a detailed description of all arguments' % self.prog, file=sys.stderr)
+            sys.exit(2)
+    parser = MyParser(
+        description='Legion Prof: application profiler')
+    parser.add_argument(
+        '-C', '--copy', dest='show_copy_matrix', action='store_true',
+        help='include copy matrix in visualization')
+    parser.add_argument(
+        '-s', '--statistics', dest='print_stats', action='store_true',
+        help='print statistics')
+    parser.add_argument(
+        '-v', '--verbose', dest='verbose', action='store_true',
+        help='print verbose profiling information')
+    parser.add_argument(
+        '-m', '--ppm', dest='us_per_pixel', action='store',
+        type=int, default=US_PER_PIXEL,
+        help='micro-seconds per pixel (default %d)' % US_PER_PIXEL)
+    parser.add_argument(
+        '-o', '--output', dest='output', action='store',
+        default='legion_prof',
+        help='output directory pathname')
+    parser.add_argument(
+        '-f', '--force', dest='force', action='store_true',
+        help='overwrite output directory if it exists')
+    parser.add_argument(
+        dest='filenames', nargs='+',
+        help='input Legion Prof log filenames')
+    args = parser.parse_args()
+
+    file_names = args.filenames
+    show_all = not args.show_copy_matrix
+    show_procs = show_all
+    show_channels = show_all
+    show_instances = show_all
+    show_copy_matrix = args.show_copy_matrix
+    force = args.force
+    output_dirname = args.output
+    copy_output_prefix = output_dirname + "_copy"
+    print_stats = args.print_stats
+    verbose = args.verbose
     interactive_timeline = True
-    if '-p' in opts:
-        show_procs = True
-        show_all = False
-    if '-c' in opts:
-        show_channels = True
-        show_all = False
-    if '-i' in opts:
-        show_instances = True
-        show_all = False
-    if '-s' in opts:
-        print_stats = True
-    if '-v' in opts:
-        verbose = True
-    if '-f' in opts:
-        force = True
-    if '-m' in opts:
-        global US_PER_PIXEL
-        US_PER_PIXEL = int(opts['-m'])
-    if '-o' in opts:
-        output_dirname = opts['-o']
-        copy_output_prefix = output_dirname + "_copy"
-    if '-C' in opts:
-        show_copy_matrix = True
-    if '-S' in opts:
-        interactive_timeline = False
-    if show_all:
-        show_procs = True
-        show_channels = True
-        show_instances = True
 
     state = State()
     has_matches = False
