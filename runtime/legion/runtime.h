@@ -746,6 +746,10 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
+      void release_candidate_references(const std::set<PhysicalManager*> 
+                                                        &candidates) const;
+      void release_candidate_references(const std::deque<PhysicalManager*>
+                                                        &candidates) const;
     protected:
       PhysicalManager* allocate_physical_instance(
                                     const LayoutConstraintSet &constraints,

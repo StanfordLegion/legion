@@ -2989,6 +2989,7 @@ namespace Legion {
             result = MappingInstance(actual_manager);
           }
         }
+        release_candidate_references(candidates);
       }
       return success;
     }
@@ -3070,6 +3071,7 @@ namespace Legion {
             result = MappingInstance(actual_manager);
           }
         }
+        release_candidate_references(candidates);
       }
       return success;
     }
@@ -4048,10 +4050,12 @@ namespace Legion {
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
       }
       // If we have any candidates check their constraints
+      bool found = false;
       if (!candidates.empty())
       {
         for (std::deque<PhysicalManager*>::const_iterator it = 
@@ -4072,11 +4076,13 @@ namespace Legion {
             }
             // If we make it here, we succeeded
             result = MappingInstance(*it);
-            return true;
+            found = true;
+            break;
           }
         }
+        release_candidate_references(candidates);
       }
-      return false;
+      return found;
     }
 
     //--------------------------------------------------------------------------
@@ -4098,10 +4104,12 @@ namespace Legion {
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
       }
       // If we have any candidates check their constraints
+      bool found = false;
       if (!candidates.empty())
       {
         for (std::deque<PhysicalManager*>::const_iterator it = 
@@ -4122,11 +4130,13 @@ namespace Legion {
             }
             // If we make it here, we succeeded
             result = MappingInstance(*it);
-            return true;
+            found = true;
+            break;
           }
         }
+        release_candidate_references(candidates);
       }
-      return false;
+      return found;
     }
 
     //--------------------------------------------------------------------------
@@ -4149,6 +4159,7 @@ namespace Legion {
             continue;
           if (!it->first->meets_region_tree(regions))
             continue;
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.insert(it->first);
         }
       }
@@ -4249,10 +4260,12 @@ namespace Legion {
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
             continue;
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
       }
       // If we have any candidates check their constraints
+      bool found = false;
       if (!candidates.empty())
       {
         for (std::deque<PhysicalManager*>::const_iterator it = 
@@ -4273,11 +4286,13 @@ namespace Legion {
             }
             // If we make it here, we succeeded
             result = MappingInstance(*it);
-            return true;
+            found = true;
+            break;
           }
         }
+        release_candidate_references(candidates);
       }
-      return false;
+      return found;
     }
     
     //--------------------------------------------------------------------------
@@ -4298,10 +4313,12 @@ namespace Legion {
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
             continue;
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
       }
       // If we have any candidates check their constraints
+      bool found = false;
       if (!candidates.empty())
       {
         for (std::deque<PhysicalManager*>::const_iterator it = 
@@ -4322,11 +4339,39 @@ namespace Legion {
             }
             // If we make it here, we succeeded
             result = MappingInstance(*it);
-            return true;
+            found = true;
+            break;
           }
         }
+        release_candidate_references(candidates);
       }
-      return false;
+      return found;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::release_candidate_references(
+                             const std::set<PhysicalManager*> &candidates) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<PhysicalManager*>::const_iterator it = 
+            candidates.begin(); it != candidates.end(); it++)
+      {
+        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          PhysicalManager::delete_physical_manager(*it);
+      } 
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::release_candidate_references(
+                           const std::deque<PhysicalManager*> &candidates) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::deque<PhysicalManager*>::const_iterator it = 
+            candidates.begin(); it != candidates.end(); it++)
+      {
+        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          PhysicalManager::delete_physical_manager(*it);
+      }
     }
 
     //--------------------------------------------------------------------------
