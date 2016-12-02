@@ -5922,6 +5922,9 @@ class Operation(object):
                 req.logical_node.compute_current_version_numbers(depth, field, self, index)
 
     def verify_copy_requirements(self, src_idx, src_req, dst_idx, dst_req, perform_checks):
+        # If this was predicated there might not be any mappings
+        if not self.mappings:
+            return True
         # We always copy from the destination point set which 
         # should be smaller than the src point set
         dst_points = dst_req.logical_node.get_point_set()
@@ -6073,10 +6076,11 @@ class Operation(object):
                     return False
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
-            assert self.points is not None
-            for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
-                if not point.op.perform_op_physical_verification(perform_checks):
-                    return False
+            # If this was predicated there might not be any points
+            if self.points:
+                for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
+                    if not point.op.perform_op_physical_verification(perform_checks):
+                        return False
             return True
         print((prefix+"Performing physical verification analysis "+
                      "for %s (UID %d)...") % (str(self),self.uid))
@@ -6277,9 +6281,10 @@ class Operation(object):
         # Handle index space operations specially, everything
         # else is the same
         if self.kind is INDEX_TASK_KIND:
-            assert self.points is not None
-            for point in self.points.itervalues():
-                point.op.print_event_graph(printer, elevate, all_nodes, False)
+            # Might have been predicated
+            if self.points:
+                for point in self.points.itervalues():
+                    point.op.print_event_graph(printer, elevate, all_nodes, False)
             # Put any operations we generated in the elevate set
             if self.realm_copies:
                 for copy in self.realm_copies:
