@@ -303,6 +303,8 @@ namespace Legion {
       virtual bool is_internal_op(void) const { return false; }
       // Determine if this operation is a partition operation
       virtual bool is_partition_op(void) const { return false; }
+      // Determine if this is a predicated operation
+      virtual bool is_predicated_op(void) const { return false; }
     public: // virtual methods for mapping
       // Pick the sources for a copy operations
       virtual void select_sources(const InstanceRef &target,
@@ -599,7 +601,7 @@ namespace Legion {
       void initialize_speculation(TaskContext *ctx, bool track, 
                                   unsigned regions, const Predicate &p);
       void register_predicate_dependence(void);
-      bool is_predicated(void) const;
+      virtual bool is_predicated_op(void) const;
       // Wait until the predicate is valid and then return
       // its value.  Give it the current processor in case it
       // needs to wait for the value

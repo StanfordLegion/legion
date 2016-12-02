@@ -3986,7 +3986,7 @@ namespace Legion {
       unregister_child_operation(child);
       // Check to see if the child is predicated
       // If it is wait for it to resolve
-      if (child->is_predicated())
+      if (child->is_predicated_op())
       {
         // See if the predicate speculates false, if so return false
         // and then we are done.

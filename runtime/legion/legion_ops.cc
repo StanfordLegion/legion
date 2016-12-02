@@ -1561,7 +1561,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SpeculativeOp::is_predicated(void) const
+    bool SpeculativeOp::is_predicated_op(void) const
     //--------------------------------------------------------------------------
     {
       return (predicate != NULL);

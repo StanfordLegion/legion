@@ -11136,8 +11136,14 @@ namespace Legion {
       }
       // If we are overwriting then we don't really care about what dirty
       // data is in a given sub-tree since it isn't going to matter
+      // BE CAREFUL: if this is predicated operation then we can't
+      // necessarily assume it will be overwritten, in which case we
+      // need a full close operation
+      // In the future we might consider breaking this out so that we
+      // generate two close operations: a read-only one for the predicate
+      // true case, and normal close operation for the predicate false case
       const bool overwriting = IS_WRITE_ONLY(closer.user.usage) && 
-                                !next_child.is_valid();
+        !next_child.is_valid() && !closer.user.op->is_predicated_op();
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
             state.field_states.begin(); it != 
