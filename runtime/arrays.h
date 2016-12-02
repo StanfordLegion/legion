@@ -114,6 +114,14 @@ namespace LegionRuntime {
           res.x[i] = x[i] + other.x[i];
 	return res;
       }
+
+      CUDAPREFIX Point<DIM> operator-(void) const
+      {
+        Point<DIM> res;
+        for(unsigned i = 0; i < DIM; i++)
+          res.x[i] = -x[i];
+        return res;
+      }
   
       CUDAPREFIX Point<DIM> operator-(const Point<DIM> other) const
       {
@@ -307,6 +315,14 @@ namespace LegionRuntime {
         for(unsigned i = 0; i < DIM; i++)
           res.x[i] = x[i] + other.x[i];
 	return res;
+      }
+
+      CUDAPREFIX Point<DIM> operator-(void) const
+      {
+        Point<DIM> res;
+        for(unsigned i = 0; i < DIM; i++)
+          res.x[i] = -x[i];
+        return res;
       }
 
       CUDAPREFIX Point<DIM> operator-(const Point<DIM> other) const
