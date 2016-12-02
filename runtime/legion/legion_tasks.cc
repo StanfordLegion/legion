@@ -5618,16 +5618,29 @@ namespace Legion {
         // this from the one below node to the node above the child node
         // The exception is if we are reducing in which case we go from
         // the all the way to the bottom so that the first reduction
-        // point bumps the version number appropriately
+        // point bumps the version number appropriately. Another exception is 
+        // for dirty reductions where we know that there is already a write 
+        // at the base level so we don't need to do an advance to get our 
+        // reduction registered with the parent VersionState object
+
         if (!IS_READ_ONLY(regions[idx]) && 
-            ((one_below != child_node) || proj_info.is_first_reduction()))
+            ((one_below != child_node) || 
+             (IS_REDUCE(regions[idx]) && !proj_info.is_dirty_reduction())))
         {
           RegionTreePath advance_path;
           // If we're a reduction we go all the way to the bottom
           // otherwise if we're read-write we go to the level above
           // because our version_analysis call will do the advance
-          // at the destination node
-          if (!proj_info.is_first_reduction())
+          // at the destination node.           
+          if (IS_REDUCE(regions[idx]) && !proj_info.is_dirty_reduction())
+          {
+#ifdef DEBUG_LEGION
+            assert((one_below->get_depth() < child_node->get_depth()) ||
+                   (one_below == child_node)); 
+#endif
+            advance_path = one_below_path;
+          }
+          else
           {
 #ifdef DEBUG_LEGION
             assert(one_below->get_depth() < child_node->get_depth()); 
@@ -5637,14 +5650,6 @@ namespace Legion {
             for (unsigned idx2 = one_below_path.get_min_depth(); 
                   idx2 < (one_below_path.get_max_depth()-1); idx2++)
               advance_path.register_child(idx2, one_below_path.get_child(idx2));
-          }
-          else
-          {
-#ifdef DEBUG_LEGION
-            assert((one_below->get_depth() < child_node->get_depth()) ||
-                   (one_below == child_node)); 
-#endif
-            advance_path = one_below_path;
           }
           const bool parent_is_upper_bound = 
             (slice_req.handle_type != PART_PROJECTION) && 

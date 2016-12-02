@@ -403,15 +403,15 @@ namespace Legion {
     public:
       ProjectionInfo(void)
         : projection(NULL), projection_type(SINGULAR),
-          projection_domain(Domain::NO_DOMAIN), first_reduction(false) { }
+          projection_domain(Domain::NO_DOMAIN), dirty_reduction(false) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
                      const Domain &launch_domain);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
       inline const LegionMap<ProjectionEpochID,FieldMask>::aligned&
         get_projection_epochs(void) const { return projection_epochs; }
-      inline bool is_first_reduction(void) const { return first_reduction; }
-      inline void set_first_reduction(void) { first_reduction = true; }
+      inline bool is_dirty_reduction(void) const { return dirty_reduction; }
+      inline void set_dirty_reduction(void) { dirty_reduction = true; }
       void record_projection_epoch(ProjectionEpochID epoch,
                                    const FieldMask &epoch_mask);
       void clear(void);
@@ -428,11 +428,13 @@ namespace Legion {
       // trying to advance information for the same projection epoch
       LegionMap<ProjectionEpochID,FieldMask>::aligned projection_epochs;
     protected:
-      // Track whether this is the first reduction in a reduction-only
-      // projection epoch which will require a special advance be done
-      // by the point tasks to ensure that the VersionState objects
-      // get registered with their parents
-      bool first_reduction;
+      // Track whether this is a dirty reduction, which means that we
+      // know that an advance has already been done by a previous write
+      // so that we know we don't have do an advance to get our reduction
+      // registered with the parent version state. If it is not a dirty
+      // reduction then we have to do the extra advance to get the 
+      // reduction registered with parent VersionState object
+      bool dirty_reduction;
     };
 
     /**
@@ -526,7 +528,8 @@ namespace Legion {
       FieldState(const GenericUser &u, const FieldMask &m, 
                  const ColorPoint &child);
       FieldState(const RegionUsage &u, const FieldMask &m,
-                 ProjectionFunction *proj, const Domain &proj_domain, bool dis);
+                 ProjectionFunction *proj, const Domain &proj_domain, 
+                 bool dis, bool dirty_reduction = false);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 

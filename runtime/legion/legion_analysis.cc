@@ -1947,7 +1947,7 @@ namespace Legion {
           runtime->find_projection_function(req.projection) : NULL),
         projection_type(req.handle_type),
         projection_domain((req.handle_type != SINGULAR) ?
-            launch_domain : Domain::NO_DOMAIN), first_reduction(false)
+            launch_domain : Domain::NO_DOMAIN), dirty_reduction(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1973,7 +1973,7 @@ namespace Legion {
       projection_type = SINGULAR;
       projection_domain = Domain::NO_DOMAIN;
       projection_epochs.clear();
-      first_reduction = false;
+      dirty_reduction = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1987,7 +1987,7 @@ namespace Legion {
         rez.serialize(it->first);
         rez.serialize(it->second);
       }
-      rez.serialize<bool>(first_reduction);
+      rez.serialize<bool>(dirty_reduction);
     }
 
     //--------------------------------------------------------------------------
@@ -2009,7 +2009,7 @@ namespace Legion {
         derez.deserialize(epoch_id);
         derez.deserialize(projection_epochs[epoch_id]);
       }
-      derez.deserialize<bool>(first_reduction);
+      derez.deserialize<bool>(dirty_reduction);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2762,7 +2762,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, const Domain &proj_dom, 
-                           bool disjoint)
+                           bool disjoint, bool dirty_reduction)
       : ChildState(m), redop(0), projection(proj), 
         projection_domain(proj_dom), rebuild_timeout(1)
     //--------------------------------------------------------------------------
@@ -2774,7 +2774,10 @@ namespace Legion {
         open_state = OPEN_READ_ONLY_PROJ;
       else if (IS_REDUCE(usage))
       {
-        open_state = OPEN_REDUCE_PROJ;
+        if (dirty_reduction)
+          open_state = OPEN_REDUCE_PROJ_DIRTY;
+        else
+          open_state = OPEN_REDUCE_PROJ;
         redop = usage.redop;
       }
       else if (disjoint && (projection->depth == 0))

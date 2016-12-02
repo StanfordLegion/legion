@@ -10919,8 +10919,6 @@ namespace Legion {
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
            proj_info.projection_domain, are_all_children_disjoint());
-        if (IS_REDUCE(user.usage))
-          proj_info.set_first_reduction();
         merge_new_field_state(state, new_state);
       }
       else if (next_child.is_valid())
@@ -11625,13 +11623,34 @@ namespace Legion {
               // same projection function with the same or smaller
               // size domain as the original index space launch
               if ((it->projection == proj_info.projection) &&
-                  it->projection_domain_dominates(proj_info.projection_domain) 
-                  && !IS_REDUCE(closer.user.usage))
+                  it->projection_domain_dominates(proj_info.projection_domain)) 
               {
-                // Update the domain  
-                it->projection_domain = proj_info.projection_domain;
-                open_below |= (it->valid_fields & current_mask);
-                it++;
+                // If we're a reduction we have to go into a dirty 
+                // reduction mode since we know we're already open below
+                if (IS_REDUCE(closer.user.usage)) 
+                {
+                  // Go to the dirty reduction mode
+                  const FieldMask overlap = it->valid_fields & current_mask;
+                  // Record that some fields are already open
+                  open_below |= overlap;
+                  // Make the new state to add
+                  new_states.push_back(FieldState(closer.user.usage, overlap, 
+                           proj_info.projection, proj_info.projection_domain, 
+                           are_all_children_disjoint(), true/*dirty reduce*/));
+                  // If we are a reduction, we can go straight there
+                  it->valid_fields -= overlap;
+                  if (!it->valid_fields)
+                    it = state.field_states.erase(it);
+                  else
+                    it++;
+                }
+                else
+                {
+                  // Update the domain  
+                  it->projection_domain = proj_info.projection_domain;
+                  open_below |= (it->valid_fields & current_mask);
+                  it++;
+                }
               }
               else
               {
@@ -11678,7 +11697,8 @@ namespace Legion {
               // Can only be here if all children are disjoint
               assert(are_all_children_disjoint());
 #endif
-              if (IS_REDUCE(closer.user.usage))
+              if (IS_REDUCE(closer.user.usage) &&
+                  it->projection_domain_dominates(proj_info.projection_domain))
               {
                 const FieldMask overlap = it->valid_fields & current_mask;
                 // Record that some fields are already open
@@ -11686,7 +11706,7 @@ namespace Legion {
                 // Make the new state to add
                 new_states.push_back(FieldState(closer.user.usage, overlap, 
                          proj_info.projection, proj_info.projection_domain, 
-                         are_all_children_disjoint()));
+                         are_all_children_disjoint(), true/*dirty reduce*/));
                 // If we are a reduction, we can go straight there
                 it->valid_fields -= overlap;
                 if (!it->valid_fields)
@@ -11703,9 +11723,13 @@ namespace Legion {
                 // index spaces without needing a close operation
                 it++;
               }
-              else if (proj_info.projection->depth == 0)
+              else if ((proj_info.projection->depth == 0) && 
+                        !IS_REDUCE(closer.user.usage))
               {
                 // If we are also disjoint shallow we can stay in this mode
+                // Exception: reductions that are larger than the current
+                // domain are bad cause we can't do advances properly for
+                // our projection epoch
                 open_below |= (it->valid_fields & current_mask);
                 it++;
               }
@@ -11734,6 +11758,7 @@ namespace Legion {
               break;
             }
           case OPEN_REDUCE_PROJ:
+          case OPEN_REDUCE_PROJ_DIRTY:
             {
               // Reduce projections of the same kind can always stay open
               // otherwise we need a close operation
@@ -11776,6 +11801,9 @@ namespace Legion {
               }
               else
               {
+                // If this is a dirty reduction, then record it
+                if (it->open_state == OPEN_REDUCE_PROJ_DIRTY)
+                  proj_info.set_dirty_reduction(); 
                 open_below |= (it->valid_fields & current_mask);
                 it++;
               }
@@ -11794,9 +11822,6 @@ namespace Legion {
         new_states.push_back(FieldState(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_domain, 
               are_all_children_disjoint()));
-        // If this is the first projection reduction record it
-        if (IS_REDUCE(closer.user.usage))
-          proj_info.set_first_reduction();
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
