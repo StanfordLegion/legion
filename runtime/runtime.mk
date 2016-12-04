@@ -433,7 +433,7 @@ HIGH_RUNTIME_OBJS:=$(HIGH_RUNTIME_SRC:.cc=.o)
 MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.o)
 ASM_OBJS	:= $(ASM_SRC:.S=.o)
 # Only compile the gpu objects if we need to 
-ifeq ($(strip $(SHARED_LOWLEVEL)),0)
+ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_OBJS	:= $(GEN_GPU_SRC:.cu=.o)
 GPU_RUNTIME_OBJS:= $(GPU_RUNTIME_SRC:.cu=.o)
 else
