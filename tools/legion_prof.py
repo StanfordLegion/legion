@@ -19,7 +19,7 @@ from __future__ import print_function
 
 import argparse
 import sys, os, shutil
-import string, re, json
+import string, re, json, heapq, time, itertools
 from math import sqrt, log
 from cgi import escape
 from operator import itemgetter
@@ -487,6 +487,9 @@ class RuntimeCallRange(TimeRange):
 class Processor(object):
     def __init__(self, proc_id, kind):
         self.proc_id = proc_id
+        # PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
+        # owner_node = proc_id[55:40]
+        self.node_id = (proc_id >> 40) & ((1 << 16) - 1)
         self.kind = kind
         self.app_ranges = list()
         self.full_range = None
@@ -576,10 +579,15 @@ class TimePoint(object):
         self.thing = thing
         self.first = first
         self.time_key = 2*time + (0 if first is True else 1)
+    def __cmp__(a, b):
+        return cmp(a.time_key, b.time_key)
 
 class Memory(object):
     def __init__(self, mem_id, kind, size):
         self.mem_id = mem_id
+        # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 1
+        # owner_node = mem_id[55:40]
+        self.node_id = (mem_id >> 40) & ((1 << 16) - 1)
         self.kind = kind
         self.total_size = size
         self.instances = set()
@@ -2085,6 +2093,97 @@ class State(object):
                 return potential_dir
             i += 1
 
+    def calculate_statistics_data(self, timepoints, max_count, num_points=100000):
+        # we assume that the timepoints are sorted before this step
+
+        # loop through all the timepoints. Get the earliest. If it's first,
+        # add to the count. if it's second, decrement the count. Store the
+        # (time, count) pair.
+
+        times = list()
+        counts = list()
+        count = 0
+        last_time = 0
+        increment = 1.0 / float(max_count)
+        for point in timepoints:
+            if point.first:
+                count += increment
+            else:
+                count -= increment
+            if point.time != last_time:
+                times.append(point.time)
+                counts.append(count)
+            last_time = point.time
+        # we want to limit to num_points points in the statistics, so only get
+        # every nth element
+        n = max(1, int(len(times) / num_points))
+        statistics = []
+        # FIXME: get correct count average
+        for i in range(0, len(times),n):
+            sub_times = times[i:i+n]
+            sub_counts = counts[i:i+n]
+            num_elems = float(len(sub_times))
+            avg_time = float(sum(sub_times)) / num_elems
+            avg_count = float(sum(sub_counts)) / num_elems
+            statistics.append((avg_time, avg_count))
+        return statistics
+
+    # utilization is 1 for a processor when some event is on the
+    # processor
+    #
+    # adds points where there are one or more events occurring.
+    # removes a point when the count drops to 0.
+    def convert_to_utilization(self, timepoints):
+        proc_utilization = []
+        count = 0
+        for point in timepoints:
+            if point.first:
+                count += 1
+                if count == 1:
+                    proc_utilization.append(point)
+            else:
+                count -= 1
+                if count == 0:
+                    proc_utilization.append(point)
+        return proc_utilization
+
+    def get_node_proc_timepoints(self):
+        node_timepoints = {}
+        for proc in self.processors.itervalues():
+            if len(proc.tasks) > 0:
+                if proc.node_id not in node_timepoints:
+                    node_timepoints[proc.node_id] = [proc.time_points]
+                else:
+                    node_timepoints[proc.node_id].append(proc.time_points)
+
+        return node_timepoints
+
+    def emit_statistics_tsv(self, output_dirname):
+        print("emitting statistics")
+
+        # this is a map from node ids to a list of timepoints in that node
+        timepoints = self.get_node_proc_timepoints()
+        timepoints['all'] = [proc.time_points for proc in self.processors.values()
+                             if len(proc.tasks) > 0]
+        
+        json_file_name = os.path.join(output_dirname, "json", "stats.json")
+        with open(json_file_name, "w") as json_file:
+            json.dump(timepoints.keys(), json_file)
+
+        for node in timepoints:
+            node_timepoints = timepoints[node]
+            utilizations = [self.convert_to_utilization(tp)
+                            for tp in node_timepoints]
+
+            max_count = len(node_timepoints)
+            statistics = self.calculate_statistics_data(sorted(itertools.chain(*utilizations)), max_count)
+            stats_tsv_filename = os.path.join(output_dirname, "tsv", str(node) + "_stats.tsv")
+            stats_tsv_file = open(stats_tsv_filename, "w")
+            stats_tsv_file.write("time\tcount\n")
+            for stat_point in statistics:
+                stats_tsv_file.write("%.2f\t%.2f\n" % stat_point)
+            stats_tsv_file.close()
+
     def emit_interactive_visualization(self, output_dirname, show_procs,
                                        show_channels, show_instances, force):
         self.assign_colors()
@@ -2209,6 +2308,8 @@ class State(object):
             os.makedirs(os.path.join(output_dirname, "json"))
         with open(scale_json_file_name, "w") as scale_json_file:
             json.dump(scale_data, scale_json_file)
+
+        self.emit_statistics_tsv(output_dirname)
 
 def main():
     class MyParser(argparse.ArgumentParser):

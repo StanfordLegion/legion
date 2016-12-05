@@ -71,8 +71,22 @@
         stroke-width: 1px;
         opacity: 0.5;
       }
+
+      path { 
+          stroke-width: 1;
+          fill: none;
+      }
+
+      .axis path,
+      .axis line {
+          fill: none;
+          stroke: grey;
+          stroke-width: 1;
+          shape-rendering: crispEdges;
+      }
+
     </style>
-    <script src="http://code.jquery.com/jquery-1.11.3.min.js"></script>
+    <script src="http://code.jquery.com/jquery-1.11.3.min.js""></script>
     <script src="http://d3js.org/d3.v3.js"></script>
   </head>
   <body>

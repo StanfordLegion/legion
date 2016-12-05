@@ -183,10 +183,10 @@ function filterAndMergeBlocks(state) {
   var endTime = convertToTime(state, windowEnd);
   var min_feature_time = convertToTime(state, constants.min_feature_width);
   var min_gap_time = convertToTime(state, constants.min_gap_width);
-  for (var proc_num in state.processors) {
-    var proc = state.processors[proc_num];
-    if (proc.enabled) {
-      var items = state.processorData[proc.processor];
+  for (var index in state.newLayoutData) {
+    var timelineElement = state.newLayoutData[index];
+    if (timelineElement.type == "proc" && timelineElement.enabled) {
+      var items = state.processorData[timelineElement.text];
       for (var level in items) {
         // gap merging below assumes intervals are sorted - do that first
         //items[level].sort(function(a,b) { return a.start - b.start; });
@@ -222,24 +222,22 @@ function filterAndMergeBlocks(state) {
             if (count > 1) {
               state.dataToDraw.push({
                 id: d.id,
-                proc: proc_num,
-                level: d.level + proc.base,
+                proc: index,
+                level: d.level + timelineElement.base,
                 start: d.start,
                 end: end,
                 color: "#808080",
-                opacity: d.opacity,
                 title: count + " merged tasks"
               });
               i += (count - 1);
             } else {
               state.dataToDraw.push({
                 id: d.id,
-                proc: proc_num,
-                level: d.level + proc.base,
+                proc: index,
+                level: d.level + timelineElement.base,
                 start: d.start,
                 end: d.end,
                 color: d.color,
-                opacity: d.opacity,
                 initiation: d.initiation,
                 title: d.title + " (expanded for visibility)"
               });
@@ -247,12 +245,13 @@ function filterAndMergeBlocks(state) {
           } else {
             state.dataToDraw.push({
               id: d.id,
-              proc: proc_num,
-              level: d.level + proc.base,
+              proc: index,
+              level: d.level + timelineElement.base,
               start: d.start,
               end: d.end,
               opacity: d.opacity,
               color: d.color,
+              opacity: d.opacity,
               initiation: d.initiation,
               title: d.title
             });
