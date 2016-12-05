@@ -960,6 +960,14 @@ function check_vectorizability.expr(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "a raw operator")
 
+    elseif node:is(ast.typed.expr.Future) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a future creation")
+
+    elseif node:is(ast.typed.expr.FutureGetResult) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a future access")
+
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
     end
