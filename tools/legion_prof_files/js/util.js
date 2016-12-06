@@ -179,68 +179,86 @@ function filterAndMergeBlocks(state) {
   var windowStart = $("#timeline").scrollLeft();
   var windowEnd = windowStart + $("#timeline").width();
   state.dataToDraw = Array();
-  var items = state.profilingData;
   var startTime = convertToTime(state, windowStart);
   var endTime = convertToTime(state, windowEnd);
   var min_feature_time = convertToTime(state, constants.min_feature_width);
   var min_gap_time = convertToTime(state, constants.min_gap_width);
-  for (var level in items) {
-    if (state.levelMap[level].enabled == false) continue;
-    // gap merging below assumes intervals are sorted - do that first
-    //items[level].sort(function(a,b) { return a.start - b.start; });
+  for (var proc_num in state.processors) {
+    var proc = state.processors[proc_num];
+    if (proc.enabled) {
+      var items = state.processorData[proc.processor];
+      for (var level in items) {
+        // gap merging below assumes intervals are sorted - do that first
+        //items[level].sort(function(a,b) { return a.start - b.start; });
 
-    // We will use binary search to limit the following section
-    var startIndex = binarySearch(items, level, startTime, false);
-    var endIndex = binarySearch(items, level, endTime, true);
-    for (var i = startIndex; i <= endIndex; ++i) {
-      var d = items[level][i];
-      var start = d.start;
-      var end = d.end;
-      // is this block too narrow?
-      if ((end - start) < min_feature_time) {
-        // see how many more after this are also too narrow and too close to us
-        var count = 1;
-        // don't do this if we're the subject of the current search and don't merge with
-        // something that is
-        if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) == null) {
-          while (((i + count) < items[level].length) && 
-                 ((items[level][i + count].start - end) < min_gap_time) &&
-                 ((items[level][i + count].end - items[level][i + count].start) < min_feature_time) &&
-                 (!state.searchEnabled || searchRegex[currentPos].exec(items[level][i + count].title) == null)) {
-            end = items[level][i + count].end;
-            count++;
+        // We will use binary search to limit the following section
+        var startIndex = binarySearch(items, level, startTime, false);
+        var endIndex = binarySearch(items, level, endTime, true);
+        for (var i = startIndex; i <= endIndex; ++i) {
+          var d = items[level][i];
+          var start = d.start;
+          var end = d.end;
+          // is this block too narrow?
+          if ((end - start) < min_feature_time) {
+            // see how many more after this are also too narrow and too close to us
+            var count = 1;
+            // don't do this if we're the subject of the current search and don't merge with
+            // something that is
+            if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) == null) {
+              while (((i + count) < items[level].length) && 
+                     ((items[level][i + count].start - end) < min_gap_time) &&
+                     ((items[level][i + count].end - items[level][i + count].start) < min_feature_time) &&
+                     (!state.searchEnabled || searchRegex[currentPos].exec(items[level][i + count].title) == null)) {
+                end = items[level][i + count].end;
+                count++;
+              }
+            }
+            // are we still too narrow?  if so, bloat, but make sure we don't overlap something later
+            if ((end - start) < min_feature_time) {
+              end = start + min_feature_time;                   
+              if (((i + count) < items[level].length) && (items[level][i + count].start < end))
+                end = items[level][i + count].start;
+            }
+            if (count > 1) {
+              state.dataToDraw.push({
+                id: d.id,
+                proc: proc_num,
+                level: d.level + proc.base,
+                start: d.start,
+                end: end,
+                color: "#808080",
+                title: count + " merged tasks"
+              });
+              i += (count - 1);
+            } else {
+              state.dataToDraw.push({
+                id: d.id,
+                proc: proc_num,
+                level: d.level + proc.base,
+                start: d.start,
+                end: d.end,
+                color: d.color,
+                initiation: d.initiation,
+                title: d.title + " (expanded for visibility)"
+              });
+            }
+          } else {
+            state.dataToDraw.push({
+              id: d.id,
+              proc: proc_num,
+              level: d.level + proc.base,
+              start: d.start,
+              end: d.end,
+              color: d.color,
+              initiation: d.initiation,
+              title: d.title
+            });
           }
         }
-        // are we still too narrow?  if so, bloat, but make sure we don't overlap something later
-        if ((end - start) < min_feature_time) {
-          end = start + min_feature_time;                   
-          if (((i + count) < items[level].length) && (items[level][i + count].start < end))
-            end = items[level][i + count].start;
-        }
-        if (count > 1) {
-          state.dataToDraw.push({
-            id: d.id,
-            level: d.level,
-            start: d.start,
-            end: end,
-            color: "#808080",
-            title: count + " merged tasks"
-          });
-          i += (count - 1);
-        } else {
-          state.dataToDraw.push({
-            id: d.id,
-            level: d.level,
-            start: d.start,
-            end: d.end,
-            color: d.color,
-            initiation: d.initiation,
-            title: d.title + " (expanded for visibility)"
-          });
-        }
-      } else {
-        state.dataToDraw.push(d);
       }
     }
   }
 }
+
+
+

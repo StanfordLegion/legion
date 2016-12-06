@@ -20,6 +20,9 @@ function parseURLParameters() {
   while (match = search.exec(query))
     urlParams[decode(match[1])] = decode(match[2]);
 
+  if ("collapseAll" in urlParams)
+    state.collapseAll = (urlParams["collapseAll"].toLowerCase() === "true");
+
   if ("resolution" in urlParams)
     state.resolution = Math.max(1, parseFloat(urlParams["resolution"]));
   // adjust zoom
@@ -72,8 +75,7 @@ function mouseMoveHandlerWhenDown() {
   if (p[0] >= mouseX) {
     select_block.attr("x", mouseX);
     select_text.attr("x", mouseX + (p[0] - mouseX) / 2);
-  }
-  else {
+  } else {
     select_block.attr("x", p[0]);
     select_text.attr("x", p[0] + (mouseX - p[0]) / 2);
   }
@@ -145,7 +147,6 @@ function mouseDownHandler() {
 }
 
 function mouseUpHandler() {
-  console.log("rangeZoom: " + state.rangeZoom);
   var p = d3.mouse(this);
   var select_block = state.timelineSvg.select("rect.select-block");
   var select_text = state.timelineSvg.select("text.select-block");
@@ -155,10 +156,8 @@ function mouseUpHandler() {
   if (state.rangeZoom && selectWidth > 10) {
     var x = select_block.attr("x");
     state.zoomHistory.push({zoom: prevZoom, start: $("#timeline").scrollLeft()});
-    showLoaderIcon();
     adjustZoom(svgWidth / selectWidth, false);
     $("#timeline").scrollLeft(x / prevZoom * state.zoom);
-    hideLoaderIcon();
   }
   state.timelineSvg.selectAll("rect.select-block").remove();
   state.timelineSvg.selectAll("text.select-block").remove();
@@ -238,7 +237,7 @@ function getMouseOver() {
 
     var text = descView.append("text")
       .attr("x", x)
-      .attr("y", state.levelMap[d.level].y * state.thickness - 5)
+      .attr("y", d.level * state.thickness - 5)
       .attr("text-anchor", anchor)
       .attr("class", "desc")
       .text(unescape(escape(title)));
@@ -261,19 +260,20 @@ var nextPos;
 var searchRegex = null;
 
 function drawTimeline() {
+  showLoaderIcon()
   updateURL(state.zoom, state.scale);
   var timelineGroup = state.timelineSvg.select("g#timeline");
   timelineGroup.selectAll("rect").remove();
   var timeline = timelineGroup.selectAll("rect")
-    .data(state.dataToDraw, function(d) { return d.id; });
+    .data(state.dataToDraw, function(d) { return d.proc + "-" + d.id; });
   var mouseOver = getMouseOver();
 
   timeline.enter().append("rect");
 
   timeline
-    .attr("id", function(d) { return "block-" + d.id; })
+    .attr("id", function(d) { return "block-" + d.proc + "-" + d.id; })
     .attr("x", function(d) { return convertToPos(state, d.start); })
-    .attr("y", function(d) { return state.levelMap[d.level].y * state.thickness; })
+    .attr("y", function(d) { return d.level * state.thickness; })
     .style("fill", function(d) {
       if (!state.searchEnabled ||
           searchRegex[currentPos].exec(d.title) == null)
@@ -298,6 +298,7 @@ function drawTimeline() {
 
   timeline.on("mouseover", mouseOver);
   timeline.exit().remove();
+  hideLoaderIcon();
 }
 
 function redraw() {
@@ -309,11 +310,9 @@ function redraw() {
   var names = processorSvg.selectAll("text");
 
   names.
-    attr("y", function(d) { 
-      return state.levelMap[d.level].y * state.thickness + state.thickness;
-    })
-    .style("opacity", function(d) {
-      return (state.levelMap[d.level].enabled) ? 1 : 0.1
+    attr("y", levelCalculator)
+    .style("opacity", function(proc) {
+      return (proc.enabled) ? 1 : 0.5;
     });
 
   var timelineGroup = state.timelineSvg.select("g#timeline");
@@ -321,10 +320,10 @@ function redraw() {
 
   var thickness = state.thickness;
   lines
-    .attr("y1", function(d) { return state.levelMap[d.level].y * thickness + thickness; })
-    .attr("y2", function(d) { return state.levelMap[d.level].y * thickness + thickness; })
-    .style("opacity", function(d) {
-      return (state.levelMap[d.level].enabled) ? 1 : 0.1
+    .attr("y1", levelCalculator)
+    .attr("y2", levelCalculator)
+    .style("opacity", function(proc) {
+      return (proc.enabled) ? 1 : 0.5;
     });
 }
 
@@ -332,26 +331,37 @@ function redraw() {
 // timeline
 function collapseHandler(d) {
   if (d.enabled) {
-    for (var i = d.levelStart; i <= d.level; ++i) {
-      state.levelMap[i].enabled = false;
-    }
-    for (var i = d.levelStart; i < state.levelMap.length; ++i) {
-      state.levelMap[i].y -= d.height;
+    for (var i = d.i + 1; i < state.processors.length; i++) {
+      state.processors[i].base -= d.height;
     }
   } else {
-    for (var i = d.levelStart; i <= d.level; ++i) {
-      state.levelMap[i].enabled = true;
-    }
-    for (var i = d.levelStart; i < state.levelMap.length; ++i) {
-      state.levelMap[i].y += d.height;
+    for (var i = d.i + 1; i < state.processors.length; i++) {
+      state.processors[i].base += d.height;
     }
   }
+
   d.enabled = !d.enabled;
-  // redraw the timeline
-  redraw();
+  if (!d.loaded) {
+    showLoaderIcon();
+    load_proc_timeline(d); // will redraw the timeline
+    d.loaded = true;
+  } else {
+    // redraw the timeline
+    redraw();
+  }
 }
 
+function levelCalculator(proc) {
+  var level = proc.base;
+  if (proc.enabled) {
+    level += proc.height;
+  } else {
+  }
+  return level * state.thickness + state.thickness;
+};
+
 function drawProcessors() {
+
   var data = state.processors;
   var svg = d3.select("#processors").append("svg")
     .attr("width", constants.margin_left)
@@ -365,10 +375,9 @@ function drawProcessors() {
   names.attr("text-anchor", "start")
     .attr("class", "processor")
     .attr("x", 0)
-    .attr("y", function(d) { 
-      return state.levelMap[d.level].y * thickness + thickness;
-    })
-    .style("fill", "#000000");
+    .attr("y", levelCalculator)
+    .style("fill", "#000000")
+    .style("opacity", 0.5);
 
   names.each(function(d) {
     var text = d3.select(this);
@@ -403,11 +412,12 @@ function drawProcessors() {
     .data(data)
     .enter().append("line")
     .attr("x1", 0)
-    .attr("y1", function(d) { return d.level * thickness + thickness; })
+    .attr("y1", levelCalculator)
     .attr("x2", state.zoom * state.width)
-    .attr("y2", function(d) { return d.level * thickness + thickness; })
+    .attr("y2", levelCalculator)
     .style("stroke", "#000000")
-    .style("stroke-width", "1px");
+    .style("stroke-width", "1px")
+    .style("opacity", 0.5);
 }
 
 function drawHelpBox() {
@@ -567,6 +577,7 @@ function updateURL() {
   var url = window.location.href.split('?')[0];
   url += "?start=" + start_time;
   url += "&end=" + end_time;
+  url += "&collapseAll=" + state.collapseAll;
   url += "&resolution=" + state.resolution;
   if (state.searchEnabled)
     url += "&search=" + searchRegex[currentPos].source;
@@ -606,8 +617,6 @@ function adjustThickness(newThickness) {
   state.height = state.thickness * constants.max_level;
   d3.select("#processors").select("svg").remove();
   var svg = d3.select("#timeline").select("svg");
-  var timelineGroup = svg.select("g#timeline");
-  //timelineGroup.selectAll("rect").remove();
   var lines = state.timelineSvg.select("g#lines");
   lines.remove();
 
@@ -690,7 +699,7 @@ function defaultKeydown(e) {
     setKeyHandler(makeModalKeyHandler(['enter', 'esc'], function(key) {
       if (key == 'enter') {
         var re = $("input.search-box").val();
-        console.log("Search Expression: " + re);
+        //console.log("Search Expression: " + re);
         if (re.trim() != "") {
           if (searchRegex == null) {
             searchRegex = new Array(sizeHistory);
@@ -727,7 +736,6 @@ function defaultKeydown(e) {
     return false;
   }
 
-  showLoaderIcon();
   if (commandType == Command.zix) {
     var inc = 4.0;
     adjustZoom(state.zoom + inc, true);
@@ -781,7 +789,6 @@ function defaultKeydown(e) {
       }
     }
   }
-  hideLoaderIcon();
   return false;
 }
 
@@ -793,8 +800,10 @@ function defaultKeyUp(e) {
   return true;
 }
 
-function load_timeline() { 
-  d3.tsv('legion_prof_data.tsv',
+function load_proc_timeline(proc) {
+  var proc_name = proc.processor;
+  state.processorData[proc_name] = {};
+  d3.tsv(proc.tsv,
     function(d, i) {
         var level = +d.level;
         var start = +d.start;
@@ -814,46 +823,55 @@ function load_timeline() {
         }
     },
     function(data) {
-      var timelineGroup = state.timelineSvg.append("g")
-          .attr("id", "timeline");
-
       // split profiling items by which level they're on
       for(var i = 0; i < data.length; i++) {
         var d = data[i];
-        if (d.level in state.profilingData) {
-          state.profilingData[d.level].push(d);
+        if (d.level in state.processorData[proc_name]) {
+          state.processorData[proc_name][d.level].push(d);
         } else {
-          state.profilingData[d.level] = [d];
+          state.processorData[proc_name][d.level] = [d];
         }
       }
+      redraw();
+    }
+  );
+}
 
-      $("#timeline").scrollLeft(0);
-      parseURLParameters();
+function initTimelineElements() {
+  var timelineGroup = state.timelineSvg.append("g")
+      .attr("id", "timeline");
 
-      filterAndMergeBlocks(state);
-      drawTimeline();
+  $("#timeline").scrollLeft(0);
+  parseURLParameters();
 
-      var windowCenterY = $(window).height() / 2;
-      $(window).scroll(function() {
-          $("#loader-icon").css("top", $(window).scrollTop() + windowCenterY);
-      });
-
-      // set scroll callback
-      var timer = null;
-      $("#timeline").scroll(function() {
-          showLoaderIcon();
-          if (timer !== null) {
-            clearTimeout(timer);
-          }
-          timer = setTimeout(function() {
-            filterAndMergeBlocks(state);
-            drawTimeline();
-            hideLoaderIcon();
-          }, 100);
-      });
-      turnOnMouseHandlers();
+  var windowCenterY = $(window).height() / 2;
+  $(window).scroll(function() {
+      $("#loader-icon").css("top", $(window).scrollTop() + windowCenterY);
   });
-};
+
+  // set scroll callback
+  var timer = null;
+  $("#timeline").scroll(function() {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(function() {
+        filterAndMergeBlocks(state);
+        drawTimeline();
+      }, 100);
+  });
+  if (!state.collapseAll) {
+    // initially load in all the cpu processors
+    state.processors.forEach(function(proc) {
+      var cpu = /CPU Processor/;
+      if (cpu.test(proc.processor)) {
+        collapseHandler(proc);
+      }
+    });
+  }
+  turnOnMouseHandlers();
+}
+
 
 function load_ops_and_timeline() {
   d3.tsv("legion_prof_ops.tsv", 
@@ -864,47 +882,43 @@ function load_ops_and_timeline() {
       data.forEach(function(d) {
         state.operations[parseInt(d.op_id)] = d.operation;      
       });
-      // load_timeline depends on the ops to be loaded
-      load_timeline();
+      // initTimelineElements depends on the ops to be loaded
+      initTimelineElements();
     }
   );
 }
 
-function load_procs() {
+function load_procs(callback) {
   d3.tsv('legion_prof_processor.tsv',
     function(d) {
       return {
-        level: +d.level,
-        processor: d.processor
+        processor: d.processor,
+        height: +d.levels,
+        tsv: d.tsv
       };
     },
     function(data) {
-      // TODO: Do this in legion_prof.py
-      data.sort(function(a,b) {return a.level - b.level});
-      var nextStart = 0;
+      var prevEnd = 0;
+      var base = 0;
+      var i = 0;
       data.forEach(function(proc) {
-        proc.levelStart = nextStart;
-        proc.currentStart = nextStart;
-        proc.height = proc.level - proc.levelStart;
-        proc.enabled = true;
-        nextStart = proc.level + 1;
+        proc.enabled = false;
+        proc.loaded = false;
+        proc.base = base;
+        proc.i = i;
+        base += 2;
+        i+= 1;
       });
-      for (var level = 0; level < nextStart; level++) {
-        state.levelMap[level] = {
-          y: level,
-          enabled: true
-        };
-      }
+      //console.log(data);
       state.processors = data;
       drawProcessors();
-      hideLoaderIcon();
+      callback();
     }
   );
 }
 
 function load_data() {
-  load_ops_and_timeline();
-  load_procs();
+  load_procs(load_ops_and_timeline);
 }
 
 function initializeState() {
@@ -914,15 +928,16 @@ function initializeState() {
   state.scale = state.width / (constants.end - constants.start);
   state.zoom = 1.0;
   state.zoomHistory = Array();
-  state.levelMap = Array();
   state.profilingData = {};
+  state.processorData = {};
   state.operations = {};
   state.thickness = Math.max(state.height / constants.max_level, 20);
   state.baseThickness = state.height / constants.max_level;
   state.height = constants.max_level * state.thickness;
   state.resolution = 10; // time (in us) of the smallest feature we want to load
   state.searchEnabled = false;
-  state.rangeZoom = true
+  state.rangeZoom = true;
+  state.collapseAll = false;
 
   setKeyHandler(defaultKeydown);
   $(document).on("keyup", defaultKeyUp);
@@ -934,6 +949,7 @@ function initializeState() {
   state.loaderSvg = d3.select("#loader-icon").append("svg")
     .attr("width", "40px")
     .attr("height", "40px");
+
   drawLoaderIcon();
   load_data();
 }
@@ -941,7 +957,6 @@ function initializeState() {
 function main() {
   $.getJSON("json/scale.json", function(json) {
     $.each(json, function(key, val) {
-      console.log("setting " + key + " to " + val);
       constants[key] = val;
     });
   }).done(initializeState);

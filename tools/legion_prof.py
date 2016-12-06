@@ -90,6 +90,14 @@ PIXELS_PER_LEVEL = 40
 # Pixels per tick mark
 PIXELS_PER_TICK = 200
 
+def slugify(filename):
+    # convert spaces to underscores
+    slugified = filename.replace(" ", "_")
+    # remove special characters
+    slugified = slugified.translate(None, "!@#$%^&*(),/?<>\"':;{}[]|/+=`~")
+    return slugified
+
+
 # Helper function for computing nice colors
 def color_helper(step, num_steps):
     assert step <= num_steps
@@ -2093,6 +2101,9 @@ class State(object):
 
         shutil.copytree(src_directory, output_dirname)
 
+        proc_list = []
+        chan_list = []
+        mem_list = []
         processor_levels = {}
         channel_levels = {}
         memory_levels = {}
@@ -2104,26 +2115,60 @@ class State(object):
         processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
         scale_json_file_name = os.path.join(output_dirname, "json", "scale.json")
 
+        data_tsv_header = "level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n"
+
         data_tsv_file = open(data_tsv_file_name, "w")
-        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n")
+        data_tsv_file.write(data_tsv_header)
+        tsv_dir = os.path.join(output_dirname, "tsv")
+        os.mkdir(tsv_dir)
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
                 if len(proc.tasks) > 0:
-                    base_level = proc.emit_tsv(data_tsv_file, base_level)
-                    processor_levels[proc] = base_level
+                    proc_name = slugify("Proc_" + str(hex(p)))
+                    proc_tsv_file_name = os.path.join(tsv_dir, proc_name + ".tsv")
+                    proc_tsv_file = open(proc_tsv_file_name, "w")
+                    proc_tsv_file.write(data_tsv_header)
+                    proc_level = proc.emit_tsv(proc_tsv_file, 0)
+                    base_level += proc_level
+                    processor_levels[proc] = {
+                        'levels': proc_level-1, 
+                        'tsv': "tsv/" + proc_name + ".tsv"
+                    }
+                    proc_list.append(proc)
+
                     last_time = max(last_time, proc.full_range.stop_time)
         if show_channels:
-            for c,channel in sorted(self.channels.iteritems()):
-                if len(channel.copies) > 0:
-                    base_level = channel.emit_tsv(data_tsv_file, base_level)
-                    channel_levels[channel] = base_level
-                    last_time = max(last_time, channel.last_time)
+            for c,chan in sorted(self.channels.iteritems()):
+                if len(chan.copies) > 0:
+                    chan_name = slugify(str(c))
+                    chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
+                    chan_tsv_file = open(chan_tsv_file_name, "w")
+                    chan_tsv_file.write(data_tsv_header)
+                    chan_level = chan.emit_tsv(chan_tsv_file, 0)
+                    base_level += chan_level
+                    channel_levels[chan] = {
+                        'levels': chan_level-1, 
+                        'tsv': "tsv/" + chan_name + ".tsv"
+                    }
+                    chan_list.append(chan)
+
+                    last_time = max(last_time, chan.last_time)
         if show_instances:
-            for m,memory in sorted(self.memories.iteritems()):
-                if len(memory.instances) > 0:
-                    base_level = memory.emit_tsv(data_tsv_file, base_level)
-                    memory_levels[memory] = base_level
-                    last_time = max(last_time, memory.last_time)
+            for m,mem in sorted(self.memories.iteritems()):
+                if len(mem.instances) > 0:
+                    mem_name = slugify("Mem_" + str(hex(m)))
+                    mem_tsv_file_name = os.path.join(tsv_dir, mem_name + ".tsv")
+                    mem_tsv_file = open(mem_tsv_file_name, "w")
+                    mem_tsv_file.write(data_tsv_header)
+                    mem_level = mem.emit_tsv(mem_tsv_file, 0)
+                    base_level += mem_level
+                    memory_levels[mem] = {
+                        'levels': mem_level-1, 
+                        'tsv': "tsv/" + mem_name + ".tsv"
+                    }
+                    mem_list.append(mem)
+
+                    last_time = max(last_time, mem.last_time)
         data_tsv_file.close()
 
         ops_file = open(ops_file_name, "w")
@@ -2133,16 +2178,25 @@ class State(object):
         ops_file.close()
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
-        processor_tsv_file.write("level\tprocessor\n")
+        processor_tsv_file.write("processor\ttsv\tlevels\n")
         if show_procs:
-            for proc,level in processor_levels.iteritems():
-                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(proc)))
+            for proc in sorted(proc_list):
+                tsv = processor_levels[proc]['tsv']
+                levels = processor_levels[proc]['levels']
+                processor_tsv_file.write("%s\t%s\t%d\n" % 
+                                (repr(proc), tsv, levels))
         if show_channels:
-            for channel,level in channel_levels.iteritems():
-                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(channel)))
+            for channel in sorted(chan_list):
+                tsv = channel_levels[channel]['tsv']
+                levels = channel_levels[channel]['levels']
+                processor_tsv_file.write("%s\t%s\t%d\n" % 
+                                (repr(channel), tsv, levels))
         if show_instances:
-            for memory,level in memory_levels.iteritems():
-                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(memory)))
+            for memory in sorted(mem_list):
+                tsv = memory_levels[memory]['tsv']
+                levels = memory_levels[memory]['levels']
+                processor_tsv_file.write("%s\t%s\t%d\n" % 
+                                (repr(memory), tsv, levels))
         processor_tsv_file.close()
 
         scale_data = {
