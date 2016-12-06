@@ -222,6 +222,9 @@ function flip_types.expr(cx, simd_width, symbol, node)
 
   elseif node:is(ast.typed.expr.IndexAccess) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
+    if cx:lookup_expr_type(node.index) == V then
+      new_node.index = flip_types.expr(cx, simd_width, symbol, node.index)
+    end
 
   elseif node:is(ast.typed.expr.Binary) then
     new_node.lhs = flip_types.expr(cx, simd_width, symbol, new_node.lhs)
