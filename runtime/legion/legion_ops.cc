@@ -9377,18 +9377,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtUserEvent MustEpochOp::find_slice_versioning_event(SliceTask *slice,
+    RtUserEvent MustEpochOp::find_slice_versioning_event(UniqueID slice_id,
                                                          bool &first)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      std::map<SliceTask*,RtUserEvent>::const_iterator finder = 
-        slice_version_events.find(slice);
+      std::map<UniqueID,RtUserEvent>::const_iterator finder = 
+        slice_version_events.find(slice_id);
       if (finder == slice_version_events.end())
       {
         first = true; 
         RtUserEvent result = Runtime::create_rt_user_event();
-        slice_version_events[slice] = result;
+        slice_version_events[slice_id] = result;
         return result;
       }
       else

@@ -7525,7 +7525,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool first = false;
-      RtUserEvent result = owner->find_slice_versioning_event(this, first); 
+      RtUserEvent result = 
+        owner->find_slice_versioning_event(unique_op_id, first);
       // If we're first, then we do the analysis
       // and chain the events
       if (first)

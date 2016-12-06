@@ -1702,7 +1702,7 @@ namespace Legion {
       void notify_subop_complete(Operation *op);
       void notify_subop_commit(Operation *op);
     public:
-      RtUserEvent find_slice_versioning_event(SliceTask *slice, bool &first);
+      RtUserEvent find_slice_versioning_event(UniqueID slice_id, bool &first);
     protected:
       int find_operation_index(Operation *op, GenerationID generation);
       TaskOp* find_task_by_index(int index);
@@ -1743,7 +1743,7 @@ namespace Legion {
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:
-      std::map<SliceTask*,RtUserEvent> slice_version_events;
+      std::map<UniqueID,RtUserEvent> slice_version_events;
     };
 
     /**
