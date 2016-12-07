@@ -266,12 +266,14 @@ namespace Legion {
                                        FieldMask *filter_mask = NULL,
                                        RegionTreeNode *parent_node = NULL,
               // For computing split masks for projection epochs only
+                                       UniqueID logical_context_uid = 0,
               const LegionMap<ProjectionEpochID,
                               FieldMask>::aligned *advance_epochs = NULL,
                                        bool skip_parent_check = false);
       void advance_version_numbers(Operation *op, unsigned idx,
                                    bool update_parent_state,
                                    bool parent_is_upper_bound,
+                                   UniqueID logical_ctx_uid,
                                    bool dedup_opens, bool dedup_advances, 
                                    ProjectionEpochID open_epoch,
                                    ProjectionEpochID advance_epoch,
@@ -1426,6 +1428,7 @@ namespace Legion {
                                    std::set<RtEvent> &ready_events,
                                    bool partial_traversal,
                                    bool disjoint_close,
+                                   UniqueID logical_context_uid,
         const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs);
       void advance_version_numbers(ContextID ctx,
                                    AddressSpaceID local_space,
@@ -1434,6 +1437,7 @@ namespace Legion {
                                    InnerContext *parent_ctx,
                                    bool update_parent_state,
                                    bool skip_update_parent,
+                                   UniqueID logical_context_uid,
                                    bool dedup_opens, bool dedup_advances, 
                                    ProjectionEpochID open_epoch,
                                    ProjectionEpochID advance_epoch,
@@ -1451,6 +1455,7 @@ namespace Legion {
       CompositeView* create_composite_instance(ContextID ctx_id,
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info,
+                                     UniqueID logical_context_uid,
                                      InnerContext *owner_context,
                                      ClosedNode *closed_tree,
                                      std::set<RtEvent> &ready_events,
@@ -1792,10 +1797,10 @@ namespace Legion {
                          const FieldMask &valid_mask,
                          VersionInfo &version_info,
                          InstanceSet &targets);
-      void register_region(const TraversalInfo &info, InnerContext *context,
-                           RestrictInfo &restrict_info, ApEvent term_event,
-                           const RegionUsage &usage, bool defer_add_users,
-                           InstanceSet &targets);
+      void register_region(const TraversalInfo &info, UniqueID logical_ctx_uid,
+                           InnerContext *context, RestrictInfo &restrict_info, 
+                           ApEvent term_event, const RegionUsage &usage, 
+                           bool defer_add_users, InstanceSet &targets);
       void seed_state(ContextID ctx, ApEvent term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
@@ -1804,7 +1809,8 @@ namespace Legion {
                              const std::vector<LogicalView*> &corresponding,
                              std::set<RtEvent> &applied_events);
       void close_state(const TraversalInfo &info, RegionUsage &usage, 
-                       InnerContext *context, InstanceSet &targets);
+                       UniqueID logical_context_uid, InnerContext *context, 
+                       InstanceSet &targets);
       void find_field_descriptors(ContextID ctx, ApEvent term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
@@ -1815,10 +1821,12 @@ namespace Legion {
                                   std::set<RtEvent> &applied_events);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size, 
-                       InnerContext *context, VersionInfo &version_info,
+                       UniqueID logical_ctx_uid, InnerContext *context, 
+                       VersionInfo &version_info,
                        std::set<RtEvent> &map_applied_events);
       ApEvent eager_fill_fields(ContextID ctx, Operation *op,
-                              const unsigned index, InnerContext *context,
+                              const unsigned index, 
+                              UniqueID logical_ctx_uid, InnerContext *context,
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceSet &instances,

@@ -859,6 +859,25 @@ namespace Legion {
      */
     class VersionManager {
     public:
+      struct ProjectionEpoch {
+      public:
+        ProjectionEpoch(void) : logical_ctx_id(0), epoch_id(0) { }
+        ProjectionEpoch(UniqueID logical_ctx, ProjectionEpochID epoch)
+          : logical_ctx_id(logical_ctx), epoch_id(epoch) { }
+      public:
+        inline bool operator==(const ProjectionEpoch &rhs) const
+          { return ((logical_ctx_id == rhs.logical_ctx_id) && 
+                    (epoch_id == rhs.epoch_id)); }
+        inline bool operator<(const ProjectionEpoch &rhs) const
+          {
+            if (logical_ctx_id < rhs.logical_ctx_id) return true;
+            if (logical_ctx_id > rhs.logical_ctx_id) return false;
+            return (epoch_id < rhs.epoch_id);
+          }
+      public:
+        UniqueID logical_ctx_id;
+        ProjectionEpochID epoch_id;
+      };
       struct DirtyUpdateArgs : public LgTaskArgs<DirtyUpdateArgs> {
       public:
         static const LgTaskID TASK_ID = LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID;
@@ -903,6 +922,7 @@ namespace Legion {
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events);
       void compute_advance_split_mask(VersionInfo &version_info,
+                                      UniqueID logical_context_uid,
                                       InnerContext *context,
                                       const FieldMask &version_mask,
                                       std::set<RtEvent> &ready_events,
@@ -920,7 +940,9 @@ namespace Legion {
                                           Operation *op, unsigned index,
                                           VersionInfo &version_info,
                                           std::set<RtEvent> &ready_events);
-      void advance_versions(FieldMask version_mask, InnerContext *context,
+      void advance_versions(FieldMask version_mask, 
+                            UniqueID logical_context_uid,
+                            InnerContext *physical_context,
                             bool update_parent_state,
                             AddressSpaceID source_space,
                             std::set<RtEvent> &applied_events,
@@ -947,6 +969,7 @@ namespace Legion {
     public:
       RtEvent send_remote_advance(const FieldMask &advance_mask,
                                   bool update_parent_state,
+                                  UniqueID logical_context_uid,
                                   bool dedup_opens, 
                                   ProjectionEpochID open_epoch,
                                   bool dedup_advances,
@@ -1013,10 +1036,17 @@ namespace Legion {
     protected:
       // Owner information about which nodes have remote copies
       LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;
+      // There is something really subtle going on here: note that the
+      // both the previous_opens and previous_advances have pairs of
+      // UniqueIDs and ProjectionEpochIDs as their keys. This is to 
+      // handle the case of virtual mappings, where projection epoch
+      // IDs can come from two different logical contexts, but be used
+      // in the same physical context due to a virtual mapping. We 
+      // disambiguate the projection epoch ID using the context ID.
       // Information about preivous opens
-      LegionMap<ProjectionEpochID,FieldMask>::aligned previous_opens;
+      LegionMap<ProjectionEpoch,FieldMask>::aligned previous_opens;
       // Information about previous advances
-      LegionMap<ProjectionEpochID,FieldMask>::aligned previous_advancers;
+      LegionMap<ProjectionEpoch,FieldMask>::aligned previous_advancers;
       // Remote information about outstanding requests we've made
       LegionMap<RtUserEvent,FieldMask>::aligned outstanding_requests;
     };

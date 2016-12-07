@@ -5559,6 +5559,7 @@ namespace Legion {
       // again to see if it has been advanced if we are going to 
       // be writing/reducing below in the tree
       const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
+      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (IS_NO_ACCESS(regions[idx]))
@@ -5608,9 +5609,9 @@ namespace Legion {
             // all the way down to the child
             runtime->forest->advance_version_numbers(this, idx, 
                 false/*update parent state*/, false/*doesn't matter*/,
-                true/*dedup opens*/, false/*dedup advance*/, it->first, 
-                0/*id*/, one_below, one_below_path, it->second, 
-                empty_dirty_previous, ready_events);
+                logical_context_uid, true/*dedup opens*/, 
+                false/*dedup advance*/, it->first, 0/*id*/, one_below, 
+                one_below_path, it->second, empty_dirty_previous, ready_events);
           }
         }
         // If we're doing something other than reading, we need
@@ -5661,9 +5662,9 @@ namespace Legion {
             // the target child for split version numbers
             runtime->forest->advance_version_numbers(this, idx, 
                 true/*update parent state*/, parent_is_upper_bound,
-                false/*dedup opens*/, true/*dedup advances*/, 0/*id*/, 
-                it->first, one_below, advance_path, it->second, 
-                empty_dirty_previous, ready_events);
+                logical_context_uid, false/*dedup opens*/, 
+                true/*dedup advances*/, 0/*id*/, it->first, one_below, 
+                advance_path, it->second, empty_dirty_previous, ready_events);
           }
         }
         // Now we can record our version numbers just like everyone else
@@ -5673,8 +5674,8 @@ namespace Legion {
                                       one_below_path, version_infos[idx], 
                                       ready_events, false/*partial*/, 
                                       false/*disjoint close*/, NULL/*filter*/,
-                                      one_below, &proj_epochs, 
-                                      true/*skip parent check*/);
+                                      one_below, logical_context_uid, 
+                                      &proj_epochs, true/*skip parent check*/);
       }
     }
 

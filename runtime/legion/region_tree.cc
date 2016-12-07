@@ -1628,7 +1628,7 @@ namespace Legion {
                         const RegionTreePath &path, VersionInfo &version_info,
                         std::set<RtEvent> &ready_events, bool partial_traversal,
                         bool disjoint_close, FieldMask *filter_mask,
-                        RegionTreeNode *parent_node,
+                        RegionTreeNode *parent_node, UniqueID logical_ctx_uid,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs,
                         bool skip_parent_check)
     //--------------------------------------------------------------------------
@@ -1667,13 +1667,15 @@ namespace Legion {
                                            user_mask, unversioned_mask,
                                            op, idx, context, version_info, 
                                            ready_events, partial_traversal,
-                                           disjoint_close, advance_epochs);
+                                           disjoint_close, logical_ctx_uid,
+                                           advance_epochs);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::advance_version_numbers(Operation *op, unsigned idx,
                                                 bool update_parent_state,
                                                 bool parent_is_upper_bound,
+                                                UniqueID logical_ctx_uid,
                                                 bool dedup_opens, 
                                                 bool dedup_advances, 
                                                 ProjectionEpochID open_epoch, 
@@ -1694,9 +1696,10 @@ namespace Legion {
       const AddressSpaceID local = runtime->address_space;
       parent->advance_version_numbers(ctx.get_id(), local, path, advance_mask,
                                       context, update_parent_state,
-                                      parent_is_upper_bound, dedup_opens, 
-                                      dedup_advances, open_epoch, advance_epoch,
-                                      dirty_previous, ready_events);
+                                      parent_is_upper_bound, logical_ctx_uid,
+                                      dedup_opens, dedup_advances, open_epoch, 
+                                      advance_epoch, dirty_previous, 
+                                      ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -2154,6 +2157,7 @@ namespace Legion {
       RegionNode *child_node = get_node(req.region);
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
+      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
       
       RegionUsage usage(req);
 #ifdef DEBUG_LEGION 
@@ -2193,8 +2197,8 @@ namespace Legion {
         // Construct the traversal info
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, local_applied);
-        child_node->register_region(info, context, restrict_info, term_event,
-                                    usage, defer_add_users, targets);
+        child_node->register_region(info, logical_ctx_uid, context, 
+            restrict_info, term_event, usage, defer_add_users, targets);
         
         if (!local_applied.empty())
         {
@@ -2220,8 +2224,8 @@ namespace Legion {
         // Construct the traversal info
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, map_applied);
-        child_node->register_region(info, context, restrict_info, term_event,
-                                    usage, defer_add_users, targets);
+        child_node->register_region(info, logical_ctx_uid, context, 
+            restrict_info, term_event, usage, defer_add_users, targets);
       }
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2375,11 +2379,12 @@ namespace Legion {
 #endif
       TraversalInfo info(ctx.get_id(), op, index, req, 
                          version_info, closing_mask, map_applied);
+      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
       // Always build the composite instance, and then optionally issue
       // update copies to the target instances from the composite instance
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
-                            closing_mask, version_info, context, closed_tree, 
-                            map_applied, projection_epochs);
+                          closing_mask, version_info, logical_ctx_uid, 
+                          context, closed_tree, map_applied, projection_epochs);
       if (targets.empty())
         return;
       PhysicalState *physical_state = NULL;
@@ -2457,6 +2462,7 @@ namespace Legion {
       RegionUsage usage(req);
       TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                          user_mask, map_applied);
+      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
       InnerContext *context = op->find_physical_context(index);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2465,7 +2471,7 @@ namespace Legion {
                                      true/*closing*/, false/*logical*/,
                  FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
-      top_node->close_state(info, usage, context, targets);
+      top_node->close_state(info, usage, logical_ctx_uid, context, targets);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -3193,6 +3199,7 @@ namespace Legion {
       RegionNode *fill_node = get_node(req.region);
       FieldMask fill_mask = 
         fill_node->column_source->get_field_mask(req.privilege_fields);
+      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
       // Check to see if we have any restricted fields that
       // we need to fill eagerly
       if (restrict_info.has_restrictions())
@@ -3204,14 +3211,14 @@ namespace Legion {
         FieldMask eager_fields;
         restrict_info.populate_restrict_fields(eager_fields);
         ApEvent done_event = fill_node->eager_fill_fields(ctx.get_id(), 
-              op, index, context, eager_fields, value, value_size, 
-              version_info, instances, precondition, map_applied_events);
+           op, index, logical_ctx_uid, context, eager_fields, value, value_size,
+           version_info, instances, precondition, map_applied_events);
         // Remove these fields from the fill set
         fill_mask -= eager_fields;
         // If we still have fields to fill, do that now
         if (!!fill_mask)
           fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-                                 context, version_info, map_applied_events);
+                 logical_ctx_uid, context, version_info, map_applied_events);
         // We know the sync precondition is chained off at least
         // one eager fill so we can return the done event
         return done_event;
@@ -3223,7 +3230,7 @@ namespace Legion {
 #endif
         // Fill in these fields on this node
         fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-                               context, version_info, map_applied_events); 
+               logical_ctx_uid, context, version_info, map_applied_events); 
         // We didn't actually use the precondition so just return it
         return precondition;
       }
@@ -12969,6 +12976,7 @@ namespace Legion {
                                                std::set<RtEvent> &ready_events,
                                                bool partial_traversal,
                                                bool disjoint_close,
+                                               UniqueID logical_context_uid,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
     //--------------------------------------------------------------------------
     {
@@ -13012,8 +13020,8 @@ namespace Legion {
         // See if we need to compute the split mask first, this happens
         // only for projection epochs
         if (advance_epochs != NULL)
-          manager.compute_advance_split_mask(version_info, parent_ctx,
-                          version_mask, ready_events, *advance_epochs);
+          manager.compute_advance_split_mask(version_info, logical_context_uid,
+                      parent_ctx, version_mask, ready_events, *advance_epochs);
         // Record the path only versions
         const FieldMask &split_mask = version_info.get_split_mask(depth);
         manager.record_path_only_versions(version_mask, split_mask,
@@ -13022,9 +13030,9 @@ namespace Legion {
         // Continue the traversal down the tree
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         child->compute_version_numbers(ctx, path, usage, version_mask,
-                                unversioned_mask, op, idx, parent_ctx, 
-                                version_info, ready_events, partial_traversal,
-                                disjoint_close, advance_epochs);
+                          unversioned_mask, op, idx, parent_ctx, 
+                          version_info, ready_events, partial_traversal,
+                          disjoint_close, logical_context_uid, advance_epochs);
       }
     }
 
@@ -13036,6 +13044,7 @@ namespace Legion {
                                                InnerContext *parent_ctx, 
                                                bool update_parent_state,
                                                bool skip_update_parent,
+                                               UniqueID logical_context_uid,
                                                bool dedup_opens, 
                                                bool dedup_advances, 
                                                ProjectionEpochID open_epoch,
@@ -13062,25 +13071,26 @@ namespace Legion {
           const FieldMask dirty_prev = finder->second & advance_mask;
           if (!!dirty_prev)
           {
-            manager.advance_versions(advance_mask, parent_ctx, 
-                 local_update_parent, local_space, ready_events, 
-                 dedup_opens, open_epoch, dedup_advances, 
-                 advance_epoch, &dirty_prev);
+            manager.advance_versions(advance_mask, logical_context_uid,
+                          parent_ctx, local_update_parent, local_space, 
+                          ready_events, dedup_opens, open_epoch, 
+                          dedup_advances, advance_epoch, &dirty_prev);
             still_need_advance = false;
           }
         }
       }
       if (still_need_advance)
-        manager.advance_versions(advance_mask, parent_ctx, 
-             local_update_parent, local_space, ready_events, 
-             dedup_opens, open_epoch, dedup_advances, advance_epoch);
+        manager.advance_versions(advance_mask, logical_context_uid,
+              parent_ctx, local_update_parent, local_space, ready_events, 
+              dedup_opens, open_epoch, dedup_advances, advance_epoch);
       // Continue the traversal, 
       // wonder if we get tail call recursion optimization
       if (!arrived)
       {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         child->advance_version_numbers(ctx, local_space, path, advance_mask, 
-                                       parent_ctx, update_parent_state, false,
+                                       parent_ctx, update_parent_state, 
+                                       false/*update*/, logical_context_uid,
                                        dedup_opens, dedup_advances, 
                                        open_epoch, advance_epoch, 
                                        dirty_previous, ready_events);
@@ -13091,6 +13101,7 @@ namespace Legion {
     CompositeView* RegionTreeNode::create_composite_instance(ContextID ctx_id,
                                                 const FieldMask &closing_mask,
                                                 VersionInfo &version_info, 
+                                                UniqueID logical_context_uid,
                                                 InnerContext *owner_ctx,
                                                 ClosedNode *closed_tree,
                                                 std::set<RtEvent> &ready_events,
@@ -13123,13 +13134,14 @@ namespace Legion {
           FieldMask overlap = it->second & closing_mask;
           if (!overlap)
             continue;
-          manager.advance_versions(overlap, owner_ctx, true/*update parent*/,
-                     local_space, ready_events, true/*dedup opens*/, it->first);
+          manager.advance_versions(overlap, logical_context_uid, owner_ctx, 
+                                   true/*update parent*/, local_space, 
+                                   ready_events, true/*dedup opens*/,it->first);
         }
       }
       else // The common case
-        manager.advance_versions(closing_mask, owner_ctx, update_parent_state, 
-                                 local_space, ready_events);
+        manager.advance_versions(closing_mask, logical_context_uid, owner_ctx,
+                                 update_parent_state, local_space,ready_events);
       // Now we can record our advance versions
       manager.record_advance_versions(closing_mask, owner_ctx, 
                                       version_info, ready_events);
@@ -15539,7 +15551,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::register_region(const TraversalInfo &info, 
+    void RegionNode::register_region(const TraversalInfo &info,
+                                     UniqueID logical_ctx_uid,
                                      InnerContext *context,
                                      RestrictInfo &restrict_info,
                                    ApEvent term_event, const RegionUsage &usage,
@@ -15560,7 +15573,7 @@ namespace Legion {
         const bool update_parent_state = 
           !info.version_info.is_upper_bound_node(this);
         const AddressSpaceID local_space = context->runtime->address_space;
-        manager.advance_versions(info.traversal_mask, context,
+        manager.advance_versions(info.traversal_mask, logical_ctx_uid, context,
             update_parent_state, local_space, info.map_applied_events);
       }
       // Sine we're mapping we need to record the advance versions
@@ -15858,7 +15871,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::close_state(const TraversalInfo &info, RegionUsage &usage, 
-                                 InnerContext *context, InstanceSet &targets)
+                                 UniqueID logical_ctx_uid,InnerContext *context, 
+                                 InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
@@ -15870,8 +15884,8 @@ namespace Legion {
       // need to be done would have been issued as part of the 
       // logical analysis or will be done as part of the registration.
       RestrictInfo empty_restrict_info;
-      register_region(info, context, empty_restrict_info, ApEvent::NO_AP_EVENT,
-                      usage, false/*defer add users*/, targets);
+      register_region(info, logical_ctx_uid, context, empty_restrict_info, 
+          ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, targets);
     }
 
     //--------------------------------------------------------------------------
@@ -15948,7 +15962,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
                                  const void *value, size_t value_size,
-                                 InnerContext *context,
+                                 UniqueID logical_ctx_uid,InnerContext *context,
                                  VersionInfo &version_info,
                                  std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
@@ -15959,7 +15973,7 @@ namespace Legion {
       const bool update_parent_state = 
         !version_info.is_upper_bound_node(this);
       const AddressSpaceID local_space = context->runtime->address_space;
-      manager.advance_versions(fill_mask, context,
+      manager.advance_versions(fill_mask, logical_ctx_uid, context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
       manager.record_advance_versions(fill_mask, context, 
@@ -15982,6 +15996,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionNode::eager_fill_fields(ContextID ctx, Operation *op,
                                           const unsigned index, 
+                                          UniqueID logical_ctx_uid,
                                           InnerContext *context,
                                           const FieldMask &fill_mask,
                                           const void *value, size_t value_size,
@@ -15997,7 +16012,7 @@ namespace Legion {
       const bool update_parent_state = 
         !version_info.is_upper_bound_node(this);
       const AddressSpaceID local_space = context->runtime->address_space;
-      manager.advance_versions(fill_mask, context,
+      manager.advance_versions(fill_mask, logical_ctx_uid, context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
       manager.record_advance_versions(fill_mask, context, 

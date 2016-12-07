@@ -4490,7 +4490,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::compute_advance_split_mask(VersionInfo &version_info,
-                                                    InnerContext *context,
+                                                   UniqueID logical_context_uid,
+                                                   InnerContext *context,
                                                 const FieldMask &version_mask,
                                                 std::set<RtEvent> &ready_events,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned &advance_epochs)
@@ -4525,8 +4526,9 @@ namespace Legion {
       for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator it =
             advance_epochs.begin(); it != advance_epochs.end(); it++)
       {
-        LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
-          finder = previous_advancers.find(it->first);
+        LegionMap<ProjectionEpoch,FieldMask>::aligned::const_iterator 
+          finder = previous_advancers.find(
+              ProjectionEpoch(logical_context_uid, it->first));
         if (finder == previous_advancers.end())
           continue;
         FieldMask overlap = finder->second & it->second;
@@ -4826,7 +4828,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::advance_versions(FieldMask mask, InnerContext *context, 
+    void VersionManager::advance_versions(FieldMask mask, 
+                                          UniqueID logical_context_uid,
+                                          InnerContext *physical_context, 
                                           bool update_parent_state,
                                           AddressSpaceID source_space,
                                           std::set<RtEvent> &applied_events,
@@ -4840,19 +4844,20 @@ namespace Legion {
       DETAILED_PROFILER(node->context->runtime, 
                         CURRENT_STATE_ADVANCE_VERSION_NUMBERS_CALL);
       // See if we have been assigned
-      if (context != current_context)
+      if (physical_context != current_context)
       {
         const AddressSpaceID local_space = 
           node->context->runtime->address_space;
-        owner_space = context->get_version_owner(node, local_space);
+        owner_space = physical_context->get_version_owner(node, local_space);
         is_owner = (owner_space == local_space);
-        current_context = context;
+        current_context = physical_context;
       }
       // Check to see if we are the owner
       if (!is_owner)
       {
         // First send back the message to the owner to do the advance there
         RtEvent advanced = send_remote_advance(mask, update_parent_state,
+                                               logical_context_uid,
                                                dedup_opens, open_epoch, 
                                                dedup_advances, advance_epoch);
         applied_events.insert(advanced); 
@@ -4868,8 +4873,9 @@ namespace Legion {
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
         if (dedup_opens)
         {
-          LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
-            finder = previous_opens.find(open_epoch);
+          LegionMap<ProjectionEpoch,FieldMask>::aligned::const_iterator
+            finder = previous_opens.find(
+                ProjectionEpoch(logical_context_uid, open_epoch));
           if (finder != previous_opens.end())
           {
             mask -= finder->second;
@@ -4879,8 +4885,9 @@ namespace Legion {
         }
         if (dedup_advances)
         {
-          LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
-            finder = previous_advancers.find(advance_epoch);
+          LegionMap<ProjectionEpoch,FieldMask>::aligned::const_iterator 
+            finder = previous_advancers.find(
+                ProjectionEpoch(logical_context_uid, advance_epoch));
           if (finder != previous_advancers.end())
           {
             mask -= finder->second;
@@ -4901,27 +4908,32 @@ namespace Legion {
         if (dedup_opens)
         {
           // Filter out any previous opens if necessary
+          const ProjectionEpoch key(logical_context_uid, open_epoch);
           if (!previous_opens.empty())
           {
-            std::vector<ProjectionEpochID> to_delete;
-            for (LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator it =
-                  previous_opens.begin(); it != previous_opens.end(); it++)
+            for (LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator it =
+                  previous_opens.begin(); it != 
+                  previous_opens.end(); /*nothing*/)
             {
-              if (it->first == open_epoch) // skip our own
+              if (it->first == key) // skip our own
+              {
+                it++;
                 continue;
+              }
               it->second -= mask;
               if (!it->second)
-                to_delete.push_back(it->first);
-            }
-            if (!to_delete.empty())
-            {
-              for (std::vector<ProjectionEpochID>::const_iterator it = 
-                    to_delete.begin(); it != to_delete.end(); it++)
-                previous_opens.erase(*it);
+              {
+                LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator 
+                  to_delete = it;
+                it++;
+                previous_opens.erase(to_delete);
+              }
+              else
+                it++;
             }
           }
-          LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator
-            finder = previous_opens.find(open_epoch);
+          LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator
+            finder = previous_opens.find(key);
           if (finder != previous_opens.end())
           {
             mask -= finder->second;
@@ -4930,33 +4942,37 @@ namespace Legion {
             finder->second |= mask;
           }
           else
-            previous_opens[open_epoch] = mask;
+            previous_opens[key] = mask;
         }
         if (dedup_advances)
         {
           // Filter out any previous advancers if necessary  
+          const ProjectionEpoch key(logical_context_uid, advance_epoch);
           if (!previous_advancers.empty())
           {
-            std::vector<ProjectionEpochID> to_delete;
-            for (LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator it =
+            for (LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator it =
                   previous_advancers.begin(); it != 
-                  previous_advancers.end(); it++)
+                  previous_advancers.end(); /*nothing*/)
             {
-              if (it->first == advance_epoch) // skip our own
+              if (it->first == key) // skip our own
+              {
+                it++;
                 continue;
+              }
               it->second -= mask;
               if (!it->second)
-                to_delete.push_back(it->first);
-            }
-            if (!to_delete.empty())
-            {
-              for (std::vector<ProjectionEpochID>::const_iterator it = 
-                    to_delete.begin(); it != to_delete.end(); it++)
-                previous_advancers.erase(*it);
+              {
+                LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator 
+                  to_delete = it;
+                it++;
+                previous_advancers.erase(to_delete);
+              }
+              else
+                it++;
             }
           }
-          LegionMap<ProjectionEpochID,FieldMask>::aligned::iterator 
-            finder = previous_advancers.find(advance_epoch);
+          LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator 
+            finder = previous_advancers.find(key);
           if (finder != previous_advancers.end())
           {
             mask -= finder->second;
@@ -4965,7 +4981,7 @@ namespace Legion {
             finder->second |= mask;
           }
           else
-            previous_advancers[advance_epoch] = mask;
+            previous_advancers[key] = mask;
         }
         // Now send any invalidations to get them in flight
         if (!remote_valid.empty() && !(remote_valid_fields * mask))
@@ -5234,8 +5250,8 @@ namespace Legion {
               continue;
             // Get the final version of this version state
             std::set<RtEvent> preconditions;
-            mit->first->request_final_version_state(context, state_overlap, 
-                                                    preconditions);
+            mit->first->request_final_version_state(physical_context, 
+                                                  state_overlap, preconditions);
             if (!preconditions.empty())
             {
               RtEvent precondition = Runtime::merge_events(preconditions);
@@ -5287,7 +5303,7 @@ namespace Legion {
           parent->get_current_version_manager(ctx);
         const ColorPoint &color = node->get_color();
         // This destroys new states, but whatever we're done anyway
-        parent_manager.update_child_versions(context, color, 
+        parent_manager.update_child_versions(physical_context, color, 
                                              new_states, applied_events);
       }
     }
@@ -5469,6 +5485,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent VersionManager::send_remote_advance(const FieldMask &advance_mask,
                                                 bool update_parent_state,
+                                                UniqueID logical_context_uid,
                                                 bool dedup_opens,
                                                 ProjectionEpochID open_epoch,
                                                 bool dedup_advances,
@@ -5483,6 +5500,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(remote_advance);
+        rez.serialize(logical_context_uid);
         rez.serialize(current_context->get_context_uid());
         if (node->is_region())
         {
@@ -5515,8 +5533,10 @@ namespace Legion {
       DerezCheck z(derez);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
+      UniqueID logical_context_uid;
+      derez.deserialize(logical_context_uid);
+      UniqueID physical_context_uid;
+      derez.deserialize(physical_context_uid);
       bool is_region;
       derez.deserialize(is_region);
       RegionTreeNode *node;
@@ -5547,13 +5567,14 @@ namespace Legion {
       if (dedup_advances)
         derez.deserialize(advance_epoch);
 
-      InnerContext *context = runtime->find_context(context_uid);
+      InnerContext *context = runtime->find_context(physical_context_uid);
       ContextID ctx = context->get_context_id();
       VersionManager &manager = node->get_current_version_manager(ctx);
       std::set<RtEvent> done_preconditions;
-      manager.advance_versions(advance_mask, context, update_parent, 
-                               source_space, done_preconditions, dedup_opens,
-                               open_epoch, dedup_advances, advance_epoch);
+      manager.advance_versions(advance_mask, logical_context_uid, context, 
+                               update_parent, source_space, done_preconditions, 
+                               dedup_opens, open_epoch, 
+                               dedup_advances, advance_epoch);
       if (!done_preconditions.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(done_preconditions));
