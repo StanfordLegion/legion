@@ -11470,6 +11470,7 @@ namespace Legion {
               break;
             }
           case OPEN_REDUCE_PROJ:
+          case OPEN_REDUCE_PROJ_DIRTY:
             {
               // If we are reducing at this level we can 
               // leave it open otherwise we need a close
