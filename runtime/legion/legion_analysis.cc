@@ -4859,7 +4859,8 @@ namespace Legion {
         RtEvent advanced = send_remote_advance(mask, update_parent_state,
                                                logical_context_uid,
                                                dedup_opens, open_epoch, 
-                                               dedup_advances, advance_epoch);
+                                               dedup_advances, advance_epoch,
+                                               dirty_previous);
         applied_events.insert(advanced); 
         // Now filter out any of our current version states that are
         // no longer valid for the given fields
@@ -5489,7 +5490,8 @@ namespace Legion {
                                                 bool dedup_opens,
                                                 ProjectionEpochID open_epoch,
                                                 bool dedup_advances,
-                                                ProjectionEpochID advance_epoch)
+                                                ProjectionEpochID advance_epoch,
+                                                const FieldMask *dirty_previous)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5520,6 +5522,13 @@ namespace Legion {
         rez.serialize<bool>(dedup_advances);
         if (dedup_advances)
           rez.serialize(advance_epoch);
+        if (dirty_previous != NULL)
+        {
+          rez.serialize<bool>(true);
+          rez.serialize(*dirty_previous);
+        }
+        else
+          rez.serialize<bool>(false);
       }
       runtime->send_version_manager_advance(owner_space, rez);
       return remote_advance;
@@ -5566,6 +5575,11 @@ namespace Legion {
       ProjectionEpochID advance_epoch = 0;
       if (dedup_advances)
         derez.deserialize(advance_epoch);
+      bool has_dirty_previous;
+      derez.deserialize(has_dirty_previous);
+      FieldMask dirty_previous;
+      if (has_dirty_previous)
+        derez.deserialize(dirty_previous);
 
       InnerContext *context = runtime->find_context(physical_context_uid);
       ContextID ctx = context->get_context_id();
@@ -5574,7 +5588,8 @@ namespace Legion {
       manager.advance_versions(advance_mask, logical_context_uid, context, 
                                update_parent, source_space, done_preconditions, 
                                dedup_opens, open_epoch, 
-                               dedup_advances, advance_epoch);
+                               dedup_advances, advance_epoch,
+                               has_dirty_previous ? &dirty_previous : NULL);
       if (!done_preconditions.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(done_preconditions));

@@ -973,7 +973,8 @@ namespace Legion {
                                   bool dedup_opens, 
                                   ProjectionEpochID open_epoch,
                                   bool dedup_advances,
-                                  ProjectionEpochID advance_epoch);
+                                  ProjectionEpochID advance_epoch,
+                                  const FieldMask *dirty_previous);
       static void handle_remote_advance(Deserializer &derez, Runtime *runtime,
                                         AddressSpaceID source_space);
     public:
