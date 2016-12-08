@@ -21345,7 +21345,7 @@ namespace Legion {
       // Make the code descriptors for our tasks
       CodeDescriptor init_task(Runtime::initialize_runtime);
       CodeDescriptor shutdown_task(Runtime::shutdown_runtime);
-      CodeDescriptor hlr_task(Runtime::high_level_runtime_task);
+      CodeDescriptor hlr_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
@@ -21689,7 +21689,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::high_level_runtime_task(
+    /*static*/ void Runtime::legion_runtime_task(
                                   const void *args, size_t arglen, 
 				  const void *userdata, size_t userlen,
 				  Processor p)

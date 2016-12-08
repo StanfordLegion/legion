@@ -7910,6 +7910,7 @@ namespace Legion {
       if (!!dirty_overlap)
       {
         target->dirty_mask |= dirty_overlap;
+        target->update_fields |= dirty_overlap;
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
               valid_views.begin(); it != valid_views.end(); it++)
         {
@@ -7935,6 +7936,7 @@ namespace Legion {
       if (!!reduction_overlap)
       {
         target->reduction_mask |= reduction_overlap;
+        target->update_fields |= reduction_overlap;
         for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
               reduction_views.begin(); it != reduction_views.end(); it++)
         {
