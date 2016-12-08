@@ -746,6 +746,10 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire, 
                                     bool tight_region_bounds, bool remote);
+      void release_candidate_references(const std::set<PhysicalManager*> 
+                                                        &candidates) const;
+      void release_candidate_references(const std::deque<PhysicalManager*>
+                                                        &candidates) const;
     protected:
       PhysicalManager* allocate_physical_instance(
                                     const LayoutConstraintSet &constraints,
@@ -1830,7 +1834,7 @@ namespace Legion {
                                      unsigned count);
       void defer_dynamic_collective_arrival(Context ctx, 
                                             DynamicCollective dc,
-                                            Future f, unsigned count);
+                                            const Future &f, unsigned count);
       Future get_dynamic_collective_result(Context ctx, DynamicCollective dc);
       DynamicCollective advance_dynamic_collective(Context ctx,
                                                    DynamicCollective dc);
@@ -2550,7 +2554,7 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-      static void high_level_runtime_task(
+      static void legion_runtime_task(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);

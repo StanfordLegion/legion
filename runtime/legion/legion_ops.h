@@ -303,6 +303,8 @@ namespace Legion {
       virtual bool is_internal_op(void) const { return false; }
       // Determine if this operation is a partition operation
       virtual bool is_partition_op(void) const { return false; }
+      // Determine if this is a predicated operation
+      virtual bool is_predicated_op(void) const { return false; }
     public: // virtual methods for mapping
       // Pick the sources for a copy operations
       virtual void select_sources(const InstanceRef &target,
@@ -599,7 +601,7 @@ namespace Legion {
       void initialize_speculation(TaskContext *ctx, bool track, 
                                   unsigned regions, const Predicate &p);
       void register_predicate_dependence(void);
-      bool is_predicated(void) const;
+      virtual bool is_predicated_op(void) const;
       // Wait until the predicate is valid and then return
       // its value.  Give it the current processor in case it
       // needs to wait for the value
@@ -1486,6 +1488,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
       virtual void trigger_complete(void);
@@ -1699,7 +1702,7 @@ namespace Legion {
       void notify_subop_complete(Operation *op);
       void notify_subop_commit(Operation *op);
     public:
-      RtUserEvent find_slice_versioning_event(SliceTask *slice, bool &first);
+      RtUserEvent find_slice_versioning_event(UniqueID slice_id, bool &first);
     protected:
       int find_operation_index(Operation *op, GenerationID generation);
       TaskOp* find_task_by_index(int index);
@@ -1740,7 +1743,7 @@ namespace Legion {
       std::map<SingleTask*,unsigned/*single task index*/> single_task_map;
       std::vector<std::set<unsigned/*single task index*/> > mapping_dependences;
     protected:
-      std::map<SliceTask*,RtUserEvent> slice_version_events;
+      std::map<UniqueID,RtUserEvent> slice_version_events;
     };
 
     /**

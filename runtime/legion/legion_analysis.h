@@ -403,15 +403,15 @@ namespace Legion {
     public:
       ProjectionInfo(void)
         : projection(NULL), projection_type(SINGULAR),
-          projection_domain(Domain::NO_DOMAIN), first_reduction(false) { }
+          projection_domain(Domain::NO_DOMAIN), dirty_reduction(false) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
                      const Domain &launch_domain);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
       inline const LegionMap<ProjectionEpochID,FieldMask>::aligned&
         get_projection_epochs(void) const { return projection_epochs; }
-      inline bool is_first_reduction(void) const { return first_reduction; }
-      inline void set_first_reduction(void) { first_reduction = true; }
+      inline bool is_dirty_reduction(void) const { return dirty_reduction; }
+      inline void set_dirty_reduction(void) { dirty_reduction = true; }
       void record_projection_epoch(ProjectionEpochID epoch,
                                    const FieldMask &epoch_mask);
       void clear(void);
@@ -428,11 +428,13 @@ namespace Legion {
       // trying to advance information for the same projection epoch
       LegionMap<ProjectionEpochID,FieldMask>::aligned projection_epochs;
     protected:
-      // Track whether this is the first reduction in a reduction-only
-      // projection epoch which will require a special advance be done
-      // by the point tasks to ensure that the VersionState objects
-      // get registered with their parents
-      bool first_reduction;
+      // Track whether this is a dirty reduction, which means that we
+      // know that an advance has already been done by a previous write
+      // so that we know we don't have do an advance to get our reduction
+      // registered with the parent version state. If it is not a dirty
+      // reduction then we have to do the extra advance to get the 
+      // reduction registered with parent VersionState object
+      bool dirty_reduction;
     };
 
     /**
@@ -526,7 +528,8 @@ namespace Legion {
       FieldState(const GenericUser &u, const FieldMask &m, 
                  const ColorPoint &child);
       FieldState(const RegionUsage &u, const FieldMask &m,
-                 ProjectionFunction *proj, const Domain &proj_domain, bool dis);
+                 ProjectionFunction *proj, const Domain &proj_domain, 
+                 bool dis, bool dirty_reduction = false);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 
@@ -856,6 +859,25 @@ namespace Legion {
      */
     class VersionManager {
     public:
+      struct ProjectionEpoch {
+      public:
+        ProjectionEpoch(void) : logical_ctx_id(0), epoch_id(0) { }
+        ProjectionEpoch(UniqueID logical_ctx, ProjectionEpochID epoch)
+          : logical_ctx_id(logical_ctx), epoch_id(epoch) { }
+      public:
+        inline bool operator==(const ProjectionEpoch &rhs) const
+          { return ((logical_ctx_id == rhs.logical_ctx_id) && 
+                    (epoch_id == rhs.epoch_id)); }
+        inline bool operator<(const ProjectionEpoch &rhs) const
+          {
+            if (logical_ctx_id < rhs.logical_ctx_id) return true;
+            if (logical_ctx_id > rhs.logical_ctx_id) return false;
+            return (epoch_id < rhs.epoch_id);
+          }
+      public:
+        UniqueID logical_ctx_id;
+        ProjectionEpochID epoch_id;
+      };
       struct DirtyUpdateArgs : public LgTaskArgs<DirtyUpdateArgs> {
       public:
         static const LgTaskID TASK_ID = LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID;
@@ -900,6 +922,7 @@ namespace Legion {
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events);
       void compute_advance_split_mask(VersionInfo &version_info,
+                                      UniqueID logical_context_uid,
                                       InnerContext *context,
                                       const FieldMask &version_mask,
                                       std::set<RtEvent> &ready_events,
@@ -917,7 +940,9 @@ namespace Legion {
                                           Operation *op, unsigned index,
                                           VersionInfo &version_info,
                                           std::set<RtEvent> &ready_events);
-      void advance_versions(FieldMask version_mask, InnerContext *context,
+      void advance_versions(FieldMask version_mask, 
+                            UniqueID logical_context_uid,
+                            InnerContext *physical_context,
                             bool update_parent_state,
                             AddressSpaceID source_space,
                             std::set<RtEvent> &applied_events,
@@ -944,10 +969,12 @@ namespace Legion {
     public:
       RtEvent send_remote_advance(const FieldMask &advance_mask,
                                   bool update_parent_state,
+                                  UniqueID logical_context_uid,
                                   bool dedup_opens, 
                                   ProjectionEpochID open_epoch,
                                   bool dedup_advances,
-                                  ProjectionEpochID advance_epoch);
+                                  ProjectionEpochID advance_epoch,
+                                  const FieldMask *dirty_previous);
       static void handle_remote_advance(Deserializer &derez, Runtime *runtime,
                                         AddressSpaceID source_space);
     public:
@@ -1010,10 +1037,17 @@ namespace Legion {
     protected:
       // Owner information about which nodes have remote copies
       LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;
+      // There is something really subtle going on here: note that the
+      // both the previous_opens and previous_advances have pairs of
+      // UniqueIDs and ProjectionEpochIDs as their keys. This is to 
+      // handle the case of virtual mappings, where projection epoch
+      // IDs can come from two different logical contexts, but be used
+      // in the same physical context due to a virtual mapping. We 
+      // disambiguate the projection epoch ID using the context ID.
       // Information about preivous opens
-      LegionMap<ProjectionEpochID,FieldMask>::aligned previous_opens;
+      LegionMap<ProjectionEpoch,FieldMask>::aligned previous_opens;
       // Information about previous advances
-      LegionMap<ProjectionEpochID,FieldMask>::aligned previous_advancers;
+      LegionMap<ProjectionEpoch,FieldMask>::aligned previous_advancers;
       // Remote information about outstanding requests we've made
       LegionMap<RtUserEvent,FieldMask>::aligned outstanding_requests;
     };

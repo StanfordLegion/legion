@@ -15,10 +15,12 @@
 # limitations under the License.
 #
 
+from __future__ import print_function
+
+import argparse
 import sys, os, shutil
 import string, re, json
 from math import sqrt, log
-from getopt import getopt
 from cgi import escape
 from operator import itemgetter
 from os.path import dirname, exists, basename
@@ -87,6 +89,14 @@ US_PER_PIXEL = 100
 PIXELS_PER_LEVEL = 40
 # Pixels per tick mark
 PIXELS_PER_TICK = 200
+
+def slugify(filename):
+    # convert spaces to underscores
+    slugified = filename.replace(" ", "_")
+    # remove special characters
+    slugified = slugified.translate(None, "!@#$%^&*(),/?<>\"':;{}[]|/+=`~")
+    return slugified
+
 
 # Helper function for computing nice colors
 def color_helper(step, num_steps):
@@ -546,12 +556,12 @@ class Processor(object):
         active_ratio = 100.0*float(active_time)/float(total_time)
         application_ratio = 100.0*float(application_time)/float(total_time)
         meta_ratio = 100.0*float(meta_time)/float(total_time)
-        print self
-        print "    Total time: %d us" % total_time
-        print "    Active time: %d us (%.3f%%)" % (active_time, active_ratio)
-        print "    Application time: %d us (%.3f%%)" % (application_time, application_ratio)
-        print "    Meta time: %d us (%.3f%%)" % (meta_time, meta_ratio)
-        print
+        print(self)
+        print("    Total time: %d us" % total_time)
+        print("    Active time: %d us (%.3f%%)" % (active_time, active_ratio))
+        print("    Application time: %d us (%.3f%%)" % (application_time, application_ratio))
+        print("    Meta time: %d us (%.3f%%)" % (meta_time, meta_ratio))
+        print()
 
     def update_task_stats(self, stat):
         for task in self.tasks:
@@ -672,11 +682,11 @@ class Memory(object):
             previous_time = point.time
         # Last interval is empty so don't worry about it
         average_usage /= float(self.last_time) 
-        print self
-        print "    Total Instances: %d" % len(self.instances)
-        print "    Maximum Utilization: %.3f%%" % (100.0 * max_usage)
-        print "    Average Utilization: %.3f%%" % (100.0 * average_usage)
-        print
+        print(self)
+        print("    Total Instances: %d" % len(self.instances))
+        print("    Maximum Utilization: %.3f%%" % (100.0 * max_usage))
+        print("    Average Utilization: %.3f%%" % (100.0 * average_usage))
+        print()
   
     def __repr__(self):
         return '%s Memory %s' % (self.kind, hex(self.mem_id))
@@ -775,11 +785,11 @@ class Channel(object):
                 if current_transfers == 0:
                     total_usage_time += (point.time - previous_time)
         average_usage = float(total_usage_time)/float(self.last_time)
-        print self
-        print "    Total Transfers: %d" % len(self.copies)
-        print "    Maximum Executing Transfers: %d" % (max_transfers)
-        print "    Average Utilization: %.3f%%" % (100.0 * average_usage)
-        print
+        print(self)
+        print("    Total Transfers: %d" % len(self.copies))
+        print("    Maximum Executing Transfers: %d" % (max_transfers))
+        print("    Average Utilization: %.3f%%" % (100.0 * average_usage))
+        print()
         
     def __repr__(self):
         if self.src is None:
@@ -849,11 +859,11 @@ class Variant(object):
             max_call, max_dev, min_call, min_dev):
         avg = float(total_execution_time) / float(total_calls) \
                 if total_calls > 0 else 0
-        print '       Total Invocations: %d' % total_calls
-        print '       Total Time: %d us' % total_execution_time
-        print '       Average Time: %.2f us' % avg
-        print '       Maximum Time: %d us (%.3f sig)' % (max_call,max_dev)
-        print '       Minimum Time: %d us (%.3f sig)' % (min_call,min_dev)
+        print('       Total Invocations: %d' % total_calls)
+        print('       Total Time: %d us' % total_execution_time)
+        print('       Average Time: %.2f us' % avg)
+        print('       Maximum Time: %d us (%.3f sig)' % (max_call,max_dev))
+        print('       Minimum Time: %d us (%.3f sig)' % (min_call,min_dev))
 
 
     def print_stats(self, verbose):
@@ -880,10 +890,10 @@ class Variant(object):
         max_dev = (float(max_call) - avg) / stddev if stddev != 0.0 else 0.0
         min_dev = (float(min_call) - avg) / stddev if stddev != 0.0 else 0.0
 
-        print '  '+self.name
+        print('  '+self.name)
         self.print_task_stat(total_calls, total_execution_time,
                 max_call, max_dev, min_call, min_dev)
-        print
+        print()
 
         if verbose and len(procs) > 1:
             for proc in sorted(self.total_calls.iterkeys()):
@@ -898,12 +908,12 @@ class Variant(object):
                 max_dev = (float(self.max_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
                 min_dev = (float(self.min_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
 
-                print '    On ' + repr(proc)
+                print('    On ' + repr(proc))
                 self.print_task_stat(self.total_calls[proc],
                         self.total_execution_time[proc],
                         self.max_call[proc], max_dev,
                         self.min_call[proc], min_dev)
-                print
+                print()
 
 class Operation(object):
     def __init__(self, op_id):
@@ -1358,15 +1368,15 @@ class StatGatherer(object):
             task.variant.increment_calls(exec_time, proc)
 
     def print_stats(self, verbose):
-        print "  -------------------------"
-        print "  Task Statistics"
-        print "  -------------------------"
+        print("  -------------------------")
+        print("  Task Statistics")
+        print("  -------------------------")
         for variant in sorted(self.application_tasks,
                                 key=lambda v: v.total_time(),reverse=True):
             variant.print_stats(verbose)
-        print "  -------------------------"
-        print "  Meta-Task Statistics"
-        print "  -------------------------"
+        print("  -------------------------")
+        print("  Meta-Task Statistics")
+        print("  -------------------------")
         for variant in sorted(self.meta_tasks,
                                 key=lambda v: v.total_time(),reverse=True):
             variant.print_stats(verbose)
@@ -1600,9 +1610,9 @@ class State(object):
                 matches -= 1 
                 skipped += 1
                 if verbose:
-                    print 'Skipping line: %s' % line.strip()
+                    print('Skipping line: %s' % line.strip())
         if skipped > 0:
-            print 'WARNING: Skipped %d lines in %s' % (skipped, file_name)
+            print('WARNING: Skipped %d lines in %s' % (skipped, file_name))
         return matches
 
     def log_task_info(self, op_id, variant_id, proc_id,
@@ -1923,33 +1933,33 @@ class State(object):
             channel.sort_time_range()
 
     def print_processor_stats(self):
-        print '****************************************************'
-        print '   PROCESSOR STATS'
-        print '****************************************************'
+        print('****************************************************')
+        print('   PROCESSOR STATS')
+        print('****************************************************')
         for p,proc in sorted(self.processors.iteritems()):
             proc.print_stats()
         print
 
     def print_memory_stats(self):
-        print '****************************************************'
-        print '   MEMORY STATS'
-        print '****************************************************'
+        print('****************************************************')
+        print('   MEMORY STATS')
+        print('****************************************************')
         for m,mem in sorted(self.memories.iteritems()):
             mem.print_stats()
         print
 
     def print_channel_stats(self):
-        print '****************************************************'
-        print '   CHANNEL STATS'
-        print '****************************************************'
+        print('****************************************************')
+        print('   CHANNEL STATS')
+        print('****************************************************')
         for c,channel in sorted(self.channels.iteritems()):
             channel.print_stats()
         print
 
     def print_task_stats(self, verbose):
-        print '****************************************************'
-        print '   TASK STATS'
-        print '****************************************************'
+        print('****************************************************')
+        print('   TASK STATS')
+        print('****************************************************')
         stat = StatGatherer(self)
         for proc in self.processors.itervalues():
             proc.update_task_stats(stat)
@@ -2006,7 +2016,7 @@ class State(object):
         self.assign_colors()
         svg_file = output_prefix + '.svg'
         html_file = output_prefix + '.html'
-        print 'Generating visualization files %s and %s' % (svg_file,html_file) 
+        print('Generating visualization files %s and %s' % (svg_file,html_file))
         # Make a printer and emit the files
         printer = SVGPrinter(svg_file, html_file)
         if show_procs:
@@ -2025,7 +2035,7 @@ class State(object):
                 "legion_prof_copy.html.template")
         tsv_file_name = output_prefix + ".tsv"
         html_file_name = output_prefix + ".html"
-        print 'Generating copy visualization files %s and %s' % (tsv_file_name,html_file_name)
+        print('Generating copy visualization files %s and %s' % (tsv_file_name,html_file_name))
 
         def node_id(memory):
             return (memory.mem_id >> 23) & ((1 << 5) - 1)
@@ -2086,11 +2096,14 @@ class State(object):
         else:
             output_dirname = self.find_unique_dirname(output_dirname)
 
-        print 'Generating interactive visualization files in directory ' + output_dirname
+        print('Generating interactive visualization files in directory ' + output_dirname)
         src_directory = os.path.join(dirname(sys.argv[0]), "legion_prof_files")
 
         shutil.copytree(src_directory, output_dirname)
 
+        proc_list = []
+        chan_list = []
+        mem_list = []
         processor_levels = {}
         channel_levels = {}
         memory_levels = {}
@@ -2102,26 +2115,60 @@ class State(object):
         processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
         scale_json_file_name = os.path.join(output_dirname, "json", "scale.json")
 
+        data_tsv_header = "level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n"
+
         data_tsv_file = open(data_tsv_file_name, "w")
-        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n")
+        data_tsv_file.write(data_tsv_header)
+        tsv_dir = os.path.join(output_dirname, "tsv")
+        os.mkdir(tsv_dir)
         if show_procs:
             for p,proc in sorted(self.processors.iteritems()):
                 if len(proc.tasks) > 0:
-                    base_level = proc.emit_tsv(data_tsv_file, base_level)
-                    processor_levels[proc] = base_level
+                    proc_name = slugify("Proc_" + str(hex(p)))
+                    proc_tsv_file_name = os.path.join(tsv_dir, proc_name + ".tsv")
+                    proc_tsv_file = open(proc_tsv_file_name, "w")
+                    proc_tsv_file.write(data_tsv_header)
+                    proc_level = proc.emit_tsv(proc_tsv_file, 0)
+                    base_level += proc_level
+                    processor_levels[proc] = {
+                        'levels': proc_level-1, 
+                        'tsv': "tsv/" + proc_name + ".tsv"
+                    }
+                    proc_list.append(proc)
+
                     last_time = max(last_time, proc.full_range.stop_time)
         if show_channels:
-            for c,channel in sorted(self.channels.iteritems()):
-                if len(channel.copies) > 0:
-                    base_level = channel.emit_tsv(data_tsv_file, base_level)
-                    channel_levels[channel] = base_level
-                    last_time = max(last_time, channel.last_time)
+            for c,chan in sorted(self.channels.iteritems()):
+                if len(chan.copies) > 0:
+                    chan_name = slugify(str(c))
+                    chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
+                    chan_tsv_file = open(chan_tsv_file_name, "w")
+                    chan_tsv_file.write(data_tsv_header)
+                    chan_level = chan.emit_tsv(chan_tsv_file, 0)
+                    base_level += chan_level
+                    channel_levels[chan] = {
+                        'levels': chan_level-1, 
+                        'tsv': "tsv/" + chan_name + ".tsv"
+                    }
+                    chan_list.append(chan)
+
+                    last_time = max(last_time, chan.last_time)
         if show_instances:
-            for m,memory in sorted(self.memories.iteritems()):
-                if len(memory.instances) > 0:
-                    base_level = memory.emit_tsv(data_tsv_file, base_level)
-                    memory_levels[memory] = base_level
-                    last_time = max(last_time, memory.last_time)
+            for m,mem in sorted(self.memories.iteritems()):
+                if len(mem.instances) > 0:
+                    mem_name = slugify("Mem_" + str(hex(m)))
+                    mem_tsv_file_name = os.path.join(tsv_dir, mem_name + ".tsv")
+                    mem_tsv_file = open(mem_tsv_file_name, "w")
+                    mem_tsv_file.write(data_tsv_header)
+                    mem_level = mem.emit_tsv(mem_tsv_file, 0)
+                    base_level += mem_level
+                    memory_levels[mem] = {
+                        'levels': mem_level-1, 
+                        'tsv': "tsv/" + mem_name + ".tsv"
+                    }
+                    mem_list.append(mem)
+
+                    last_time = max(last_time, mem.last_time)
         data_tsv_file.close()
 
         ops_file = open(ops_file_name, "w")
@@ -2131,16 +2178,25 @@ class State(object):
         ops_file.close()
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
-        processor_tsv_file.write("level\tprocessor\n")
+        processor_tsv_file.write("processor\ttsv\tlevels\n")
         if show_procs:
-            for proc,level in processor_levels.iteritems():
-                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(proc)))
+            for proc in sorted(proc_list):
+                tsv = processor_levels[proc]['tsv']
+                levels = processor_levels[proc]['levels']
+                processor_tsv_file.write("%s\t%s\t%d\n" % 
+                                (repr(proc), tsv, levels))
         if show_channels:
-            for channel,level in channel_levels.iteritems():
-                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(channel)))
+            for channel in sorted(chan_list):
+                tsv = channel_levels[channel]['tsv']
+                levels = channel_levels[channel]['levels']
+                processor_tsv_file.write("%s\t%s\t%d\n" % 
+                                (repr(channel), tsv, levels))
         if show_instances:
-            for memory,level in memory_levels.iteritems():
-                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(memory)))
+            for memory in sorted(mem_list):
+                tsv = memory_levels[memory]['tsv']
+                levels = memory_levels[memory]['levels']
+                processor_tsv_file.write("%s\t%s\t%d\n" % 
+                                (repr(memory), tsv, levels))
         processor_tsv_file.close()
 
         scale_data = {
@@ -2154,77 +2210,63 @@ class State(object):
         with open(scale_json_file_name, "w") as scale_json_file:
             json.dump(scale_data, scale_json_file)
 
-def usage():
-    print 'Usage: '+sys.argv[0]+' [-p] [-i] [-c] [-s] [-v] [-o out_file] [-m us_per_pixel] <file_names>+'
-    print '  -p : include processors in visualization'
-    print '  -i : include instances in visualization'
-    print '  -c : include channels in visualization'
-    print '  -s : print statistics'
-    print '  -v : print verbose profiling information'
-    print '  -o <out_dirname> : give the directory for the output'
-    print '  -f : force the creation of a new directory for legion_prof timelines (OVERWRITES OLD DIRECTORY)'
-    print '  -m <ppm> : set the micro-seconds per pixel for images (default %d)' % (US_PER_PIXEL)
-    sys.exit(1)
-
 def main():
-    opts, args = getopt(sys.argv[1:],'pcivfm:o:sCST')
-    opts = dict(opts)
-    if len(args) == 0:
-      usage()
-    file_names = args
-    # By default we show all
-    # If options are specified we only show what the user wants
-    show_all = True
-    show_procs = False
-    show_channels = False
-    show_instances = False
-    show_copy_matrix = False
-    force = False
-    output_dirname = 'legion_prof'
-    copy_output_prefix = 'legion_prof_copy'
-    print_stats = False
-    verbose = False
+    class MyParser(argparse.ArgumentParser):
+        def error(self, message):
+            self.print_usage(sys.stderr)
+            print('error: %s' % message, file=sys.stderr)
+            print('hint: invoke %s -h for a detailed description of all arguments' % self.prog, file=sys.stderr)
+            sys.exit(2)
+    parser = MyParser(
+        description='Legion Prof: application profiler')
+    parser.add_argument(
+        '-C', '--copy', dest='show_copy_matrix', action='store_true',
+        help='include copy matrix in visualization')
+    parser.add_argument(
+        '-s', '--statistics', dest='print_stats', action='store_true',
+        help='print statistics')
+    parser.add_argument(
+        '-v', '--verbose', dest='verbose', action='store_true',
+        help='print verbose profiling information')
+    parser.add_argument(
+        '-m', '--ppm', dest='us_per_pixel', action='store',
+        type=int, default=US_PER_PIXEL,
+        help='micro-seconds per pixel (default %d)' % US_PER_PIXEL)
+    parser.add_argument(
+        '-o', '--output', dest='output', action='store',
+        default='legion_prof',
+        help='output directory pathname')
+    parser.add_argument(
+        '-f', '--force', dest='force', action='store_true',
+        help='overwrite output directory if it exists')
+    parser.add_argument(
+        dest='filenames', nargs='+',
+        help='input Legion Prof log filenames')
+    args = parser.parse_args()
+
+    file_names = args.filenames
+    show_all = not args.show_copy_matrix
+    show_procs = show_all
+    show_channels = show_all
+    show_instances = show_all
+    show_copy_matrix = args.show_copy_matrix
+    force = args.force
+    output_dirname = args.output
+    copy_output_prefix = output_dirname + "_copy"
+    print_stats = args.print_stats
+    verbose = args.verbose
     interactive_timeline = True
-    if '-p' in opts:
-        show_procs = True
-        show_all = False
-    if '-c' in opts:
-        show_channels = True
-        show_all = False
-    if '-i' in opts:
-        show_instances = True
-        show_all = False
-    if '-s' in opts:
-        print_stats = True
-    if '-v' in opts:
-        verbose = True
-    if '-f' in opts:
-        force = True
-    if '-m' in opts:
-        global US_PER_PIXEL
-        US_PER_PIXEL = int(opts['-m'])
-    if '-o' in opts:
-        output_dirname = opts['-o']
-        copy_output_prefix = output_dirname + "_copy"
-    if '-C' in opts:
-        show_copy_matrix = True
-    if '-S' in opts:
-        interactive_timeline = False
-    if show_all:
-        show_procs = True
-        show_channels = True
-        show_instances = True
 
     state = State()
     has_matches = False
     for file_name in file_names:
-        print 'Reading log file %s...' % file_name
+        print('Reading log file %s...' % file_name)
         total_matches = state.parse_log_file(file_name, verbose)
-        print 'Matched %s lines' % total_matches
+        print('Matched %s lines' % total_matches)
         if total_matches > 0:
             has_matches = True
     if not has_matches:
-        print 'No matches found! Exiting...'
+        print('No matches found! Exiting...')
         return
 
     # Once we are done loading everything, do the sorting

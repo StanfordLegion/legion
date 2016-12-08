@@ -5559,6 +5559,7 @@ namespace Legion {
       // again to see if it has been advanced if we are going to 
       // be writing/reducing below in the tree
       const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
+      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (IS_NO_ACCESS(regions[idx]))
@@ -5608,9 +5609,9 @@ namespace Legion {
             // all the way down to the child
             runtime->forest->advance_version_numbers(this, idx, 
                 false/*update parent state*/, false/*doesn't matter*/,
-                true/*dedup opens*/, false/*dedup advance*/, it->first, 
-                0/*id*/, one_below, one_below_path, it->second, 
-                empty_dirty_previous, ready_events);
+                logical_context_uid, true/*dedup opens*/, 
+                false/*dedup advance*/, it->first, 0/*id*/, one_below, 
+                one_below_path, it->second, empty_dirty_previous, ready_events);
           }
         }
         // If we're doing something other than reading, we need
@@ -5618,16 +5619,29 @@ namespace Legion {
         // this from the one below node to the node above the child node
         // The exception is if we are reducing in which case we go from
         // the all the way to the bottom so that the first reduction
-        // point bumps the version number appropriately
+        // point bumps the version number appropriately. Another exception is 
+        // for dirty reductions where we know that there is already a write 
+        // at the base level so we don't need to do an advance to get our 
+        // reduction registered with the parent VersionState object
+
         if (!IS_READ_ONLY(regions[idx]) && 
-            ((one_below != child_node) || proj_info.is_first_reduction()))
+            ((one_below != child_node) || 
+             (IS_REDUCE(regions[idx]) && !proj_info.is_dirty_reduction())))
         {
           RegionTreePath advance_path;
           // If we're a reduction we go all the way to the bottom
           // otherwise if we're read-write we go to the level above
           // because our version_analysis call will do the advance
-          // at the destination node
-          if (!proj_info.is_first_reduction())
+          // at the destination node.           
+          if (IS_REDUCE(regions[idx]) && !proj_info.is_dirty_reduction())
+          {
+#ifdef DEBUG_LEGION
+            assert((one_below->get_depth() < child_node->get_depth()) ||
+                   (one_below == child_node)); 
+#endif
+            advance_path = one_below_path;
+          }
+          else
           {
 #ifdef DEBUG_LEGION
             assert(one_below->get_depth() < child_node->get_depth()); 
@@ -5637,14 +5651,6 @@ namespace Legion {
             for (unsigned idx2 = one_below_path.get_min_depth(); 
                   idx2 < (one_below_path.get_max_depth()-1); idx2++)
               advance_path.register_child(idx2, one_below_path.get_child(idx2));
-          }
-          else
-          {
-#ifdef DEBUG_LEGION
-            assert((one_below->get_depth() < child_node->get_depth()) ||
-                   (one_below == child_node)); 
-#endif
-            advance_path = one_below_path;
           }
           const bool parent_is_upper_bound = 
             (slice_req.handle_type != PART_PROJECTION) && 
@@ -5656,9 +5662,9 @@ namespace Legion {
             // the target child for split version numbers
             runtime->forest->advance_version_numbers(this, idx, 
                 true/*update parent state*/, parent_is_upper_bound,
-                false/*dedup opens*/, true/*dedup advances*/, 0/*id*/, 
-                it->first, one_below, advance_path, it->second, 
-                empty_dirty_previous, ready_events);
+                logical_context_uid, false/*dedup opens*/, 
+                true/*dedup advances*/, 0/*id*/, it->first, one_below, 
+                advance_path, it->second, empty_dirty_previous, ready_events);
           }
         }
         // Now we can record our version numbers just like everyone else
@@ -5668,8 +5674,8 @@ namespace Legion {
                                       one_below_path, version_infos[idx], 
                                       ready_events, false/*partial*/, 
                                       false/*disjoint close*/, NULL/*filter*/,
-                                      one_below, &proj_epochs, 
-                                      true/*skip parent check*/);
+                                      one_below, logical_context_uid, 
+                                      &proj_epochs, true/*skip parent check*/);
       }
     }
 
@@ -7520,7 +7526,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool first = false;
-      RtUserEvent result = owner->find_slice_versioning_event(this, first); 
+      RtUserEvent result = 
+        owner->find_slice_versioning_event(unique_op_id, first);
       // If we're first, then we do the analysis
       // and chain the events
       if (first)

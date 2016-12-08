@@ -1561,7 +1561,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SpeculativeOp::is_predicated(void) const
+    bool SpeculativeOp::is_predicated_op(void) const
     //--------------------------------------------------------------------------
     {
       return (predicate != NULL);
@@ -4984,6 +4984,7 @@ namespace Legion {
       const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
       runtime->forest->advance_version_numbers(this, 0/*idx*/,
                                                false/*update parent state*/,
+                                               parent_ctx->get_context_uid(),
                                                false/*doesn't matter*/,
                                                false/*dedup opens*/,
                                                false/*dedup advances*/, 
@@ -5177,6 +5178,7 @@ namespace Legion {
         runtime->forest->advance_version_numbers(this, 0/*idx*/, 
                                                  true/*update parent state*/,
                                                  parent_is_upper_bound,
+                                                 parent_ctx->get_context_uid(),
                                                  false/*dedup opens*/,
                                                  false/*dedup advance*/,
                                                  0/*open id*/, 0/*advance id*/,
@@ -5190,6 +5192,7 @@ namespace Legion {
         runtime->forest->advance_version_numbers(this, 0/*idx*/,
                                                  true/*update parent state*/,
                                                  parent_is_upper_bound,
+                                                 parent_ctx->get_context_uid(),
                                                  false/*dedup opens*/,
                                                  false/*dedup advance*/,
                                                  0/*open id*/, 0/*advance id*/,
@@ -5204,6 +5207,7 @@ namespace Legion {
         runtime->forest->advance_version_numbers(this, 0/*idx*/,
                                                  true/*update parent state*/,
                                                  parent_is_upper_bound,
+                                                 parent_ctx->get_context_uid(),
                                                  false/*dedup opens*/,
                                                  false/*dedup advance*/,
                                                  0/*open id*/, 0/*advance id*/,
@@ -7873,6 +7877,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DynamicCollectiveOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // See if we had any contributions for this dynamic collective
+      std::vector<Future> contributions;
+      parent_ctx->find_collective_contributions(collective, contributions);
+      for (std::vector<Future>::const_iterator it = contributions.begin();
+            it != contributions.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->impl != NULL);
+#endif
+        it->impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (it->impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
+              get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void DynamicCollectiveOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
@@ -9354,18 +9381,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtUserEvent MustEpochOp::find_slice_versioning_event(SliceTask *slice,
+    RtUserEvent MustEpochOp::find_slice_versioning_event(UniqueID slice_id,
                                                          bool &first)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      std::map<SliceTask*,RtUserEvent>::const_iterator finder = 
-        slice_version_events.find(slice);
+      std::map<UniqueID,RtUserEvent>::const_iterator finder = 
+        slice_version_events.find(slice_id);
       if (finder == slice_version_events.end())
       {
         first = true; 
         RtUserEvent result = Runtime::create_rt_user_event();
-        slice_version_events[slice] = result;
+        slice_version_events[slice_id] = result;
         return result;
       }
       else

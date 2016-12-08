@@ -202,16 +202,17 @@ namespace Legion {
   namespace Internal {
 
     enum OpenState {
-      NOT_OPEN             = 0,
-      OPEN_READ_ONLY       = 1,
-      OPEN_READ_WRITE      = 2, // unknown dirty information below
-      OPEN_SINGLE_REDUCE   = 3, // only one open child with reductions below
-      OPEN_MULTI_REDUCE    = 4, // multiple open children with same reduction
+      NOT_OPEN                = 0,
+      OPEN_READ_ONLY          = 1,
+      OPEN_READ_WRITE         = 2, // unknown dirty information below
+      OPEN_SINGLE_REDUCE      = 3, // only one open child with reductions below
+      OPEN_MULTI_REDUCE       = 4, // multiple open children with same reduction
       // Only projection states below here
-      OPEN_READ_ONLY_PROJ  = 5, // read-only projection
-      OPEN_READ_WRITE_PROJ = 6, // read-write projection
+      OPEN_READ_ONLY_PROJ     = 5, // read-only projection
+      OPEN_READ_WRITE_PROJ    = 6, // read-write projection
       OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW = 7, // depth=1, children disjoint
-      OPEN_REDUCE_PROJ     = 8, // reduction-only projection
+      OPEN_REDUCE_PROJ        = 8, // reduction-only projection
+      OPEN_REDUCE_PROJ_DIRTY  = 9, // same as above but already open dirty 
     }; 
 
     // redop IDs - none used in HLR right now, but 0 isn't allowed

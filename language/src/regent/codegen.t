@@ -2042,11 +2042,14 @@ function codegen.expr_index_access(cx, node)
       return values.value(node, expr.just(actions, list), list_type)
     end
   elseif std.is_region(value_type) then
-    local index = codegen.expr(cx, node.index):read(cx)
+    local index = codegen.expr(cx, node.index):read(cx, index_type)
 
     local pointer_type = node.expr_type.pointer_type
     local pointer = index
     if not std.type_eq(index_type, pointer_type) then
+      if std.is_vptr(index_type) then
+        return values.vref(node, pointer, index_type)
+      end
       local point = std.implicit_cast(index_type, pointer_type.index_type, index.value)
       pointer = expr.just(
         index.actions,
