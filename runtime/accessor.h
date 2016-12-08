@@ -22,6 +22,7 @@
 #define CUDAPREFIX
 #endif
 
+#include "common.h"
 #include "arrays.h"
 
 #ifndef __GNUC__
