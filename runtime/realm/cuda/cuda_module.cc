@@ -1783,6 +1783,21 @@ namespace Realm {
       // no synchronization here
     }
 
+    void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
+    {
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CHECK_CU( cuMemsetD32Async((CUdeviceptr)dst, unsigned(value), 
+                                  count, current) );
+    }
+
+    void GPUProcessor::gpu_memset_async(void *dst, int value, 
+                                        size_t count, cudaStream_t stream)
+    {
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CHECK_CU( cuMemsetD32Async((CUdeviceptr)dst, unsigned(value),
+                                  count, current) );
+    }
+
 
     ////////////////////////////////////////////////////////////////////////
     //

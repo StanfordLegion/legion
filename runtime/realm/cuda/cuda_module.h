@@ -520,6 +520,8 @@ namespace Realm {
 					size_t offset, cudaMemcpyKind kind,
 					cudaStream_t stream);
 
+      void gpu_memset(void *dst, int value, size_t count);
+      void gpu_memset_async(void *dst, int value, size_t count, cudaStream_t stream);
     public:
       GPU *gpu;
 

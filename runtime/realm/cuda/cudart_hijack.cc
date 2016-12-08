@@ -264,6 +264,21 @@ namespace Realm {
 	return cudaSuccess;
       }
 
+      cudaError_t cudaMemset(void *dst, int value, size_t count)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaMemset");
+        p->gpu_memset(dst, value, count);
+        return cudaSuccess;
+      }
+
+      cudaError_t cudaMemsetAsync(void *dst, int value, 
+                                  size_t count, cudaStream_t stream)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaMemsetAsync");
+        p->gpu_memset_async(dst, value, count, stream);
+        return cudaSuccess;
+      }
+
       cudaError_t cudaDeviceSynchronize(void)
       {
 	GPUProcessor *p = get_gpu_or_die("cudaDeviceSynchronize");
