@@ -15,6 +15,7 @@
  */
 
 #include "channel.h"
+#include "channel_disk.h"
 
 namespace LegionRuntime {
   namespace LowLevel {
@@ -1644,7 +1645,7 @@ namespace LegionRuntime {
             channel = channel_manager->get_hdf_read_channel();
             buf_base = (char*) dst_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
             assert(src_impl->kind == MemoryImpl::MKIND_HDF);
-            assert(dst_impl->kind == MemoryImpl::MKIND_SYSMEM || dst_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
+            //assert(dst_impl->kind == MemoryImpl::MKIND_SYSMEM || dst_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
             HDFReadRequest* hdf_read_reqs = (HDFReadRequest*) calloc(max_nr, sizeof(HDFReadRequest));
             for (int i = 0; i < max_nr; i++) {
               hdf_read_reqs[i].xd = this;
@@ -1682,7 +1683,7 @@ namespace LegionRuntime {
             pthread_rwlock_unlock(&((HDFMemory*)get_runtime()->get_memory_impl(dst_buf.memory))->rwlock);
             channel = channel_manager->get_hdf_write_channel();
             buf_base = (char*) src_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-            assert(src_impl->kind == MemoryImpl::MKIND_SYSMEM || src_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
+            //assert(src_impl->kind == MemoryImpl::MKIND_SYSMEM || src_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
             assert(dst_impl->kind == MemoryImpl::MKIND_HDF);
             HDFWriteRequest* hdf_write_reqs = (HDFWriteRequest*) calloc(max_nr, sizeof(HDFWriteRequest));
             for (int i = 0; i < max_nr; i++) {
