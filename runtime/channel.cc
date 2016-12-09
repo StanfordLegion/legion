@@ -2640,6 +2640,8 @@ namespace LegionRuntime {
         async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
         async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
 #endif /*USE_DISK*/
+        async_channels.push_back(channel_manager->create_file_read_channel(max_nr));
+        async_channels.push_back(channel_manager->create_file_write_channel(max_nr));
         dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, async_channels);
         gasnet_channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
         gasnet_channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));

@@ -1119,6 +1119,16 @@ namespace LegionRuntime{
         return disk_write_channel;
       }
 #endif /*USE_DISK*/
+      FileChannel* create_file_read_channel(long max_nr) {
+        assert(file_read_channel == NULL);
+        file_read_channel = new FileChannel(max_nr, XferDes::XFER_FILE_READ);
+        return file_read_channel;
+      }
+      FileChannel* create_file_write_channel(long max_nr) {
+        assert(file_write_channel == NULL);
+        file_write_channel = new FileChannel(max_nr, XferDes::XFER_FILE_WRITE);
+        return file_write_channel;
+      }
 #ifdef USE_CUDA
       GPUChannel* create_gpu_to_fb_channel(long max_nr, GPU* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
@@ -1169,6 +1179,12 @@ namespace LegionRuntime{
         return disk_write_channel;
       }
 #endif /*USE_DISK*/
+      FileChannel* get_file_read_channel() {
+        return file_read_channel;
+      }
+      FileChannel* get_file_write_channel() {
+        return file_write_channel;
+      }
 #ifdef USE_CUDA
       GPUChannel* get_gpu_to_fb_channel(GPU* gpu) {
         std::map<GPU*, GPUChannel*>::iterator it;
@@ -1210,6 +1226,7 @@ namespace LegionRuntime{
 #ifdef USE_DISK
       DiskChannel *disk_read_channel, *disk_write_channel;
 #endif /*USE_DISK*/
+      FileChannel *file_read_channel, *file_write_channel;
 #ifdef USE_CUDA
       std::map<GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif
