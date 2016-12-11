@@ -1528,7 +1528,7 @@ function std.flatten_struct_fields(struct_type, pred)
           end))
       field_types:insertall(entry_field_types)
     end
-  else
+  elseif pred == nil then
     field_paths:insert(data.newtuple())
     field_types:insert(struct_type)
   end
