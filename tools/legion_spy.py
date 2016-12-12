@@ -15,6 +15,10 @@
 # limitations under the License.
 #
 
+# TODO LIST
+# Better algorithm for checking for dataflow paths in physical analysis
+# Support predication for physical analysis
+
 from __future__ import print_function
 
 import argparse
