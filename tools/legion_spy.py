@@ -3445,8 +3445,9 @@ class LogicalState(object):
                 # Full closes have to close everybody 
                 children_to_close = dict() 
                 # If we're going to do a write discard then
-                # this can be a read only close
-                overwrite = req.priv == WRITE_ONLY
+                # this can be a read only close, but only if
+                # the operation is not predicated
+                overwrite = req.priv == WRITE_ONLY and not op.predicate 
                 for child,open_mode in self.open_children.iteritems():
                     if open_mode == OPEN_READ_ONLY:                
                         children_to_close[child] = False
