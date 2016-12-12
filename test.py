@@ -32,7 +32,7 @@ tutorial = [
 ]
 
 examples = [
-    ['examples/attach_file/attach_file', []],
+    #['examples/attach_file/attach_file', []],
     ['examples/circuit/circuit', []],
     ['examples/dynamic_registration/dynamic_registration', []],
     ['examples/ghost/ghost', ['-ll:cpu', '4']],
