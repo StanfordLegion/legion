@@ -1345,7 +1345,6 @@ namespace Legion {
                                     const bool advance_root = true);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
-                              bool permit_leave_open,
                               bool read_only_close);
       void siphon_logical_children(LogicalCloser &closer,
                                    LogicalState &state,
@@ -1375,11 +1374,9 @@ namespace Legion {
                                     bool allow_next_child,
                                     const FieldMask *aliased_children,
                                     bool upgrade_next_child, 
-                                    bool permit_leave_open,
                                     bool read_only_close,
                                     bool record_close_operations,
                                     bool record_closed_fields,
-                                   LegionDeque<FieldState>::aligned &new_states,
                                     FieldMask &output_mask); 
       void merge_new_field_state(LogicalState &state, 
                                  const FieldState &new_state);
