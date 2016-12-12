@@ -2662,10 +2662,10 @@ class LogicalRegion(object):
         for child in self.children.itervalues():
             child.perform_deletion_invalidation(op, req, field)
 
-    def close_logical_tree(self, field, closed_users, permit_leave_open):
+    def close_logical_tree(self, field, closed_users):
         if field not in self.logical_state:
             return
-        self.logical_state[field].close_logical_tree(closed_users, permit_leave_open)
+        self.logical_state[field].close_logical_tree(closed_users)
 
     def get_verification_state(self, depth, field, point):
         # Should always be at the root
@@ -2999,10 +2999,10 @@ class LogicalPartition(object):
         for child in self.children.itervalues():
             child.perform_deletion_invalidation(op, req, field)
 
-    def close_logical_tree(self, field, closed_users, permit_leave_open):
+    def close_logical_tree(self, field, closed_users):
         if field not in self.logical_state:
             return
-        self.logical_state[field].close_logical_tree(closed_users, permit_leave_open)
+        self.logical_state[field].close_logical_tree(closed_users)
 
     def compute_current_version_numbers(self, depth, field, op, index):
         self.parent.compute_current_version_numbers(depth, field, op, 
@@ -3377,11 +3377,10 @@ class LogicalState(object):
                         return False
                     self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
-            children_to_close = dict()
-            permit_leave_open = False # Never allowed to leave anything open here
+            children_to_close = set()
             # Flushing reductions close all children no matter what
             for child,open_mode in self.open_children.iteritems():
-                children_to_close[child] = permit_leave_open
+                children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
             if not self.perform_close_operation(children_to_close, False, op, req, 
                                                 previous_deps, perform_checks):
@@ -3571,11 +3570,10 @@ class LogicalState(object):
                     else:
                         self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
-            children_to_close = dict()
-            permit_leave_open = False # Never allowed to leave anything open here
+            children_to_close = set()
             # Flushing reductions close all children no matter what
             for child,open_mode in self.open_children.iteritems():
-                children_to_close[child] = permit_leave_open
+                children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
             if not self.perform_close_operation(children_to_close, False, op, req, 
                                                 previous_deps, perform_checks):
@@ -3757,10 +3755,10 @@ class LogicalState(object):
                                           perform_checks, error_str)
         if not close:
             return False
-        for child,permit_leave_open in children_to_close.iteritems():
+        for child in children_to_close:
             closed_users = list()
             # Close the child tree
-            child.close_logical_tree(self.field, closed_users, permit_leave_open)
+            child.close_logical_tree(self.field, closed_users)
             # Perform any checks
             if perform_checks:
                 if not self.perform_close_checks(close, closed_users, op, req, 
@@ -3769,12 +3767,7 @@ class LogicalState(object):
             else:
                 self.record_close_dependences(close, closed_users, op, req,
                                               previous_deps)
-            # Remove the child if necessary
-            if permit_leave_open:
-                assert req.is_read_only()
-                self.open_children[child] = OPEN_READ_ONLY
-            else:
-                del self.open_children[child]
+            del self.open_children[child]
             # Remove it from the list of open reductions to if it is there
             if child in self.open_redop:
                 del self.open_redop[child]
@@ -3801,21 +3794,15 @@ class LogicalState(object):
                 self.dirty_below = False
         return True
 
-    def close_logical_tree(self, closed_users, permit_leave_open):
+    def close_logical_tree(self, closed_users):
         # Save the closed users and then close the subtrees
         closed_users += self.current_epoch_users
         self.current_epoch_users = list()
         self.previous_epoch_users = list()
         for child in self.open_children:
-            child.close_logical_tree(self.field, closed_users, permit_leave_open)
-        if permit_leave_open:
-            for child in self.open_children.iterkeys():
-                self.open_children[child] = OPEN_READ_ONLY
-                if child in self.open_redop:
-                    del self.open_redop[child]
-        else:
-            self.open_children = dict()
-            self.open_redop = dict()
+            child.close_logical_tree(self.field, closed_users)
+        self.open_children = dict()
+        self.open_redop = dict()
         self.current_redop = 0
         self.dirty_below = False
         self.projection_mode = OPEN_NONE
