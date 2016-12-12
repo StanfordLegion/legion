@@ -4750,13 +4750,13 @@ namespace Legion {
                                                          unsigned idx2)
     //--------------------------------------------------------------------------
     {
-#if 0
-      log_run.error("Aliased region requirements for individual tasks "
-                          "are not permitted. Region requirements %d and %d "
-                          "of task %s (UID %lld) in parent task %s (UID %lld) "
-                          "are interfering.", idx1, idx2, get_task_name(),
-                          get_unique_id(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id());
+#if 1
+      log_run.error("Aliased and interfering region requirements for "
+                    "individual tasks are not permitted. Region requirements "
+                    "%d and %d of task %s (UID %lld) in parent task %s "
+                    "(UID %lld) are interfering.", idx1, idx2, get_task_name(),
+                    get_unique_id(), parent_ctx->get_task_name(),
+                    parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
 #endif
