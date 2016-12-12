@@ -4184,7 +4184,7 @@ class VerificationTraverser(object):
                        self.dataflow_stack[-1] and \
                     self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
                     # Traverse the dataflow path
-                    src = copy.srcs[copy.dst_fields.index(self.src_field)]
+                    src = copy.srcs[copy.dst_fields.index(self.dst_field)]
                     # See if the source is a valid instance or a
                     # previous instance in the presence of pending reductions
                     if not self.state.pending_reductions or self.state.valid_instances:
