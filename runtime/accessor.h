@@ -105,6 +105,9 @@ namespace LegionRuntime {
 
     template <typename AT> struct RegionAccessor<AT, void, void> : public AT::Untyped {
       CUDAPREFIX
+      RegionAccessor(void)
+        : AT::Untyped() {}
+      CUDAPREFIX
       RegionAccessor(const typename AT::Untyped& to_copy)
 	: AT::Untyped(to_copy) {}
     };
