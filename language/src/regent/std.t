@@ -1509,26 +1509,28 @@ function std.flatten_struct_fields(struct_type, pred)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()
-  if pred ~= nil and pred(struct_type) then
-    field_paths:insert(data.newtuple())
-    field_types:insert(struct_type)
-  elseif struct_type:isstruct() or std.is_fspace_instance(struct_type) then
-    local entries = struct_type:getentries()
-    for _, entry in ipairs(entries) do
-      local entry_name = entry[1] or entry.field
-      -- FIXME: Fix for struct types with symbol fields.
-      assert(type(entry_name) == "string")
-      local entry_type = entry[2] or entry.type
-      local entry_field_paths, entry_field_types =
-        std.flatten_struct_fields(entry_type, pred)
-      field_paths:insertall(
-        entry_field_paths:map(
-          function(entry_field_path)
-            return data.newtuple(entry_name) .. entry_field_path
-          end))
-      field_types:insertall(entry_field_types)
+  if pred == nil or pred(struct_type) == nil then
+    if struct_type:isstruct() or std.is_fspace_instance(struct_type) then
+      local entries = struct_type:getentries()
+      for _, entry in ipairs(entries) do
+        local entry_name = entry[1] or entry.field
+        -- FIXME: Fix for struct types with symbol fields.
+        assert(type(entry_name) == "string")
+        local entry_type = entry[2] or entry.type
+        local entry_field_paths, entry_field_types =
+          std.flatten_struct_fields(entry_type, pred)
+        field_paths:insertall(
+          entry_field_paths:map(
+            function(entry_field_path)
+              return data.newtuple(entry_name) .. entry_field_path
+            end))
+        field_types:insertall(entry_field_types)
+      end
+    else
+      field_paths:insert(data.newtuple())
+      field_types:insert(struct_type)
     end
-  elseif pred == nil then
+  elseif pred(struct_type) then
     field_paths:insert(data.newtuple())
     field_types:insert(struct_type)
   end
