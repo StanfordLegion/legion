@@ -127,21 +127,14 @@ void deferred_free(void *ptr)
   }
 }
 
-enum PayloadSourceType {
-  PAYLOAD_SOURCE_CONTIGUOUS = 0,
-  PAYLOAD_SOURCE_TWOD,
-  PAYLOAD_SOURCE_SPAN,
-};
-
 class PayloadSource {
 public:
   PayloadSource(void) { }
   virtual ~PayloadSource(void) { }
 public:
   virtual void copy_data(void *dest) = 0;
-  virtual PayloadSourceType get_payload_source_type() = 0;
   virtual void *get_contig_pointer(void) { assert(false); return 0; }
-  virtual int get_payload_mode(void) { assert(false); return PAYLOAD_NONE; }
+  virtual int get_payload_mode(void) { return PAYLOAD_KEEP; }
 };
 
 class ContiguousPayload : public PayloadSource {
@@ -149,7 +142,6 @@ public:
   ContiguousPayload(void *_srcptr, size_t _size, int _mode);
   virtual ~ContiguousPayload(void) { }
   virtual void copy_data(void *dest);
-  virtual PayloadSourceType get_payload_source_type() { return PAYLOAD_SOURCE_CONTIGUOUS; }
   virtual void *get_contig_pointer(void) { return srcptr; }
   virtual int get_payload_mode(void) { return mode; }
 protected:
@@ -164,8 +156,6 @@ public:
 	      ptrdiff_t _line_stride, int _mode);
   virtual ~TwoDPayload(void) { }
   virtual void copy_data(void *dest);
-  virtual PayloadSourceType get_payload_source_type() { return PAYLOAD_SOURCE_TWOD; }
-  virtual int get_payload_mode(void) { return PAYLOAD_KEEP; }
 protected:
   const void *srcptr;
   size_t line_size, line_count;
@@ -178,7 +168,6 @@ public:
   SpanPayload(const SpanList& _spans, size_t _size, int _mode);
   virtual ~SpanPayload(void) { }
   virtual void copy_data(void *dest);
-  virtual PayloadSourceType get_payload_source_type() { return PAYLOAD_SOURCE_SPAN; }
 protected:
   SpanList spans;
   size_t size;
