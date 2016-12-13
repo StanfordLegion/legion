@@ -528,6 +528,7 @@ namespace LegionRuntime {
 
       bool dominates(const Rect<DIM>& other) const
       {
+        if (other.volume() == 0) return true;
         for (unsigned i = 0; i < DIM; i++)
         {
           if (other.lo.x[i] < lo.x[i])
