@@ -4211,6 +4211,7 @@ namespace Legion {
     void VersionManager::reset(void)
     //--------------------------------------------------------------------------
     {
+      AutoLock m_lock(manager_lock);
       is_owner = false;
       current_context = NULL;
       remote_valid_fields.clear();
