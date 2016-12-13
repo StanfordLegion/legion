@@ -1509,7 +1509,8 @@ function std.flatten_struct_fields(struct_type, pred)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()
-  if pred == nil or pred(struct_type) == nil then
+  local check = pred and pred(struct_type)
+  if check == nil then
     if struct_type:isstruct() or std.is_fspace_instance(struct_type) then
       local entries = struct_type:getentries()
       for _, entry in ipairs(entries) do
@@ -1530,7 +1531,7 @@ function std.flatten_struct_fields(struct_type, pred)
       field_paths:insert(data.newtuple())
       field_types:insert(struct_type)
     end
-  elseif pred(struct_type) then
+  elseif check then
     field_paths:insert(data.newtuple())
     field_types:insert(struct_type)
   end
