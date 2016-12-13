@@ -5091,7 +5091,7 @@ namespace Legion {
       // See if we need to trigger that our children are complete
       // Note it is only safe to do this if we were not sent remotely
       bool need_commit = false;
-      if (!sent_remotely)
+      if (!sent_remotely && (execution_context != NULL))
         need_commit = execution_context->attempt_children_commit();
       if (must_epoch != NULL)
         must_epoch->notify_subop_complete(this);
