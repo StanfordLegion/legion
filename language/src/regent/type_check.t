@@ -1687,7 +1687,7 @@ function type_check.expr_image(cx, node)
     end
   end
 
-  if std.is_bounded_type(field_type) then
+  if std.is_bounded_type(field_type) and field_type:is_ptr() then
     -- Check that parent is a subregion of the field bounds.
     for _, bound_symbol in ipairs(field_type.bounds_symbols) do
       local constraint = std.constraint(
@@ -1841,7 +1841,7 @@ function type_check.expr_preimage(cx, node)
     end
   end
 
-  if std.is_bounded_type(field_type) then
+  if std.is_bounded_type(field_type) and field_type:is_ptr() then
     -- Check that partitions's parent is a subregion of the field bounds.
     for _, bound_symbol in ipairs(field_type.bounds_symbols) do
       local constraint = std.constraint(
