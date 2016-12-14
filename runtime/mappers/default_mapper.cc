@@ -1697,6 +1697,34 @@ namespace Legion {
                           std::vector<PhysicalInstance> &instances)
     //--------------------------------------------------------------------------
     {
+      // Special case for reduction instances, no point in checking
+      // for existing ones and we also know that currently we can only
+      // make a single instance for each field of a reduction
+      if (req.privilege == REDUCE)
+      {
+        // Iterate over the fields one by one for now, once Realm figures
+        // out how to deal with reduction instances that contain
+        bool force_new_instances = true; // always have to force new instances
+        LayoutConstraintID our_layout_id = 
+         default_policy_select_layout_constraints(ctx, target_memory, req,
+               TASK_MAPPING, needs_field_constraint_check, force_new_instances);
+        LayoutConstraintSet our_constraints = 
+                      runtime->find_layout_constraints(ctx, our_layout_id);
+        instances.resize(instances.size() + req.privilege_fields.size());
+        unsigned idx = 0;
+        for (std::set<FieldID>::const_iterator it = 
+              req.privilege_fields.begin(); it !=
+              req.privilege_fields.end(); it++, idx++)
+        {
+          our_constraints.field_constraint.field_set.clear();
+          our_constraints.field_constraint.field_set.push_back(*it);
+          if (!default_make_instance(ctx, target_memory, our_constraints,
+                       instances[idx], TASK_MAPPING, force_new_instances,
+                       true/*meets*/, req))
+            return false;
+        }
+        return true; 
+      }
       // Before we do anything else figure out our 
       // constraints for any instances of this task, then we'll
       // see if these constraints conflict with or are satisfied by
