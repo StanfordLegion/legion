@@ -1821,6 +1821,9 @@ namespace Legion {
         FoldReductionManager::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+#endif
       return instance.get_accessor();
     }
 
@@ -1830,9 +1833,15 @@ namespace Legion {
         FoldReductionManager::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return instance.get_accessor();
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+      assert(layout != NULL);
+#endif
+      const Domain::CopySrcDstField &info = layout->find_field_info(fid);
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> temp = 
+                                                    instance.get_accessor();
+      return temp.get_untyped_field_accessor(info.offset, info.size);
     }
 
     //--------------------------------------------------------------------------
