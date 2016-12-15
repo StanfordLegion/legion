@@ -6188,7 +6188,7 @@ class Operation(object):
             PENDING_PART_OP_KIND : "honeydew",
             DYNAMIC_COLLECTIVE_OP_KIND : "navy",
             TRACE_OP_KIND : "springgreen",
-            TIMING_OP_KIND : "turqoise",
+            TIMING_OP_KIND : "turquoise",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
             }[self.kind]
