@@ -1617,10 +1617,14 @@ namespace Legion {
         assert((speculation_state == RESOLVE_TRUE_STATE) ||
                (speculation_state == RESOLVE_FALSE_STATE));
 #endif
-        if (speculation_state == RESOLVE_TRUE_STATE)
-          resolve_true(false/*misspeculated*/);
-        else
+        if (speculation_state == RESOLVE_FALSE_STATE)
+        {
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_predicated_false_op(unique_op_id);
           resolve_false(false/*misspecualted*/);
+        }
+        else
+          resolve_true(false/*misspeculated*/);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -1701,7 +1705,11 @@ namespace Legion {
       if (continue_true)
         resolve_true(false/*misspeculated*/);
       if (continue_false)
+      {
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_predicated_false_op(unique_op_id);
         resolve_false(false/*misspeculated*/);
+      }
       if (need_resolution)
         resolve_speculation(); 
     }
@@ -1803,7 +1811,11 @@ namespace Legion {
       if (continue_true)
         resolve_true(misspeculated);
       if (continue_false)
+      {
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_predicated_false_op(unique_op_id);
         resolve_false(misspeculated);
+      }
       if (misspeculated)
         quash_operation(get_generation(), restart);
       if (need_resolve)
