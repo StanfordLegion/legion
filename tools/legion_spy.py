@@ -2305,7 +2305,7 @@ class IndexPartition(object):
                 print(('WARNING: child % is not dominated by parent %s in %s. '+
                       'This is definitely an application bug.') %
                       (child, self.parent, self))
-                if self.node.state.assert_on_warning:
+                if self.state.assert_on_warning:
                     assert False
         # Check disjointness
         if self.disjoint:
@@ -2316,7 +2316,7 @@ class IndexPartition(object):
                     print(('WARNING: %s was logged disjoint '+
                             'but there are overlapping children. This '+
                             'is definitely an application bug.') % self)
-                    if self.node.state.assert_on_warning:
+                    if self.state.assert_on_warning:
                         assert False
                     break
                 previous |= child_shape
@@ -2328,7 +2328,7 @@ class IndexPartition(object):
                 print(('WARNING: %s was logged complete '+
                         'but there are missing points. This '+
                         'is definitely an application bug.') % self)
-                if self.node.state.assert_on_warning:
+                if self.state.assert_on_warning:
                     assert False
 
     def update_index_sets(self, index_sets):
