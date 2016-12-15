@@ -4888,8 +4888,8 @@ class Operation(object):
                  'temporaries', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
-                 'advance_ops', 'task', 'task_id', 'predicate', 'futures', 
-                 'index_owner', 'points', 'launch_rect', 'creator', 
+                 'advance_ops', 'task', 'task_id', 'predicate', 'predicate_result',
+                 'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
                  'realm_copies', 'realm_fills', 'version_numbers', 
                  'internal_idx', 'disjoint_close_fields', 'partition_kind', 
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
@@ -4920,6 +4920,7 @@ class Operation(object):
         self.realm_fills = None
         self.version_numbers = None
         self.predicate = None
+        self.predicate_result = True
         self.futures = None
         # Only valid for tasks
         self.task = None
@@ -5174,6 +5175,9 @@ class Operation(object):
         if index not in self.temporaries:
             self.temporaries[index] = dict()
         self.temporaries[index][fid] = inst
+
+    def set_predicate_result(self, result):
+        self.predicate_result = result
 
     def add_future(self, future):
         if not self.futures:
@@ -6051,6 +6055,9 @@ class Operation(object):
         return True
 
     def perform_op_physical_verification(self, perform_checks):
+        # If we were predicated false, then there is nothing to do
+        if not self.predicate_result:
+            return True
         prefix = ''
         if self.context:
             depth = self.context.get_depth()
@@ -6068,11 +6075,9 @@ class Operation(object):
                     return False
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
-            # If this was predicated there might not be any points
-            if self.points:
-                for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
-                    if not point.op.perform_op_physical_verification(perform_checks):
-                        return False
+            for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
+                if not point.op.perform_op_physical_verification(perform_checks):
+                    return False
             return True
         print((prefix+"Performing physical verification analysis "+
                      "for %s (UID %d)...") % (str(self),self.uid))
@@ -6266,6 +6271,9 @@ class Operation(object):
         self.print_base_node(printer, False)
 
     def print_event_graph(self, printer, elevate, all_nodes, top):
+        # If we were predicated false then we don't get printed
+        if not self.predicate_result:
+            return
         # Do any of our close operations too
         if self.inter_close_ops:
             for close in self.inter_close_ops:
@@ -8536,6 +8544,8 @@ close_index_pat          = re.compile(
     prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 disjoint_close_pat       = re.compile(
     prefix+"Disjoint Close Field (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
+predicate_false_pat      = re.compile(
+    prefix+"Predicate False (?P<uid>[0-9]+)")
 # Patterns for logical analysis and region requirements
 requirement_pat         = re.compile(
     prefix+"Logical Requirement (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<is_reg>[0-1]) "+
@@ -9276,6 +9286,11 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.add_disjoint_close_field(int(m.group('fid')))     
+        return True
+    m = predicate_false_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_predicate_result(False)
         return True
     # Region tree shape patterns (near the bottom since they are infrequent)
     m = top_index_pat.match(line)
