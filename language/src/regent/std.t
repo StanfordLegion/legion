@@ -1038,6 +1038,7 @@ local function reconstruct_param_as_arg_type(param_type, mapping, optional)
     local param_parent_region_as_arg_type =
       reconstruct_param_as_arg_symbol(param_type:parent_region(), mapping)
     local param_colors_as_arg_type =
+      reconstruct_param_as_arg_symbol(param_type:colors(), mapping) or
       reconstruct_param_as_arg_type(param_type:colors(), mapping)
     return std.partition(
       param_type.disjointness, param_parent_region_as_arg_type,
