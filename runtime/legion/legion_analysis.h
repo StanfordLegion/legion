@@ -712,6 +712,7 @@ namespace Legion {
       // Record normal closes like this
       void record_close_operation(const FieldMask &mask, bool projection,
                                   bool disjoint_close = false);
+      void record_overwriting_close(const FieldMask &mask, bool projection);
       void record_read_only_close(const FieldMask &mask, bool projection);
       void record_flush_only_close(const FieldMask &mask);
       ClosedNode* find_closed_node(RegionTreeNode *node);
@@ -751,6 +752,7 @@ namespace Legion {
       FieldMask normal_close_mask;
       FieldMask read_only_close_mask;
       FieldMask flush_only_close_mask;
+      FieldMask overwriting_close_mask;
       std::map<RegionTreeNode*,ClosedNode*> closed_nodes;
       FieldMask closed_projections;
       FieldMask disjoint_close_mask;

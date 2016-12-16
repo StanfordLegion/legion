@@ -1375,6 +1375,7 @@ namespace Legion {
                                     const FieldMask *aliased_children,
                                     bool upgrade_next_child, 
                                     bool read_only_close,
+                                    bool overwriting_close,
                                     bool record_close_operations,
                                     bool record_closed_fields,
                                     FieldMask &output_mask); 

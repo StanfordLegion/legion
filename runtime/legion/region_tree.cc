@@ -11081,6 +11081,7 @@ namespace Legion {
                                    NULL/*aliased children*/,
                                    false/*upgrade*/,
                                    read_only_close,
+                                   false/*overwiting close*/,
                                    false/*record close operations*/,
                                    false/*record closed fields*/,
                                    already_open);
@@ -11196,6 +11197,7 @@ namespace Legion {
                                          aliased_children,
                                          needs_upgrade,
                                          true/*read only close*/,
+                                         false/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          already_open);
@@ -11219,7 +11221,8 @@ namespace Legion {
                                        true/*allow next*/,
                                        aliased_children,
                                        false/*needs upgrade*/,
-                                       overwriting/*read only close*/,
+                                       false/*read only close*/,
+                                       overwriting/*overwriting close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
                                        open_below);
@@ -11324,6 +11327,7 @@ namespace Legion {
                                            aliased_children,
                                            true/*needs upgrade*/,
                                            false/*read only close*/,
+                                           false/*overwriting close*/,
                                            record_close_operations,
                                            false/*record closed fields*/,
                                            already_open);
@@ -11348,7 +11352,8 @@ namespace Legion {
                                          false/*allow next*/,
                                          NULL/*aliased children*/,
                                          false/*needs upgrade*/,
-                                         overwriting/*read only close*/,
+                                         false/*read only close*/,
+                                         overwriting/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          already_open);
@@ -11389,7 +11394,8 @@ namespace Legion {
                                          false/*allow next child*/,
                                          NULL/*aliased children*/,
                                          false/*needs upgrade*/,
-                                         overwriting/*read only close*/,
+                                         false/*read only close*/,
+                                         overwriting/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          already_open);
@@ -11441,7 +11447,7 @@ namespace Legion {
                 assert(!!overlap);
 #endif
                 if (overwriting)
-                  closer.record_read_only_close(overlap, true/*projection*/);
+                  closer.record_overwriting_close(overlap, true/*projection*/);
                 else
                 {
                   closer.record_close_operation(overlap, true/*projection*/);
@@ -11473,7 +11479,7 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   if (overwriting)
-                    closer.record_read_only_close(overlap, true/*projection*/);
+                    closer.record_overwriting_close(overlap,true/*projection*/);
                   else
                   {
                     closer.record_close_operation(overlap, true/*projection*/);
@@ -11565,6 +11571,7 @@ namespace Legion {
                                        NULL/*aliased children*/,
                                        false/*needs upgrade*/,
                                        true/*read only close*/,
+                                       false/*overwriting close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
                                        already_open);
@@ -11585,6 +11592,7 @@ namespace Legion {
                                        NULL/*aliased children*/,
                                        false/*needs upgrade*/,
                                        false/*read only close*/,
+                                       false/*overwriting close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
                                        already_open);
@@ -11884,6 +11892,7 @@ namespace Legion {
                                      NULL/*aliased children*/,
                                      false/*needs upgrade*/,
                                      false/*read only close*/,
+                                     false/*overwriting close*/,
                                      record_close_operations,
                                      true/*record closed fields*/,
                                      closed_child_fields);
@@ -11916,6 +11925,7 @@ namespace Legion {
                                             const FieldMask *aliased_children,
                                             bool upgrade_next_child,
                                             bool read_only_close,
+                                            bool overwriting_close,
                                             bool record_close_operations,
                                             bool record_closed_fields,
                                             FieldMask &output_mask)
@@ -11961,10 +11971,12 @@ namespace Legion {
           }
         }
       }
-      else if (read_only_close)
+      else if (read_only_close || overwriting_close)
       {
         // Read only closes can close specific children without 
         // any issues, so we can selectively filter what we need to close
+        // Overwriting closes are the same as read-only closes, but 
+        // they actually do need to close all the children
         std::vector<ColorPoint> to_delete;
         for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
               state.open_children.begin(); it != 
@@ -12014,8 +12026,8 @@ namespace Legion {
             }
           }
           // Check for child disjointness
-          if (next_child.is_valid() && (it->first != next_child) &&
-              (all_children_disjoint || 
+          if (!overwriting_close && next_child.is_valid() && 
+              (it->first != next_child) && (all_children_disjoint || 
                are_children_disjoint(it->first, next_child)))
             continue;
           // Perform the close operation
@@ -12023,7 +12035,12 @@ namespace Legion {
           child_node->close_logical_node(closer, close_mask, 
                                          true/*read only*/);
           if (record_close_operations)
-            closer.record_read_only_close(close_mask, false/*projection*/);
+          {
+            if (overwriting_close)
+              closer.record_overwriting_close(close_mask, false/*projection*/);
+            else
+              closer.record_read_only_close(close_mask, false/*projection*/);
+          }
           // Remove the close fields
           it->second -= close_mask;
           removed_fields = true;
@@ -12647,6 +12664,7 @@ namespace Legion {
                                          NULL/*aliased children*/,
                                          false/*upgrade next child*/,
                                          false/*read only close*/,
+                                         false/*overwriting close*/,
                                          true/*record close operations*/,
                                          true/*record closed fields*/,
                                          open_below);
@@ -12672,6 +12690,7 @@ namespace Legion {
                                          NULL/*aliased children*/,
                                          false/*upgrade next child*/,
                                          false/*read only close*/,
+                                         false/*overwriting close*/,
                                          true/*record close operations*/,
                                          true/*record closed fields*/,
                                          open_below);
@@ -12695,6 +12714,7 @@ namespace Legion {
                                        NULL/*aliased children*/,
                                        false/*upgrade next child*/,
                                        false/*read only close*/,
+                                       false/*overwriting close*/,
                                        true/*record close operations*/,
                                        true/*record closed fields*/,
                                        open_below);
