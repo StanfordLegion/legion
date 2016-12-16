@@ -1607,6 +1607,15 @@ function specialize.stat_raw_delete(cx, node)
   }
 end
 
+function specialize.stat_with(cx, node)
+  return ast.specialized.stat.With {
+    exprs = node.exprs:map(function(expr) return specialize.expr(cx, expr) end),
+    block = specialize.block(cx, node.block),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.stat(cx, node)
   if node:is(ast.unspecialized.stat.If) then
     return specialize.stat_if(cx, node)
@@ -1655,6 +1664,9 @@ function specialize.stat(cx, node)
 
   elseif node:is(ast.unspecialized.stat.RawDelete) then
     return specialize.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.unspecialized.stat.With) then
+    return specialize.stat_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

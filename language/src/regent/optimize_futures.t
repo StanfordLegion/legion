@@ -382,6 +382,10 @@ function analyze_var_flow.stat_reduce(cx, node)
   end
 end
 
+function analyze_var_flow.stat_with(cx, node)
+  analyze_var_flow.block(cx, node.block)
+end
+
 function analyze_var_flow.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return analyze_var_flow.stat_if(cx, node)
@@ -433,6 +437,9 @@ function analyze_var_flow.stat(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return
+
+  elseif node:is(ast.typed.stat.With) then
+    return analyze_var_flow.stat_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -1453,6 +1460,15 @@ function optimize_futures.stat_raw_delete(cx, node)
   })
 end
 
+function optimize_futures.stat_with(cx, node)
+  return terralib.newlist({
+    node {
+      exprs = node.exprs:map(function(expr) return optimize_futures.expr(cx, expr) end),
+      block = optimize_futures.block(cx, node.block),
+    }
+  })
+end
+
 function optimize_futures.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return optimize_futures.stat_if(cx, node)
@@ -1504,6 +1520,9 @@ function optimize_futures.stat(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return optimize_futures.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.typed.stat.With) then
+    return optimize_futures.stat_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

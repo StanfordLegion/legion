@@ -3428,6 +3428,17 @@ function type_check.stat_raw_delete(cx, node)
   }
 end
 
+function type_check.stat_with(cx, node)
+  local exprs = node.exprs:map(function(expr) return type_check.expr(cx, expr) end)
+
+  return ast.typed.stat.With {
+    exprs = exprs,
+    block = type_check.block(cx, node.block),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.stat(cx, node)
   if node:is(ast.specialized.stat.If) then
     return type_check.stat_if(cx, node)
@@ -3473,6 +3484,9 @@ function type_check.stat(cx, node)
 
   elseif node:is(ast.specialized.stat.RawDelete) then
     return type_check.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.specialized.stat.With) then
+    return type_check.stat_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
