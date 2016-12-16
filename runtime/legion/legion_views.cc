@@ -1692,9 +1692,7 @@ namespace Legion {
             // really at the version number if we're not reducing
             // We can't count split fields here because they might
             // contain users from many versions
-            // Disabling the write-skip optimization for now
-            // TODO: rethink how this works
-#if 0
+#ifndef LEGION_SPY 
             if (!is_reduction)
             {
               if (!!split_mask)
