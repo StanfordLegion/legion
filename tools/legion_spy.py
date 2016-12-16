@@ -3358,13 +3358,13 @@ class LogicalState(object):
                 # We need a close if req is not read only or there is a next child
                 if not req.is_read_only() or next_child:
                     if not self.perform_close_operation(empty_children_to_close,
-                                  True, op, req, previous_deps, perform_checks):
+                          True, False, op, req, previous_deps, perform_checks):
                         return False
                     self.projection_mode = OPEN_NONE
             elif self.projection_mode == OPEN_READ_WRITE:
                 # We close this no matter what
                 if not self.perform_close_operation(empty_children_to_close,
-                                  False, op, req, previous_deps, perform_checks):
+                          False, False, op, req, previous_deps, perform_checks):
                     return False
                 self.projection_mode = OPEN_NONE
             else:
@@ -3373,7 +3373,7 @@ class LogicalState(object):
                 if not req.is_reduce() or next_child or \
                             req.redop != self.current_redop: 
                     if not self.perform_close_operation(empty_children_to_close,
-                                  False, op, req, previous_deps, perform_checks):
+                          False, False, op, req, previous_deps, perform_checks):
                         return False
                     self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
@@ -3382,8 +3382,8 @@ class LogicalState(object):
             for child,open_mode in self.open_children.iteritems():
                 children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
-            if not self.perform_close_operation(children_to_close, False, op, req, 
-                                                previous_deps, perform_checks):
+            if not self.perform_close_operation(children_to_close, False, False,
+                                        op, req, previous_deps, perform_checks):
                 return False
         elif next_child is None or not self.node.are_all_children_disjoint():
             # Figure out which children we need to do closes for
@@ -3463,7 +3463,7 @@ class LogicalState(object):
                         children_to_close[child] = False
                     else:
                         assert False
-                if not self.perform_close_operation(children_to_close,
+                if not self.perform_close_operation(children_to_close, False,
                         overwrite, op, req, previous_deps, perform_checks):
                     return False
                 # No upgrades if we closed it
@@ -3484,7 +3484,7 @@ class LogicalState(object):
                         upgrade_child = False
                     children_to_read_close[child] = False
                 if not self.perform_close_operation(children_to_read_close,
-                        True, op, req, previous_deps, perform_checks):
+                        True, False, op, req, previous_deps, perform_checks):
                     return False
             if upgrade_child:
                 assert next_child
@@ -3551,8 +3551,8 @@ class LogicalState(object):
                 # If we can't do either of these then we have to close
                 # Also have to close if this is a reduction and not shallow disjoint
                 if not shallow_disjoint and (not same_func_and_rect or req.is_reduce()):
-                    if not self.perform_close_operation(empty_children_to_close,
-                          False, op, req, previous_deps, perform_checks, disjoint_close):
+                    if not self.perform_close_operation(empty_children_to_close, False, 
+                            False, op, req, previous_deps, perform_checks, disjoint_close):
                         return False
                     if disjoint_close:
                         self.projection_mode = OPEN_READ_WRITE
@@ -3562,8 +3562,8 @@ class LogicalState(object):
                 assert self.projection_mode == OPEN_MULTI_REDUCE
                 assert self.current_redop != 0
                 if self.current_redop != req.redop:
-                    if not self.perform_close_operation(empty_children_to_close,
-                          False, op, req, previous_deps, perform_checks, disjoint_close):
+                    if not self.perform_close_operation(empty_children_to_close, False, 
+                            False, op, req, previous_deps, perform_checks, disjoint_close):
                         return False
                     if disjoint_close:
                         self.projection_mode = OPEN_READ_WRITE
@@ -3575,8 +3575,8 @@ class LogicalState(object):
             for child,open_mode in self.open_children.iteritems():
                 children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
-            if not self.perform_close_operation(children_to_close, False, op, req, 
-                                                previous_deps, perform_checks):
+            if not self.perform_close_operation(children_to_close, False, False, 
+                                            op, req, previous_deps, perform_checks):
                 return False
         else:
             # Close all open children
@@ -3588,12 +3588,12 @@ class LogicalState(object):
                 else:
                     children_to_close[child] = False
             if children_to_close:
-                if not self.perform_close_operation(children_to_close, False, op, req,
-                                                    previous_deps, perform_checks):
+                if not self.perform_close_operation(children_to_close, False, False,
+                                            op, req, previous_deps, perform_checks):
                     return False
             if children_to_read_close:
-                if not self.perform_close_operation(children_to_read_close, True, op, req,
-                                                    previous_deps, perform_checks):
+                if not self.perform_close_operation(children_to_read_close, True, 
+                                    False, op, req, previous_deps, perform_checks):
                     return False
             # Can now reset this
             self.open_children = dict()
@@ -3613,19 +3613,19 @@ class LogicalState(object):
             del self.open_children[next_child]
         elif open_mode == OPEN_READ_WRITE:
             if force_close and not self.perform_close_operation(child_to_close, 
-                                        False, op, req, previous_deps, perform_checks): 
+                            False, False, op, req, previous_deps, perform_checks): 
                 return False
         elif open_mode == OPEN_SINGLE_REDUCE:
             if force_close: 
                 if not self.perform_close_operation(child_to_close,
-                            False, op, req, previous_deps, perform_checks):
+                            False, False, op, req, previous_deps, perform_checks):
                     return False
             else:
                 # Update the state to read-write
                 self.open_children[next_child] = OPEN_READ_WRITE
         elif open_mode == OPEN_MULTI_REDUCE:
             if not self.perform_close_operation(child_to_close,
-                              False, op, req, previous_deps, perform_checks):
+                          False, False, op, req, previous_deps, perform_checks):
                 return False
         else:
             assert False # should never get here
@@ -3746,12 +3746,12 @@ class LogicalState(object):
                 prev_op.add_outgoing(dep)
                 close.add_incoming(dep)
 
-    def perform_close_operation(self, children_to_close, read_only_close, op, req,
-                                previous_deps, perform_checks, disjoint_close = False):
+    def perform_close_operation(self, children_to_close, read_only_close, overwriting_close, 
+                            op, req, previous_deps, perform_checks, disjoint_close = False):
         error_str = ' for read-only close operation' if read_only_close \
             else ' for normal close operation'
         # Find the close operation first
-        close = self.find_close_operation(op, req, read_only_close,
+        close = self.find_close_operation(op, req, read_only_close or overwriting_close,
                                           perform_checks, error_str)
         if not close:
             return False
