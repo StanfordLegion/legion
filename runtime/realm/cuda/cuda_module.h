@@ -158,6 +158,19 @@ namespace Realm {
       virtual void request_completed(void) = 0;
     };
 
+    class GPUPreemptionWaiter : public GPUCompletionNotification {
+    public:
+      GPUPreemptionWaiter(GPU *gpu);
+      virtual ~GPUPreemptionWaiter(void) {}
+    public:
+      virtual void request_completed(void);
+    public:
+      void preempt(void);
+    private:
+      GPU *const gpu;
+      Event wait_event;
+    };
+
     // An abstract base class for all GPU memcpy operations
     class GPUMemcpy { //: public GPUJob {
     public:
