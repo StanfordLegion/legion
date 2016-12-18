@@ -905,7 +905,7 @@ namespace Legion {
       PHYSICAL_STATE_MAKE_LOCAL_CALL,
       VERSION_STATE_UPDATE_PATH_ONLY_CALL,
       VERSION_STATE_MERGE_PHYSICAL_STATE_CALL,
-      VERSION_STATE_REQUEST_CHILD_CALL,
+      VERSION_STATE_REQUEST_CHILDREN_CALL,
       VERSION_STATE_REQUEST_INITIAL_CALL,
       VERSION_STATE_REQUEST_FINAL_CALL,
       VERSION_STATE_SEND_STATE_CALL,
@@ -971,6 +971,7 @@ namespace Legion {
       "Activate Individual",                                          \
       "Deactivate Individual",                                        \
       "Individual Perform Mapping",                                   \
+      "Individual Return Virtual",                                    \
       "Individual Trigger Complete",                                  \
       "Individual Trigger Commit",                                    \
       "Individual Post Mapped",                                       \
@@ -1062,7 +1063,7 @@ namespace Legion {
       "Physical State Make Local",                                    \
       "Version State Update Path Only",                               \
       "Version State Merge Physical State",                           \
-      "Version State Request Child",                                  \
+      "Version State Request Children",                               \
       "Version State Request Initial",                                \
       "Version State Request Final",                                  \
       "Version State Send State",                                     \
