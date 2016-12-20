@@ -321,6 +321,7 @@ namespace LegionRuntime {
         return true;
       }
 
+#ifdef USE_3D_XFERS
       template<unsigned DIM>
       bool XferDes::simple_get_request_3d(off_t &src_start,
                                           off_t &dst_start,
@@ -414,6 +415,7 @@ namespace LegionRuntime {
         }
         return true;
       }
+#endif
 
 #ifdef DEADCODE_OLD_GENERIC_ITERATOR
       template<unsigned DIM>
@@ -2749,8 +2751,10 @@ namespace LegionRuntime {
             total_field_size += _oas_vec[i].size;
           }
           log_new_dma.info("Create local XferDes: id(" IDFMT "), pre(" IDFMT
-                           "), next(" IDFMT "), type(%d), domain(%zu), total_field_size(%zu)",
-                           _guid, _pre_xd_guid, _next_xd_guid, _kind, _domain.get_volume(), total_field_size);
+                           "), next(" IDFMT "), type(%d), domain(%zu), "
+                           "total_field_size(%zu)",
+                           _guid, _pre_xd_guid, _next_xd_guid, _kind,
+                           _domain.get_volume(), total_field_size);
           XferDes* xd;
           switch (_kind) {
           case XferDes::XFER_MEM_CPY:
