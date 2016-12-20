@@ -1495,6 +1495,34 @@ namespace Legion {
 	  output.chosen_instances[idx].push_back(virt_inst);
 	  continue;
 	}
+        // Check to see if any of the valid instances satisfy this requirement
+        {
+          std::vector<PhysicalInstance> valid_instances;
+
+          for (std::vector<PhysicalInstance>::const_iterator
+                 it = input.valid_instances[idx].begin(),
+                 ie = input.valid_instances[idx].end(); it != ie; ++it)
+          {
+            if (it->get_location() == target_memory)
+              valid_instances.push_back(*it);
+          }
+
+          std::set<FieldID> valid_missing_fields;
+          runtime->filter_instances(ctx, task, idx, output.chosen_variant,
+                                    valid_instances, valid_missing_fields);
+
+#ifndef NDEBUG
+          bool check =
+#endif
+            runtime->acquire_and_filter_instances(ctx, valid_instances);
+          assert(check);
+
+          output.chosen_instances[idx] = valid_instances;
+          missing_fields[idx] = valid_missing_fields;
+
+          if (missing_fields[idx].empty())
+            continue;
+        }
         // Otherwise make normal instances for the given region
         if (!default_create_custom_instances(ctx, task.target_proc,
                 target_memory, task.regions[idx], idx, missing_fields[idx],
