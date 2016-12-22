@@ -1641,7 +1641,7 @@ function parser.stat_raw_delete(p, annotations)
   }
 end
 
-function parser.stat_with(p, annotations)
+function parser.stat_parallelize_with(p, annotations)
   local start = ast.save(p)
   p:expect("__parallelize_with")
   local exprs = terralib.newlist()
@@ -1652,7 +1652,7 @@ function parser.stat_with(p, annotations)
   p:expect("do")
   local block = p:block()
   p:expect("end")
-  return ast.unspecialized.stat.With {
+  return ast.unspecialized.stat.ParallelizeWith {
     exprs = exprs,
     block = block,
     annotations = annotations,
@@ -1794,7 +1794,7 @@ function parser.stat(p)
     return p:stat_raw_delete(annotations)
 
   elseif p:matches("__parallelize_with") then
-    return p:stat_with(annotations)
+    return p:stat_parallelize_with(annotations)
 
   else
     return p:stat_expr(annotations)

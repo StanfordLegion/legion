@@ -162,7 +162,7 @@ local function check_annotations_node(cx)
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
       node:is(ast.typed.stat.RawDelete) or
-      node:is(ast.typed.stat.With)
+      node:is(ast.typed.stat.ParallelizeWith)
     then
       check(cx, node, data.set({}))
 

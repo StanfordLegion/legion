@@ -3428,10 +3428,10 @@ function type_check.stat_raw_delete(cx, node)
   }
 end
 
-function type_check.stat_with(cx, node)
+function type_check.stat_parallelize_with(cx, node)
   local exprs = node.exprs:map(function(expr) return type_check.expr(cx, expr) end)
 
-  return ast.typed.stat.With {
+  return ast.typed.stat.ParallelizeWith {
     exprs = exprs,
     block = type_check.block(cx, node.block),
     annotations = node.annotations,
@@ -3485,8 +3485,8 @@ function type_check.stat(cx, node)
   elseif node:is(ast.specialized.stat.RawDelete) then
     return type_check.stat_raw_delete(cx, node)
 
-  elseif node:is(ast.specialized.stat.With) then
-    return type_check.stat_with(cx, node)
+  elseif node:is(ast.specialized.stat.ParallelizeWith) then
+    return type_check.stat_parallelize_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

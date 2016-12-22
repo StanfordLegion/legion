@@ -450,7 +450,7 @@ function optimize_mapping.stat_raw_delete(cx, node)
   return annotate(node, usage, usage)
 end
 
-function optimize_mapping.stat_with(cx, node)
+function optimize_mapping.stat_parallelize_with(cx, node)
   local exprs_usage = analyze_usage(cx, node.exprs)
   local annotated_block = optimize_mapping.block(cx, node.block)
   local block_usage = usage_meet(exprs_usage, annotated_in_usage(annotated_block))
@@ -512,8 +512,8 @@ function optimize_mapping.stat(cx, node)
   elseif node:is(ast.typed.stat.RawDelete) then
     return optimize_mapping.stat_raw_delete(cx, node)
 
-  elseif node:is(ast.typed.stat.With) then
-    return optimize_mapping.stat_with(cx, node)
+  elseif node:is(ast.typed.stat.ParallelizeWith) then
+    return optimize_mapping.stat_parallelize_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

@@ -130,7 +130,7 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
       node:is(ast.typed.stat.RawDelete) or
-      node:is(ast.typed.stat.With)
+      node:is(ast.typed.stat.ParallelizeWith)
     then
       return true
 
@@ -250,7 +250,7 @@ local function analyze_inner_node(cx)
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
       node:is(ast.typed.stat.RawDelete) or
-      node:is(ast.typed.stat.With)
+      node:is(ast.typed.stat.ParallelizeWith)
     then
       return true
 

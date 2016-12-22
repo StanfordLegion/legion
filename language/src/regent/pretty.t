@@ -935,7 +935,7 @@ function pretty.stat_raw_delete(cx, node)
     ")"})
 end
 
-function pretty.stat_with(cx, node)
+function pretty.stat_parallelize_with(cx, node)
   local result = terralib.newlist()
   result:insert(join({
     "__parallelize_with ",
@@ -1014,8 +1014,8 @@ function pretty.stat(cx, node)
   elseif node:is(ast.typed.stat.RawDelete) then
     return pretty.stat_raw_delete(cx, node)
 
-  elseif node:is(ast.typed.stat.With) then
-    return pretty.stat_with(cx, node)
+  elseif node:is(ast.typed.stat.ParallelizeWith) then
+    return pretty.stat_parallelize_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
