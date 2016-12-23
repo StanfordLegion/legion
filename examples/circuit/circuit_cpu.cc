@@ -143,7 +143,75 @@ static inline float get_node_voltage(const RegionAccessor<AT,float> &priv,
   return 0.f;
 }
 
-#ifdef __SSE__
+#if defined(__AVX512F__)
+template<typename AT_VAL, typename AT_PTR>
+static inline __m512 get_vec_node_voltage(ptr_t current_wire,
+                                          const RegionAccessor<AT_VAL,float> &priv,
+                                          const RegionAccessor<AT_VAL,float> &shr,
+                                          const RegionAccessor<AT_VAL,float> &ghost,
+                                          const RegionAccessor<AT_PTR,ptr_t> &ptrs,
+                                          const RegionAccessor<AT_VAL,PointerLocation> &locs)
+{
+  float voltages[16];
+  for (int i = 0; i < 16; i++)
+  {
+    ptr_t node_ptr = ptrs.read(current_wire+i);
+    PointerLocation loc = locs.read(current_wire+i);
+    switch (loc)
+    {
+      case PRIVATE_PTR:
+        voltages[i] = priv.read(node_ptr);
+        break;
+      case SHARED_PTR:
+        voltages[i] = shr.read(node_ptr);
+        break;
+      case GHOST_PTR:
+        voltages[i] = ghost.read(node_ptr);
+        break;
+      default:
+        assert(false);
+    }
+  }
+  return _mm512_set_ps(voltages[15],voltages[14],voltages[13],voltages[12],
+                       voltages[11],voltages[10],voltages[9],voltages[8],
+                       voltages[7],voltages[6],voltages[5],voltages[4],
+                       voltages[3],voltages[2],voltages[1],voltages[0]);
+}
+
+#elif defined(__AVX__)
+template<typename AT_VAL, typename AT_PTR>
+static inline __m256 get_vec_node_voltage(ptr_t current_wire,
+                                          const RegionAccessor<AT_VAL,float> &priv,
+                                          const RegionAccessor<AT_VAL,float> &shr,
+                                          const RegionAccessor<AT_VAL,float> &ghost,
+                                          const RegionAccessor<AT_PTR,ptr_t> &ptrs,
+                                          const RegionAccessor<AT_VAL,PointerLocation> &locs)
+{
+  float voltages[8];
+  for (int i = 0; i < 8; i++)
+  {
+    ptr_t node_ptr = ptrs.read(current_wire+i);
+    PointerLocation loc = locs.read(current_wire+i);
+    switch (loc)
+    {
+      case PRIVATE_PTR:
+        voltages[i] = priv.read(node_ptr);
+        break;
+      case SHARED_PTR:
+        voltages[i] = shr.read(node_ptr);
+        break;
+      case GHOST_PTR:
+        voltages[i] = ghost.read(node_ptr);
+        break;
+      default:
+        assert(false);
+    }
+  }
+  return _mm256_set_ps(voltages[7],voltages[6],voltages[5],voltages[4],
+                       voltages[3],voltages[2],voltages[1],voltages[0]);
+}
+
+#elif defined(__SSE__)
 template<typename AT_VAL, typename AT_PTR>
 static inline __m128 get_vec_node_voltage(ptr_t current_wire,
                                           const RegionAccessor<AT_VAL,float> &priv,
@@ -242,7 +310,127 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
 
   const int steps = piece.steps;
   unsigned index = 0;
-#ifdef __SSE__
+#if defined(__AVX512F__)
+#warning "targeting KNL..."
+  // using SSE intrinsics, we can work on wires 4-at-a-time
+  {
+    __m512 temp_v[WIRE_SEGMENTS+1];
+    __m512 temp_i[WIRE_SEGMENTS];
+    __m512 old_i[WIRE_SEGMENTS];
+    __m512 old_v[WIRE_SEGMENTS-1];
+    __m512 dt = _mm512_set1_ps(piece.dt);
+    __m512 recip_dt = _mm512_set1_ps(1.0/piece.dt);
+    while ((index+7) < piece.num_wires)
+    {
+      // We can do pointer math!
+      ptr_t current_wire = piece.first_wire+index;
+      for (int i = 0; i < WIRE_SEGMENTS; i++)
+      {
+        temp_i[i] = _mm512_load_ps(soa_current[i].ptr(current_wire));
+        old_i[i] = temp_i[i];
+      }
+      for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
+      {
+        temp_v[i+1] = _mm512_load_ps(soa_voltage[i].ptr(current_wire));
+        old_v[i] = temp_v[i+1];
+      }
+
+      // Pin the outer voltages to the node voltages
+      temp_v[0] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
+                                       soa_shr_voltage, soa_ghost_voltage,
+                                       soa_in_ptr, soa_in_loc);
+      temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
+                                       soa_shr_voltage, soa_ghost_voltage,
+                                       soa_out_ptr, soa_out_loc);
+      __m512 inductance = _mm512_load_ps(soa_inductance.ptr(current_wire));
+      __m512 recip_resistance = _mm512_rcp14_ps(_mm512_load_ps(soa_resistance.ptr(current_wire)));
+      __m512 recip_capacitance = _mm512_rcp14_ps(_mm512_load_ps(soa_wire_cap.ptr(current_wire)));
+      for (int j = 0; j < steps; j++)
+      {
+        for (int i = 0; i < WIRE_SEGMENTS; i++)
+        {
+          __m512 dv = _mm512_sub_ps(temp_v[i+1],temp_v[i]);
+          __m512 di = _mm512_sub_ps(temp_i[i],old_i[i]);
+          __m512 vol = _mm512_sub_ps(dv,_mm512_mul_ps(_mm512_mul_ps(inductance,di),recip_dt));
+          temp_i[i] = _mm512_mul_ps(vol,recip_resistance);
+        }
+        for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
+        {
+          __m512 dq = _mm512_mul_ps(dt,_mm512_sub_ps(temp_i[i],temp_i[i+1]));
+          temp_v[i+1] = _mm512_add_ps(old_v[i],_mm512_mul_ps(dq,recip_capacitance));
+        }
+      }
+      // Write out the results
+      for (int i = 0; i < WIRE_SEGMENTS; i++)
+        _mm512_stream_ps(soa_current[i].ptr(current_wire),temp_i[i]);
+      for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
+        _mm512_stream_ps(soa_voltage[i].ptr(current_wire),temp_v[i+1]);
+      // Update the index
+      index += 16;
+    }
+  }
+
+#elif defined(__AVX__)
+#warning "targeting haswell..."
+  // using SSE intrinsics, we can work on wires 4-at-a-time
+  {
+    __m256 temp_v[WIRE_SEGMENTS+1];
+    __m256 temp_i[WIRE_SEGMENTS];
+    __m256 old_i[WIRE_SEGMENTS];
+    __m256 old_v[WIRE_SEGMENTS-1];
+    __m256 dt = _mm256_set1_ps(piece.dt);
+    __m256 recip_dt = _mm256_set1_ps(1.0/piece.dt);
+    while ((index+7) < piece.num_wires)
+    {
+      // We can do pointer math!
+      ptr_t current_wire = piece.first_wire+index;
+      for (int i = 0; i < WIRE_SEGMENTS; i++)
+      {
+        temp_i[i] = _mm256_load_ps(soa_current[i].ptr(current_wire));
+        old_i[i] = temp_i[i];
+      }
+      for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
+      {
+        temp_v[i+1] = _mm256_load_ps(soa_voltage[i].ptr(current_wire));
+        old_v[i] = temp_v[i+1];
+      }
+
+      // Pin the outer voltages to the node voltages
+      temp_v[0] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
+                                       soa_shr_voltage, soa_ghost_voltage,
+                                       soa_in_ptr, soa_in_loc);
+      temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, soa_pvt_voltage,
+                                       soa_shr_voltage, soa_ghost_voltage,
+                                       soa_out_ptr, soa_out_loc);
+      __m256 inductance = _mm256_load_ps(soa_inductance.ptr(current_wire));
+      __m256 recip_resistance = _mm256_rcp_ps(_mm256_load_ps(soa_resistance.ptr(current_wire)));
+      __m256 recip_capacitance = _mm256_rcp_ps(_mm256_load_ps(soa_wire_cap.ptr(current_wire)));
+      for (int j = 0; j < steps; j++)
+      {
+        for (int i = 0; i < WIRE_SEGMENTS; i++)
+        {
+          __m256 dv = _mm256_sub_ps(temp_v[i+1],temp_v[i]);
+          __m256 di = _mm256_sub_ps(temp_i[i],old_i[i]);
+          __m256 vol = _mm256_sub_ps(dv,_mm256_mul_ps(_mm256_mul_ps(inductance,di),recip_dt));
+          temp_i[i] = _mm256_mul_ps(vol,recip_resistance);
+        }
+        for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
+        {
+          __m256 dq = _mm256_mul_ps(dt,_mm256_sub_ps(temp_i[i],temp_i[i+1]));
+          temp_v[i+1] = _mm256_add_ps(old_v[i],_mm256_mul_ps(dq,recip_capacitance));
+        }
+      }
+      // Write out the results
+      for (int i = 0; i < WIRE_SEGMENTS; i++)
+        _mm256_stream_ps(soa_current[i].ptr(current_wire),temp_i[i]);
+      for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
+        _mm256_stream_ps(soa_voltage[i].ptr(current_wire),temp_v[i+1]);
+      // Update the index
+      index += 8;
+    }
+  }
+
+#elif defined(__SSE__)
   // using SSE intrinsics, we can work on wires 4-at-a-time
   {
     __m128 temp_v[WIRE_SEGMENTS+1];
