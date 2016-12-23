@@ -311,8 +311,7 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
   const int steps = piece.steps;
   unsigned index = 0;
 #if defined(__AVX512F__)
-#warning "targeting KNL..."
-  // using SSE intrinsics, we can work on wires 4-at-a-time
+  // using AVX512F intrinsics, we can work on wires 16-at-a-time
   {
     __m512 temp_v[WIRE_SEGMENTS+1];
     __m512 temp_i[WIRE_SEGMENTS];
@@ -371,8 +370,7 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
   }
 
 #elif defined(__AVX__)
-#warning "targeting haswell..."
-  // using SSE intrinsics, we can work on wires 4-at-a-time
+  // using AVX intrinsics, we can work on wires 8-at-a-time
   {
     __m256 temp_v[WIRE_SEGMENTS+1];
     __m256 temp_i[WIRE_SEGMENTS];
