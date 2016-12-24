@@ -13,14 +13,17 @@
 -- limitations under the License.
 
 -- fails-with:
--- specialize_call_nonfunction.rg:24: unable to specialize non-function in function call position
---   x(5)
---   ^
+-- type_mismatch_list_ispace_mapping4.rg:28: no applicable overloaded function mapping for arguments int3d, rect3d
+--   var l = list_ispace(is, mapping)
+--                                 ^
 
 import "regent"
 
-task f()
-  var x = 20
-  x(5)
+terra mapping(p : int2d, s : rect2d)
+  return 0
 end
-f:compile()
+
+task f()
+  var is = ispace(int3d, { x = 5, y = 5, z = 5 })
+  var l = list_ispace(is, mapping)
+end

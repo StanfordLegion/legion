@@ -572,12 +572,7 @@ function specialize.expr_call(cx, node, allow_lists)
     report.error(fn, "unable to specialize complex expression in function call position")
   end
 
-  if terralib.isfunction(fn.value) or
-    terralib.isoverloadedfunction(fn.value) or
-    terralib.ismacro(fn.value) or
-    std.is_task(fn.value) or
-    type(fn.value) == "cdata"
-  then
+  if std.is_callable(fn.value) then
     if not std.is_task(fn.value) and #node.conditions > 0 then
       report.error(node.conditions[1],
         "terra function call cannot have conditions")
@@ -948,6 +943,7 @@ end
 function specialize.expr_list_ispace(cx, node, allow_lists)
   return ast.specialized.expr.ListIspace {
     ispace = specialize.expr(cx, node.ispace),
+    mapping = node.mapping and specialize.expr(cx, node.mapping),
     annotations = node.annotations,
     span = node.span,
   }

@@ -746,6 +746,15 @@ function std.is_fspace_instance(t)
   return terralib.types.istype(t) and rawget(t, "is_fspace_instance")
 end
 
+-- Returns true if value `x` can be called in Regent (type cast doesn't count).
+function std.is_callable(x)
+  return terralib.isfunction(x) or
+    terralib.isoverloadedfunction(x) or
+    terralib.ismacro(x) or
+    std.is_task(x) or
+    type(x) == "cdata"
+end
+
 std.untyped = terralib.types.newstruct("untyped")
 
 function std.type_sub(t, mapping)
@@ -2322,6 +2331,10 @@ std.rect_type = terralib.memoize(function(index_type)
       elseif std.type_eq(to, c.legion_domain_t) then
         return `([expr]:to_domain())
       end
+    elseif std.is_rect_type(to) then
+      if std.type_eq(from, c["legion_rect_" .. tostring(st.dim) .. "d_t"]) then
+        return `([to] { lo = [index_type]([expr].lo), hi = [index_type]([expr].hi) })
+      end
     end
     assert(false)
   end
@@ -2375,6 +2388,8 @@ function std.index_type(base_type, displayname)
         return `([to]{ __ptr = c.legion_ptr_t { value = [expr] } })
       elseif not to:is_opaque() and std.validate_implicit_cast(from, to.base_type) then
         return `([to]{ __ptr = [expr] })
+      elseif std.type_eq(from, c["legion_point_" .. tostring(data.max(st.dim, 1)) .. "d_t"]) then
+        return `([st.from_point]([expr]))
       end
     elseif std.is_index_type(from) then
       if std.type_eq(to, c.legion_domain_point_t) then
@@ -2497,6 +2512,23 @@ function std.index_type(base_type, displayname)
   end
   terra st.from_domain_point(pt : c.legion_domain_point_t)
     [make_from_domain_point(pt)]
+  end
+
+  -- Generate `from_point` function.
+  do
+    local point_dim = data.max(st.dim, 1)
+    local point_type = c["legion_point_" .. point_dim .. "d_t"]
+    local fields = st.fields
+    if fields then
+      terra st.from_point(pt : point_type)
+        return st { __ptr = [st.impl_type] {
+          [data.mapi(function(i) return `(pt.x[ [i-1] ]) end, st.fields)] } }
+      end
+    else
+      terra st.from_point(pt : point_type)
+        return st { __ptr = [st.impl_type](pt.x[0]) }
+      end
+    end
   end
 
   for method_name, method in pairs(std.generate_arithmetic_metamethods(st)) do
