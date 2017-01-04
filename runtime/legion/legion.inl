@@ -1200,6 +1200,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void AttachLauncher::attach_file(const char *name,
+                                            const std::vector<FieldID> &fields,
+                                            LegionFileMode m)
+    //--------------------------------------------------------------------------
+    {
+      file_name = name;
+      mode = m;
+      file_fields = fields;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AttachLauncher::attach_hdf5(const char *name,
+                                const std::map<FieldID,const char*> &field_map,
+                                LegionFileMode m)
+    //--------------------------------------------------------------------------
+    {
+      file_name = name;
+      mode = m;
+      field_files = field_map;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AttachLauncher::add_field_pointer(FieldID fid, void *ptr)
+    //--------------------------------------------------------------------------
+    {
+      field_pointers[fid] = ptr;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void AttachLauncher::set_pitch(unsigned dim, size_t pitch)
+    //--------------------------------------------------------------------------
+    {
+      if (pitches.size() <= dim)
+        pitches.resize(dim+1, 0);
+      pitches[dim] = pitch;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void TimingLauncher::add_precondition(const Future &f)
+    //--------------------------------------------------------------------------
+    {
+      preconditions.insert(f);
+    }
+
+    //--------------------------------------------------------------------------
     inline void MustEpochLauncher::add_single_task(const DomainPoint &point,
                                                    const TaskLauncher &launcher)
     //--------------------------------------------------------------------------

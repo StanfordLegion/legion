@@ -657,10 +657,6 @@ namespace Legion {
       PhysicalRegion initialize(TaskContext *ctx,
                                 const InlineLauncher &launcher,
                                 bool check_privileges);
-      PhysicalRegion initialize(TaskContext *ctx,
-                                const RegionRequirement &req,
-                                MapperID id, MappingTagID tag,
-                                bool check_privileges);
       void initialize(TaskContext *ctx, const PhysicalRegion &region);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
@@ -2134,22 +2130,6 @@ namespace Legion {
     public:
       FillOp& operator=(const FillOp &rhs);
     public:
-      void initialize(TaskContext *ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid,
-                      const void *ptr, size_t size,
-                      const Predicate &pred, bool check_privileges);
-      void initialize(TaskContext *ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid,const Future &f,
-                      const Predicate &pred, bool check_privileges);
-      void initialize(TaskContext *ctx, LogicalRegion handle,
-                      LogicalRegion parent, 
-                      const std::set<FieldID> &fields,
-                      const void *ptr, size_t size,
-                      const Predicate &pred, bool check_privileges);
-      void initialize(TaskContext *ctx, LogicalRegion handle,
-                      LogicalRegion parent, 
-                      const std::set<FieldID> &fields, const Future &f,
-                      const Predicate &pred, bool check_privileges);
       void initialize(TaskContext *ctx, const FillLauncher &launcher,
                       bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
@@ -2199,11 +2179,6 @@ namespace Legion {
     class AttachOp : public Operation {
     public:
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
-      enum ExternalType {
-        HDF5_FILE,
-        NORMAL_FILE,
-        IN_MEMORY_DATA
-      };
     public:
       AttachOp(Runtime *rt);
       AttachOp(const AttachOp &rhs);
@@ -2211,16 +2186,9 @@ namespace Legion {
     public:
       AttachOp& operator=(const AttachOp &rhs);
     public:
-      PhysicalRegion initialize_hdf5(
-                                 TaskContext *ctx, const char *file_name,
-                                 LogicalRegion handle, LogicalRegion parent,
-                                 const std::map<FieldID,const char*> &field_map,
-                                 LegionFileMode mode, bool check_privileges);
-      PhysicalRegion initialize_file(
-                                     TaskContext *ctx, const char *file_name,
-                                     LogicalRegion handle, LogicalRegion parent,
-                                     const std::vector<FieldID> &field_vec,
-                                     LegionFileMode mode, bool check_privileges);
+      PhysicalRegion initialize(TaskContext *ctx,
+                                const AttachLauncher &launcher,
+                                bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
@@ -2245,6 +2213,7 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
     public:
+      ExternalResource resource;
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
@@ -2252,7 +2221,6 @@ namespace Legion {
       const char *file_name;
       std::map<FieldID,const char*> field_map;
       LegionFileMode file_mode;
-      ExternalType file_type;
       PhysicalRegion region;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
@@ -2305,21 +2273,13 @@ namespace Legion {
      */
     class TimingOp : public Operation {
     public:
-      enum MeasurementKind {
-        ABSOLUTE_MEASUREMENT,
-        MICROSECOND_MEASUREMENT,
-        NANOSECOND_MEASUREMENT,
-      };
-    public:
       TimingOp(Runtime *rt);
       TimingOp(const TimingOp &rhs);
       virtual ~TimingOp(void);
     public:
       TimingOp& operator=(const TimingOp &rhs);
     public:
-      Future initialize(TaskContext *ctx, const Future &pre);
-      Future initialize_microseconds(TaskContext *ctx, const Future &pre);
-      Future initialize_nanoseconds(TaskContext *ctx, const Future &pre);
+      Future initialize(TaskContext *ctx, const TimingLauncher &launcher);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2331,8 +2291,8 @@ namespace Legion {
       virtual void deferred_execute(void);
       virtual void trigger_complete(void);
     protected:
-      MeasurementKind kind;
-      Future precondition;
+      TimingMeasurement measurement;
+      std::set<Future> preconditions;
       Future result;
     };
 

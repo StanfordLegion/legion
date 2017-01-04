@@ -420,6 +420,19 @@ typedef enum legion_partition_kind_t {
   COMPUTE_KIND,
 } legion_partition_kind_t;
 
+typedef enum legion_external_resource_t {
+  EXTERNAL_POSIX_FILE,
+  EXTERNAL_HDF5_FILE,
+  EXTERNAL_C_ARRAY,
+  EXTERNAL_FORTRAN_ARRAY,
+} legion_external_resource_t;
+
+typedef enum legion_timing_measurement_t {
+  MEASURE_SECONDS,
+  MEASURE_MICRO_SECONDS,
+  MEASURE_NANO_SECONDS,
+} legion_timing_measurement_t;
+
 typedef enum legion_dependence_type_t {
   NO_DEPENDENCE = 0,
   TRUE_DEPENDENCE = 1,

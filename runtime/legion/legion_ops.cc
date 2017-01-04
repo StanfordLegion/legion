@@ -1898,40 +1898,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion MapOp::initialize(TaskContext *ctx,
-                                     const RegionRequirement &req,
-                                     MapperID id, MappingTagID t,
-                                     bool check_privileges)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, true/*track*/);
-      parent_task = ctx->get_task();
-      requirement = req;
-      if (requirement.privilege_fields.empty())
-      {
-        log_task.warning("WARNING: REGION REQUIREMENT OF INLINE MAPPING "
-                               "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
-                               "FIELDS! DID YOU FORGET THEM?!?",
-                               parent_ctx->get_task_name(), 
-                               parent_ctx->get_unique_id());
-      }
-      requirement = req;
-      map_id = id;
-      tag = t;
-      termination_event = Runtime::create_ap_user_event();
-      region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
-                              completion_event, true/*mapped*/, ctx, 
-                              map_id, tag, false/*leaf*/, 
-                              false/*virtual mapped*/, runtime));
-      if (check_privileges)
-        check_privilege();
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
-                                         unique_op_id);
-      return region;
-    }
-
-    //--------------------------------------------------------------------------
     void MapOp::initialize(TaskContext *ctx, const PhysicalRegion &reg)
     //--------------------------------------------------------------------------
     {
@@ -10477,93 +10443,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::initialize(TaskContext *ctx, LogicalRegion handle,
-                            LogicalRegion parent, FieldID fid,
-                            const void *ptr, size_t size,
-                            const Predicate &pred,bool check_privileges)
-    //--------------------------------------------------------------------------
-    {
-      parent_ctx = ctx;
-      initialize_speculation(ctx, true/*track*/, 1, pred);
-      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      requirement.privilege_fields.insert(fid);
-      value_size = size;
-      value = malloc(value_size);
-      memcpy(value, ptr, value_size);
-      if (check_privileges)
-        check_fill_privilege();
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
-                                      unique_op_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::initialize(TaskContext *ctx, LogicalRegion handle,
-                            LogicalRegion parent, FieldID fid, 
-                            const Future &f,
-                            const Predicate &pred,bool check_privileges)
-    //--------------------------------------------------------------------------
-    {
-      parent_ctx = ctx;
-      initialize_speculation(ctx, true/*track*/, 1, pred);
-      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      requirement.privilege_fields.insert(fid);
-      future = f;
-      if (check_privileges)
-        check_fill_privilege();
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
-                                      unique_op_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::initialize(TaskContext *ctx, LogicalRegion handle,
-                            LogicalRegion parent,
-                            const std::set<FieldID> &fields,
-                            const void *ptr, size_t size,
-                            const Predicate &pred,bool check_privileges)
-    //--------------------------------------------------------------------------
-    {
-      parent_ctx = ctx;
-      initialize_speculation(ctx, true/*track*/, 1, pred);
-      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      requirement.privilege_fields = fields;
-      value_size = size;
-      value = malloc(value_size);
-      memcpy(value, ptr, size);
-      if (check_privileges)
-        check_fill_privilege();
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
-                                      unique_op_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::initialize(TaskContext *ctx, LogicalRegion handle,
-                            LogicalRegion parent,
-                            const std::set<FieldID> &fields, 
-                            const Future &f,
-                            const Predicate &pred,bool check_privileges)
-    //--------------------------------------------------------------------------
-    {
-      parent_ctx = ctx;
-      initialize_speculation(ctx, true/*track*/, 1, pred);
-      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      requirement.privilege_fields = fields;
-      future = f;
-      if (check_privileges)
-        check_fill_privilege();
-      if (Runtime::legion_spy_enabled)
-      {
-        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
-                                      unique_op_id);
-        if ((future.impl != NULL) && future.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, 
-                                    future.impl->get_ready_event());
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void FillOp::initialize(TaskContext *ctx, const FillLauncher &launcher,
                             bool check_privileges)
     //--------------------------------------------------------------------------
@@ -11129,76 +11008,67 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion AttachOp::initialize_hdf5(TaskContext *ctx,
-                                             const char *name,
-                                             LogicalRegion handle, 
-                                             LogicalRegion parent,
-                                      const std::map<FieldID,const char*> &fmap,
-                                             LegionFileMode mode,
-                                             bool check_privileges)
+    PhysicalRegion AttachOp::initialize(TaskContext *ctx,
+                          const AttachLauncher &launcher, bool check_privileges)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      if (fmap.empty())
+      resource = launcher.resource;
+      switch (resource)
       {
-        log_run.warning("WARNING: HDF5 ATTACH OPERATION ISSUED WITH NO "
-                        "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                        "FORGET THEM?!?", parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id());
+        case EXTERNAL_POSIX_FILE:
+          {
+            if (launcher.file_fields.empty())
+              log_run.warning("WARNING: FILE ATTACH OPERATION ISSUED WITH NO "
+                              "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                              "FORGET THEM?!?", parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
 
+            file_name = strdup(launcher.file_name);
+            // Construct the region requirement for this task
+            requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
+                                            EXCLUSIVE, launcher.parent);
+            for (std::vector<FieldID>::const_iterator it = 
+                  launcher.file_fields.begin(); it != 
+                  launcher.file_fields.end(); it++)
+              requirement.add_field(*it);
+            file_mode = launcher.mode;       
+            break;
+          }
+        case EXTERNAL_HDF5_FILE:
+          {
+            if (launcher.field_files.empty())
+              log_run.warning("WARNING: HDF5 ATTACH OPERATION ISSUED WITH NO "
+                              "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                              "FORGET THEM?!?", parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
+            file_name = strdup(launcher.file_name);
+            // Construct the region requirement for this task
+            requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
+                                            EXCLUSIVE, launcher.parent);
+            for (std::map<FieldID,const char*>::const_iterator it = 
+                  launcher.field_files.begin(); it != 
+                  launcher.field_files.end(); it++)
+            {
+              requirement.add_field(it->first);
+              field_map[it->first] = strdup(it->second);
+            }
+            file_mode = launcher.mode;
+            break;
+          }
+        case EXTERNAL_C_ARRAY:
+          {
+            assert(false); // TODO: Implement this
+            break;
+          }
+        case EXTERNAL_FORTRAN_ARRAY:
+          {
+            assert(false); // TODO implement this
+            break;
+          }
+        default:
+          assert(false); // should never get here
       }
-      file_type = HDF5_FILE;
-      file_name = strdup(name);
-      // Construct the region requirement for this task
-      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      for (std::map<FieldID,const char*>::const_iterator it = fmap.begin();
-            it != fmap.end(); it++)
-      {
-        requirement.add_field(it->first);
-        field_map[it->first] = strdup(it->second);
-      }
-      file_mode = mode;
-      region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
-                              completion_event, true/*mapped*/, ctx,
-                              0/*map id*/, 0/*tag*/, false/*leaf*/, 
-                              false/*virtual mapped*/, runtime));
-      if (check_privileges)
-        check_privilege();
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id);
-      return region;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalRegion AttachOp::initialize_file(TaskContext *ctx,
-                                             const char *name,
-                                             LogicalRegion handle,
-                                             LogicalRegion parent,
-                                      const std::vector<FieldID> &fvec,
-                                             LegionFileMode mode,
-                                             bool check_privileges)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, true/*track*/);
-      if (fvec.empty())
-      {
-        log_run.warning("WARNING: FILE ATTACH OPERATION ISSUED WITH NO "
-                        "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                        "FORGET THEM?!?", parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id());
-
-      }
-      file_type = NORMAL_FILE;
-      file_name = strdup(name);
-      // Construct the region requirement for this task
-      requirement = RegionRequirement(handle, WRITE_DISCARD, EXCLUSIVE, parent);
-      for (std::vector<FieldID>::const_iterator it = fvec.begin();
-            it != fvec.end(); it++)
-      {
-        requirement.add_field(*it);
-      }
-      file_mode = mode;
       region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
                               completion_event, true/*mapped*/, ctx,
                               0/*map id*/, 0/*tag*/, false/*leaf*/, 
@@ -11395,30 +11265,45 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalInstance result = PhysicalInstance::NO_INST;
-      if (file_type == HDF5_FILE) 
+      switch (resource)
       {
-        // First build the set of field paths
-        std::vector<const char*> field_files(field_map.size());
-        unsigned idx = 0;
-        for (std::map<FieldID,const char*>::const_iterator it = 
-              field_map.begin(); it != field_map.end(); it++, idx++)
-        {
-          field_files[idx] = it->second;
-        }
-        // Now ask the low-level runtime to create the instance
-        result = dom.create_hdf5_instance(file_name, sizes,
-                            field_files, (file_mode == LEGION_FILE_READ_ONLY));
-        constraints.specialized_constraint = 
-          SpecializedConstraint(HDF5_FILE_SPECIALIZE);
-      } 
-      else if (file_type == NORMAL_FILE) 
-      {
-        result = dom.create_file_instance(file_name, sizes, file_mode);
-        constraints.specialized_constraint = 
-          SpecializedConstraint(GENERIC_FILE_SPECIALIZE);
+        case EXTERNAL_POSIX_FILE:
+          {
+            result = dom.create_file_instance(file_name, sizes, file_mode);
+            constraints.specialized_constraint = 
+              SpecializedConstraint(GENERIC_FILE_SPECIALIZE);           
+            break;
+          }
+        case EXTERNAL_HDF5_FILE:
+          {
+            // First build the set of field paths
+            std::vector<const char*> field_files(field_map.size());
+            unsigned idx = 0;
+            for (std::map<FieldID,const char*>::const_iterator it = 
+                  field_map.begin(); it != field_map.end(); it++, idx++)
+            {
+              field_files[idx] = it->second;
+            }
+            // Now ask the low-level runtime to create the instance
+            result = dom.create_hdf5_instance(file_name, sizes, field_files, 
+                                      (file_mode == LEGION_FILE_READ_ONLY));
+            constraints.specialized_constraint = 
+              SpecializedConstraint(HDF5_FILE_SPECIALIZE);
+            break;
+          }
+        case EXTERNAL_C_ARRAY:
+          {
+            assert(false);
+            break;
+          }
+        case EXTERNAL_FORTRAN_ARRAY:
+          {
+            assert(false);
+            break;
+          }
+        default:
+          assert(false);
       }
-      else // unknown file type
-        assert(false);
 #ifdef DEBUG_LEGION
       assert(result.exists());
 #endif      
@@ -11860,12 +11745,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future TimingOp::initialize(TaskContext *ctx, const Future &pre)
+    Future TimingOp::initialize(TaskContext *ctx,const TimingLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      kind = ABSOLUTE_MEASUREMENT;
-      precondition = pre; 
+      measurement = launcher.measurement;
+      preconditions = launcher.preconditions;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
                   runtime->address_space, runtime->address_space, this));
@@ -11874,53 +11759,13 @@ namespace Legion {
         LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
         DomainPoint empty_point;
         LegionSpy::log_future_creation(unique_op_id, 
-            result.impl->get_ready_event(), empty_point); 
-        if ((pre.impl != NULL) && pre.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, pre.impl->get_ready_event());
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Future TimingOp::initialize_microseconds(TaskContext *ctx,const Future &pre)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, true/*track*/);
-      kind = MICROSECOND_MEASUREMENT;
-      precondition = pre;
-      result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
-                  runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, this));
-      if (Runtime::legion_spy_enabled)
-      {
-        LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
-        DomainPoint empty_point;
-        LegionSpy::log_future_creation(unique_op_id, 
-            result.impl->get_ready_event(), empty_point); 
-        if ((pre.impl != NULL) && pre.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, pre.impl->get_ready_event());
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Future TimingOp::initialize_nanoseconds(TaskContext *ctx, const Future &pre)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, true/*track*/);
-      kind = NANOSECOND_MEASUREMENT;
-      precondition = pre;
-      result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
-                  runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, this));
-      if (Runtime::legion_spy_enabled)
-      {
-        LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);
-        DomainPoint empty_point;
-        LegionSpy::log_future_creation(unique_op_id, 
-            result.impl->get_ready_event(), empty_point); 
-        if ((pre.impl != NULL) && pre.impl->get_ready_event().exists())
-          LegionSpy::log_future_use(unique_op_id, pre.impl->get_ready_event());
+            result.impl->get_ready_event(), empty_point);
+        for (std::set<Future>::const_iterator it = preconditions.begin();
+              it != preconditions.end(); it++)
+        {
+          if ((it->impl != NULL) && it->impl->get_ready_event().exists())
+            LegionSpy::log_future_use(unique_op_id,it->impl->get_ready_event());
+        }
       }
       return result;
     }
@@ -11937,8 +11782,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
-      // Remove our references
-      precondition = Future();
+      preconditions.clear();
       result = Future();
       runtime->free_timing_op(this);
     }
@@ -11961,8 +11805,12 @@ namespace Legion {
     void TimingOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (precondition.impl != NULL)
-        precondition.impl->register_dependence(this);
+      for (std::set<Future>::const_iterator it = preconditions.begin();
+            it != preconditions.end(); it++)
+      {
+        if (it->impl != NULL)
+          it->impl->register_dependence(this);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11970,14 +11818,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       complete_mapping();
-      if ((precondition.impl != NULL) && 
-          !(precondition.impl->ready_event.has_triggered()))
+      std::set<ApEvent> pre_events;
+      for (std::set<Future>::const_iterator it = preconditions.begin();
+            it != preconditions.end(); it++)
       {
-        ApEvent wait_on = precondition.impl->get_ready_event();
+        if ((it->impl != NULL) && !it->impl->ready_event.has_triggered())
+          pre_events.insert(it->impl->get_ready_event());
+      }
+      RtEvent wait_on;
+      if (!pre_events.empty())
+        wait_on = Runtime::protect_event(Runtime::merge_events(pre_events));
+      if (wait_on.exists() && !wait_on.has_triggered())
+      {
         DeferredExecuteArgs args;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
-                                         Runtime::protect_event(wait_on));
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+                                         this, wait_on);
       }
       else
         deferred_execute();
@@ -11987,21 +11843,21 @@ namespace Legion {
     void TimingOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
-      switch (kind)
+      switch (measurement)
       {
-        case ABSOLUTE_MEASUREMENT:
+        case MEASURE_SECONDS:
           {
             double value = Realm::Clock::current_time();
             result.impl->set_result(&value, sizeof(value), false);
             break;
           }
-        case MICROSECOND_MEASUREMENT:
+        case MEASURE_MICRO_SECONDS:
           {
             long long value = Realm::Clock::current_time_in_microseconds();
             result.impl->set_result(&value, sizeof(value), false);
             break;
           }
-        case NANOSECOND_MEASUREMENT:
+        case MEASURE_NANO_SECONDS:
           {
             long long value = Realm::Clock::current_time_in_nanoseconds();
             result.impl->set_result(&value, sizeof(value), false);

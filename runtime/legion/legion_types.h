@@ -52,6 +52,8 @@ namespace Legion {
   typedef ::legion_region_flags_t RegionFlags;
   typedef ::legion_projection_type_t ProjectionType;
   typedef ::legion_partition_kind_t PartitionKind;
+  typedef ::legion_external_resource_t ExternalResource;
+  typedef ::legion_timing_measurement_t TimingMeasurement;
   typedef ::legion_dependence_type_t DependenceType;
   typedef ::legion_index_space_kind_t IndexSpaceKind;
   typedef ::legion_file_mode_t LegionFileMode;

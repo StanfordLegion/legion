@@ -1358,6 +1358,61 @@ namespace Legion {
       bool                            silence_warnings;
     };
 
+    /**
+     * \struct AttachLauncher
+     * Attach launchers are used for attaching existing physical resources
+     * outside of a Legion application to a specific logical region.
+     * This can include attaching files or arrays from inter-operating
+     * programs. We provide a generic attach launcher than can handle
+     * all kinds of attachments. Each attach launcher should be used
+     * for attaching only one kind of resource.
+     * @see Runtime
+     */
+    struct AttachLauncher {
+    public:
+      AttachLauncher(ExternalResource resource, 
+                     LogicalRegion handle, LogicalRegion parent);
+    public:
+      inline void attach_file(const char *file_name,
+                              const std::vector<FieldID> &fields,
+                              LegionFileMode mode);
+      inline void attach_hdf5(const char *file_name,
+                              const std::map<FieldID,const char*> &field_map,
+                              LegionFileMode mode);
+    public:
+      inline void add_field_pointer(FieldID fid, void *ptr);
+      inline void set_pitch(unsigned dim, size_t pitch);
+    public:
+      ExternalResource                              resource;
+      LogicalRegion                                 handle;
+      LogicalRegion                                 parent;
+    public:
+      // Data for files
+      const char                                    *file_name;
+      LegionFileMode                                mode;
+      std::vector<FieldID>                          file_fields; // normal files
+      std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files
+    public:
+      // Data for arrays
+      std::map<FieldID,/*pointers*/void*>           field_pointers;
+      std::vector<size_t/*bytes*/>                  pitches;
+    };
+
+    /**
+     * \struct TimingLauncher
+     * Timing launchers are used for issuing a timing measurement.
+     * @see Runtime
+     */
+    struct TimingLauncher {
+    public:
+      TimingLauncher(TimingMeasurement measurement);
+    public:
+      inline void add_precondition(const Future &f);
+    public:
+      TimingMeasurement               measurement;
+      std::set<Future>                preconditions;
+    };
+
     //==========================================================================
     //                          Task Variant Registrars 
     //==========================================================================
@@ -3670,9 +3725,27 @@ namespace Legion {
       void fill_fields(Context ctx, const FillLauncher &launcher);
     public:
       //------------------------------------------------------------------------
-      // File Operations
+      // Attach Operations
       //------------------------------------------------------------------------
+
       /**
+       * Attach an external resource to a logical region
+       * @param ctx enclosing task context
+       * @param launcher the attach launcher that describes the resource
+       * @return the physical region for the external resource
+       */
+      PhysicalRegion attach_external_resource(Context ctx, 
+                                              const AttachLauncher &launcher);
+
+      /**
+       * Detach an external resource from a logical region
+       * @param ctx enclosing task context
+       * @param the physical region for the external resource
+       */
+      void detach_external_resource(Context ctx, PhysicalRegion region);
+
+      /**
+       * @deprecated
        * Attach an HDF5 file as a physical region. The file must already 
        * exist. Legion will defer the attach operation until all other
        * operations on the logical region are finished. After the attach
@@ -3707,6 +3780,7 @@ namespace Legion {
                                  LegionFileMode mode);
 
       /**
+       * @deprecated
        * Detach an HDF5 file. This can only be performed on a physical
        * region that was created by calling attach_hdf5. The runtime
        * will properly defer the detach call until all other operations
@@ -3724,6 +3798,7 @@ namespace Legion {
       void detach_hdf5(Context ctx, PhysicalRegion region);
 
       /**
+       * @deprecated
        * Attach an normal file as a physical region. This attach is similar to
        * attach_hdf5 operation, except that the file has exact same data format
        * as in-memory physical region. Data lays out as SOA in file.
@@ -3734,6 +3809,7 @@ namespace Legion {
                                  LegionFileMode mode);
 
       /**
+       * @deprecated
        * Detach an normal file. THis detach operation is similar to
        * detach_hdf5
        */
@@ -4115,6 +4191,15 @@ namespace Legion {
        */
       Future get_current_time_in_nanoseconds(Context ctx,
                                              Future precondition = Future());
+
+      /**
+       * Issue a timing measurement operation configured with a launcher.
+       * The above methods are just common special cases. This allows for
+       * the general case of an arbitrary measurement with an arbitrary
+       * number of preconditions.
+       */
+      Future issue_timing_measurement(Context ctx, 
+                                      const TimingLauncher &launcher);
 
       /**
        * Return the base time in nanoseconds on THIS node with which all 
