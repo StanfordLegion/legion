@@ -120,23 +120,61 @@ namespace LegionRuntime {
         size_t rlen, rleft;
       };
 
-      template<unsigned DIM>
       class LayoutIterator {
       public:
-        LayoutIterator(Rect<DIM> rect, Mapping<DIM, 1> *src_m,
-                       Mapping<DIM, 1> *dst_m, XferOrder::Type order)
-          : orig_rect(rect), src_mapping(src_m), dst_mapping(dst_m),
-            iter_order(order), cur_idx(0) {
-          src_mapping->add_reference();
-          dst_mapping->add_reference();
-          rect_size = orig_rect.volume();
-          Rect<DIM> subrect;
-          Point<1> in1[DIM], in2[DIM];
-          src_mapping->image_linear_subrect(rect, subrect, in1);
-          dst_mapping->image_linear_subrect(rect, subrect, in2);
+        LayoutIterator(const Domain& dm,
+                       const DomainLinearization& src_dl,
+                       const DomainLinearization& dst_dl,
+                       XferOrder::Type order)
+        : iter_order(order), cur_idx(0)
+        {
+          //src_dl.add_local_reference();
+          //dst_dl.add_local_reference();
+          rect_size = dm.get_volume();
+          assert(dm.get_dim() == src_dl.get_dim());
+          assert(dm.get_dim() == dst_dl.get_dim());
+          Point<1> in1[3], in2[3];
+          switch (dm.get_dim()) {
+            case 1:
+            {
+              Rect<1> rect = dm.get_rect<1>(), subrect;
+              Mapping<1, 1>* src_m = src_dl.get_mapping<1>();
+              Mapping<1, 1>* dst_m = dst_dl.get_mapping<1>();
+              src_m->image_linear_subrect(rect, subrect, in1);
+              dst_m->image_linear_subrect(rect, subrect, in2);
+              src_lo = src_m->image(rect.lo);
+              dst_lo = dst_m->image(rect.lo);
+              break;
+            }
+            case 2:
+            {
+              Rect<2> rect = dm.get_rect<2>(), subrect;
+              Mapping<2, 1>* src_m = src_dl.get_mapping<2>();
+              Mapping<2, 1>* dst_m = dst_dl.get_mapping<2>();
+              src_m->image_linear_subrect(rect, subrect, in1);
+              dst_m->image_linear_subrect(rect, subrect, in2);
+              src_lo = src_m->image(rect.lo);
+              dst_lo = dst_m->image(rect.lo);
+              break;
+            }
+            case 3:
+            {
+              Rect<3> rect = dm.get_rect<3>(), subrect;
+              Mapping<3, 1>* src_m = src_dl.get_mapping<1>();
+              Mapping<3, 1>* dst_m = dst_dl.get_mapping<1>();
+              src_m->image_linear_subrect(rect, subrect, in1);
+              dst_m->image_linear_subrect(rect, subrect, in2);
+              src_lo = src_m->image(rect.lo);
+              dst_lo = dst_m->image(rect.lo);
+              break;
+            }
+            default:
+              assert(0);
+          }
+
           // Currently we only support FortranArrayLinearization
-          assert(src_strides[0][0] == 1);
-          assert(dst_strides[0][0] == 1);
+          assert(in1[0] == 1);
+          assert(in2[0] == 1);
           dim = 0;
           coord_t exp1 = 0, exp2 = 0;
           for (unsigned i = 0; i < DIM; i++) {
@@ -155,12 +193,10 @@ namespace LegionRuntime {
               dim++;
             }
           }
-          src_lo = src_mapping->image(orig_rect.lo);
-          dst_lo = dst_mapping->image(orig_rect.lo);
-        }
+       }
         ~LayoutIterator() {
-          src_mapping->remove_reference();
-          dst_mapping->remove_reference();
+          //src_dl.remove_reference();
+          //dst_dl.remove_reference();
         }
         void reset() {cur_idx = 0;}
         bool any_left() {return cur_idx < rect_size;}
@@ -201,12 +237,10 @@ namespace LegionRuntime {
         }
         void move(coord_t steps) {cur_idx += steps; assert(cur_idx <= rect_size);};
       private:
-        Point<1> src_strides[DIM], dst_strides[DIM], src_lo, dst_lo;
-        Point<DIM> extents;
+        Point<1> src_strides[3], dst_strides[3], src_lo, dst_lo;
+        Point<3> extents;
         int dim;
         coord_t cur_idx, rect_size;
-        Rect<DIM> orig_rect;
-        Mapping<DIM, 1> *src_mapping, *dst_mapping;
       };
 
       static inline off_t calc_mem_loc_ib(off_t alloc_offset,

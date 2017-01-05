@@ -308,8 +308,8 @@ namespace LegionRuntime{
     };
 
     class MaskEnumerator;
+    class LayoutIterator;
 
-    template<unsigned DIM>
     class XferDes {
     public:
       enum XferKind {
@@ -377,7 +377,7 @@ namespace LegionRuntime{
       pthread_mutex_t xd_lock, update_read_lock, update_write_lock;
       // default iterators provided to generate requests
       //Layouts::GenericLayoutIterator<DIM>* li;
-      LayoutIterator<DIM>* li;
+      LayoutIterator* li;
       MaskEnumerator* me;
       unsigned offset_idx;
     public:
@@ -408,10 +408,10 @@ namespace LegionRuntime{
                                   dst_buf.linearization.get_mapping<1>(),
                                   order, src_buf.is_ib, dst_buf.is_ib);
         } else {
-          li = new LayoutIterator<DIM>(
-                       domain.get_rect<DIM>(),
-                       src_buf.linearization.get_mapping<DIM>(),
-                       dst_buf.linearization.get_mapping<DIM>(),
+          li = new LayoutIterator(
+                       domain,
+                       src_buf.linearization,
+                       dst_buf.linearization,
                        order);
           me = NULL;
         }
