@@ -986,7 +986,7 @@ public:
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
 private:
-  // std::vector<Processor>& procs_list;
+  std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;
   std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
   std::map<Processor, Memory>& proc_sysmems;
@@ -1001,7 +1001,7 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
                              std::map<Processor, Memory>* _proc_sysmems,
                              std::map<Processor, Memory>* _proc_regmems)
   : DefaultMapper(rt, machine, local, mapper_name),
-    // procs_list(*_procs_list),
+    procs_list(*_procs_list),
     // sysmems_list(*_sysmems_list),
     sysmem_local_procs(*_sysmem_local_procs),
     proc_sysmems(*_proc_sysmems)// ,
@@ -1012,19 +1012,26 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
 Processor PennantMapper::default_policy_select_initial_processor(
                                     MapperContext ctx, const Task &task)
 {
-  const char* task_name = task.get_task_name();
-  if (strcmp(task_name, "calculate_new_currents") == 0 ||
-      strcmp(task_name, "distribute_charge") == 0 ||
-      strcmp(task_name, "update_voltages") == 0 ||
-      strcmp(task_name, "init_pointers") == 0)
-  {
-    std::vector<Processor> &local_procs =
-      sysmem_local_procs[proc_sysmems[local_proc]];
-    if (local_procs.size() > 1 && task.regions[0].handle_type == SINGULAR) {
+  if (!task.regions.empty()) {
+    if (task.regions[0].handle_type == SINGULAR) {
       Color index = runtime->get_logical_region_color(ctx, task.regions[0].region);
-      return local_procs[(index % (local_procs.size() - 1)) + 1];
-    } else {
-      return local_proc;
+#define NO_SPMD 0
+#if NO_SPMD
+      return procs_list[index % procs_list.size()];
+#else
+      std::vector<Processor> &local_procs =
+        sysmem_local_procs[proc_sysmems[local_proc]];
+      if (local_procs.size() > 1) {
+#define SPMD_RESERVE_SHARD_PROC 0
+#if SPMD_RESERVE_SHARD_PROC
+        return local_procs[(index % (local_procs.size() - 1)) + 1];
+#else
+        return local_procs[index % local_procs.size()];
+#endif
+      } else {
+        return local_procs[0];
+      }
+#endif
     }
   }
 

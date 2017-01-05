@@ -158,6 +158,19 @@ namespace Realm {
       virtual void request_completed(void) = 0;
     };
 
+    class GPUPreemptionWaiter : public GPUCompletionNotification {
+    public:
+      GPUPreemptionWaiter(GPU *gpu);
+      virtual ~GPUPreemptionWaiter(void) {}
+    public:
+      virtual void request_completed(void);
+    public:
+      void preempt(void);
+    private:
+      GPU *const gpu;
+      Event wait_event;
+    };
+
     // An abstract base class for all GPU memcpy operations
     class GPUMemcpy { //: public GPUJob {
     public:
@@ -566,6 +579,8 @@ namespace Realm {
 					size_t offset, cudaMemcpyKind kind,
 					cudaStream_t stream);
 
+      void gpu_memset(void *dst, int value, size_t count);
+      void gpu_memset_async(void *dst, int value, size_t count, cudaStream_t stream);
     public:
       GPU *gpu;
 

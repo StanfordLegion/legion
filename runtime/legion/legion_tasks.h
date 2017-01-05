@@ -583,15 +583,6 @@ namespace Legion {
                              const TaskLauncher &launcher, 
                              bool check_privileges,
                              bool track = true);
-      Future initialize_task(TaskContext *ctx,
-              Processor::TaskFuncID task_id,
-              const std::vector<IndexSpaceRequirement> &indexes,
-              const std::vector<RegionRequirement> &regions,
-              const TaskArgument &arg,
-              const Predicate &predicate,
-              MapperID id, MappingTagID tag,
-              bool check_privileges,
-              bool track = true); 
       void set_top_level(void);
     public:
       RtEvent perform_versioning_analysis(void);
@@ -788,30 +779,6 @@ namespace Legion {
                              ReductionOpID redop,
                              bool check_privileges,
                              bool track = true);
-      FutureMap initialize_task(TaskContext *ctx,
-            Processor::TaskFuncID task_id,
-            const Domain &launch_domain,
-            const std::vector<IndexSpaceRequirement> &indexes,
-            const std::vector<RegionRequirement> &regions,
-            const TaskArgument &global_arg,
-            const ArgumentMap &arg_map,
-            const Predicate &predicate,
-            bool must_parallelism,
-            MapperID id, MappingTagID tag,
-            bool check_privileges);
-      Future initialize_task(TaskContext *ctx,
-            Processor::TaskFuncID task_id,
-            const Domain &launch_domain,
-            const std::vector<IndexSpaceRequirement> &indexes,
-            const std::vector<RegionRequirement> &regions,
-            const TaskArgument &global_arg,
-            const ArgumentMap &arg_map,
-            ReductionOpID redop,
-            const TaskArgument &init_value,
-            const Predicate &predicate,
-            bool must_parallelism,
-            MapperID id, MappingTagID tag,
-            bool check_privileges);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
     public:

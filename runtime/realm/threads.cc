@@ -714,21 +714,31 @@ namespace Realm {
 						 &(rsrv.allocation->allowed_cpus)) );
 #endif
 
+    // pthreads also has min stack size, except that you have to guess what it
+    //  is when using glibc - the PTHREAD_STACK_MIN value is the min size of
+    //  the stack _AFTER_ any space needed for thread-local storage has been 
+    //  subtracted (see https://sourceware.org/bugzilla/show_bug.cgi?id=11787)
+    // glibc won't tell you how much to add, but anecdotally, 128KB seems to
+    //  be enough, so we'll do the greater of 256KB and twice
+    //  PTHREAD_STACK_MIN and hope we never have to debug this again...
+    const ptrdiff_t MIN_STACK_SIZE = ((PTHREAD_STACK_MIN > (128 << 10)) ?
+				        (PTHREAD_STACK_MIN * 2) :
+				        (256 << 10));
+
     if(params.stack_size != params.STACK_SIZE_DEFAULT) {
       // make sure it's not too large
       assert((rsrv.params.max_stack_size == rsrv.params.STACK_SIZE_DEFAULT) ||
 	     (params.stack_size <= rsrv.params.max_stack_size));
 
-      // pthreads also has a limit
-      if(params.stack_size < PTHREAD_STACK_MIN)
-	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN) );
+      if(params.stack_size < MIN_STACK_SIZE)
+	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, MIN_STACK_SIZE) );
       else
 	CHECK_PTHREAD( pthread_attr_setstacksize(&attr, params.stack_size) );
     } else {
       // does the entire core reservation have a non-standard stack size?
       if(rsrv.params.max_stack_size != rsrv.params.STACK_SIZE_DEFAULT) {
-	if(rsrv.params.max_stack_size < PTHREAD_STACK_MIN)
-	  CHECK_PTHREAD( pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN) );
+	if(rsrv.params.max_stack_size < MIN_STACK_SIZE)
+	  CHECK_PTHREAD( pthread_attr_setstacksize(&attr, MIN_STACK_SIZE) );
 	else
 	  CHECK_PTHREAD( pthread_attr_setstacksize(&attr, rsrv.params.max_stack_size) );
       }

@@ -15,6 +15,10 @@
 # limitations under the License.
 #
 
+# TODO LIST
+# Better algorithm for checking for dataflow paths in physical analysis
+# Support predication for physical analysis
+
 from __future__ import print_function
 
 import argparse
@@ -2301,7 +2305,7 @@ class IndexPartition(object):
                 print(('WARNING: child % is not dominated by parent %s in %s. '+
                       'This is definitely an application bug.') %
                       (child, self.parent, self))
-                if self.node.state.assert_on_warning:
+                if self.state.assert_on_warning:
                     assert False
         # Check disjointness
         if self.disjoint:
@@ -2312,7 +2316,7 @@ class IndexPartition(object):
                     print(('WARNING: %s was logged disjoint '+
                             'but there are overlapping children. This '+
                             'is definitely an application bug.') % self)
-                    if self.node.state.assert_on_warning:
+                    if self.state.assert_on_warning:
                         assert False
                     break
                 previous |= child_shape
@@ -2324,7 +2328,7 @@ class IndexPartition(object):
                 print(('WARNING: %s was logged complete '+
                         'but there are missing points. This '+
                         'is definitely an application bug.') % self)
-                if self.node.state.assert_on_warning:
+                if self.state.assert_on_warning:
                     assert False
 
     def update_index_sets(self, index_sets):
@@ -2658,10 +2662,10 @@ class LogicalRegion(object):
         for child in self.children.itervalues():
             child.perform_deletion_invalidation(op, req, field)
 
-    def close_logical_tree(self, field, closed_users, permit_leave_open):
+    def close_logical_tree(self, field, closed_users):
         if field not in self.logical_state:
             return
-        self.logical_state[field].close_logical_tree(closed_users, permit_leave_open)
+        self.logical_state[field].close_logical_tree(closed_users)
 
     def get_verification_state(self, depth, field, point):
         # Should always be at the root
@@ -2995,10 +2999,10 @@ class LogicalPartition(object):
         for child in self.children.itervalues():
             child.perform_deletion_invalidation(op, req, field)
 
-    def close_logical_tree(self, field, closed_users, permit_leave_open):
+    def close_logical_tree(self, field, closed_users):
         if field not in self.logical_state:
             return
-        self.logical_state[field].close_logical_tree(closed_users, permit_leave_open)
+        self.logical_state[field].close_logical_tree(closed_users)
 
     def compute_current_version_numbers(self, depth, field, op, index):
         self.parent.compute_current_version_numbers(depth, field, op, 
@@ -3354,13 +3358,13 @@ class LogicalState(object):
                 # We need a close if req is not read only or there is a next child
                 if not req.is_read_only() or next_child:
                     if not self.perform_close_operation(empty_children_to_close,
-                                  True, op, req, previous_deps, perform_checks):
+                          True, False, op, req, previous_deps, perform_checks):
                         return False
                     self.projection_mode = OPEN_NONE
             elif self.projection_mode == OPEN_READ_WRITE:
                 # We close this no matter what
                 if not self.perform_close_operation(empty_children_to_close,
-                                  False, op, req, previous_deps, perform_checks):
+                          False, False, op, req, previous_deps, perform_checks):
                     return False
                 self.projection_mode = OPEN_NONE
             else:
@@ -3369,18 +3373,17 @@ class LogicalState(object):
                 if not req.is_reduce() or next_child or \
                             req.redop != self.current_redop: 
                     if not self.perform_close_operation(empty_children_to_close,
-                                  False, op, req, previous_deps, perform_checks):
+                          False, False, op, req, previous_deps, perform_checks):
                         return False
                     self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
-            children_to_close = dict()
-            permit_leave_open = False # Never allowed to leave anything open here
+            children_to_close = set()
             # Flushing reductions close all children no matter what
             for child,open_mode in self.open_children.iteritems():
-                children_to_close[child] = permit_leave_open
+                children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
-            if not self.perform_close_operation(children_to_close, False, op, req, 
-                                                previous_deps, perform_checks):
+            if not self.perform_close_operation(children_to_close, False, False,
+                                        op, req, previous_deps, perform_checks):
                 return False
         elif next_child is None or not self.node.are_all_children_disjoint():
             # Figure out which children we need to do closes for
@@ -3445,8 +3448,9 @@ class LogicalState(object):
                 # Full closes have to close everybody 
                 children_to_close = dict() 
                 # If we're going to do a write discard then
-                # this can be a read only close
-                overwrite = req.priv == WRITE_ONLY
+                # this can be a read only close, but only if
+                # the operation is not predicated
+                overwrite = req.priv == WRITE_ONLY and not op.predicate 
                 for child,open_mode in self.open_children.iteritems():
                     if open_mode == OPEN_READ_ONLY:                
                         children_to_close[child] = False
@@ -3459,7 +3463,7 @@ class LogicalState(object):
                         children_to_close[child] = False
                     else:
                         assert False
-                if not self.perform_close_operation(children_to_close,
+                if not self.perform_close_operation(children_to_close, False,
                         overwrite, op, req, previous_deps, perform_checks):
                     return False
                 # No upgrades if we closed it
@@ -3480,7 +3484,7 @@ class LogicalState(object):
                         upgrade_child = False
                     children_to_read_close[child] = False
                 if not self.perform_close_operation(children_to_read_close,
-                        True, op, req, previous_deps, perform_checks):
+                        True, False, op, req, previous_deps, perform_checks):
                     return False
             if upgrade_child:
                 assert next_child
@@ -3547,8 +3551,8 @@ class LogicalState(object):
                 # If we can't do either of these then we have to close
                 # Also have to close if this is a reduction and not shallow disjoint
                 if not shallow_disjoint and (not same_func_and_rect or req.is_reduce()):
-                    if not self.perform_close_operation(empty_children_to_close,
-                          False, op, req, previous_deps, perform_checks, disjoint_close):
+                    if not self.perform_close_operation(empty_children_to_close, False, 
+                            False, op, req, previous_deps, perform_checks, disjoint_close):
                         return False
                     if disjoint_close:
                         self.projection_mode = OPEN_READ_WRITE
@@ -3558,22 +3562,21 @@ class LogicalState(object):
                 assert self.projection_mode == OPEN_MULTI_REDUCE
                 assert self.current_redop != 0
                 if self.current_redop != req.redop:
-                    if not self.perform_close_operation(empty_children_to_close,
-                          False, op, req, previous_deps, perform_checks, disjoint_close):
+                    if not self.perform_close_operation(empty_children_to_close, False, 
+                            False, op, req, previous_deps, perform_checks, disjoint_close):
                         return False
                     if disjoint_close:
                         self.projection_mode = OPEN_READ_WRITE
                     else:
                         self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
-            children_to_close = dict()
-            permit_leave_open = False # Never allowed to leave anything open here
+            children_to_close = set()
             # Flushing reductions close all children no matter what
             for child,open_mode in self.open_children.iteritems():
-                children_to_close[child] = permit_leave_open
+                children_to_close.add(child)
             # If we are flushing reductions we do a close no matter what
-            if not self.perform_close_operation(children_to_close, False, op, req, 
-                                                previous_deps, perform_checks):
+            if not self.perform_close_operation(children_to_close, False, False, 
+                                            op, req, previous_deps, perform_checks):
                 return False
         else:
             # Close all open children
@@ -3585,12 +3588,12 @@ class LogicalState(object):
                 else:
                     children_to_close[child] = False
             if children_to_close:
-                if not self.perform_close_operation(children_to_close, False, op, req,
-                                                    previous_deps, perform_checks):
+                if not self.perform_close_operation(children_to_close, False, False,
+                                            op, req, previous_deps, perform_checks):
                     return False
             if children_to_read_close:
-                if not self.perform_close_operation(children_to_read_close, True, op, req,
-                                                    previous_deps, perform_checks):
+                if not self.perform_close_operation(children_to_read_close, True, 
+                                    False, op, req, previous_deps, perform_checks):
                     return False
             # Can now reset this
             self.open_children = dict()
@@ -3610,19 +3613,19 @@ class LogicalState(object):
             del self.open_children[next_child]
         elif open_mode == OPEN_READ_WRITE:
             if force_close and not self.perform_close_operation(child_to_close, 
-                                        False, op, req, previous_deps, perform_checks): 
+                            False, False, op, req, previous_deps, perform_checks): 
                 return False
         elif open_mode == OPEN_SINGLE_REDUCE:
             if force_close: 
                 if not self.perform_close_operation(child_to_close,
-                            False, op, req, previous_deps, perform_checks):
+                            False, False, op, req, previous_deps, perform_checks):
                     return False
             else:
                 # Update the state to read-write
                 self.open_children[next_child] = OPEN_READ_WRITE
         elif open_mode == OPEN_MULTI_REDUCE:
             if not self.perform_close_operation(child_to_close,
-                              False, op, req, previous_deps, perform_checks):
+                          False, False, op, req, previous_deps, perform_checks):
                 return False
         else:
             assert False # should never get here
@@ -3743,19 +3746,19 @@ class LogicalState(object):
                 prev_op.add_outgoing(dep)
                 close.add_incoming(dep)
 
-    def perform_close_operation(self, children_to_close, read_only_close, op, req,
-                                previous_deps, perform_checks, disjoint_close = False):
+    def perform_close_operation(self, children_to_close, read_only_close, overwriting_close, 
+                            op, req, previous_deps, perform_checks, disjoint_close = False):
         error_str = ' for read-only close operation' if read_only_close \
             else ' for normal close operation'
         # Find the close operation first
-        close = self.find_close_operation(op, req, read_only_close,
+        close = self.find_close_operation(op, req, read_only_close or overwriting_close,
                                           perform_checks, error_str)
         if not close:
             return False
-        for child,permit_leave_open in children_to_close.iteritems():
+        for child in children_to_close:
             closed_users = list()
             # Close the child tree
-            child.close_logical_tree(self.field, closed_users, permit_leave_open)
+            child.close_logical_tree(self.field, closed_users)
             # Perform any checks
             if perform_checks:
                 if not self.perform_close_checks(close, closed_users, op, req, 
@@ -3764,12 +3767,7 @@ class LogicalState(object):
             else:
                 self.record_close_dependences(close, closed_users, op, req,
                                               previous_deps)
-            # Remove the child if necessary
-            if permit_leave_open:
-                assert req.is_read_only()
-                self.open_children[child] = OPEN_READ_ONLY
-            else:
-                del self.open_children[child]
+            del self.open_children[child]
             # Remove it from the list of open reductions to if it is there
             if child in self.open_redop:
                 del self.open_redop[child]
@@ -3796,21 +3794,15 @@ class LogicalState(object):
                 self.dirty_below = False
         return True
 
-    def close_logical_tree(self, closed_users, permit_leave_open):
+    def close_logical_tree(self, closed_users):
         # Save the closed users and then close the subtrees
         closed_users += self.current_epoch_users
         self.current_epoch_users = list()
         self.previous_epoch_users = list()
         for child in self.open_children:
-            child.close_logical_tree(self.field, closed_users, permit_leave_open)
-        if permit_leave_open:
-            for child in self.open_children.iterkeys():
-                self.open_children[child] = OPEN_READ_ONLY
-                if child in self.open_redop:
-                    del self.open_redop[child]
-        else:
-            self.open_children = dict()
-            self.open_redop = dict()
+            child.close_logical_tree(self.field, closed_users)
+        self.open_children = dict()
+        self.open_redop = dict()
         self.current_redop = 0
         self.dirty_below = False
         self.projection_mode = OPEN_NONE
@@ -4183,7 +4175,7 @@ class VerificationTraverser(object):
                        self.dataflow_stack[-1] and \
                     self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
                     # Traverse the dataflow path
-                    src = copy.srcs[copy.dst_fields.index(self.src_field)]
+                    src = copy.srcs[copy.dst_fields.index(self.dst_field)]
                     # See if the source is a valid instance or a
                     # previous instance in the presence of pending reductions
                     if not self.state.pending_reductions or self.state.valid_instances:
@@ -4896,8 +4888,8 @@ class Operation(object):
                  'temporaries', 'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
-                 'advance_ops', 'task', 'task_id', 'predicate', 'futures', 
-                 'index_owner', 'points', 'launch_rect', 'creator', 
+                 'advance_ops', 'task', 'task_id', 'predicate', 'predicate_result',
+                 'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
                  'realm_copies', 'realm_fills', 'version_numbers', 
                  'internal_idx', 'disjoint_close_fields', 'partition_kind', 
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
@@ -4928,6 +4920,7 @@ class Operation(object):
         self.realm_fills = None
         self.version_numbers = None
         self.predicate = None
+        self.predicate_result = True
         self.futures = None
         # Only valid for tasks
         self.task = None
@@ -5182,6 +5175,9 @@ class Operation(object):
         if index not in self.temporaries:
             self.temporaries[index] = dict()
         self.temporaries[index][fid] = inst
+
+    def set_predicate_result(self, result):
+        self.predicate_result = result
 
     def add_future(self, future):
         if not self.futures:
@@ -6059,6 +6055,9 @@ class Operation(object):
         return True
 
     def perform_op_physical_verification(self, perform_checks):
+        # If we were predicated false, then there is nothing to do
+        if not self.predicate_result:
+            return True
         prefix = ''
         if self.context:
             depth = self.context.get_depth()
@@ -6076,11 +6075,9 @@ class Operation(object):
                     return False
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
-            # If this was predicated there might not be any points
-            if self.points:
-                for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
-                    if not point.op.perform_op_physical_verification(perform_checks):
-                        return False
+            for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
+                if not point.op.perform_op_physical_verification(perform_checks):
+                    return False
             return True
         print((prefix+"Performing physical verification analysis "+
                      "for %s (UID %d)...") % (str(self),self.uid))
@@ -6196,7 +6193,7 @@ class Operation(object):
             PENDING_PART_OP_KIND : "honeydew",
             DYNAMIC_COLLECTIVE_OP_KIND : "navy",
             TRACE_OP_KIND : "springgreen",
-            TIMING_OP_KIND : "turqoise",
+            TIMING_OP_KIND : "turquoise",
             PREDICATE_OP_KIND : "olivedrab1",
             MUST_EPOCH_OP_KIND : "tomato",
             }[self.kind]
@@ -6274,6 +6271,9 @@ class Operation(object):
         self.print_base_node(printer, False)
 
     def print_event_graph(self, printer, elevate, all_nodes, top):
+        # If we were predicated false then we don't get printed
+        if not self.predicate_result:
+            return
         # Do any of our close operations too
         if self.inter_close_ops:
             for close in self.inter_close_ops:
@@ -8544,6 +8544,8 @@ close_index_pat          = re.compile(
     prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 disjoint_close_pat       = re.compile(
     prefix+"Disjoint Close Field (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
+predicate_false_pat      = re.compile(
+    prefix+"Predicate False (?P<uid>[0-9]+)")
 # Patterns for logical analysis and region requirements
 requirement_pat         = re.compile(
     prefix+"Logical Requirement (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<is_reg>[0-1]) "+
@@ -9284,6 +9286,11 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.add_disjoint_close_field(int(m.group('fid')))     
+        return True
+    m = predicate_false_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_predicate_result(False)
         return True
     # Region tree shape patterns (near the bottom since they are infrequent)
     m = top_index_pat.match(line)

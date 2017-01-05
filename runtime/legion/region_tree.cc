@@ -11024,7 +11024,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::close_logical_node(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
-                                            bool permit_leave_open,
                                             bool read_only_close)
     //--------------------------------------------------------------------------
     {
@@ -11048,7 +11047,6 @@ namespace Legion {
           closed_node->record_closed_fields(closing_mask & state.dirty_fields);
       }
       // Recursively traverse any open children and close them as well
-      LegionDeque<FieldState>::aligned new_states;
       for (std::list<FieldState>::iterator it = state.field_states.begin();
             it != state.field_states.end(); /*nothing*/)
       {
@@ -11082,11 +11080,11 @@ namespace Legion {
                                    false/*allow next*/,
                                    NULL/*aliased children*/,
                                    false/*upgrade*/,
-                                   permit_leave_open,
                                    read_only_close,
+                                   false/*overwiting close*/,
                                    false/*record close operations*/,
                                    false/*record closed fields*/,
-                                   new_states, already_open);
+                                   already_open);
         }
         // Remove the state if it is now empty
         if (!it->valid_fields)
@@ -11094,9 +11092,6 @@ namespace Legion {
         else
           it++;
       }
-      // Merge any new field states
-      if (!new_states.empty())
-        merge_new_field_states(state, new_states);
       // We can clear out our dirty fields 
       if (!!state.dirty_fields)
         state.dirty_fields -= closing_mask;
@@ -11201,11 +11196,11 @@ namespace Legion {
                                          true/*allow next*/,
                                          aliased_children,
                                          needs_upgrade,
-                                         false/*permit leave open*/,
                                          true/*read only close*/,
+                                         false/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
-                                         new_states, already_open);
+                                         already_open);
                 open_below |= already_open;
                 if (needs_upgrade && !!already_open)
                   new_states.push_back(
@@ -11226,11 +11221,11 @@ namespace Legion {
                                        true/*allow next*/,
                                        aliased_children,
                                        false/*needs upgrade*/,
-                                       IS_READ_ONLY(closer.user.usage),
-                                       overwriting/*read only close*/,
+                                       false/*read only close*/,
+                                       overwriting/*overwriting close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
-                                       new_states, open_below);
+                                       open_below);
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
               else
@@ -11331,11 +11326,11 @@ namespace Legion {
                                            true/*allow next*/,
                                            aliased_children,
                                            true/*needs upgrade*/,
-                                           false/*permit leave open*/,
                                            false/*read only close*/,
+                                           false/*overwriting close*/,
                                            record_close_operations,
                                            false/*record closed fields*/,
-                                           new_states, already_open);
+                                           already_open);
                   open_below |= already_open;
                   if (!!already_open)
                   {
@@ -11357,11 +11352,11 @@ namespace Legion {
                                          false/*allow next*/,
                                          NULL/*aliased children*/,
                                          false/*needs upgrade*/,
-                                         false/*permit leave open*/,
-                                         overwriting/*read only close*/,
+                                         false/*read only close*/,
+                                         overwriting/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
-                                         new_states, already_open);
+                                         already_open);
                 open_below |= already_open;
               }
               // Now see if the current field state is still valid
@@ -11399,11 +11394,11 @@ namespace Legion {
                                          false/*allow next child*/,
                                          NULL/*aliased children*/,
                                          false/*needs upgrade*/,
-                                         false/*permit leave open*/,
-                                         overwriting/*read only close*/,
+                                         false/*read only close*/,
+                                         overwriting/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
-                                         new_states, already_open);
+                                         already_open);
 #ifdef DEBUG_LEGION
                 assert(!already_open); // should all be closed now
 #endif
@@ -11452,7 +11447,7 @@ namespace Legion {
                 assert(!!overlap);
 #endif
                 if (overwriting)
-                  closer.record_read_only_close(overlap, true/*projection*/);
+                  closer.record_overwriting_close(overlap, true/*projection*/);
                 else
                 {
                   closer.record_close_operation(overlap, true/*projection*/);
@@ -11484,7 +11479,7 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   if (overwriting)
-                    closer.record_read_only_close(overlap, true/*projection*/);
+                    closer.record_overwriting_close(overlap,true/*projection*/);
                   else
                   {
                     closer.record_close_operation(overlap, true/*projection*/);
@@ -11575,11 +11570,11 @@ namespace Legion {
                                        no_next_child, false/*allow next*/,
                                        NULL/*aliased children*/,
                                        false/*needs upgrade*/,
-                                       false/*permit leave open*/,
                                        true/*read only close*/,
+                                       false/*overwriting close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
-                                       new_states, already_open);
+                                       already_open);
               open_below |= already_open;
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
@@ -11596,11 +11591,11 @@ namespace Legion {
                                        no_next_child, false/*allow next*/,
                                        NULL/*aliased children*/,
                                        false/*needs upgrade*/,
-                                       false/*permit leave open*/,
                                        false/*read only close*/,
+                                       false/*overwriting close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
-                                       new_states, already_open);
+                                       already_open);
               open_below |= already_open;
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
@@ -11896,11 +11891,11 @@ namespace Legion {
                                      next_child, false/*allow_next*/,
                                      NULL/*aliased children*/,
                                      false/*needs upgrade*/,
-                                     false/*permit leave open*/,
                                      false/*read only close*/,
+                                     false/*overwriting close*/,
                                      record_close_operations,
                                      true/*record closed fields*/,
-                                     new_states, closed_child_fields);
+                                     closed_child_fields);
             // We only really flushed fields that were actually closed
             flushed_fields |= closed_child_fields;
           }
@@ -11929,11 +11924,10 @@ namespace Legion {
                                             bool allow_next_child,
                                             const FieldMask *aliased_children,
                                             bool upgrade_next_child,
-                                            bool permit_leave_open,
                                             bool read_only_close,
+                                            bool overwriting_close,
                                             bool record_close_operations,
                                             bool record_closed_fields,
-                                   LegionDeque<FieldState>::aligned &new_states,
                                             FieldMask &output_mask)
     //--------------------------------------------------------------------------
     {
@@ -11977,10 +11971,12 @@ namespace Legion {
           }
         }
       }
-      else if (read_only_close)
+      else if (read_only_close || overwriting_close)
       {
         // Read only closes can close specific children without 
         // any issues, so we can selectively filter what we need to close
+        // Overwriting closes are the same as read-only closes, but 
+        // they actually do need to close all the children
         std::vector<ColorPoint> to_delete;
         for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
               state.open_children.begin(); it != 
@@ -12030,25 +12026,26 @@ namespace Legion {
             }
           }
           // Check for child disjointness
-          if (next_child.is_valid() && (it->first != next_child) &&
-              (all_children_disjoint || 
+          if (!overwriting_close && next_child.is_valid() && 
+              (it->first != next_child) && (all_children_disjoint || 
                are_children_disjoint(it->first, next_child)))
             continue;
           // Perform the close operation
           RegionTreeNode *child_node = get_tree_child(it->first);
           child_node->close_logical_node(closer, close_mask, 
-                                         permit_leave_open, true/*read only*/);
+                                         true/*read only*/);
           if (record_close_operations)
-            closer.record_read_only_close(close_mask, false/*projection*/);
+          {
+            if (overwriting_close)
+              closer.record_overwriting_close(close_mask, false/*projection*/);
+            else
+              closer.record_read_only_close(close_mask, false/*projection*/);
+          }
           // Remove the close fields
           it->second -= close_mask;
           removed_fields = true;
           if (!it->second)
             to_delete.push_back(it->first);
-          // If we're allowed to leave this open, add a new
-          // state for the current user
-          if (permit_leave_open)
-            new_states.push_back(FieldState(closer.user,close_mask,it->first));
           if (record_closed_fields)
             output_mask |= close_mask;
         }
@@ -12152,18 +12149,12 @@ namespace Legion {
             // Perform the close operation
             RegionTreeNode *child_node = get_tree_child(it->first);
             child_node->close_logical_node(closer, child_close, 
-                                           permit_leave_open, 
                                            false/*read only close*/);
             // Remove the close fields
             it->second -= child_close;
             removed_fields = true;
             if (!it->second)
               to_delete.push_back(it->first);
-            // If we're allowed to leave this open, add a new
-            // state for the current user
-            if (permit_leave_open)
-              new_states.push_back(FieldState(closer.user, 
-                                              child_close, it->first));
           }
           // Remove the children that can be deleted
           for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
@@ -12672,11 +12663,11 @@ namespace Legion {
                                          next_child, false/*allow next*/,
                                          NULL/*aliased children*/,
                                          false/*upgrade next child*/,
-                                         false/*permit leave open*/,
                                          false/*read only close*/,
+                                         false/*overwriting close*/,
                                          true/*record close operations*/,
                                          true/*record closed fields*/,
-                                         new_states, open_below);
+                                         open_below);
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -12698,11 +12689,11 @@ namespace Legion {
                                          next_child, false/*allow next*/,
                                          NULL/*aliased children*/,
                                          false/*upgrade next child*/,
-                                         false/*permit leave open*/,
                                          false/*read only close*/,
+                                         false/*overwriting close*/,
                                          true/*record close operations*/,
                                          true/*record closed fields*/,
-                                         new_states, open_below);
+                                         open_below);
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -12722,11 +12713,11 @@ namespace Legion {
                                        next_child, false/*allow next*/,
                                        NULL/*aliased children*/,
                                        false/*upgrade next child*/,
-                                       false/*permit leave open*/,
                                        false/*read only close*/,
+                                       false/*overwriting close*/,
                                        true/*record close operations*/,
                                        true/*record closed fields*/,
-                                       new_states, open_below);
+                                       open_below);
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
               else

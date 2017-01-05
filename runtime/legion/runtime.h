@@ -1728,82 +1728,19 @@ namespace Legion {
                                             const IndexLauncher &launcher);
       Future execute_index_space(Context ctx, 
                         const IndexLauncher &launcher, ReductionOpID redop);
-      Future execute_task(Context ctx, 
-                          Processor::TaskFuncID task_id,
-                          const std::vector<IndexSpaceRequirement> &indexes,
-                          const std::vector<FieldSpaceRequirement> &fields,
-                          const std::vector<RegionRequirement> &regions,
-                          const TaskArgument &arg, 
-                          const Predicate &predicate = Predicate::TRUE_PRED,
-                          MapperID id = 0, 
-                          MappingTagID tag = 0);
-      FutureMap execute_index_space(Context ctx, 
-                          Processor::TaskFuncID task_id,
-                          const Domain domain,
-                          const std::vector<IndexSpaceRequirement> &indexes,
-                          const std::vector<FieldSpaceRequirement> &fields,
-                          const std::vector<RegionRequirement> &regions,
-                          const TaskArgument &global_arg, 
-                          const ArgumentMap &arg_map,
-                          const Predicate &predicate = Predicate::TRUE_PRED,
-                          bool must_paralleism = false, 
-                          MapperID id = 0, 
-                          MappingTagID tag = 0);
-      Future execute_index_space(Context ctx, 
-                          Processor::TaskFuncID task_id,
-                          const Domain domain,
-                          const std::vector<IndexSpaceRequirement> &indexes,
-                          const std::vector<FieldSpaceRequirement> &fields,
-                          const std::vector<RegionRequirement> &regions,
-                          const TaskArgument &global_arg, 
-                          const ArgumentMap &arg_map,
-                          ReductionOpID reduction, 
-                          const TaskArgument &initial_value,
-                          const Predicate &predicate = Predicate::TRUE_PRED,
-                          bool must_parallelism = false, 
-                          MapperID id = 0, 
-                          MappingTagID tag = 0);
     public:
       PhysicalRegion map_region(Context ctx, 
                                 const InlineLauncher &launcher);
-      PhysicalRegion map_region(Context ctx, 
-                                const RegionRequirement &req, 
-                                MapperID id = 0, MappingTagID tag = 0);
       PhysicalRegion map_region(Context ctx, unsigned idx, 
                                 MapperID id = 0, MappingTagID tag = 0);
       void remap_region(Context ctx, PhysicalRegion region);
       void unmap_region(Context ctx, PhysicalRegion region);
       void unmap_all_regions(Context ctx);
     public:
-      void fill_field(Context ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid,
-                      const void *value, size_t value_size,
-                      const Predicate &pred);
-      void fill_field(Context ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid,
-                      Future f, const Predicate &pred);
-      void fill_fields(Context ctx, LogicalRegion handle,
-                       LogicalRegion parent,
-                       const std::set<FieldID> &fields,
-                       const void *value, size_t value_size,
-                       const Predicate &pred);
-      void fill_fields(Context ctx, LogicalRegion handle,
-                       LogicalRegion parent,
-                       const std::set<FieldID> &fields,
-                       Future f, const Predicate &pred);
       void fill_fields(Context ctx, const FillLauncher &launcher);
-    public:
-      PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
-                                 LogicalRegion handle, LogicalRegion parent,
-                                 const std::map<FieldID,const char*> field_map,
-                                 LegionFileMode);
-      void detach_hdf5(Context ctx, PhysicalRegion region);
-      PhysicalRegion attach_file(Context ctx, const char *file_name,
-                                 LogicalRegion handle, LogicalRegion parent,
-                                 const std::vector<FieldID> field_vec,
-                                 LegionFileMode);
-      void detach_file(Context ctx, PhysicalRegion region);
-    public:
+      PhysicalRegion attach_external_resource(Context ctx,
+                                              const AttachLauncher &launcher);
+      void detach_external_resource(Context ctx, PhysicalRegion region);
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
     public:
       Predicate create_predicate(Context ctx, const Future &f);
@@ -1848,16 +1785,14 @@ namespace Legion {
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
+      Future issue_timing_measurement(Context ctx,
+                                      const TimingLauncher &launcher);
     public:
       Future select_tunable_value(Context ctx, TunableID tid,
                                   MapperID mid, MappingTagID tag);
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mid, MappingTagID tag);
       void perform_tunable_selection(const SelectTunableArgs *args);
-    public:
-      Future get_current_time(Context ctx, const Future &precondition);
-      Future get_current_time_in_microseconds(Context ctx, const Future &pre);
-      Future get_current_time_in_nanoseconds(Context ctx, const Future &pre);
     public:
       Mapper* get_mapper(Context ctx, MapperID id, Processor target);
       Processor get_executing_processor(Context ctx);
@@ -2327,11 +2262,7 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void remap_unmapped_regions(Processor proc, Context ctx,
-            const std::vector<PhysicalRegion> &unmapped_regions);
-      void execute_task_launch(Context ctx, TaskOp *task_op, 
-                               bool index, bool silence_warnings);
-      void add_to_dependence_queue(Processor p, Operation *op);
+      void add_to_dependence_queue(TaskContext *ctx, Processor p,Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
       void add_to_local_queue(Processor p, Operation *op);

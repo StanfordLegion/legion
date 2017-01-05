@@ -425,6 +425,11 @@ namespace Legion {
         log_spy.print("Close Index %llu %d %llu", parent_id, index, child_id);
       }
 
+      static inline void log_predicated_false_op(UniqueID unique_id)
+      {
+        log_spy.print("Predicate False %lld", unique_id);
+      }
+
       // Logger calls for mapping dependence analysis 
       static inline void log_logical_requirement(UniqueID unique_id, 
           unsigned index, bool region, IDType index_component,

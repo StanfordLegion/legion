@@ -87,7 +87,7 @@ namespace LegionRuntime {
 	bool operator()(const Point<DIM>& a, const Point<DIM>& b) const
 	{
 	  for(unsigned i = 0; i < DIM; i++)  {
-	    int d = a.x[i] - b.x[i];
+	    coord_t d = a.x[i] - b.x[i];
 	    if (d < 0) return true;
 	    if (d > 0) return false;
 	  }
@@ -202,13 +202,13 @@ namespace LegionRuntime {
 
       CUDAPREFIX static coord_t dot(const Point<DIM> a, const Point<DIM> b)
       {
-	int v = 0;
+	coord_t v = 0;
         for(unsigned i = 0; i < DIM; i++)
 	  v += a.x[i] * b.x[i];
 	return v;
       }
   
-      CUDAPREFIX int dot(const Point<DIM> other) const
+      CUDAPREFIX coord_t dot(const Point<DIM> other) const
       {
         coord_t v = 0;
         for(unsigned i = 0; i < DIM; i++) v += x[i] * other.x[i];
@@ -303,7 +303,7 @@ namespace LegionRuntime {
 
       CUDAPREFIX static coord_t dot(const Point<DIM> a, const Point<DIM> b)
       {
-	int v = 0;
+	coord_t v = 0;
         for(unsigned i = 0; i < DIM; i++)
 	  v += a.x[i] * b.x[i];
 	return v;
@@ -528,6 +528,7 @@ namespace LegionRuntime {
 
       bool dominates(const Rect<DIM>& other) const
       {
+        if (other.volume() == 0) return true;
         for (unsigned i = 0; i < DIM; i++)
         {
           if (other.lo.x[i] < lo.x[i])
@@ -909,7 +910,7 @@ namespace LegionRuntime {
       typedef GenericPointInRectIterator<IDIM> PointInInputRectIterator;
       typedef GenericPointInRectIterator<ODIM> PointInOutputRectIterator;
 
-      Linearization(const Point<DIM> _strides, int _offset = 0)
+      Linearization(const Point<DIM> _strides, coord_t _offset = 0)
         : strides(_strides), offset(_offset) {}
 
       Point<1> image(const Point<IDIM> p) const
@@ -1007,7 +1008,7 @@ namespace LegionRuntime {
     class CArrayLinearization : public Linearization<DIM> {
     public:
       CArrayLinearization(void) {}
-      CArrayLinearization(Rect<DIM> bounds, int first_index = 0)
+      CArrayLinearization(Rect<DIM> bounds, coord_t first_index = 0)
       {
 	Linearization<DIM>::strides.x[DIM - 1] = 1;
 	for(int i = int(DIM) - 2; i >= 0; i--)
@@ -1020,7 +1021,7 @@ namespace LegionRuntime {
     class FortranArrayLinearization : public Linearization<DIM> {
     public:
       FortranArrayLinearization(void) {}
-      FortranArrayLinearization(Rect<DIM> bounds, int first_index = 1)
+      FortranArrayLinearization(Rect<DIM> bounds, coord_t first_index = 1)
       {
 	this->strides.x[0] = 1;
 	for(unsigned i = 1; i < DIM; i++)

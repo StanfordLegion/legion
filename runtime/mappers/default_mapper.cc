@@ -1495,6 +1495,34 @@ namespace Legion {
 	  output.chosen_instances[idx].push_back(virt_inst);
 	  continue;
 	}
+        // Check to see if any of the valid instances satisfy this requirement
+        {
+          std::vector<PhysicalInstance> valid_instances;
+
+          for (std::vector<PhysicalInstance>::const_iterator
+                 it = input.valid_instances[idx].begin(),
+                 ie = input.valid_instances[idx].end(); it != ie; ++it)
+          {
+            if (it->get_location() == target_memory)
+              valid_instances.push_back(*it);
+          }
+
+          std::set<FieldID> valid_missing_fields;
+          runtime->filter_instances(ctx, task, idx, output.chosen_variant,
+                                    valid_instances, valid_missing_fields);
+
+#ifndef NDEBUG
+          bool check =
+#endif
+            runtime->acquire_and_filter_instances(ctx, valid_instances);
+          assert(check);
+
+          output.chosen_instances[idx] = valid_instances;
+          missing_fields[idx] = valid_missing_fields;
+
+          if (missing_fields[idx].empty())
+            continue;
+        }
         // Otherwise make normal instances for the given region
         if (!default_create_custom_instances(ctx, task.target_proc,
                 target_memory, task.regions[idx], idx, missing_fields[idx],
@@ -1697,6 +1725,34 @@ namespace Legion {
                           std::vector<PhysicalInstance> &instances)
     //--------------------------------------------------------------------------
     {
+      // Special case for reduction instances, no point in checking
+      // for existing ones and we also know that currently we can only
+      // make a single instance for each field of a reduction
+      if (req.privilege == REDUCE)
+      {
+        // Iterate over the fields one by one for now, once Realm figures
+        // out how to deal with reduction instances that contain
+        bool force_new_instances = true; // always have to force new instances
+        LayoutConstraintID our_layout_id = 
+         default_policy_select_layout_constraints(ctx, target_memory, req,
+               TASK_MAPPING, needs_field_constraint_check, force_new_instances);
+        LayoutConstraintSet our_constraints = 
+                      runtime->find_layout_constraints(ctx, our_layout_id);
+        instances.resize(instances.size() + req.privilege_fields.size());
+        unsigned idx = 0;
+        for (std::set<FieldID>::const_iterator it = 
+              req.privilege_fields.begin(); it !=
+              req.privilege_fields.end(); it++, idx++)
+        {
+          our_constraints.field_constraint.field_set.clear();
+          our_constraints.field_constraint.field_set.push_back(*it);
+          if (!default_make_instance(ctx, target_memory, our_constraints,
+                       instances[idx], TASK_MAPPING, force_new_instances,
+                       true/*meets*/, req))
+            return false;
+        }
+        return true; 
+      }
       // Before we do anything else figure out our 
       // constraints for any instances of this task, then we'll
       // see if these constraints conflict with or are satisfied by

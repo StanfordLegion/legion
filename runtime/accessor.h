@@ -22,6 +22,7 @@
 #define CUDAPREFIX
 #endif
 
+#include "common.h"
 #include "arrays.h"
 
 #ifndef __GNUC__
@@ -103,6 +104,9 @@ namespace LegionRuntime {
     template <typename AT, typename ET = void, typename PT = ET> struct RegionAccessor;
 
     template <typename AT> struct RegionAccessor<AT, void, void> : public AT::Untyped {
+      CUDAPREFIX
+      RegionAccessor(void)
+        : AT::Untyped() {}
       CUDAPREFIX
       RegionAccessor(const typename AT::Untyped& to_copy)
 	: AT::Untyped(to_copy) {}

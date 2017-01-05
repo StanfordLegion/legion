@@ -1038,7 +1038,8 @@ local function reconstruct_param_as_arg_type(param_type, mapping, optional)
     local param_parent_region_as_arg_type =
       reconstruct_param_as_arg_symbol(param_type:parent_region(), mapping)
     local param_colors_as_arg_type =
-      reconstruct_param_as_arg_symbol(param_type:colors(), mapping)
+      reconstruct_param_as_arg_symbol(param_type:colors(), mapping) or
+      reconstruct_param_as_arg_type(param_type:colors(), mapping)
     return std.partition(
       param_type.disjointness, param_parent_region_as_arg_type,
       param_colors_as_arg_type)
@@ -1509,26 +1510,29 @@ function std.flatten_struct_fields(struct_type, pred)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()
-  if pred ~= nil and pred(struct_type) then
-    field_paths:insert(data.newtuple())
-    field_types:insert(struct_type)
-  elseif struct_type:isstruct() or std.is_fspace_instance(struct_type) then
-    local entries = struct_type:getentries()
-    for _, entry in ipairs(entries) do
-      local entry_name = entry[1] or entry.field
-      -- FIXME: Fix for struct types with symbol fields.
-      assert(type(entry_name) == "string")
-      local entry_type = entry[2] or entry.type
-      local entry_field_paths, entry_field_types =
-        std.flatten_struct_fields(entry_type, pred)
-      field_paths:insertall(
-        entry_field_paths:map(
-          function(entry_field_path)
-            return data.newtuple(entry_name) .. entry_field_path
-          end))
-      field_types:insertall(entry_field_types)
+  local check = pred and pred(struct_type)
+  if check == nil then
+    if struct_type:isstruct() or std.is_fspace_instance(struct_type) then
+      local entries = struct_type:getentries()
+      for _, entry in ipairs(entries) do
+        local entry_name = entry[1] or entry.field
+        -- FIXME: Fix for struct types with symbol fields.
+        assert(type(entry_name) == "string")
+        local entry_type = entry[2] or entry.type
+        local entry_field_paths, entry_field_types =
+          std.flatten_struct_fields(entry_type, pred)
+        field_paths:insertall(
+          entry_field_paths:map(
+            function(entry_field_path)
+              return data.newtuple(entry_name) .. entry_field_path
+            end))
+        field_types:insertall(entry_field_types)
+      end
+    else
+      field_paths:insert(data.newtuple())
+      field_types:insert(struct_type)
     end
-  else
+  elseif check then
     field_paths:insert(data.newtuple())
     field_types:insert(struct_type)
   end

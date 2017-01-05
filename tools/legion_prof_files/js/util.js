@@ -227,6 +227,7 @@ function filterAndMergeBlocks(state) {
                 start: d.start,
                 end: end,
                 color: "#808080",
+                opacity: d.opacity,
                 title: count + " merged tasks"
               });
               i += (count - 1);
@@ -238,6 +239,7 @@ function filterAndMergeBlocks(state) {
                 start: d.start,
                 end: d.end,
                 color: d.color,
+                opacity: d.opacity,
                 initiation: d.initiation,
                 title: d.title + " (expanded for visibility)"
               });
@@ -249,6 +251,7 @@ function filterAndMergeBlocks(state) {
               level: d.level + proc.base,
               start: d.start,
               end: d.end,
+              opacity: d.opacity,
               color: d.color,
               initiation: d.initiation,
               title: d.title

@@ -625,8 +625,8 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      find_local_copy_preconditions_above(redop, reading, restrict_out, 
-                  single_copy, copy_mask, child_color, origin_node, versions, 
+      find_local_copy_preconditions_above(redop, reading, single_copy, 
+                  restrict_out, copy_mask, child_color, origin_node, versions, 
                   creator_op_id, index, source, preconditions, applied_events);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
@@ -1692,9 +1692,7 @@ namespace Legion {
             // really at the version number if we're not reducing
             // We can't count split fields here because they might
             // contain users from many versions
-            // Disabling the write-skip optimization for now
-            // TODO: rethink how this works
-#if 0
+#ifndef LEGION_SPY 
             if (!is_reduction)
             {
               if (!!split_mask)

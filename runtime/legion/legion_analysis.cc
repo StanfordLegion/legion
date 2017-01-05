@@ -3510,6 +3510,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LogicalCloser::record_overwriting_close(const FieldMask &mask,
+                                                 bool projection)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      // Overwriting closes do all the same stuff as read-only closes
+      // only they also get to clear the dirty-below bits in the state
+      overwriting_close_mask |= mask;
+      record_read_only_close(mask, projection);
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalCloser::record_read_only_close(const FieldMask &mask,
                                                bool projection)
     //--------------------------------------------------------------------------
@@ -3722,6 +3736,9 @@ namespace Legion {
       // closes already did this when we made the disjoint close op
       if (!!closed_projections)
         state.advance_projection_epochs(closed_projections);
+      // If we had any overwriting close operations remove dirty below bits
+      if (!!overwriting_close_mask)
+        state.dirty_below -= overwriting_close_mask;
       // If we only have read-only closes then we are done
       FieldMask closed_mask = normal_close_mask | flush_only_close_mask;
       if (!closed_mask)
@@ -4211,6 +4228,7 @@ namespace Legion {
     void VersionManager::reset(void)
     //--------------------------------------------------------------------------
     {
+      AutoLock m_lock(manager_lock);
       is_owner = false;
       current_context = NULL;
       remote_valid_fields.clear();
