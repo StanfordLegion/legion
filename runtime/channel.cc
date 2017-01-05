@@ -120,15 +120,112 @@ namespace LegionRuntime {
         size_t rlen, rleft;
       };
 
-      static inline off_t calc_mem_loc_ib(off_t alloc_offset, off_t field_start, int field_size, size_t elmt_size,
-                                          size_t block_size, size_t domain_size, off_t index)
+      template<unsigned DIM>
+      class LayoutIterator {
+      public:
+        LayoutIterator(Rect<DIM> rect, Mapping<DIM, 1> *src_m,
+                       Mapping<DIM, 1> *dst_m, XferOrder::Type order)
+          : orig_rect(rect), src_mapping(src_m), dst_mapping(dst_m),
+            iter_order(order), cur_idx(0) {
+          src_mapping->add_reference();
+          dst_mapping->add_reference();
+          rect_size = orig_rect.volume();
+          Rect<DIM> subrect;
+          Point<1> in1[DIM], in2[DIM];
+          src_mapping->image_linear_subrect(rect, subrect, in1);
+          dst_mapping->image_linear_subrect(rect, subrect, in2);
+          // Currently we only support FortranArrayLinearization
+          assert(src_strides[0][0] == 1);
+          assert(dst_strides[0][0] == 1);
+          dim = 0;
+          coord_t exp1 = 0, exp2 = 0;
+          for (unsigned i = 0; i < DIM; i++) {
+            coord_t e = rect.dim_size(i);
+            if (i && (exp1 == in1[i][0]) && (exp2 == in2[i][0]) ) {
+              //collapse and grow extent
+              extents.x[dim - 1] *= e;
+              exp1 *= e;
+              exp2 *= e;
+            } else {
+              extents.x[dim] = e;
+              exp1 = in1[i][0] * e;
+              exp2 = in2[i][0] * e;
+              src_strides[dim] = in1[i];
+              dst_strides[dim] = in2[i];
+              dim++;
+            }
+          }
+          src_lo = src_mapping->image(orig_rect.lo);
+          dst_lo = dst_mapping->image(orig_rect.lo);
+        }
+        ~LayoutIterator() {
+          src_mapping->remove_reference();
+          dst_mapping->remove_reference();
+        }
+        void reset() {cur_idx = 0;}
+        bool any_left() {return cur_idx < rect_size;}
+        coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx,
+                                 coord_t &src_str, coord_t &dst_str,
+                                 size_t &nitems, size_t nlines) {
+          Point<DIM> p;
+          coord_t idx = cur_idx;
+          src_idx = src_lo;
+          dst_idx = dst_lo;
+          for (unsigned i = 0; i < dim; i++) {
+            p.x[i] = idx % extents[i];
+            src_idx += src_strides[i][0] * p.x[i];
+            dst_idx += dst_strides[i][0] * p.x[i];
+            idx = idx / extents[i];
+          }
+          if (dim == 1) {
+            nitems = extents[0] - p[0];
+            nlines = 1;
+            src_str = extents[0];
+            dst_str = extents[0];
+          } else {
+            if (p[0] == 0) {
+              // can perform 2D
+              nitems = extents[0];
+              nlines = extents[1] - p[1];
+              src_str = src_strides[1][0];
+              dst_str = dst_strides[1][0];
+            } else {
+              // 1D case
+              nitems = extents[0] - p[0];
+              nlines = 1;
+              src_str = src_strides[1][0];
+              dst_str = dst_strides[1][0];
+            }
+          }
+          return nitems * nlines;
+        }
+        void move(coord_t steps) {cur_idx += steps; assert(cur_idx <= rect_size);};
+      private:
+        Point<1> src_strides[DIM], dst_strides[DIM], src_lo, dst_lo;
+        Point<DIM> extents;
+        int dim;
+        coord_t cur_idx, rect_size;
+        Rect<DIM> orig_rect;
+        Mapping<DIM, 1> *src_mapping, *dst_mapping;
+      };
+
+      static inline off_t calc_mem_loc_ib(off_t alloc_offset,
+                                          off_t field_start,
+                                          int field_size,
+                                          size_t elmt_size,
+                                          size_t block_size,
+                                          size_t buf_size,
+                                          size_t domain_size,
+                                          off_t index)
       {
         off_t idx2 = domain_size / block_size * block_size;
+        off_t offset;
         if (index < idx2) {
-          return calc_mem_loc(alloc_offset, field_start, field_size, elmt_size, block_size, index);
+          offset = calc_mem_loc(alloc_offset, field_start, field_size, elmt_size, block_size, index);
         } else {
-          return (alloc_offset + field_start * domain_size + (elmt_size - field_start) * idx2 + (index - idx2) * field_size);
+          offset = (alloc_offset + field_start * domain_size + (elmt_size - field_start) * idx2 + (index - idx2) * field_size);
         }
+        return offset % buf_size;
       }
 
       bool XferDes::simple_get_mask_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
@@ -176,6 +273,139 @@ namespace LegionRuntime {
           offset_idx ++;
         }
         return true;
+      }
+#define MAX_GEN_REQS 3
+
+      bool support_2d_xfers(XferDes::Kind kind)
+      {
+        return (kind == XferDes::XFER_GPU_TO_FB)
+               || (kind == XferDes::XFER_GPU_FROM_FB)
+               || (kind == XferDes::XFER_GPU_IN_FB)
+               || (kind == XferDes::XFER_GPU_PEER_FB)
+               || (kind == XferDes::XFER_REMOTE_WRITE)
+               || (kind == XferDes::XFER_MEM_CPY);
+      }
+
+      template<unsigned DIM>
+      long XferDes::default_get_requests(Request** reqs, long nr)
+      {
+        long idx = 0;
+        coord_t src_idx, dst_idx, todo, src_str, dst_str;
+        size_t nitems, nlines;
+        while (idx + MAX_GEN_REQS <= nr
+        && MAX_GEN_REQS <= available_reqs.size()) {
+          if (DIM == 0)
+            todo = min(max_req_size / oas_vec[offset_idx].size,
+                       me->continuous_steps(src_idx, dst_idx));
+          else
+            todo = min(max_req_size / oas_vec[offset_idx].size,
+                       li->continuous_steps(src_idx, dst_idx,
+                                            src_str, dst_str,
+                                            nitems, nlines));
+          coord_t src_in_block = src_buf.block_size
+                               - src_idx % src_buf.block_size;
+          coord_t dst_in_block = dst_buf.block_size
+                               - dst_idx % dst_buf.block_size;
+          todo = min(todo, min(src_in_block, dst_in_block));
+          if (src_buf.is_ib) {
+            src_start = calc_mem_loc_ib(0,
+                                        oas_vec[offset_idx].src_offset,
+                                        oas_vec[offset_idx].size,
+                                        src_buf.elmt_size,
+                                        src_buf.block_size,
+                                        src_buf.buf_size,
+                                        domain.get_volume(), src_idx);
+            todo = min(todo, max(0, pre_bytes_write - src_start)
+                                    / oas_vec[offset_idx].size);
+          } else {
+            src_start = calc_mem_loc(0,
+                                     oas_vec[offset_idx].src_offset,
+                                     oas_vec[offset_idx].size,
+                                     src_buf.elmt_size,
+                                     src_buf.block_size, src_idx);
+          }
+          if (dst_buf.is_ib) {
+            dst_start = calc_mem_loc_ib(0,
+                                        oas_vec[offset_idx].dst_offset,
+                                        oas_vec[offset_idx].size,
+                                        dst_buf.elmt_size,
+                                        dst_buf.block_size,
+                                        dst_buf.buf_size,
+                                        domain.get_volume(), dst_idx);
+            todo = min(todo, max(0, next_bytes_read + dst_buf.buf_size - dst_start)
+                                    / oas_vec[offset_idx].size);
+          } else {
+            dst_start = calc_mem_loc(0,
+                                     oas_vec[offset_idx].dst_offset,
+                                     oas_vec[offset_idx].size,
+                                     dst_buf.elmt_size,
+                                     dst_buf.block_size, dst_idx);
+          }
+          bool cross_src_ib = false, cross_dst_ib = false;
+          if (src_buf.is_ib)
+            cross_src_ib = cross_ib(src_start,
+                                    todo * oas_vec[offset_idx].size,
+                                    src_buf.buf_size);
+          if (dst_buf.is_ib)
+            cross_dst_ib = cross_ib(dst_start,
+                                    todo * oas_vec[offset_idx].size,
+                                    dst_buf.buf_size);
+          // We are crossing ib, fallback to 1d case
+          // We don't support 2D, fallback to 1d case
+          if (cross_src_ib || cross_dst_ib || !support_2d_xfers(kind))
+            todo = min(todo, nitems);
+          if ((size_t)todo <= nitems) {
+            // fallback to 1d case
+            nitems = (size_t)todo;
+            nlines = 1;
+          } else {
+            nlines = todo / nitems;
+            todo = nlines * nitems;
+          }
+          if (nlines == 1) {
+            // 1D case
+            size_t nbytes = todo * oas_vec[offset_idx].size;
+            while (nbytes > 0) {
+              size_t req_size = nbytes;
+              Request* new_req = dequeue_request();
+              new_req->dim = Request::DIM_1D;
+              new_req->src_off = src_start;
+              new_req->dst_off = dst_start;
+              if (src_buf.is_ib)
+                req_size = umin(req_size, src_buf.buf_size - src_start);
+              if (dst_buf.is_ib)
+                req_size = umin(req_size, dst_buf.buf_size - dst_start);
+              new_req->nbytes = req_size;
+              reqs[idx++] = new_req;
+              nbytes -= req_size;
+            }
+          } else {
+            // 2D case
+            Request* new_req = dequeue_request();
+            new_req->dim = Request::DIM_2D;
+            new_req->src_off = src_start;
+            new_req->dst_off = dst_start;
+            new_req->src_str = src_str * oas_vec[offset_idx].size;
+            new_req->dst_str = dst_str * oas_vec[offset_idx].size;
+            new_req->nbytes = nitems * oas_vec[offset_idx].size;
+            new_req->nlines = nlines;
+            reqs[idx++] = new_req;
+          }
+          if (DIM == 0) {
+            me->move(todo);
+            if (!me->any_left()) {
+              me->reset();
+              offset_idx ++;
+            }
+          } else {
+            li->move(todo);
+            if (!li->any_left()) {
+              li->reset();
+              offset_idx ++;
+            }
+          }
+        } // while
+        return idx;
       }
 
       template<unsigned DIM>
@@ -320,102 +550,6 @@ namespace LegionRuntime {
         }
         return true;
       }
-
-#ifdef USE_3D_XFERS
-      template<unsigned DIM>
-      bool XferDes::simple_get_request_3d(off_t &src_start,
-                                          off_t &dst_start,
-                                          off_t &src_stride_bytes,
-                                          off_t &dst_stride_bytes,
-                                          off_t &src_height,
-                                          off_t &dst_height,
-                                          size_t &nbytes_per_line,
-                                          size_t &height,
-                                          size_t &depth,
-                                  Layouts::GenericLayoutIterator<DIM>* li,
-                                          unsigned &offset_idx,
-                                          coord_t available_slots)
-      {
-        assert(offset_idx < oas_vec.size());
-        assert(li->any_left());
-        nbytes_per_line = 0;
-        coord_t src_idx, dst_idx;
-        coord_t src_stride, dst_stride;
-        size_t nitems_per_line;
-        // cannot exceed the max_req_size
-        coord_t todo = min(max_req_size / oas_vec[offset_idx].size,
-                           li->continuous_steps(src_idx, dst_idx,
-                                                src_stride, dst_stride,
-                                                src_height, dst_height,
-                                                nitems_per_line, height, depth));
-        coord_t src_in_block = src_buf.block_size - src_idx % src_buf.block_size;
-        coord_t dst_in_block = dst_buf.block_size - dst_idx % dst_buf.block_size;
-        todo = min(todo, min(src_in_block, dst_in_block));
-        if (todo == 0)
-          return false;
-        bool scatter_src_ib = false, scatter_dst_ib = false;
-        // make sure we have source data ready
-        // 2d doesn't support scattering ib
-        if (src_buf.is_ib) {
-          src_start = calc_mem_loc_ib(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
-                                      src_buf.elmt_size, src_buf.block_size, domain.get_volume(), src_idx);
-          todo = min(todo, max(0, pre_bytes_write - src_start) / oas_vec[offset_idx].size);
-          scatter_src_ib = scatter_ib(src_start, todo * oas_vec[offset_idx].size, src_buf.buf_size);
-        } else {
-	  src_start = calc_mem_loc(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
-                                   src_buf.elmt_size, src_buf.block_size, src_idx);
-        }
-        if (todo  == 0)
-          return false;
-        // 2d doesn't support scattering ib
-        if (dst_buf.is_ib) {
-          dst_start = calc_mem_loc_ib(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
-                                      dst_buf.elmt_size, dst_buf.block_size, domain.get_volume(), dst_idx);
-          todo = min(todo, max(0, next_bytes_read + dst_buf.buf_size - dst_start) / oas_vec[offset_idx].size);
-          scatter_dst_ib = scatter_ib(dst_start, todo * oas_vec[offset_idx].size, dst_buf.buf_size);
-        } else {
-          dst_start = calc_mem_loc(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
-                                   dst_buf.elmt_size, dst_buf.block_size, dst_idx);
-        }
-        if (todo == 0)
-          return false;
-        if((scatter_src_ib && scatter_dst_ib && available_slots < 3)
-        ||((scatter_src_ib || scatter_dst_ib) && available_slots < 2))
-          return false;
-
-        if (scatter_src_ib || scatter_dst_ib) {
-          // We are scattering ib, fallback to 1d case
-          todo = min(todo, nitems_per_line);
-        }
-        if ((size_t)todo <= nitems_per_line) {
-          // fallback to 1d case
-          nitems_per_line = (size_t)todo;
-          height = 1;
-          depth = 1;
-        } else if ((size_t)todo <= nitems_per_line * height){
-          height = todo / nitems_per_line;
-          depth = 1;
-        } else {
-          depth = todo / (nitems_per_line * height);
-        }
-        todo = nitems_per_line * height * depth;
-        nbytes_per_line = nitems_per_line * oas_vec[offset_idx].size;
-        src_stride_bytes = src_stride * oas_vec[offset_idx].size;
-        dst_stride_bytes = dst_stride * oas_vec[offset_idx].size;
-        log_request.info("[3D] guid(%llx) src_start(%zd) dst_start(%zd)"
-                         "src_str(%zd) dst_str(%zd) src_hei(%zd) dst_hei(%zd)"
-                         " nbytes(%zu) height(%zu) depth(%zd) offset_idx(%u)",
-                         guid, src_start, dst_start, src_stride_bytes,
-                         dst_stride_bytes, src_height, dst_height,
-                         nbytes_per_line, height, depth, offset_idx);
-        li->move(todo);
-        if (!li->any_left()) {
-          li->reset();
-          offset_idx ++;
-        }
-        return true;
-      }
-#endif
 
 #ifdef DEADCODE_OLD_GENERIC_ITERATOR
       template<unsigned DIM>
@@ -591,8 +725,7 @@ namespace LegionRuntime {
           if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
             bytes_write += size;
             update = true;
-          }
-          else {
+          } else {
             segments_write[offset] = size;
           }
           std::map<int64_t, uint64_t>::iterator it;
@@ -612,6 +745,19 @@ namespace LegionRuntime {
           bytes_write += size;
         }
         //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", gasnet_mynode(), offset, size, guid, bytes_write);
+      }
+
+      void XferDes::notify_request_read_done(Request* req)
+      {  
+        req->is_read_done = true;
+        simple_update_bytes_read(req->src_off, req->nbytes * req->nlines);
+      }
+
+      void XferDes::notify_request_write_done(Request* req)
+      {
+        req->is_write_done = true;
+        simple_update_bytes_write(req->dst_off, req->nbytes * req->nlines);
+        enqueue_request(req);
       }
 
       template<unsigned DIM>
@@ -637,40 +783,29 @@ namespace LegionRuntime {
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        assert(src_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || src_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
-        assert(dst_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || dst_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
         channel = channel_manager->get_memcpy_channel();
         src_buf_base = (char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
         dst_buf_base = (char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
-        size_t total_field_size = 0;
-        for (unsigned i = 0; i < oas_vec.size(); i++) {
-          total_field_size += oas_vec[i].size;
-        }
-        bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-        if (DIM == 0) {
-          li = NULL;
-          // index space instances use 1D linearizations for translation
-          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order,
-                                  src_buf.is_ib, dst_buf.is_ib);
-        } else {
-          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                       dst_buf.linearization.get_mapping<DIM>(), order);
-          me = NULL;
-        }
-        offset_idx = 0;
-        requests = (MemcpyRequest*) calloc(max_nr, sizeof(MemcpyRequest));
+        memcpy_reqs = (MemcpyRequest*) calloc(max_nr, sizeof(MemcpyRequest));
         for (int i = 0; i < max_nr; i++) {
-          requests[i].xd = this;
-          available_reqs.push(&requests[i]);
+          memcpy_reqs[i].xd = this;
+          enqueue_request(&memcpy_reqs[i]);
         }
       }
 
       template<unsigned DIM>
       long MemcpyXferDes<DIM>::get_requests(Request** requests, long nr)
       {
-        MemcpyRequest** mem_cpy_reqs = (MemcpyRequest**) requests;
+        MemcpyRequest** reqs = (MemcpyRequest**) requests;
+        long new_nr = default_get_requests(requests, nr);
+        for (long i = 0; i < new_nr; i++)
+        {
+          reqs[i]->src_base = src_buf_base + reqs[i]->src_off;
+          reqs[i]->dst_base = dst_buf_base + reqs[i]->dst_off;
+        }
+        return new_nr;
+
+#ifdef TO_BE_DELETE
         long idx = 0;
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
@@ -708,8 +843,10 @@ namespace LegionRuntime {
           }
         }
         return idx;
+#endif
       }
 
+#ifdef TO_BE_DELETE
       template<unsigned DIM>
       void MemcpyXferDes<DIM>::notify_request_read_done(Request* req)
       {
@@ -726,6 +863,7 @@ namespace LegionRuntime {
         simple_update_bytes_write(mc_req->dst_buf - dst_buf_base, mc_req->nbytes);
         available_reqs.push(req);
       }
+#endif
 
       template<unsigned DIM>
       void MemcpyXferDes<DIM>::flush()
@@ -756,52 +894,22 @@ namespace LegionRuntime {
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        size_t total_field_size = 0;
-        for (unsigned i = 0; i < oas_vec.size(); i++) {
-          total_field_size += oas_vec[i].size;
+        gasnet_reqs = (GASNetRequest*) calloc(max_nr, sizeof(GASNetRequest));
+        for (int i = 0; i < max_nr; i++) {
+          gasnet_reqs[i].xd = this;
+          enqueue_request(&gasnet_reqs[i]);
         }
-        bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-        if (DIM == 0) {
-          li = NULL;
-          // index space instances use 1D linearizations for translation
-          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order,
-                                  src_buf.is_ib, dst_buf.is_ib);
-        } else {
-          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                       dst_buf.linearization.get_mapping<DIM>(), order);
-          me = NULL;
-        }
-        offset_idx = 0;
-
         switch (kind) {
           case XferDes::XFER_GASNET_READ:
           {
             channel = channel_manager->get_gasnet_read_channel();
             buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
-            assert(src_mem_impl->kind == MemoryImpl::MKIND_GLOBAL);
-            assert(dst_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || dst_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
-            GASNetReadRequest* gasnet_read_reqs = (GASNetReadRequest*) calloc(max_nr, sizeof(GASNetReadRequest));
-            for (int i = 0; i < max_nr; i++) {
-              gasnet_read_reqs[i].xd = this;
-              available_reqs.push(&gasnet_read_reqs[i]);
-            }
-            requests = gasnet_read_reqs;
             break;
           }
           case XferDes::XFER_GASNET_WRITE:
           {
             channel = channel_manager->get_gasnet_write_channel();
             buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-            assert(src_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || src_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
-            assert(dst_mem_impl->kind == MemoryImpl::MKIND_GLOBAL);
-            GASNetWriteRequest* gasnet_write_reqs = (GASNetWriteRequest*) calloc(max_nr, sizeof(GASNetWriteRequest));
-            for (int i = 0; i < max_nr; i++) {
-              gasnet_write_reqs[i].xd = this;
-              available_reqs.push(&gasnet_write_reqs[i]);
-            }
-            requests = gasnet_write_reqs;
             break;
           }
           default:
@@ -812,6 +920,30 @@ namespace LegionRuntime {
       template<unsigned DIM>
       long GASNetXferDes<DIM>::get_requests(Request** requests, long nr)
       {
+        GASNetRequest** reqs = (GASNetRequest**) requests;
+        long new_nr = default_get_requests(requests, nr);
+        switch (kind) {
+          case XferDes::XFER_GASNET_READ:
+          {
+            for (long i = 0; i < new_nr; i++) {
+              reqs[i]->gas_off = src_buf.alloc_offset + reqs[i]->src_off;
+              reqs[i]->mem_base = buf_base + reqs[i]->dst_off;
+            }
+            break;
+          }
+          case XferDes::XFER_GASNET_WRITE:
+          {
+            for (long i = 0; i < new_nr; i++) {
+              reqs[i]->mem_base = buf_base + reqs[i]->src_off;
+              reqs[i]->gas_off = dst_buf.alloc_offset + reqs[i]->dst_off;
+            }
+            break;
+          }
+          default:
+            assert(0);
+        }
+        return new_nr;
+#ifdef TO_BE_DELETE
         long idx = 0;
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
@@ -867,8 +999,10 @@ namespace LegionRuntime {
           }
         }
         return idx;
+#endif
       }
 
+#define TO_BE_DELETE
       template<unsigned DIM>
       void GASNetXferDes<DIM>::notify_request_read_done(Request* req)
       {
@@ -911,6 +1045,7 @@ namespace LegionRuntime {
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
       }
+#endif
 
       template<unsigned DIM>
       void GASNetXferDes<DIM>::flush()
@@ -940,36 +1075,17 @@ namespace LegionRuntime {
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        assert(src_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || src_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
         // make sure dst buffer is registered memory
         assert(dst_mem_impl->kind == MemoryImpl::MKIND_RDMA);
         channel = channel_manager->get_remote_write_channel();
         src_buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-        // Note that we could use get_direct_ptr to get dst_buf_base, since it always returns 0
+        // Note that we cannot use get_direct_ptr to get dst_buf_base, since it always returns 0
         dst_buf_base = ((const char*)((Realm::RemoteMemory*)dst_mem_impl)->regbase) + dst_buf.alloc_offset;
-        size_t total_field_size = 0;
-        for (unsigned i = 0; i < oas_vec.size(); i++) {
-          total_field_size += oas_vec[i].size;
-        }
-        bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (pre_xd_guid==XFERDES_NO_GUID) ? bytes_total : 0;
-        if (DIM == 0) {
-          li = NULL;
-          // index space instances use 1D linearizations for translation
-          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order,
-                                  src_buf.is_ib, dst_buf.is_ib);
-        } else {
-          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                       dst_buf.linearization.get_mapping<DIM>(), order);
-          me = NULL;
-        }
-        offset_idx = 0;
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
           requests[i].dst_node = ID(_dst_buf.memory).memory.owner_node;
-          available_reqs.push(&requests[i]);
+          enqueue_request(&requests[i]);
         }
       }
 
@@ -977,7 +1093,17 @@ namespace LegionRuntime {
       long RemoteWriteXferDes<DIM>::get_requests(Request** requests, long nr)
       {
         pthread_mutex_lock(&xd_lock);
-        long idx = 0;
+        RemoteWriteRequest** reqs = (RemoteWriteRequest**) requests;
+        long new_nr = default_get_requests(requests, nr);
+        for (long i = 0; i < new_nr; i++)
+        {
+          reqs[i]->src_base = src_buf_base + reqs[i]->src_off;
+          reqs[i]->dst_base = dst_buf_base + reqs[i]->dst_off;
+        }
+        pthread_mutex_unlock(&xd_lock);
+        return new_nr;
+#ifdef TO_BE_DELETE
+       long idx = 0;
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
           size_t nbytes;
@@ -1016,16 +1142,20 @@ namespace LegionRuntime {
         }
         pthread_mutex_unlock(&xd_lock);
         return idx;
+#endif
       }
 
       template<unsigned DIM>
       void RemoteWriteXferDes<DIM>::notify_request_read_done(Request* req)
       {
         pthread_mutex_lock(&xd_lock);
+        XferDes<DIM>::notify_request_read_done(req);
+#ifdef TO_BE_DELETE
         req->is_read_done = true;
         int64_t offset = ((RemoteWriteRequest*)req)->src_buf - src_buf_base;
         uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
         simple_update_bytes_read(offset, size);
+#endif
         pthread_mutex_unlock(&xd_lock);
       }
 
@@ -1033,11 +1163,14 @@ namespace LegionRuntime {
       void RemoteWriteXferDes<DIM>::notify_request_write_done(Request* req)
       {
         pthread_mutex_lock(&xd_lock);
+        XferDes<DIM>::notify_request_write_done(req);
+#ifdef TO_BE_DELETE
         req->is_write_done = true;
         int64_t offset = ((RemoteWriteRequest*)req)->dst_buf - dst_buf_base;
         uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
+#endif
         pthread_mutex_unlock(&xd_lock);
       }
 
@@ -1073,25 +1206,11 @@ namespace LegionRuntime {
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        size_t total_field_size = 0;
-        for (unsigned i = 0; i < oas_vec.size(); i++) {
-          total_field_size += oas_vec[i].size;
+        disk_reqs = (DiskRequest*) calloc(max_nr, sizeof(DiskRequest));
+        for (int i = 0; i < max_nr; i++) {
+          disk_reqs[i].xd = this;
+          available_reqs.push(&disk_reqs[i]);
         }
-        bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-        if (DIM == 0) {
-          li = NULL;
-          // index space instances use 1D linearizations for translation
-          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order,
-                                  src_buf.is_ib, dst_buf.is_ib);
-        } else {
-          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                       dst_buf.linearization.get_mapping<DIM>(), order);
-          me = NULL;
-        }
-        offset_idx = 0;
-
         switch (kind) {
           case XferDes::XFER_DISK_READ:
           {
@@ -1099,13 +1218,6 @@ namespace LegionRuntime {
             fd = ((Realm::DiskMemory*)src_mem_impl)->fd;
             buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
             assert(src_mem_impl->kind == MemoryImpl::MKIND_DISK);
-            assert(dst_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || dst_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
-            DiskReadRequest* disk_read_reqs = (DiskReadRequest*) calloc(max_nr, sizeof(DiskReadRequest));
-            for (int i = 0; i < max_nr; i++) {
-              disk_read_reqs[i].xd = this;
-              available_reqs.push(&disk_read_reqs[i]);
-            }
-            requests = disk_read_reqs;
             break;
           }
           case XferDes::XFER_DISK_WRITE:
@@ -1113,14 +1225,7 @@ namespace LegionRuntime {
             channel = channel_manager->get_disk_write_channel();
             fd = ((Realm::DiskMemory*)dst_mem_impl)->fd;
             buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-            assert(src_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || src_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
             assert(dst_mem_impl->kind == MemoryImpl::MKIND_DISK);
-            DiskWriteRequest* disk_write_reqs = (DiskWriteRequest*) calloc(max_nr, sizeof(DiskWriteRequest));
-            for (int i = 0; i < max_nr; i++) {
-              disk_write_reqs[i].xd = this;
-              available_reqs.push(&disk_write_reqs[i]);
-            }
-            requests = disk_write_reqs;
             break;
           }
           default:
@@ -1131,6 +1236,30 @@ namespace LegionRuntime {
       template<unsigned DIM>
       long DiskXferDes<DIM>::get_requests(Request** requests, long nr)
       {
+        DiskRequest** reqs = (DiskRequest**) requests;
+        long new_nr = default_get_requests(requests, nr);
+        switch (kind) {
+          case XferDes::XFER_DISK_READ:
+          {
+            for (long i = 0; i < new_nr; i++) {
+              reqs[i]->disk_off = src_buf.alloc_offset + reqs[i]->src_off;
+              reqs[i]->mem_base = buf_base + reqs[i]->dst_off;
+            }
+            break;
+          }
+          case XferDes::XFER_DISK_WRITE:
+          {
+            for (long i = 0; i < new_nr; i++) {
+              reqs[i]->mem_base = buf_base + reqs[i]->src_off;
+              reqs[i]->disk_off = dst_buf.alloc_offset + reqs[i]->dst_off;
+            }
+            break;
+          }
+          default:
+            assert(0);
+        }
+        return new_nr;
+#ifdef TO_BE_DELETE
         long idx = 0;
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
@@ -1188,8 +1317,10 @@ namespace LegionRuntime {
           }
         }
         return idx;
+#endif
       }
 
+#ifdef TO_BE_DELETE
       template<unsigned DIM>
       void DiskXferDes<DIM>::notify_request_read_done(Request* req)
       {
@@ -1233,6 +1364,7 @@ namespace LegionRuntime {
         available_reqs.push(req);
         //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
       }
+#endif
 
       template<unsigned DIM>
       void DiskXferDes<DIM>::flush()
@@ -1265,25 +1397,12 @@ namespace LegionRuntime {
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        size_t total_field_size = 0;
-        for (unsigned i = 0; i < oas_vec.size(); i++) {
-          total_field_size += oas_vec[i].size;
+        gpu_reqs = (GPURequest*) calloc(max_nr, sizeof(GPURequest));
+        for (int i = 0; i < max_nr; i++) {
+          gpu_reqs[i].xd = this;
+          enqueue_request(&gpu_reqs[i]);
         }
-        bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-        if (DIM == 0) {
-          li = NULL;
-          // index space instances use 1D linearizations for translation
-          me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(), order,
-                                  src_buf.is_ib, dst_buf.is_ib);
-        } else {
-          li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                       dst_buf.linearization.get_mapping<DIM>(), order);
-          me = NULL;
-        }
-        offset_idx = 0;
-
+ 
         switch (kind) {
           case XferDes::XFER_GPU_TO_FB:
           {
@@ -1292,15 +1411,16 @@ namespace LegionRuntime {
             channel = channel_manager->get_gpu_to_fb_channel(dst_gpu);
             src_buf_base = (char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
             dst_buf_base = NULL;
-            assert(src_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || src_mem_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
             assert(dst_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
-            //GPUtoFBRequest* gpu_to_fb_reqs = (GPUtoFBRequest*) calloc(max_nr, sizeof(GPUtoFBRequest));
+            //GPURequest* gpu_to_fb_reqs = (GPUtoFBRequest*) calloc(max_nr, sizeof(GPUtoFBRequest));
+#ifdef TO_BE_DELETE
             for (int i = 0; i < max_nr; i++) {
-              GPUtoFBRequest* gpu_to_fb_req = new GPUtoFBRequest;
+              //GPUtoFBRequest* gpu_to_fb_req = new GPUtoFBRequest;
               gpu_to_fb_req->xd = this;
               available_reqs.push(gpu_to_fb_req);
             }
             //requests = gpu_to_fb_reqs;
+#endif
             break;
           }
           case XferDes::XFER_GPU_FROM_FB:
@@ -1311,14 +1431,15 @@ namespace LegionRuntime {
             src_buf_base = NULL;
             dst_buf_base = (char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
-            assert(dst_mem_impl->kind == MemoryImpl::MKIND_SYSMEM || dst_mem_impl->MemoryImpl::MKIND_ZEROCOPY);
             //GPUfromFBRequest* gpu_from_fb_reqs = (GPUfromFBRequest*) calloc(max_nr, sizeof(GPUfromFBRequest));
+#ifdef TO_BE_DELETE
             for (int i = 0; i < max_nr; i++) {
               GPUfromFBRequest* gpu_from_fb_req = new GPUfromFBRequest;
               gpu_from_fb_req->xd = this;
               available_reqs.push(gpu_from_fb_req);
             }
             //requests = gpu_from_fb_reqs;
+#endif
             break;
           }
           case XferDes::XFER_GPU_IN_FB:
@@ -1331,12 +1452,14 @@ namespace LegionRuntime {
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
             assert(src_gpu == dst_gpu);
             //GPUinFBRequest* gpu_in_fb_reqs = (GPUinFBRequest*) calloc(max_nr, sizeof(GPUinFBRequest));
+#ifdef TO_BE_DELETE
             for (int i = 0; i < max_nr; i++) {
               GPUinFBRequest* gpu_in_fb_req = new GPUinFBRequest;
               gpu_in_fb_req->xd = this;
               available_reqs.push(gpu_in_fb_req);
             }
             //requests = gpu_in_fb_reqs;
+#endif
             break;
           }
           case XferDes::XFER_GPU_PEER_FB:
@@ -1349,12 +1472,14 @@ namespace LegionRuntime {
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
             assert(src_gpu != dst_gpu);
             //GPUpeerFBRequest* gpu_peer_fb_reqs = (GPUpeerFBRequest*) calloc(max_nr, sizeof(GPUpeerFBRequest));
+#ifdef TO_BE_DELETE
             for (int i = 0; i < max_nr; i++) {
               GPUpeerFBRequest* gpu_peer_fb_req = new GPUpeerFBRequest;
               gpu_peer_fb_req->xd = this;
               available_reqs.push(gpu_peer_fb_req);
             }
             //requests = gpu_peer_fb_reqs;
+#endif
             break;
           }
           default:
@@ -1365,6 +1490,41 @@ namespace LegionRuntime {
       template<unsigned DIM>
       long GPUXferDes<DIM>::get_requests(Request** requests, long nr)
       {
+        GPURequest** reqs = (DiskRequest**) requests;
+        long new_nr = default_get_requests(requests, nr);
+        for (long i = 0; i < new_nr; i++) {
+          reqs[i]->event.reset();
+          switch (kind) {
+            case XferDes::XFER_GPU_TO_FB:
+            {
+              reqs[i]->src_base = src_buf_base + reqs[i]->src_off;
+              reqs[i]->dst_gpu_off = dst_buf.alloc_offset + reqs[i]->dst_off;
+              break;
+            }
+            case XferDes::XFER_GPU_FROM_FB:
+            {
+              reqs[i]->src_gpu_off = src_buf.alloc_offset + reqs[i]->src_off;
+              reqs[i]->dst_base = dst_buf_base + reqs[i]->dst_off;
+              break;
+            }
+            case XferDes::XFER_GPU_IN_FB:
+            {
+              reqs[i]->src_gpu_off = src_buf.alloc_offset + reqs[i]->src_off;
+              reqs[i]->dst_gpu_off = dst_buf.alloc_offset + reqs[i]->dst_off;
+              break;
+            }
+            case XferDes::XFER_GPU_PEER_FB:
+            {
+              reqs[i]->src_gpu_off = src_buf.alloc_offset + reqs[i]->src_off;
+              reqs[i]->dst_gpu_off = dst_buf.alloc_offset + reqs[i]->dst_off;
+              break;
+            }
+            default:
+              assert(0);
+          }
+        }
+        return new_nr;
+#ifdef TO_BE_DELETE
         long idx = 0;
         while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
           off_t src_start, dst_start;
@@ -1499,8 +1659,10 @@ namespace LegionRuntime {
           }
         }
         return idx;
+#endif
       }
 
+#ifdef TO_BE_DELETE
       template<unsigned DIM>
       void GPUXferDes<DIM>::notify_request_read_done(Request* req)
       {
@@ -1592,6 +1754,7 @@ namespace LegionRuntime {
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
       }
+#endif
 
       template<unsigned DIM>
       void GPUXferDes<DIM>::flush()
@@ -1903,7 +2066,17 @@ namespace LegionRuntime {
           for (it = thread_queue.begin(); it != thread_queue.end(); it++) {
             MemcpyRequest* req = *it;
             //double starttime = Realm::Clock::current_time_in_microseconds();
-            memcpy(req->dst_buf, req->src_buf, req->nbytes);
+            if (req->dim == Request::DIM_1D) {
+              memcpy(req->src_base, req->dst_base, req->nbytes);
+            } else {
+              assert(req->dim == Request::DIM_2D);
+              char *src = req->src_base, *dst = req->dst_base;
+              for (size_t i = 0; i < req->nlines; i++) {
+                memcpy(src, dst, req->nbytes);
+                src += req->src_str;
+                dst += req->dst_str;
+              }
+            }
             //double stoptime = Realm::Clock::current_time_in_microseconds();
             //fprintf(stderr, "t = %.2lfus, tp = %.2lfMB/s\n", stoptime - starttime, (req->nbytes / (stoptime - starttime)));
           }
@@ -2037,25 +2210,28 @@ namespace LegionRuntime {
 
       long GASNetChannel::submit(Request** requests, long nr)
       {
-        switch (kind) {
-          case XferDes::XFER_GASNET_READ:
-            for (long i = 0; i < nr; i++) {
-              GASNetReadRequest* read_req = (GASNetReadRequest*) requests[i];
-              get_runtime()->global_memory->get_bytes(read_req->src_offset, read_req->dst_buf, read_req->nbytes);
-              read_req->xd->notify_request_read_done(read_req);
-              read_req->xd->notify_request_write_done(read_req);
+        for (long i = 0; i < nr; i++) {
+          GASNetRequest* req = (GASNetRequest*) requests[i];
+          switch (kind) {
+            case XferDes::XFER_GASNET_READ:
+            {
+              get_runtime()->global_memory->get_bytes(req->gas_off,
+                                                      req->mem_base,
+                                                      req->nbytes);
+              break;
             }
-            break;
-          case XferDes::XFER_GASNET_WRITE:
-            for (long i = 0; i < nr; i++) {
-              GASNetWriteRequest* write_req = (GASNetWriteRequest*) requests[i];
-              get_runtime()->global_memory->put_bytes(write_req->dst_offset, write_req->src_buf, write_req->nbytes);
-              write_req->xd->notify_request_read_done(write_req);
-              write_req->xd->notify_request_write_done(write_req);
+            case XferDes::XFER_GASNET_WRITE:
+            {
+              get_runtime()->global_memory->put_bytes(req->gas_off,
+                                                      req->mem_base,
+                                                      req->nbytes);
+              break;
             }
-            break;
-          default:
-            assert(0);
+            default:
+              assert(0);
+          }
+          req->xd->notify_request_read_done(req);
+          req->xd->notify_request_write_done(req);
         }
         return nr;
       }
@@ -2081,7 +2257,17 @@ namespace LegionRuntime {
         assert(nr <= capacity);
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
-          XferDesRemoteWriteMessage::send_request(req->dst_node, req->dst_buf, req->src_buf, req->nbytes, req);
+          if (req->dim == Request::DIM_1D) {
+            XferDesRemoteWriteMessage::send_request(
+                req->dst_node, req->dst_base, req->src_base, req->nbytes, req);
+          } else {
+            assert(req->dim == Request::DIM_2D);
+            // dest MUST be continuous
+            assert(req->nlines <= 1 || req->dst_str == req->nbytes);
+            XferDesRemoteWriteMessage::send_request(
+                req->dst_node, req->dst_base, req->src_base, req->nbytes,
+                req->src_str, req->nlines, req);
+          }
           capacity--;
         /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           req->complete_event = GenEventImpl::create_genevent()->current_event();
@@ -2154,28 +2340,16 @@ namespace LegionRuntime {
         int ns = 0;
         switch (kind) {
           case XferDes::XFER_DISK_READ:
-            while (ns < nr && !available_cb.empty()) {
-              DiskReadRequest* disk_read_req = (DiskReadRequest*) requests[ns];
-              cbs[ns] = available_cb.back();
-              available_cb.pop_back();
-              cbs[ns]->aio_fildes = disk_read_req->fd;
-              cbs[ns]->aio_data = (uint64_t) (disk_read_req);
-              cbs[ns]->aio_buf = disk_read_req->dst_buf;
-              cbs[ns]->aio_offset = disk_read_req->src_offset;
-              cbs[ns]->aio_nbytes = disk_read_req->nbytes;
-              ns++;
-            }
-            break;
           case XferDes::XFER_DISK_WRITE:
             while (ns < nr && !available_cb.empty()) {
-              DiskWriteRequest* disk_write_req = (DiskWriteRequest*) requests[ns];
+              DiskRequest* req = (DiskRequest*) requests[ns];
               cbs[ns] = available_cb.back();
               available_cb.pop_back();
-              cbs[ns]->aio_fildes = disk_write_req->fd;
-              cbs[ns]->aio_data = (uint64_t) (disk_write_req);
-              cbs[ns]->aio_buf = disk_write_req->src_buf;
-              cbs[ns]->aio_offset = disk_write_req->dst_offset;
-              cbs[ns]->aio_nbytes = disk_write_req->nbytes;
+              cbs[ns]->aio_fildes = req->fd;
+              cbs[ns]->aio_data = (uint64_t) (req);
+              cbs[ns]->aio_buf = req->mem_base;
+              cbs[ns]->aio_offset = req->disk_off;
+              cbs[ns]->aio_nbytes = req->nbytes;
               ns++;
             }
             break;
@@ -2225,94 +2399,62 @@ namespace LegionRuntime {
 
       long GPUChannel::submit(Request** requests, long nr)
       {
-        switch (kind) {
-          case XferDes::XFER_GPU_TO_FB:
-          {
-            GPUtoFBRequest** gpu_to_fb_reqs = (GPUtoFBRequest**) requests;
-            for (long i = 0; i < nr; i++) {
-              //gpu_to_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_to_fb_3d(gpu_to_fb_reqs[i]->dst_offset,
-                                  gpu_to_fb_reqs[i]->src,
-                                  gpu_to_fb_reqs[i]->dst_stride,
-                                  gpu_to_fb_reqs[i]->src_stride,
-                                  gpu_to_fb_reqs[i]->dst_height,
-                                  gpu_to_fb_reqs[i]->src_height,
-                                  gpu_to_fb_reqs[i]->nbytes_per_line,
-                                  gpu_to_fb_reqs[i]->height,
-                                  gpu_to_fb_reqs[i]->depth,
-                                  &gpu_to_fb_reqs[i]->event
-                                  /*Event::NO_EVENT,
-                                  gpu_to_fb_reqs[i]->complete_event*/);
-              pending_copies.push_back(gpu_to_fb_reqs[i]);
+        for (long i = 0; i < nr; i++) {
+          GPURequest* req = (GPURequest*) requests[i];
+          if (req->dim == Request::DIM_1D) { 
+            switch (kind) {
+              case XferDes::XFER_GPU_TO_FB:
+                src_gpu->copy_to_fb(req->dst_gpu_off, req->src_base,
+                                    req->nbytes, &req->event);
+                break;
+              case XferDes::XFER_GPU_FROM_FB:
+                src_gpu->copy_from_fb(req->dst_base, req->src_gpu_off,
+                                      req->nbytes, &req->event);
+                break;
+              case XferDes::XFER_GPU_IN_FB:
+                src_gpu->copy_within_fb(req->dst_gpu_off, req->src_gpu_off,
+                                        req->nbytes, &req->event);
+                break;
+              case XferDes::XFER_GPU_PEER_FB:
+                src_gpu->copy_to_peer(req->dst_gpu, req->dst_gpu_off,
+                                      req->src_gpu_off, req->nbytes,
+                                      &req->event);
+                break;
+              default:
+                assert(0);
             }
-            break;
-          }
-          case XferDes::XFER_GPU_FROM_FB:
-          {
-            GPUfromFBRequest** gpu_from_fb_reqs = (GPUfromFBRequest**) requests;
-            for (long i = 0; i < nr; i++) {
-              //gpu_from_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_from_fb_3d(gpu_from_fb_reqs[i]->dst,
-                                    gpu_from_fb_reqs[i]->src_offset,
-                                    gpu_from_fb_reqs[i]->dst_stride,
-                                    gpu_from_fb_reqs[i]->src_stride,
-                                    gpu_from_fb_reqs[i]->dst_height,
-                                    gpu_from_fb_reqs[i]->src_height,
-                                    gpu_from_fb_reqs[i]->nbytes_per_line,
-                                    gpu_from_fb_reqs[i]->height,
-                                    gpu_from_fb_reqs[i]->depth,
-                                    &gpu_from_fb_reqs[i]->event
-                                    /*Event::NO_EVENT,
-                                    gpu_from_fb_reqs[i]->complete_event*/);
-              pending_copies.push_back(gpu_from_fb_reqs[i]);
+          } else {
+            assert(req->dim == Request::DIM_2D);
+            switch (kind) {
+              case XferDes::XFER_GPU_TO_FB:
+                src_gpu->copy_to_fb_2d(req->dst_gpu_off, req->src_base,
+                                       req->dst_str, req->src_str,
+                                       req->nbytes, req->nlines, &req->event);
+                break;
+              case XferDes::XFER_GPU_FROM_FB:
+                src_gpu->copy_from_fb_2d(req->dst_base, req->src_gpu_off,
+                                         req->dst_str, req->src_str,
+                                         req->nbytes, req->nlines,
+                                         &req->event);
+                break;
+              case XferDes::XFER_GPU_IN_FB:
+                src_gpu->copy_within_fb_2d(req->dst_gpu_off, req->src_gpu_off,
+                                           req->dst_str, req->src_str,
+                                           req->nbytes, req->nlines,
+                                           &req->event);
+                break;
+              case XferDes::XFER_GPU_PEER_FB:
+                src_gpu->copy_to_peer_2d(req->dst_gpu, req->dst_gpu_off,
+                                         req->src_gpu_off, req->dst_str,
+                                         req->src_str, req->nbytes,
+                                         req->nlines, &req->event);
+                break;
+              default:
+                assert(0);
             }
-            break;
+ 
           }
-          case XferDes::XFER_GPU_IN_FB:
-          {
-            GPUinFBRequest** gpu_in_fb_reqs = (GPUinFBRequest**) requests;
-            for (long i = 0; i < nr; i++) {
-              //gpu_in_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_within_fb_3d(gpu_in_fb_reqs[i]->dst_offset,
-                                      gpu_in_fb_reqs[i]->src_offset,
-                                      gpu_in_fb_reqs[i]->dst_stride,
-                                      gpu_in_fb_reqs[i]->src_stride,
-                                      gpu_in_fb_reqs[i]->dst_height,
-                                      gpu_in_fb_reqs[i]->src_height,
-                                      gpu_in_fb_reqs[i]->nbytes_per_line,
-                                      gpu_in_fb_reqs[i]->height,
-                                      gpu_in_fb_reqs[i]->depth,
-                                      &gpu_in_fb_reqs[i]->event
-                                      /*Event::NO_EVENT,
-                                      gpu_in_fb_reqs[i]->complete_event*/);
-              pending_copies.push_back(gpu_in_fb_reqs[i]);
-            }
-            break;
-          }
-          case XferDes::XFER_GPU_PEER_FB:
-          {
-            GPUpeerFBRequest** gpu_peer_fb_reqs = (GPUpeerFBRequest**) requests;
-            for (long i = 0; i < nr; i++) {
-              //gpu_peer_fb_reqs[i]->complete_event = GenEventImpl::create_genevent()->current_event();
-              src_gpu->copy_to_peer_3d(gpu_peer_fb_reqs[i]->dst_gpu,
-                                    gpu_peer_fb_reqs[i]->dst_offset,
-                                    gpu_peer_fb_reqs[i]->src_offset,
-                                    gpu_peer_fb_reqs[i]->dst_stride,
-                                    gpu_peer_fb_reqs[i]->src_stride,
-                                    gpu_peer_fb_reqs[i]->dst_height,
-                                    gpu_peer_fb_reqs[i]->src_height,
-                                    gpu_peer_fb_reqs[i]->nbytes_per_line,
-                                    gpu_peer_fb_reqs[i]->height,
-                                    gpu_peer_fb_reqs[i]->depth,
-                                    &gpu_peer_fb_reqs[i]->event
-                                    /*Event::NO_EVENT,
-                                    gpu_peer_fb_reqs[i]->complete_event*/);
-              pending_copies.push_back(gpu_peer_fb_reqs[i]);
-            }
-            break;
-          }
-          default:
-            assert(0);
+          pending_copies.push_back(req);
         }
         return nr;
       }
@@ -2321,47 +2463,14 @@ namespace LegionRuntime {
       {
         switch (kind) {
           case XferDes::XFER_GPU_TO_FB:
-            while (!pending_copies.empty()) {
-              GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*)pending_copies.front();
-              if (gpu_to_fb_req->event.has_triggered()) {
-                gpu_to_fb_req->xd->notify_request_read_done(gpu_to_fb_req);
-                gpu_to_fb_req->xd->notify_request_write_done(gpu_to_fb_req);
-                pending_copies.pop_front();
-              }
-              else
-                break;
-            }
-            break;
           case XferDes::XFER_GPU_FROM_FB:
-            while (!pending_copies.empty()) {
-              GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*)pending_copies.front();
-              if (gpu_from_fb_req->event.has_triggered()) {
-                gpu_from_fb_req->xd->notify_request_read_done(gpu_from_fb_req);
-                gpu_from_fb_req->xd->notify_request_write_done(gpu_from_fb_req);
-                pending_copies.pop_front();
-              }
-              else
-                break;
-            }
-            break;
           case XferDes::XFER_GPU_IN_FB:
-            while (!pending_copies.empty()) {
-              GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*)pending_copies.front();
-              if (gpu_in_fb_req->event.has_triggered()) {
-                gpu_in_fb_req->xd->notify_request_read_done(gpu_in_fb_req);
-                gpu_in_fb_req->xd->notify_request_write_done(gpu_in_fb_req);
-                pending_copies.pop_front();
-              }
-              else
-                break;
-            }
-            break;
           case XferDes::XFER_GPU_PEER_FB:
             while (!pending_copies.empty()) {
-              GPUpeerFBRequest* gpu_peer_fb_req = (GPUpeerFBRequest*)pending_copies.front();
-              if (gpu_peer_fb_req->event.has_triggered()) {
-                gpu_peer_fb_req->xd->notify_request_read_done(gpu_peer_fb_req);
-                gpu_peer_fb_req->xd->notify_request_write_done(gpu_peer_fb_req);
+              GPURequest* req = (GPURequest*)pending_copies.front();
+              if (req->event.has_triggered()) {
+                req->xd->notify_request_read_done(req);
+                req->xd->notify_request_write_done(req);
                 pending_copies.pop_front();
               }
               else

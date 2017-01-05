@@ -161,59 +161,56 @@ namespace LegionRuntime{
 
     class Request {
     public:
+      enum Dimension {
+        DIM_1D,
+        DIM_2D
+      };
       // a pointer to the owning xfer descriptor
       // this should set at Request creation
       XferDes* xd;
+     // src/dst offset in the src/dst instance
+      off_t src_off, dst_off;
+      // src/dst strides
+      off_t src_str, dst_str;
+      // number of bytes being transferred
+      size_t nbytes, nlines;
       // a flag indicating whether this request read has been done
       bool is_read_done;
       // a flag indicating whether this request write has been done
       bool is_write_done;
+      // whether I am a 1D or 2D transfer
+      Dimension dim;
     };
 #ifdef USE_DISK
-    class DiskReadRequest : public Request {
+    class DiskRequest : public Request {
     public:
       int fd;
-      uint64_t dst_buf;
-      int64_t src_offset;
-      uint64_t nbytes;
-    };
-
-    class DiskWriteRequest : public Request {
-    public:
-      int fd;
-      uint64_t src_buf;
-      int64_t dst_offset;
-      uint64_t nbytes;
+      char *mem_base;
+      off_t disk_off;
+      //uint64_t dst_buf;
+      //int64_t src_offset;
+      //uint64_t nbytes;
     };
 #endif /*USE_DISK*/
     class MemcpyRequest : public Request {
     public:
-      char *src_buf, *dst_buf;
-      size_t nbytes;
-      //std::deque<Copy_1D*> copies_1D;
-      //std::deque<Copy_2D*> copies_2D;
-      //long num_flying_aios;
+      char *src_base, *dst_base;
+      //size_t nbytes;
     };
 
-    class GASNetReadRequest : public Request {
+    class GASNetRequest : public Request {
     public:
-      char *dst_buf;
-      off_t src_offset;
-      size_t nbytes;
-    };
-
-    class GASNetWriteRequest : public Request {
-    public:
-      char *src_buf;
-      off_t dst_offset;
-      size_t nbytes;
+      char *mem_base;
+      off_t gas_off;
+      //off_t src_offset;
+      //size_t nbytes;
     };
 
     class RemoteWriteRequest : public Request {
     public:
       gasnet_node_t dst_node;
-      char *src_buf, *dst_buf;
-      size_t nbytes;
+      char *src_base, *dst_base;
+      //size_t nbytes;
     };
 
 #ifdef USE_CUDA
@@ -227,6 +224,15 @@ namespace LegionRuntime{
       bool triggered;
     };
 
+    class GPURequest : public Request {
+    public:
+      char *src_base, *dst_base;
+      off_t src_gpu_off, dst_gpu_off;
+      GPU* dst_gpu;
+      GPUCompletionEvent event;
+    };
+
+#ifdef TO_BE_DELETE
     class GPUtoFBRequest : public Request {
     public:
       const char* src;
@@ -265,6 +271,7 @@ namespace LegionRuntime{
       GPU* dst_gpu;
       GPUCompletionEvent event;
     };
+#endif
 
 #endif
 
@@ -302,6 +309,7 @@ namespace LegionRuntime{
 
     class MaskEnumerator;
 
+    template<unsigned DIM>
     class XferDes {
     public:
       enum XferKind {
@@ -352,8 +360,6 @@ namespace LegionRuntime{
       XferKind kind;
       // XferOrder of the Xfer Descriptor
       XferOrder::Type order;
-      // channel this XferDes describes
-
       // map from unique id to request class, this map only keeps
        std::map<int64_t, uint64_t> segments_read, segments_write;
       // queue that contains all available free requests
@@ -361,6 +367,7 @@ namespace LegionRuntime{
       enum {
         XFERDES_NO_GUID = 0
       };
+      // channel this XferDes describes
       Channel* channel;
       // event is triggered when the XferDes is completed
       XferDesFence* complete_fence;
@@ -368,6 +375,11 @@ namespace LegionRuntime{
       // SIMULTANEOUS invocation to get_requests,
       // notify_request_read_done, and notify_request_write_done
       pthread_mutex_t xd_lock, update_read_lock, update_write_lock;
+      // default iterators provided to generate requests
+      //Layouts::GenericLayoutIterator<DIM>* li;
+      LayoutIterator<DIM>* li;
+      MaskEnumerator* me;
+      unsigned offset_idx;
     public:
       XferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
               XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
@@ -376,18 +388,55 @@ namespace LegionRuntime{
               uint64_t _max_req_size, int _priority,
               XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
         : dma_request(_dma_request), mark_start(_mark_start), launch_node(_launch_node),
-          bytes_read(0), bytes_write(0), bytes_total(0), pre_bytes_write(0), next_bytes_read(0),
+          bytes_read(0), bytes_write(0), next_bytes_read(0),
           domain(_domain), src_buf(_src_buf), dst_buf(_dst_buf), oas_vec(_oas_vec),
           max_req_size(_max_req_size), priority(_priority),
           guid(_guid), pre_xd_guid(_pre_xd_guid), next_xd_guid(_next_xd_guid),
           kind (_kind), order(_order), channel(NULL), complete_fence(_complete_fence)
       {
+        size_t total_field_size = 0;
+        for (unsigned i = 0; i < oas_vec.size(); i++) {
+          total_field_size += oas_vec[i].size;
+        }
+        bytes_total = total_field_size * domain.get_volume();
+        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
+        if (DIM == 0) {
+          li = NULL;
+          // index space instances use 1D linearizations for translation
+          me = new MaskEnumerator(domain.get_index_space(),
+                                  src_buf.linearization.get_mapping<1>(),
+                                  dst_buf.linearization.get_mapping<1>(),
+                                  order, src_buf.is_ib, dst_buf.is_ib);
+        } else {
+          li = new LayoutIterator<DIM>(
+                       domain.get_rect<DIM>(),
+                       src_buf.linearization.get_mapping<DIM>(),
+                       dst_buf.linearization.get_mapping<DIM>(),
+                       order);
+          me = NULL;
+        }
+        offset_idx = 0;
         pthread_mutex_init(&xd_lock, NULL);
         pthread_mutex_init(&update_read_lock, NULL);
         pthread_mutex_init(&update_write_lock, NULL);
       }
 
       virtual ~XferDes() {
+        // clear available_reqs
+        while (!available_reqs.empty()) {
+          available_reqs.pop();
+        }
+        if (DIM == 0) {
+          delete me;
+        } else {
+          delete li;
+        }
+        // If src_buf is intermediate buffer,
+        // we need to free the buffer
+        if (src_buf.is_ib) {
+          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(
+              src_buf.alloc_offset, src_buf.buf_size);
+        }
         pthread_mutex_destroy(&xd_lock);
         pthread_mutex_destroy(&update_read_lock);
         pthread_mutex_destroy(&update_write_lock);
@@ -411,77 +460,13 @@ namespace LegionRuntime{
                                  Layouts::GenericLayoutIterator<DIM>* li,
                                  unsigned &offset_idx, coord_t available_slots);
 
-      template<unsigned DIM>
-      bool simple_get_request_3d(off_t &src_start, off_t &dst_start,
-                                 off_t &src_stride, off_t &dst_stride,
-                                 off_t &src_height, off_t &dst_height,
-                                 size_t &nbytes_per_line, size_t &height, size_t &depth,
-                                 Layouts::GenericLayoutIterator<DIM>* li,
-                                 unsigned &offset_idx, coord_t available_slots);
-
-#ifdef DEADCODE_USE_GENERIC_ITERATOR
-      template<unsigned DIM>
-      bool simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
-                              Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dsi,
-                              Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> >* &dso,
-                              Rect<1> &irect, Rect<1> &orect,
-                              int &done, int &offset_idx, int &block_start, int &total, int available_slots,
-                              bool disable_batch = false);
-#endif
       void simple_update_bytes_read(int64_t offset, uint64_t size);
       void simple_update_bytes_write(int64_t offset, uint64_t size);
 
-#ifdef USE_XFERDES_ITER
-      virtual bool has_next_request() {
-        return iterator->has_next();
-      }
-
-      // returns the size of this request
-      virtual uint64_t gen_next_request(Request* request) {
-        uint64_t ret = 0;
-        request->copies_2D.clear();
-        request->copies_1D.clear();
-        int64_t src_offset, dst_offset;
-        uint64_t space_left = max_req_size, nbytes;
-        size_t field_id;
-        std::map<Copy_2D*, size_t> copy_to_field;
-        while (iterator->get_next(space_left, src_offset, dst_offset, nbytes, field_id)) {
-          // see if we can aggregate this with previous copy structs
-          bool aggregated = false;
-          for (std::map<Copy_2D*, size_t>::iterator iter = copy_to_field.begin(); iter != copy_to_field.end(); iter++)
-            if (iter->second == field_id && iter->first->nbytes == nbytes){
-              Copy_2D *copy = iter->first;
-              if (copy->nlines == 1) {
-                copy->src_stride = src_offset - copy->src_offset;
-                copy->dst_stride = dst_offset - copy->dst_offset;
-                copy->nlines ++;
-                aggregated = true;
-                break;
-              }
-              else if (src_offset == copy->src_stride * copy->nlines + copy->src_offset
-                    && dst_offset == copy->dst_stride * copy->nlines + copy->dst_offset) {
-                copy->nlines ++;
-                aggregated = true;
-                break;
-              }
-            }
-          if (!aggregated) {
-            Copy_2D *copy = copy_pool_2d.get_one();
-            request->copies_2D.push_back(copy);
-            copy->src_offset = src_offset;
-            copy->dst_offset = dst_offset;
-            copy->nlines = 1;
-            copy->nbytes = nbytes;
-            copy_to_field.insert(std::pair<Copy_2D*, size_t>(copy, field_id));
-          }
-          ret += nbytes;
-        }
-        return ret;
-      }
-#endif
-
       bool is_completed() {
-        return ((bytes_write == bytes_total)&&(next_xd_guid == XFERDES_NO_GUID || next_bytes_read == bytes_total));
+        return ((bytes_write == bytes_total)
+              &&((next_xd_guid == XFERDES_NO_GUID)
+               ||(next_bytes_read == bytes_total)));
       }
 
       void mark_completed();
@@ -508,121 +493,28 @@ namespace LegionRuntime{
         pthread_mutex_unlock(&update_read_lock);
       }
 
+      Request* dequeue_request() {
+        Request* req = available_reqs.front();
+	available_reqs.pop();
+	req->is_read_done = false;
+	req->is_write_done = false;
+      }
+
+      void enqueue_request(Request* req) {
+        available_reqs.push(req);
+      }
+
       gasnet_node_t find_execution_node() {
         // For now, we think the node that contains the src_buf is the execution node
         return ID(src_buf.memory).memory.owner_node;
       }
 
-      virtual void notify_request_read_done(Request* req) = 0;
-      /*{
-        // notify previous XferDes that there are more bytes read
-        req->is_read_done = true;
-        // add read_done segments into segments_read
-        for (std::deque<Copy_1D*>::const_iterator it = req->copies_1D.begin(); it != req->copies_1D.end(); it++) {
-          segments_read.insert(std::pair<int64_t, uint64_t>((*it)->src_offset, (*it)->nbytes));
-        }
-        for (std::deque<Copy_2D*>::const_iterator it = req->copies_2D.begin(); it != req->copies_2D.end(); it++) {
-          // check if we could reduce 2D -> 1D case
-          if ((*it)->src_stride == (*it)->nbytes) {
-            segments_read.insert(std::pair<int64_t, uint64_t>((*it)->src_offset, (*it)->nbytes * (*it)->nlines));
-          }
-          else {
-            for (int i = 0; i < (*it)->nlines; i++)
-              segments_read.insert(std::pair<int64_t, uint64_t>((*it)->src_offset + (*it)->src_stride * i, (*it)->nbytes));
-          }
-        }
-        // clear countinous finished segments and updates bytes
-        std::map<int64_t, uint64_t>::iterator it;
-        bool updated = false;
-        while (true) {
-          it = segments_read.find(bytes_read);
-          if (it == segments_read.end())
-            break;
-          updated = true;
-          bytes_read += it->second;
-          segments_read.erase(it);
-        }
-        if (pre_XferDes != NULL && updated) {
-          pre_XferDes->update_next_bytes_read(bytes_read);
-        }
-      }*/
+      virtual void notify_request_read_done(Request* req);
 
-      virtual void notify_request_write_done(Request* req) = 0;
-      /*{
-        req->is_write_done = true;
-        // add write_done segments into segments_written
-        for (std::deque<Copy_1D*>::const_iterator it = req->copies_1D.begin(); it != req->copies_1D.end(); it++) {
-          segments_written.insert(std::pair<int64_t, uint64_t>((*it)->dst_offset, (*it)->nbytes));
-        }
-        for (std::deque<Copy_2D*>::const_iterator it = req->copies_2D.begin(); it != req->copies_2D.end(); it++) {
-          if ((*it)->dst_stride == (*it)->nbytes) {
-            segments_written.insert(std::pair<int64_t, uint64_t>((*it)->dst_offset, (*it)->nbytes * (*it)->nlines));
-          }
-          else {
-            for (int i = 0; i < (*it)->nlines; i++)
-              segments_written.insert(std::pair<int64_t, uint64_t>((*it)->dst_offset + (*it)->dst_stride * i, (*it)->nbytes));
-          }
-        }
-
-        // add this request back to available_reqs queue
-        copy_pool_1d.free_multiple(req->copies_1D);
-        copy_pool_2d.free_multiple(req->copies_2D);
-        req->copies_1D.clear();
-        req->copies_2D.clear();
-        available_reqs.push(req);
-        // clear countinous finished segments and updates bytes
-        std::map<int64_t, uint64_t>::iterator it;
-        bool updated = false;
-        while (true) {
-          it = segments_written.find(bytes_write);
-          if (it == segments_written.end())
-            break;
-          updated = true;
-          bytes_write += it-> second;
-          segments_written.erase(it);
-        }
-        // notify next XferDes that there are more bytes written
-        if (next_XferDes != NULL && updated) {
-          next_XferDes->update_pre_bytes_write(bytes_write);
-        }
-      }*/
+      virtual void notify_request_write_done(Request* req);
 
       virtual void flush() = 0;
     };
-
-    /*
-    class GenericBlockIterator {
-    public:
-      GenericBlockIterator(int in_lo, int in_hi, int in_block_size, int in_offset_size)
-      : lo(in_lo), hi(in_hi), block_size(in_block_size), offset_size(in_offset_size) {
-        done = 0;
-        offset_idx = 0;
-        any_left = true;
-        block_start = lo;
-      }
-
-      bool step(int n) {
-        if (done + n == hi - lo + 1) {
-          offset_idx ++;
-          if (offset_idx >= offset_size)
-            any_left = false;
-          done = block_start - lo;
-        }
-        else if ((done + n) % block_size == 0) {
-          offset_idx =
-        }
-        else {
-          done += n;
-        }
-        return any_left;
-      }
-
-      operator bool(void) const {return any_left;}
-    public:
-      int done, offset_idx, lo, hi, offset_size, block_size, block_start;
-      bool any_left;
-    };
-    */
 
     template<unsigned DIM>
     class MemcpyXferDes : public XferDes {
@@ -636,25 +528,7 @@ namespace LegionRuntime{
 
       ~MemcpyXferDes()
       {
-        // clear available_reqs
-        while (!available_reqs.empty()) {
-          available_reqs.pop();
-        }
-        if (DIM == 0) {
-          delete me;
-        } else {
-          delete li;
-        }
-        free(requests);
-        // trigger complete event
-        //if (complete_event.exists()) {
-          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        //}
-        // If src_buf is intermediate buffer,
-        // we need to free the buffer
-        if (src_buf.is_ib) {
-          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
-        }
+        free(memcpy_reqs);
       }
 
       long get_requests(Request** requests, long nr);
@@ -663,11 +537,7 @@ namespace LegionRuntime{
       void flush();
 
     private:
-      MemcpyRequest* requests;
-      //std::map<int64_t, uint64_t> segments_read, segments_write;
-      Layouts::GenericLayoutIterator<DIM>* li;
-      MaskEnumerator* me;
-      unsigned offset_idx;
+      MemcpyRequest* memcpy_reqs;
       const char *src_buf_base, *dst_buf_base;
     };
 
@@ -683,25 +553,7 @@ namespace LegionRuntime{
 
       ~GASNetXferDes()
       {
-        // clear available_reqs
-        while (!available_reqs.empty()) {
-          available_reqs.pop();
-        }
-        if (DIM == 0) {
-          delete me;
-        } else {
-          delete li;
-        }
-        free(requests);
-        // trigger completion event
-        //if (complete_event.exists()) {
-          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        //}
-        // If src_buf is intermediate buffer,
-        // we need to free the buffer
-        if (src_buf.is_ib) {
-          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
-        }
+        free(gasnet_reqs);
       }
 
       long get_requests(Request** requests, long nr);
@@ -710,11 +562,7 @@ namespace LegionRuntime{
       void flush();
 
     private:
-      Request* requests;
-      //std::map<int64_t, uint64_t> segments_read, segments_write;
-      Layouts::GenericLayoutIterator<DIM>* li;
-      MaskEnumerator* me;
-      unsigned offset_idx;
+      GASNetRequest* gasnet_reqs;
       const char *buf_base;
     };
 
@@ -730,24 +578,7 @@ namespace LegionRuntime{
 
       ~RemoteWriteXferDes()
       {
-        // clear available_reqs
-        while (!available_reqs.empty()) {
-          available_reqs.pop();
-        }
-        if (DIM == 0) {
-          delete me;
-        } else {
-          delete li;
-        }
         free(requests);
-        //if (complete_event.exists()) {
-          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        //}
-        // If src_buf is intermediate buffer,
-        // we need to free the buffer
-        if (src_buf.is_ib) {
-          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
-        }
       }
 
       long get_requests(Request** requests, long nr);
@@ -757,10 +588,6 @@ namespace LegionRuntime{
 
     private:
       RemoteWriteRequest* requests;
-      //std::map<int64_t, uint64_t> segments_read, segments_write;
-      Layouts::GenericLayoutIterator<DIM>* li;
-      MaskEnumerator* me;
-      unsigned offset_idx;
       const char *src_buf_base, *dst_buf_base;
       MemoryImpl *dst_mem_impl;
     };
@@ -777,25 +604,7 @@ namespace LegionRuntime{
                   XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
 
       ~DiskXferDes() {
-        // clear available_reqs
-        while (!available_reqs.empty()) {
-          available_reqs.pop();
-        }
-        if (DIM == 0) {
-          delete me;
-        } else {
-          delete li;
-        }
-        free(requests);
-        // trigger complete event
-        //if (complete_event.exists()) {
-          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        //}
-        // If src_buf is intermediate buffer,
-        // we need to free the buffer
-        if (src_buf.is_ib) {
-          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
-        }
+        free(disk_reqs);
       }
 
       long get_requests(Request** requests, long nr);
@@ -805,11 +614,7 @@ namespace LegionRuntime{
 
     private:
       int fd;
-      Request* requests;
-      //std::map<int64_t, uint64_t> segments_read, segments_write;
-      Layouts::GenericLayoutIterator<DIM>* li;
-      MaskEnumerator* me;
-      unsigned offset_idx;
+      DiskRequest* disk_reqs;
       const char *buf_base;
     };
 #endif /*USE_DISK*/
@@ -825,27 +630,7 @@ namespace LegionRuntime{
                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
       ~GPUXferDes()
       {
-        // clear available_reqs
-        while (!available_reqs.empty()) {
-          Request* req = available_reqs.front();
-          delete req;
-          available_reqs.pop();
-        }
-        if (DIM == 0) {
-          delete me;
-        } else {
-          delete li;
-        }
-        //free(requests);
-        // trigger complete event
-        //if (complete_event.exists()) {
-          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        //}
-        // If src_buf is intermediate buffer,
-        // we need to free the buffer
-        if (src_buf.is_ib) {
-          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
-        }
+        free(gpu_reqs);
       }
 
       long get_requests(Request** requests, long nr);
@@ -854,11 +639,7 @@ namespace LegionRuntime{
       void flush();
 
     private:
-      //Request* requests;
-      //std::map<int64_t, uint64_t> segments_read, segments_write;
-      Layouts::GenericLayoutIterator<DIM>* li;
-      MaskEnumerator* me;
-      unsigned offset_idx;
+      Request* gpu_reqs;
       char *src_buf_base;
       char *dst_buf_base;
       GPU *dst_gpu, *src_gpu;
@@ -1346,7 +1127,8 @@ namespace LegionRuntime{
                                          handle_request> Message;
 
       static void send_request(gasnet_node_t target, char* dst_buf,
-                               char* src_buf, size_t nbytes, RemoteWriteRequest* req)
+                               char* src_buf, size_t nbytes,
+                               RemoteWriteRequest* req) 
       {
         RequestArgs args;
         args.dst_buf = dst_buf;
@@ -1354,6 +1136,19 @@ namespace LegionRuntime{
         args.sender = gasnet_mynode();
         //TODO: need to ask Sean what payload mode we should use
         Message::request(target, args, src_buf, nbytes, PAYLOAD_KEEP, dst_buf);
+      }
+
+      static void send_request(gasnet_node_t target, char* dst_buf,
+                               char* src_buf, size_t nbytes, off_t src_str,
+                               size_t nlines, RemoteWriteRequest* req)
+      {
+        RequestArgs args;
+	args.dst_buf = dst_buf;
+	args.req = req;
+	args.sender = gasnet_mynode();
+        //TODO: need to ask Sean what payload mode we should use
+        Message::request(target, args, src_buf, nbytes, src_str, nlines,
+                         PAYLOAD_KEEP, dst_buf);
       }
     };
 
