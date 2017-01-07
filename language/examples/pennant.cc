@@ -986,7 +986,7 @@ public:
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
 private:
-  std::vector<Processor>& procs_list;
+  // std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;
   std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
   std::map<Processor, Memory>& proc_sysmems;
