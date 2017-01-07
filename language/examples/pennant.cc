@@ -1001,7 +1001,7 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
                              std::map<Processor, Memory>* _proc_sysmems,
                              std::map<Processor, Memory>* _proc_regmems)
   : DefaultMapper(rt, machine, local, mapper_name),
-    procs_list(*_procs_list),
+    // procs_list(*_procs_list),
     // sysmems_list(*_sysmems_list),
     sysmem_local_procs(*_sysmem_local_procs),
     proc_sysmems(*_proc_sysmems)// ,
