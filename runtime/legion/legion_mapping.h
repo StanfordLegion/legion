@@ -609,10 +609,15 @@ namespace Legion {
        * using the 'speculate' field. If it does choose to speculate
        * then the mapper can control the guessed value for the
        * predicate by setting the 'speculative_value' field.
+       * Finally the mapper can control whether the speculation
+       * is solely for the mapping of the operation or whether it
+       * should extend to the execution of the operation with 
+       * the 'speculate_mapping_only' field.
        */
       struct SpeculativeOutput {
         bool                                    speculate;
         bool                                    speculative_value;
+        bool                                    speculate_mapping_only;
       };
       //------------------------------------------------------------------------
       virtual void speculate(const MapperContext      ctx,

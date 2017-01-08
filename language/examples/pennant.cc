@@ -986,7 +986,7 @@ public:
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
 private:
-  std::vector<Processor>& procs_list;
+  // std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;
   std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
   std::map<Processor, Memory>& proc_sysmems;
@@ -1001,7 +1001,7 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
                              std::map<Processor, Memory>* _proc_sysmems,
                              std::map<Processor, Memory>* _proc_regmems)
   : DefaultMapper(rt, machine, local, mapper_name),
-    procs_list(*_procs_list),
+    // procs_list(*_procs_list),
     // sysmems_list(*_sysmems_list),
     sysmem_local_procs(*_sysmem_local_procs),
     proc_sysmems(*_proc_sysmems)// ,

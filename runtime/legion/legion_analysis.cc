@@ -4487,6 +4487,7 @@ namespace Legion {
 #endif
         }
       }
+      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
       for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
             vit = current_version_infos.begin(); vit != 
             current_version_infos.end(); vit++)

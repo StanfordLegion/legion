@@ -19301,6 +19301,13 @@ namespace Legion {
                                   Runtime::get_runtime(p), args);
             break;
           }
+        case LG_MISSPECULATE_TASK_ID:
+          {
+            const SingleTask::MisspeculationTaskArgs *targs = 
+              (const SingleTask::MisspeculationTaskArgs*)args;
+            targs->task->handle_misspeculation();
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 
