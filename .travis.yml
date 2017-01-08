@@ -39,7 +39,8 @@ before_install:
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
-      brew install pypy llvm@3.8
+      brew install pypy llvm
+      export LLVM_CONFIG="$(find "$(brew --prefix)"/Cellar/llvm/*/bin/llvm-config -print -quit)"
     fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "g++" ]]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-3.5" CC="clang-3.5"; fi
