@@ -1,5 +1,5 @@
-/* Copyright 2016 Stanford University
- * Copyright 2016 Los Alamos National Laboratory
+/* Copyright 2017 Stanford University
+ * Copyright 2017 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -307,8 +307,185 @@ namespace LegionRuntime{
       virtual void print(std::ostream& os) const { os << "XferDesFence"; }
     };
 
-    class MaskEnumerator;
-    class LayoutIterator;
+    class MaskEnumerator {
+    public:
+      MaskEnumerator(IndexSpace _is, Mapping<1, 1> *src_m,
+                     Mapping<1, 1> *dst_m, XferOrder::Type order,
+                     bool is_src_ib, bool is_dst_ib)
+        : is(_is), src_mapping(src_m), dst_mapping(dst_m), rstart(0), rlen(0), rleft(0)
+      {
+        e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
+        e->peek_next(rstart, rlen);
+        src_idx_offset = is_src_ib ? src_mapping->image(rstart)[0] : 0;
+        dst_idx_offset = is_dst_ib ? dst_mapping->image(rstart)[0] : 0;
+      };
+
+      ~MaskEnumerator() {
+        delete e;
+      }
+
+      coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx) {
+        if (rleft == 0) {
+          e->get_next(rstart, rlen);
+          rleft = rlen;
+        }
+        src_idx = src_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - src_idx_offset;
+        dst_idx = dst_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - dst_idx_offset;
+        return rleft;
+      }
+
+      void reset() {
+        delete e;
+        e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
+        rleft = 0;
+      };
+
+      bool any_left() {
+        coord_t rstart2;
+        size_t rlen2;
+        return (e->peek_next(rstart2, rlen2) || (rleft > 0));
+      };
+
+      void move(size_t steps) {
+        assert(steps <= rleft);
+        rleft -= steps;
+      };
+    private:
+      IndexSpace is;
+      ElementMask::Enumerator* e;
+      Mapping<1, 1> *src_mapping, *dst_mapping;
+      coord_t rstart, src_idx_offset, dst_idx_offset;
+      size_t rlen, rleft;
+    };
+
+    class LayoutIterator {
+    public:
+      LayoutIterator(const Domain& dm,
+                     const DomainLinearization& src_dl,
+                     const DomainLinearization& dst_dl,
+                     XferOrder::Type order)
+      : cur_idx(0)
+      {
+        //src_dl.add_local_reference();
+        //dst_dl.add_local_reference();
+        rect_size = dm.get_volume();
+        assert(dm.get_dim() == src_dl.get_dim());
+        assert(dm.get_dim() == dst_dl.get_dim());
+        Point<1> in1[3], in2[3];
+        switch (dm.get_dim()) {
+          case 1:
+          {
+            Rect<1> rect = dm.get_rect<1>(), subrect;
+            Mapping<1, 1>* src_m = src_dl.get_mapping<1>();
+            Mapping<1, 1>* dst_m = dst_dl.get_mapping<1>();
+            src_m->image_linear_subrect(rect, subrect, in1);
+            dst_m->image_linear_subrect(rect, subrect, in2);
+            src_lo = src_m->image(rect.lo);
+            dst_lo = dst_m->image(rect.lo);
+            break;
+          }
+          case 2:
+          {
+            Rect<2> rect = dm.get_rect<2>(), subrect;
+            Mapping<2, 1>* src_m = src_dl.get_mapping<2>();
+            Mapping<2, 1>* dst_m = dst_dl.get_mapping<2>();
+            src_m->image_linear_subrect(rect, subrect, in1);
+            dst_m->image_linear_subrect(rect, subrect, in2);
+            src_lo = src_m->image(rect.lo);
+            dst_lo = dst_m->image(rect.lo);
+            break;
+          }
+          case 3:
+          {
+            Rect<3> rect = dm.get_rect<3>(), subrect;
+            Mapping<3, 1>* src_m = src_dl.get_mapping<3>();
+            Mapping<3, 1>* dst_m = dst_dl.get_mapping<3>();
+            src_m->image_linear_subrect(rect, subrect, in1);
+            dst_m->image_linear_subrect(rect, subrect, in2);
+            src_lo = src_m->image(rect.lo);
+            dst_lo = dst_m->image(rect.lo);
+            break;
+          }
+          default:
+            assert(0);
+        }
+
+        // Currently we only support FortranArrayLinearization
+        assert(in1[0][0] == 1);
+        assert(in2[0][0] == 1);
+        dim = 0;
+        coord_t exp1 = 0, exp2 = 0;
+        for (int i = 0; i < dm.get_dim(); i++) {
+          coord_t e = dm.rect_data[i*2+1] - dm.rect_data[i*2] + 1;
+          if (i && (exp1 == in1[i][0]) && (exp2 == in2[i][0]) ) {
+            //collapse and grow extent
+            extents.x[dim - 1] *= e;
+            exp1 *= e;
+            exp2 *= e;
+          } else {
+            extents.x[dim] = e;
+            exp1 = in1[i][0] * e;
+            exp2 = in2[i][0] * e;
+            src_strides[dim] = in1[i];
+            dst_strides[dim] = in2[i];
+            dim++;
+          }
+        }
+        can_perform_2d = false;
+        if ((order == XferOrder::SRC_FIFO && src_strides[1][0] == extents[0])
+          ||(order == XferOrder::SRC_FIFO && src_strides[1][0] == extents[0]))
+          can_perform_2d = (dim > 1);
+      }
+      ~LayoutIterator() {
+        //src_dl.remove_reference();
+        //dst_dl.remove_reference();
+      }
+      void reset() {cur_idx = 0;}
+      bool any_left() {return cur_idx < rect_size;}
+      coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx,
+                               coord_t &src_str, coord_t &dst_str,
+                               size_t &nitems, size_t nlines)
+      {
+        Point<3> p;
+        coord_t idx = cur_idx;
+        src_idx = src_lo;
+        dst_idx = dst_lo;
+        for (int i = 0; i < dim; i++) {
+          p.x[i] = idx % extents[i];
+          src_idx += src_strides[i][0] * p.x[i];
+          dst_idx += dst_strides[i][0] * p.x[i];
+          idx = idx / extents[i];
+        }
+        if (dim == 1) {
+          nitems = extents[0] - p[0];
+          nlines = 1;
+          src_str = extents[0];
+          dst_str = extents[0];
+        } else {
+          if (p[0] == 0) {
+            // can perform 2D
+            nitems = extents[0];
+            nlines = extents[1] - p[1];
+            src_str = src_strides[1][0];
+            dst_str = dst_strides[1][0];
+          } else {
+            // 1D case
+            nitems = extents[0] - p[0];
+            nlines = 1;
+            src_str = src_strides[1][0];
+            dst_str = dst_strides[1][0];
+          }
+        }
+        return nitems * nlines;
+      }
+      void move(coord_t steps) {cur_idx += steps; assert(cur_idx <= rect_size);};
+    private:
+      Point<1> src_strides[3], dst_strides[3], src_lo, dst_lo;
+      Point<3> extents;
+      int dim;
+      coord_t cur_idx, rect_size;
+      bool can_perform_2d;
+    };
 
     class XferDes {
     public:
@@ -400,7 +577,7 @@ namespace LegionRuntime{
         }
         bytes_total = total_field_size * domain.get_volume();
         pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-        if (DIM == 0) {
+        if (domain.get_dim() == 0) {
           li = NULL;
           // index space instances use 1D linearizations for translation
           me = new MaskEnumerator(domain.get_index_space(),
@@ -426,7 +603,7 @@ namespace LegionRuntime{
         while (!available_reqs.empty()) {
           available_reqs.pop();
         }
-        if (DIM == 0) {
+        if (domain.get_dim() == 0) {
           delete me;
         } else {
           delete li;
@@ -444,6 +621,11 @@ namespace LegionRuntime{
 
       virtual long get_requests(Request** requests, long nr) = 0;
 
+      template<unsigned DIM>
+      long default_get_requests(Request** requests, long nr);
+      void default_notify_request_read_done(Request* req);
+      void default_notify_request_write_done(Request* req);
+#ifdef SIMPLE_GET_REQUEST
       bool simple_get_mask_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                                    MaskEnumerator* me,
                                    unsigned &offset_idx, coord_t available_slots);
@@ -459,6 +641,7 @@ namespace LegionRuntime{
                                  size_t &nbytes_per_line, size_t &nlines,
                                  Layouts::GenericLayoutIterator<DIM>* li,
                                  unsigned &offset_idx, coord_t available_slots);
+#endif
 
       void simple_update_bytes_read(int64_t offset, uint64_t size);
       void simple_update_bytes_write(int64_t offset, uint64_t size);
@@ -498,6 +681,7 @@ namespace LegionRuntime{
 	available_reqs.pop();
 	req->is_read_done = false;
 	req->is_write_done = false;
+        return req;
       }
 
       void enqueue_request(Request* req) {
@@ -509,9 +693,9 @@ namespace LegionRuntime{
         return ID(src_buf.memory).memory.owner_node;
       }
 
-      virtual void notify_request_read_done(Request* req);
+      virtual void notify_request_read_done(Request* req) = 0;
 
-      virtual void notify_request_write_done(Request* req);
+      virtual void notify_request_write_done(Request* req) = 0;
 
       virtual void flush() = 0;
     };
@@ -900,6 +1084,7 @@ namespace LegionRuntime{
         return disk_write_channel;
       }
 #endif /*USE_DISK*/
+#ifdef USE_FILE
       FileChannel* create_file_read_channel(long max_nr) {
         assert(file_read_channel == NULL);
         file_read_channel = new FileChannel(max_nr, XferDes::XFER_FILE_READ);
@@ -910,6 +1095,7 @@ namespace LegionRuntime{
         file_write_channel = new FileChannel(max_nr, XferDes::XFER_FILE_WRITE);
         return file_write_channel;
       }
+#endif
 #ifdef USE_CUDA
       GPUChannel* create_gpu_to_fb_channel(long max_nr, GPU* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
@@ -960,12 +1146,14 @@ namespace LegionRuntime{
         return disk_write_channel;
       }
 #endif /*USE_DISK*/
+#ifdef USE_FILE
       FileChannel* get_file_read_channel() {
         return file_read_channel;
       }
       FileChannel* get_file_write_channel() {
         return file_write_channel;
       }
+#endif
 #ifdef USE_CUDA
       GPUChannel* get_gpu_to_fb_channel(GPU* gpu) {
         std::map<GPU*, GPUChannel*>::iterator it;
@@ -1007,7 +1195,9 @@ namespace LegionRuntime{
 #ifdef USE_DISK
       DiskChannel *disk_read_channel, *disk_write_channel;
 #endif /*USE_DISK*/
+#ifdef USE_FILE
       FileChannel *file_read_channel, *file_write_channel;
+#endif
 #ifdef USE_CUDA
       std::map<GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif

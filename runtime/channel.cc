@@ -57,7 +57,7 @@ namespace LegionRuntime {
       static inline int max(int a, int b) { return (a < b) ? b : a; }
       static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
 
-      static inline bool scatter_ib(off_t start, size_t nbytes, size_t buf_size)
+      static inline bool cross_ib(off_t start, size_t nbytes, size_t buf_size)
       {
         return (nbytes > 0) && (start / buf_size < (start + nbytes - 1) / buf_size);
       }
@@ -71,177 +71,6 @@ namespace LegionRuntime {
           NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
         }
       }
-
-      class MaskEnumerator {
-      public:
-        MaskEnumerator(IndexSpace _is, Mapping<1, 1> *src_m, Mapping<1, 1> *dst_m, XferOrder::Type order, bool is_src_ib, bool is_dst_ib)
-          : is(_is), src_mapping(src_m), dst_mapping(dst_m), rstart(0), rlen(0), rleft(0) {
-          e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
-          e->peek_next(rstart, rlen);
-          src_idx_offset = is_src_ib ? src_mapping->image(rstart)[0] : 0;
-          dst_idx_offset = is_dst_ib ? dst_mapping->image(rstart)[0] : 0;
-        };
-
-        ~MaskEnumerator() {
-          delete e;
-        }
-
-        coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx) {
-          if (rleft == 0) {
-            e->get_next(rstart, rlen);
-            rleft = rlen;
-          }
-          src_idx = src_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - src_idx_offset;
-          dst_idx = dst_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - dst_idx_offset;
-          return rleft;
-        }
-
-        void reset() {
-          delete e;
-          e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
-          rleft = 0;
-        };
-
-        bool any_left() {
-          coord_t rstart2;
-          size_t rlen2;
-          return (e->peek_next(rstart2, rlen2) || (rleft > 0));
-        };
-
-        void move(size_t steps) {
-          assert(steps <= rleft);
-          rleft -= steps;
-        };
-      private:
-        IndexSpace is;
-        ElementMask::Enumerator* e;
-        Mapping<1, 1> *src_mapping, *dst_mapping;
-        coord_t rstart, src_idx_offset, dst_idx_offset;
-        size_t rlen, rleft;
-      };
-
-      class LayoutIterator {
-      public:
-        LayoutIterator(const Domain& dm,
-                       const DomainLinearization& src_dl,
-                       const DomainLinearization& dst_dl,
-                       XferOrder::Type order)
-        : iter_order(order), cur_idx(0)
-        {
-          //src_dl.add_local_reference();
-          //dst_dl.add_local_reference();
-          rect_size = dm.get_volume();
-          assert(dm.get_dim() == src_dl.get_dim());
-          assert(dm.get_dim() == dst_dl.get_dim());
-          Point<1> in1[3], in2[3];
-          switch (dm.get_dim()) {
-            case 1:
-            {
-              Rect<1> rect = dm.get_rect<1>(), subrect;
-              Mapping<1, 1>* src_m = src_dl.get_mapping<1>();
-              Mapping<1, 1>* dst_m = dst_dl.get_mapping<1>();
-              src_m->image_linear_subrect(rect, subrect, in1);
-              dst_m->image_linear_subrect(rect, subrect, in2);
-              src_lo = src_m->image(rect.lo);
-              dst_lo = dst_m->image(rect.lo);
-              break;
-            }
-            case 2:
-            {
-              Rect<2> rect = dm.get_rect<2>(), subrect;
-              Mapping<2, 1>* src_m = src_dl.get_mapping<2>();
-              Mapping<2, 1>* dst_m = dst_dl.get_mapping<2>();
-              src_m->image_linear_subrect(rect, subrect, in1);
-              dst_m->image_linear_subrect(rect, subrect, in2);
-              src_lo = src_m->image(rect.lo);
-              dst_lo = dst_m->image(rect.lo);
-              break;
-            }
-            case 3:
-            {
-              Rect<3> rect = dm.get_rect<3>(), subrect;
-              Mapping<3, 1>* src_m = src_dl.get_mapping<1>();
-              Mapping<3, 1>* dst_m = dst_dl.get_mapping<1>();
-              src_m->image_linear_subrect(rect, subrect, in1);
-              dst_m->image_linear_subrect(rect, subrect, in2);
-              src_lo = src_m->image(rect.lo);
-              dst_lo = dst_m->image(rect.lo);
-              break;
-            }
-            default:
-              assert(0);
-          }
-
-          // Currently we only support FortranArrayLinearization
-          assert(in1[0] == 1);
-          assert(in2[0] == 1);
-          dim = 0;
-          coord_t exp1 = 0, exp2 = 0;
-          for (unsigned i = 0; i < DIM; i++) {
-            coord_t e = rect.dim_size(i);
-            if (i && (exp1 == in1[i][0]) && (exp2 == in2[i][0]) ) {
-              //collapse and grow extent
-              extents.x[dim - 1] *= e;
-              exp1 *= e;
-              exp2 *= e;
-            } else {
-              extents.x[dim] = e;
-              exp1 = in1[i][0] * e;
-              exp2 = in2[i][0] * e;
-              src_strides[dim] = in1[i];
-              dst_strides[dim] = in2[i];
-              dim++;
-            }
-          }
-       }
-        ~LayoutIterator() {
-          //src_dl.remove_reference();
-          //dst_dl.remove_reference();
-        }
-        void reset() {cur_idx = 0;}
-        bool any_left() {return cur_idx < rect_size;}
-        coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx,
-                                 coord_t &src_str, coord_t &dst_str,
-                                 size_t &nitems, size_t nlines) {
-          Point<DIM> p;
-          coord_t idx = cur_idx;
-          src_idx = src_lo;
-          dst_idx = dst_lo;
-          for (unsigned i = 0; i < dim; i++) {
-            p.x[i] = idx % extents[i];
-            src_idx += src_strides[i][0] * p.x[i];
-            dst_idx += dst_strides[i][0] * p.x[i];
-            idx = idx / extents[i];
-          }
-          if (dim == 1) {
-            nitems = extents[0] - p[0];
-            nlines = 1;
-            src_str = extents[0];
-            dst_str = extents[0];
-          } else {
-            if (p[0] == 0) {
-              // can perform 2D
-              nitems = extents[0];
-              nlines = extents[1] - p[1];
-              src_str = src_strides[1][0];
-              dst_str = dst_strides[1][0];
-            } else {
-              // 1D case
-              nitems = extents[0] - p[0];
-              nlines = 1;
-              src_str = src_strides[1][0];
-              dst_str = dst_strides[1][0];
-            }
-          }
-          return nitems * nlines;
-        }
-        void move(coord_t steps) {cur_idx += steps; assert(cur_idx <= rect_size);};
-      private:
-        Point<1> src_strides[3], dst_strides[3], src_lo, dst_lo;
-        Point<3> extents;
-        int dim;
-        coord_t cur_idx, rect_size;
-      };
 
       static inline off_t calc_mem_loc_ib(off_t alloc_offset,
                                           off_t field_start,
@@ -262,6 +91,7 @@ namespace LegionRuntime {
         return offset % buf_size;
       }
 
+#ifdef SIMPLE_GET_MASK_REQUEST
       bool XferDes::simple_get_mask_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                                             MaskEnumerator* me,
                                             unsigned &offset_idx, coord_t available_slots)
@@ -279,7 +109,7 @@ namespace LegionRuntime {
         // make sure we have source data ready
         if (src_buf.is_ib) {
           src_start = calc_mem_loc_ib(0, oas_vec[offset_idx].src_offset, oas_vec[offset_idx].size,
-                                      src_buf.elmt_size, src_buf.block_size, domain.get_volume(), src_idx);
+                                      src_buf.elmt_size, src_buf.block_size, src_buf.buf_size, domain.get_volume(), src_idx);
           todo = min(todo, max(0, pre_bytes_write - src_start) / oas_vec[offset_idx].size);
           scatter_src_ib = scatter_ib(src_start, todo * oas_vec[offset_idx].size, src_buf.buf_size);
         } else {
@@ -289,7 +119,7 @@ namespace LegionRuntime {
         // make sure there are enough space in destination
         if (dst_buf.is_ib) {
           dst_start = calc_mem_loc_ib(0, oas_vec[offset_idx].dst_offset, oas_vec[offset_idx].size,
-                                      dst_buf.elmt_size, dst_buf.block_size, domain.get_volume(), dst_idx);
+                                      dst_buf.elmt_size, dst_buf.block_size, dst_buf.buf_size, domain.get_volume(), dst_idx);
           todo = min(todo, max(0, next_bytes_read + dst_buf.buf_size - dst_start) / oas_vec[offset_idx].size);
           scatter_dst_ib = scatter_ib(dst_start, todo * oas_vec[offset_idx].size, dst_buf.buf_size);
         } else {
@@ -308,9 +138,10 @@ namespace LegionRuntime {
         }
         return true;
       }
+#endif
 #define MAX_GEN_REQS 3
 
-      bool support_2d_xfers(XferDes::Kind kind)
+      bool support_2d_xfers(XferDes::XferKind kind)
       {
         return (kind == XferDes::XFER_GPU_TO_FB)
                || (kind == XferDes::XFER_GPU_FROM_FB)
@@ -328,9 +159,12 @@ namespace LegionRuntime {
         size_t nitems, nlines;
         while (idx + MAX_GEN_REQS <= nr
         && MAX_GEN_REQS <= available_reqs.size()) {
-          if (DIM == 0)
+          if (DIM == 0) {
             todo = min(max_req_size / oas_vec[offset_idx].size,
                        me->continuous_steps(src_idx, dst_idx));
+            nitems = src_str = dst_str = todo;
+            nlines = 1;
+          }
           else
             todo = min(max_req_size / oas_vec[offset_idx].size,
                        li->continuous_steps(src_idx, dst_idx,
@@ -341,6 +175,7 @@ namespace LegionRuntime {
           coord_t dst_in_block = dst_buf.block_size
                                - dst_idx % dst_buf.block_size;
           todo = min(todo, min(src_in_block, dst_in_block));
+          coord_t src_start, dst_start;
           if (src_buf.is_ib) {
             src_start = calc_mem_loc_ib(0,
                                         oas_vec[offset_idx].src_offset,
@@ -442,6 +277,7 @@ namespace LegionRuntime {
         return idx;
       }
 
+#ifdef SIMPLE_GET_REQUEST
       template<unsigned DIM>
       bool XferDes::simple_get_request(off_t &src_start, off_t &dst_start, size_t &nbytes,
                               Layouts::GenericLayoutIterator<DIM>* li,
@@ -584,6 +420,7 @@ namespace LegionRuntime {
         }
         return true;
       }
+#endif
 
 #ifdef DEADCODE_OLD_GENERIC_ITERATOR
       template<unsigned DIM>
@@ -781,13 +618,13 @@ namespace LegionRuntime {
         //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", gasnet_mynode(), offset, size, guid, bytes_write);
       }
 
-      void XferDes::notify_request_read_done(Request* req)
+      void XferDes::default_notify_request_read_done(Request* req)
       {  
         req->is_read_done = true;
         simple_update_bytes_read(req->src_off, req->nbytes * req->nlines);
       }
 
-      void XferDes::notify_request_write_done(Request* req)
+      void XferDes::default_notify_request_write_done(Request* req)
       {
         req->is_write_done = true;
         simple_update_bytes_write(req->dst_off, req->nbytes * req->nlines);
@@ -831,11 +668,11 @@ namespace LegionRuntime {
       long MemcpyXferDes<DIM>::get_requests(Request** requests, long nr)
       {
         MemcpyRequest** reqs = (MemcpyRequest**) requests;
-        long new_nr = default_get_requests(requests, nr);
+        long new_nr = default_get_requests<DIM>(requests, nr);
         for (long i = 0; i < new_nr; i++)
         {
-          reqs[i]->src_base = src_buf_base + reqs[i]->src_off;
-          reqs[i]->dst_base = dst_buf_base + reqs[i]->dst_off;
+          reqs[i]->src_base = (char*)(src_buf_base + reqs[i]->src_off);
+          reqs[i]->dst_base = (char*)(dst_buf_base + reqs[i]->dst_off);
         }
         return new_nr;
 
@@ -880,24 +717,17 @@ namespace LegionRuntime {
 #endif
       }
 
-#ifdef TO_BE_DELETE
       template<unsigned DIM>
       void MemcpyXferDes<DIM>::notify_request_read_done(Request* req)
       {
-        req->is_read_done = true;
-        MemcpyRequest* mc_req = (MemcpyRequest*) req;
-        simple_update_bytes_read(mc_req->src_buf - src_buf_base, mc_req->nbytes);
+        default_notify_request_read_done(req);
       }
 
       template<unsigned DIM>
       void MemcpyXferDes<DIM>::notify_request_write_done(Request* req)
       {
-        req->is_write_done = true;
-        MemcpyRequest* mc_req = (MemcpyRequest*) req;
-        simple_update_bytes_write(mc_req->dst_buf - dst_buf_base, mc_req->nbytes);
-        available_reqs.push(req);
+        default_notify_request_write_done(req);
       }
-#endif
 
       template<unsigned DIM>
       void MemcpyXferDes<DIM>::flush()
@@ -955,20 +785,20 @@ namespace LegionRuntime {
       long GASNetXferDes<DIM>::get_requests(Request** requests, long nr)
       {
         GASNetRequest** reqs = (GASNetRequest**) requests;
-        long new_nr = default_get_requests(requests, nr);
+        long new_nr = default_get_requests<DIM>(requests, nr);
         switch (kind) {
           case XferDes::XFER_GASNET_READ:
           {
             for (long i = 0; i < new_nr; i++) {
               reqs[i]->gas_off = src_buf.alloc_offset + reqs[i]->src_off;
-              reqs[i]->mem_base = buf_base + reqs[i]->dst_off;
+              reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
             }
             break;
           }
           case XferDes::XFER_GASNET_WRITE:
           {
             for (long i = 0; i < new_nr; i++) {
-              reqs[i]->mem_base = buf_base + reqs[i]->src_off;
+              reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
               reqs[i]->gas_off = dst_buf.alloc_offset + reqs[i]->dst_off;
             }
             break;
@@ -1036,10 +866,11 @@ namespace LegionRuntime {
 #endif
       }
 
-#define TO_BE_DELETE
       template<unsigned DIM>
       void GASNetXferDes<DIM>::notify_request_read_done(Request* req)
       {
+        default_notify_request_read_done(req);
+#ifdef TO_BE_DELETE
         req->is_read_done = true;
         int64_t offset;
         uint64_t size;
@@ -1056,11 +887,14 @@ namespace LegionRuntime {
             assert(0);
         }
         simple_update_bytes_read(offset, size);
+#endif
       }
 
       template<unsigned DIM>
       void GASNetXferDes<DIM>::notify_request_write_done(Request* req)
       {
+        default_notify_request_write_done(req);
+#ifdef TO_BE_DELETE
         req->is_write_done = true;
         int64_t offset;
         uint64_t size;
@@ -1078,8 +912,8 @@ namespace LegionRuntime {
         }
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
-      }
 #endif
+      }
 
       template<unsigned DIM>
       void GASNetXferDes<DIM>::flush()
@@ -1128,11 +962,11 @@ namespace LegionRuntime {
       {
         pthread_mutex_lock(&xd_lock);
         RemoteWriteRequest** reqs = (RemoteWriteRequest**) requests;
-        long new_nr = default_get_requests(requests, nr);
+        long new_nr = default_get_requests<DIM>(requests, nr);
         for (long i = 0; i < new_nr; i++)
         {
-          reqs[i]->src_base = src_buf_base + reqs[i]->src_off;
-          reqs[i]->dst_base = dst_buf_base + reqs[i]->dst_off;
+          reqs[i]->src_base = (char*)(src_buf_base + reqs[i]->src_off);
+          reqs[i]->dst_base = (char*)(dst_buf_base + reqs[i]->dst_off);
         }
         pthread_mutex_unlock(&xd_lock);
         return new_nr;
@@ -1183,7 +1017,7 @@ namespace LegionRuntime {
       void RemoteWriteXferDes<DIM>::notify_request_read_done(Request* req)
       {
         pthread_mutex_lock(&xd_lock);
-        XferDes<DIM>::notify_request_read_done(req);
+        default_notify_request_read_done(req);
 #ifdef TO_BE_DELETE
         req->is_read_done = true;
         int64_t offset = ((RemoteWriteRequest*)req)->src_buf - src_buf_base;
@@ -1197,7 +1031,7 @@ namespace LegionRuntime {
       void RemoteWriteXferDes<DIM>::notify_request_write_done(Request* req)
       {
         pthread_mutex_lock(&xd_lock);
-        XferDes<DIM>::notify_request_write_done(req);
+        default_notify_request_write_done(req);
 #ifdef TO_BE_DELETE
         req->is_write_done = true;
         int64_t offset = ((RemoteWriteRequest*)req)->dst_buf - dst_buf_base;
@@ -1271,20 +1105,20 @@ namespace LegionRuntime {
       long DiskXferDes<DIM>::get_requests(Request** requests, long nr)
       {
         DiskRequest** reqs = (DiskRequest**) requests;
-        long new_nr = default_get_requests(requests, nr);
+        long new_nr = default_get_requests<DIM>(requests, nr);
         switch (kind) {
           case XferDes::XFER_DISK_READ:
           {
             for (long i = 0; i < new_nr; i++) {
               reqs[i]->disk_off = src_buf.alloc_offset + reqs[i]->src_off;
-              reqs[i]->mem_base = buf_base + reqs[i]->dst_off;
+              reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
             }
             break;
           }
           case XferDes::XFER_DISK_WRITE:
           {
             for (long i = 0; i < new_nr; i++) {
-              reqs[i]->mem_base = buf_base + reqs[i]->src_off;
+              reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
               reqs[i]->disk_off = dst_buf.alloc_offset + reqs[i]->dst_off;
             }
             break;
@@ -1354,10 +1188,11 @@ namespace LegionRuntime {
 #endif
       }
 
-#ifdef TO_BE_DELETE
       template<unsigned DIM>
       void DiskXferDes<DIM>::notify_request_read_done(Request* req)
       {
+        default_notify_request_read_done(req);
+#ifdef TO_BE_DELETE
         req->is_read_done = true;
         int64_t offset;
         uint64_t size;
@@ -1374,11 +1209,14 @@ namespace LegionRuntime {
             assert(0);
         }
         simple_update_bytes_read(offset, size);
+#endif
       }
 
       template<unsigned DIM>
       void DiskXferDes<DIM>::notify_request_write_done(Request* req)
       {
+        default_notify_request_write_done(req);
+#ifdef TO_BE_DELETE
         req->is_write_done = true;
         int64_t offset;
         uint64_t size;
@@ -1396,9 +1234,8 @@ namespace LegionRuntime {
         }
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
-        //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
-      }
 #endif
+      }
 
       template<unsigned DIM>
       void DiskXferDes<DIM>::flush()
@@ -1524,8 +1361,8 @@ namespace LegionRuntime {
       template<unsigned DIM>
       long GPUXferDes<DIM>::get_requests(Request** requests, long nr)
       {
-        GPURequest** reqs = (DiskRequest**) requests;
-        long new_nr = default_get_requests(requests, nr);
+        GPURequest** reqs = (GPURequest**) requests;
+        long new_nr = default_get_requests<DIM>(requests, nr);
         for (long i = 0; i < new_nr; i++) {
           reqs[i]->event.reset();
           switch (kind) {
@@ -1696,10 +1533,11 @@ namespace LegionRuntime {
 #endif
       }
 
-#ifdef TO_BE_DELETE
       template<unsigned DIM>
       void GPUXferDes<DIM>::notify_request_read_done(Request* req)
       {
+        default_notify_request_read_done(req);
+#ifdef TO_BE_DELETE
         req->is_read_done = true;
         int64_t offset;
         uint64_t size;
@@ -1740,11 +1578,14 @@ namespace LegionRuntime {
             assert(0);
         }
         simple_update_bytes_read(offset, size);
+#endif
       }
 
       template<unsigned DIM>
       void GPUXferDes<DIM>::notify_request_write_done(Request* req)
       {
+        default_notify_request_write_done(req);
+#ifdef TO_BE_DELETE
         req->is_write_done = true;
         int64_t offset;
         uint64_t size;
@@ -1787,8 +1628,8 @@ namespace LegionRuntime {
         //printf("[GPU_Request_Done] dst_offset = %ld, nbytes = %lu\n", offset, size);
         simple_update_bytes_write(offset, size);
         available_reqs.push(req);
-      }
 #endif
+      }
 
       template<unsigned DIM>
       void GPUXferDes<DIM>::flush()
@@ -2297,7 +2138,7 @@ namespace LegionRuntime {
           } else {
             assert(req->dim == Request::DIM_2D);
             // dest MUST be continuous
-            assert(req->nlines <= 1 || req->dst_str == req->nbytes);
+            assert(req->nlines <= 1 || ((size_t)req->dst_str) == req->nbytes);
             XferDesRemoteWriteMessage::send_request(
                 req->dst_node, req->dst_base, req->src_base, req->nbytes,
                 req->src_str, req->nlines, req);
@@ -2381,7 +2222,7 @@ namespace LegionRuntime {
               available_cb.pop_back();
               cbs[ns]->aio_fildes = req->fd;
               cbs[ns]->aio_data = (uint64_t) (req);
-              cbs[ns]->aio_buf = req->mem_base;
+              cbs[ns]->aio_buf = (uint64_t) (req->mem_base);
               cbs[ns]->aio_offset = req->disk_off;
               cbs[ns]->aio_nbytes = req->nbytes;
               ns++;
@@ -2785,8 +2626,10 @@ namespace LegionRuntime {
         async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
         async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
 #endif /*USE_DISK*/
+#ifdef USE_FILE
         async_channels.push_back(channel_manager->create_file_read_channel(max_nr));
         async_channels.push_back(channel_manager->create_file_write_channel(max_nr));
+#endif
         dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, async_channels);
         gasnet_channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
         gasnet_channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));
