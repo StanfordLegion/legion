@@ -1356,7 +1356,7 @@ namespace Legion {
      * fields with a default value.
      */
     class FillView : public DeferredView {
-      public:
+    public:
       static const AllocationType alloc_type = FILL_VIEW_ALLOC;
     public:
       class FillViewValue : public Collectable {

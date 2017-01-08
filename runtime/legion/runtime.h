@@ -2858,9 +2858,11 @@ namespace Legion {
       static inline ApUserEvent create_ap_user_event(void);
       static inline void trigger_event(ApUserEvent to_trigger,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
+      static inline void poison_event(ApUserEvent to_poison);
       static inline RtUserEvent create_rt_user_event(void);
       static inline void trigger_event(RtUserEvent to_trigger,
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
+      static inline void poison_event(RtUserEvent to_poison);
     public:
       static inline RtEvent protect_event(ApEvent to_protect);
       static inline RtEvent protect_merge_events(
@@ -3202,6 +3204,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::poison_event(ApUserEvent to_poison)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_poison;
+      copy.cancel();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ inline RtUserEvent Runtime::create_rt_user_event(void)
     //--------------------------------------------------------------------------
     {
@@ -3224,6 +3234,14 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_rt_user_event_trigger(to_trigger);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::poison_event(RtUserEvent to_poison)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_poison;
+      copy.cancel();
     }
 
     //--------------------------------------------------------------------------

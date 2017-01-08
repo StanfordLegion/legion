@@ -307,6 +307,7 @@ namespace Legion {
       LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
       LG_DISJOINT_CLOSE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
+      LG_MISSPECULATE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -400,6 +401,7 @@ namespace Legion {
         "Version State Capture Dirty",                            \
         "Disjoint Close",                                         \
         "Defer Materialized View Creation",                       \
+        "Handle Mapping Misspeculation",                          \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
