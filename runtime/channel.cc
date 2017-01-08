@@ -153,8 +153,8 @@ namespace LegionRuntime {
 
       void print_request_info(Request* req)
       {
-        printf("request(%dD): src_off(%ld) dst_off(%ld) src_str(%ld)"
-               " dst_str(%ld) nbytes(%lu) nlines(%lu)",
+        printf("request(%dD): src_off(%zd) dst_off(%zd) src_str(%zd)"
+               " dst_str(%zd) nbytes(%zu) nlines(%zu)",
                req->dim, req->src_off, req->dst_off, req->src_str,
                req->dst_str, req->nbytes, req->nlines);
       }
