@@ -416,7 +416,8 @@ namespace LegionRuntime{
         dim = 0;
         coord_t exp1 = 0, exp2 = 0;
         for (int i = 0; i < dm.get_dim(); i++) {
-          coord_t e = dm.rect_data[i*2+1] - dm.rect_data[i*2] + 1;
+          coord_t e = dm.rect_data[i + dm.get_dim()] - dm.rect_data[i] + 1;
+	  //printf("%d %lld = %lld - %lld\n", i, e, dm.rect_data[i + dm.get_dim()], dm.rect_data[i]);
           if (i && (exp1 == in1[i][0]) && (exp2 == in2[i][0]) ) {
             //collapse and grow extent
             extents.x[dim - 1] *= e;
@@ -433,8 +434,11 @@ namespace LegionRuntime{
         }
         can_perform_2d = false;
         if ((order == XferOrder::SRC_FIFO && src_strides[1][0] == extents[0])
-          ||(order == XferOrder::SRC_FIFO && src_strides[1][0] == extents[0]))
+          ||(order == XferOrder::DST_FIFO && dst_strides[1][0] == extents[0]))
           can_perform_2d = (dim > 1);
+        //printf("extents: %lld %lld %lld\n", extents[0], extents[1], extents[2]);
+        //printf("src_str: %lld %lld %lld\n", src_strides[0][0], src_strides[1][0], src_strides[2][0]);
+        //printf("dst_str: %lld %lld %lld\n", dst_strides[0][0], dst_strides[1][0], dst_strides[2][0]);
       }
       ~LayoutIterator() {
         //src_dl.remove_reference();
@@ -462,7 +466,7 @@ namespace LegionRuntime{
           src_str = extents[0];
           dst_str = extents[0];
         } else {
-          if (p[0] == 0) {
+          if (p[0] == 0 && can_perform_2d) {
             // can perform 2D
             nitems = extents[0];
             nlines = extents[1] - p[1];
