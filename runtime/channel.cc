@@ -151,13 +151,21 @@ namespace LegionRuntime {
                || (kind == XferDes::XFER_MEM_CPY);
       }
 
+      void print_request_info(Request* req)
+      {
+        printf("request(%dD): src_off(%ld) dst_off(%ld) src_str(%ld)"
+               " dst_str(%ld) nbytes(%lu) nlines(%lu)",
+               req->dim, req->src_off, req->dst_off, req->src_str,
+               req->dst_str, req->nbytes, req->nlines);
+      }
+
       template<unsigned DIM>
       long XferDes::default_get_requests(Request** reqs, long nr)
       {
         long idx = 0;
         coord_t src_idx, dst_idx, todo, src_str, dst_str;
         size_t nitems, nlines;
-        while (idx + MAX_GEN_REQS <= nr
+        while (idx + MAX_GEN_REQS <= nr && offset_idx < oas_vec.size()
         && MAX_GEN_REQS <= available_reqs.size()) {
           if (DIM == 0) {
             todo = min(max_req_size / oas_vec[offset_idx].size,
@@ -245,6 +253,7 @@ namespace LegionRuntime {
               if (dst_buf.is_ib)
                 req_size = umin(req_size, dst_buf.buf_size - dst_start);
               new_req->nbytes = req_size;
+              new_req->nlines = 1;
               reqs[idx++] = new_req;
               nbytes -= req_size;
             }
@@ -621,13 +630,19 @@ namespace LegionRuntime {
       void XferDes::default_notify_request_read_done(Request* req)
       {  
         req->is_read_done = true;
-        simple_update_bytes_read(req->src_off, req->nbytes * req->nlines);
+        if (req->dim == Request::DIM_1D)
+          simple_update_bytes_read(req->src_off, req->nbytes);
+        else
+          simple_update_bytes_read(req->src_off, req->nbytes * req->nlines);
       }
 
       void XferDes::default_notify_request_write_done(Request* req)
       {
         req->is_write_done = true;
-        simple_update_bytes_write(req->dst_off, req->nbytes * req->nlines);
+        if (req->dim == Request::DIM_1D)
+          simple_update_bytes_write(req->dst_off, req->nbytes);
+        else
+          simple_update_bytes_write(req->dst_off, req->nbytes * req->nlines);
         enqueue_request(req);
       }
 
@@ -1942,12 +1957,12 @@ namespace LegionRuntime {
             MemcpyRequest* req = *it;
             //double starttime = Realm::Clock::current_time_in_microseconds();
             if (req->dim == Request::DIM_1D) {
-              memcpy(req->src_base, req->dst_base, req->nbytes);
+              memcpy(req->dst_base, req->src_base, req->nbytes);
             } else {
               assert(req->dim == Request::DIM_2D);
               char *src = req->src_base, *dst = req->dst_base;
               for (size_t i = 0; i < req->nlines; i++) {
-                memcpy(src, dst, req->nbytes);
+                memcpy(dst, src, req->nbytes);
                 src += req->src_str;
                 dst += req->dst_str;
               }
