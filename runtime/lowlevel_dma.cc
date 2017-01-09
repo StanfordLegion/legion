@@ -3097,6 +3097,9 @@ namespace LegionRuntime {
       default:
         assert(0);
       }
+      assert(0);
+      return DomainLinearization::from_mapping<1>(
+                 Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
     }
 
     Buffer simple_create_intermediate_buffer(const IBInfo& ib_info, const Domain& domain,

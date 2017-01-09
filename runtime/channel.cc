@@ -150,14 +150,13 @@ namespace LegionRuntime {
                || (kind == XferDes::XFER_REMOTE_WRITE)
                || (kind == XferDes::XFER_MEM_CPY);
       }
-
-      void print_request_info(Request* req)
+      /* void print_request_info(Request* req)
       {
         printf("request(%dD): src_off(%zd) dst_off(%zd) src_str(%zd)"
                " dst_str(%zd) nbytes(%zu) nlines(%zu)",
                req->dim, req->src_off, req->dst_off, req->src_str,
                req->dst_str, req->nbytes, req->nlines);
-      }
+      }*/
 
       template<unsigned DIM>
       long XferDes::default_get_requests(Request** reqs, long nr)
