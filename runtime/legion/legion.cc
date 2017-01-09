@@ -1299,11 +1299,11 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // IndexLauncher 
+    // IndexTaskLauncher 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndexLauncher::IndexLauncher(void)
+    IndexTaskLauncher::IndexTaskLauncher(void)
       : task_id(0), launch_domain(Domain::NO_DOMAIN), 
         global_arg(TaskArgument()), argument_map(ArgumentMap()), 
         predicate(Predicate::TRUE_PRED), must_parallelism(false), 
@@ -1314,12 +1314,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexLauncher::IndexLauncher(Processor::TaskFuncID tid, Domain dom,
-                                 TaskArgument global,
-                                 ArgumentMap map,
-                                 Predicate pred /*= Predicate::TRUE_PRED*/,
-                                 bool must /*=false*/, MapperID mid /*=0*/,
-                                 MappingTagID t /*=0*/)
+    IndexTaskLauncher::IndexTaskLauncher(Processor::TaskFuncID tid, Domain dom,
+                                     TaskArgument global,
+                                     ArgumentMap map,
+                                     Predicate pred /*= Predicate::TRUE_PRED*/,
+                                     bool must /*=false*/, MapperID mid /*=0*/,
+                                     MappingTagID t /*=0*/)
       : task_id(tid), launch_domain(dom), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must),
         map_id(mid), tag(t), independent_requirements(false), 
@@ -1361,6 +1361,19 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // IndexCopyLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexCopyLauncher::IndexCopyLauncher(Domain dom, 
+                                    Predicate pred /*= Predicate::TRUE_PRED*/,
+                                    MapperID mid /*=0*/, MappingTagID t /*=0*/) 
+      : domain(dom), predicate(pred), map_id(mid),tag(t),silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // AcquireLauncher 
     /////////////////////////////////////////////////////////////
 
@@ -1395,6 +1408,14 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    FillLauncher::FillLauncher(void)
+      : handle(LogicalRegion::NO_REGION), parent(LogicalRegion::NO_REGION),
+        silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p,
                                TaskArgument arg, 
                                Predicate pred /*= Predicate::TRUE_PRED*/)
@@ -1409,6 +1430,63 @@ namespace Legion {
                                Predicate pred /*= Predicate::TRUE_PRED*/)
       : handle(h), parent(p), future(f), 
         predicate(pred), silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // IndexFillLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(void)
+      : domain(Domain::NO_DOMAIN), region(LogicalRegion::NO_REGION),
+        partition(LogicalPartition::NO_PART), projection(0), 
+        silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalRegion h, 
+                               LogicalRegion p, TaskArgument arg, 
+                               ProjectionID proj, Predicate pred)
+      : domain(dom), region(h), partition(LogicalPartition::NO_PART),
+        parent(p), projection(proj), argument(arg), predicate(pred),
+        silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalRegion h,
+                                LogicalRegion p, Future f,
+                                ProjectionID proj, Predicate pred)
+      : domain(dom), region(h), partition(LogicalPartition::NO_PART),
+        parent(p), projection(proj), future(f), predicate(pred),
+        silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
+                                         LogicalRegion p, TaskArgument arg,
+                                         ProjectionID proj, Predicate pred)
+      : domain(dom), region(LogicalRegion::NO_REGION), partition(h),
+        parent(p), projection(proj), argument(arg), predicate(pred),
+        silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
+                                         LogicalRegion p, Future f,
+                                         ProjectionID proj, Predicate pred)
+      : domain(dom), region(LogicalRegion::NO_REGION), partition(h),
+        parent(p), projection(proj), future(f), predicate(pred),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3247,7 +3325,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::execute_index_space(Context ctx, 
-                                                  const IndexLauncher &launcher)
+                                              const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       return runtime->execute_index_space(ctx, launcher);
@@ -3255,7 +3333,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                            const IndexLauncher &launcher, ReductionOpID redop)
+                         const IndexTaskLauncher &launcher, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
       return runtime->execute_index_space(ctx, launcher, redop);
@@ -3294,8 +3372,8 @@ namespace Legion {
                         MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      IndexLauncher launcher(task_id, domain, global_arg, arg_map,
-                             predicate, must_parallelism, id, tag);
+      IndexTaskLauncher launcher(task_id, domain, global_arg, arg_map,
+                                 predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
       return runtime->execute_index_space(ctx, launcher);
@@ -3319,8 +3397,8 @@ namespace Legion {
                         MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      IndexLauncher launcher(task_id, domain, global_arg, arg_map,
-                             predicate, must_parallelism, id, tag);
+      IndexTaskLauncher launcher(task_id, domain, global_arg, arg_map,
+                                 predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
       return runtime->execute_index_space(ctx, launcher, reduction);
@@ -3430,6 +3508,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      runtime->fill_fields(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_external_resource(Context ctx, 
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -3487,8 +3572,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_copy_operation(Context ctx, 
-                                                const CopyLauncher &launcher)
+    void Runtime::issue_copy_operation(Context ctx,const CopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      runtime->issue_copy_operation(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::issue_copy_operation(Context ctx,
+                                       const IndexCopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       runtime->issue_copy_operation(ctx, launcher);

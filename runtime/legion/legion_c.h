@@ -2075,7 +2075,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see Legion::IndexLauncher::IndexLauncher()
+   * @see Legion::IndexTaskLauncher::IndexTaskLauncher()
    */
   legion_index_launcher_t
   legion_index_launcher_create(
@@ -2091,7 +2091,7 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see Legion::IndexLauncher::~IndexLauncher()
+   * @see Legion::IndexTaskLauncher::~IndexTaskLauncher()
    */
   void
   legion_index_launcher_destroy(legion_index_launcher_t handle);
@@ -2099,7 +2099,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see Legion::Runtime::execute_index_space(Context, const IndexLauncher &)
+   * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &)
    */
   legion_future_map_t
   legion_index_launcher_execute(legion_runtime_t runtime,
@@ -2109,7 +2109,7 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
-   * @see Legion::Runtime::execute_index_space(Context, const IndexLauncher &, ReductionOpID)
+   * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, ReductionOpID)
    */
   legion_future_t
   legion_index_launcher_execute_reduction(legion_runtime_t runtime,
@@ -2118,7 +2118,7 @@ extern "C" {
                                           legion_reduction_op_id_t redop);
 
   /**
-   * @see Legion::IndexLauncher::add_region_requirement()
+   * @see Legion::IndexTaskLauncher::add_region_requirement()
    */
   unsigned
   legion_index_launcher_add_region_requirement_logical_region(
@@ -2132,7 +2132,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see Legion::IndexLauncher::add_region_requirement()
+   * @see Legion::IndexTaskLauncher::add_region_requirement()
    */
   unsigned
   legion_index_launcher_add_region_requirement_logical_partition(
@@ -2146,7 +2146,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see Legion::IndexLauncher::add_region_requirement()
+   * @see Legion::IndexTaskLauncher::add_region_requirement()
    */
   unsigned
   legion_index_launcher_add_region_requirement_logical_region_reduction(
@@ -2160,7 +2160,7 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see Legion::IndexLauncher::add_region_requirement()
+   * @see Legion::IndexTaskLauncher::add_region_requirement()
    */
   unsigned
   legion_index_launcher_add_region_requirement_logical_partition_reduction(
@@ -2199,7 +2199,7 @@ extern "C" {
                                         enum legion_region_flags_t flags);
 
   /**
-   * @see Legion::IndexLauncher::add_index_requirement()
+   * @see Legion::IndexTaskLauncher::add_index_requirement()
    */
   unsigned
   legion_index_launcher_add_index_requirement(
@@ -2210,21 +2210,21 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
-   * @see Legion::IndexLauncher::add_future()
+   * @see Legion::IndexTaskLauncher::add_future()
    */
   void
   legion_index_launcher_add_future(legion_index_launcher_t launcher,
                                    legion_future_t future);
 
   /**
-   * @see Legion::IndexLauncher::add_wait_barrier()
+   * @see Legion::IndexTaskLauncher::add_wait_barrier()
    */
   void
   legion_index_launcher_add_wait_barrier(legion_index_launcher_t launcher,
                                          legion_phase_barrier_t bar);
 
   /**
-   * @see Legion::IndexLauncher::add_arrival_barrier()
+   * @see Legion::IndexTaskLauncher::add_arrival_barrier()
    */
   void
   legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher,

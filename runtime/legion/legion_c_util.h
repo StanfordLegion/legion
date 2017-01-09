@@ -136,7 +136,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_future_t, Future *);
       NEW_OPAQUE_WRAPPER(legion_future_map_t, FutureMap *);
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
-      NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexTaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
       NEW_OPAQUE_WRAPPER(legion_copy_launcher_t, CopyLauncher *);
       NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);

@@ -280,14 +280,17 @@ namespace Legion {
                                                     FieldSpace handle) = 0;
     public:
       virtual Future execute_task(const TaskLauncher &launcher) = 0;
-      virtual FutureMap execute_index_space(const IndexLauncher &launcher) = 0;
-      virtual Future execute_index_space(const IndexLauncher &launcher,
+      virtual FutureMap execute_index_space(
+                                         const IndexTaskLauncher &launcher) = 0;
+      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop) = 0; 
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual void remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
+      virtual void fill_fields(const IndexFillLauncher &launcher) = 0;
       virtual void issue_copy(const CopyLauncher &launcher) = 0;
+      virtual void issue_copy(const IndexCopyLauncher &launcher) = 0;
       virtual void issue_acquire(const AcquireLauncher &launcher) = 0;
       virtual void issue_release(const ReleaseLauncher &launcher) = 0;
       virtual PhysicalRegion attach_resource(
@@ -834,14 +837,16 @@ namespace Legion {
                                                     FieldSpace handle);
     public:
       virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexLauncher &launcher);
-      virtual Future execute_index_space(const IndexLauncher &launcher,
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual void remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
       virtual void fill_fields(const FillLauncher &launcher);
+      virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
+      virtual void issue_copy(const IndexCopyLauncher &launcher);
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
@@ -1301,14 +1306,16 @@ namespace Legion {
                                                     FieldSpace handle);
     public:
       virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexLauncher &launcher);
-      virtual Future execute_index_space(const IndexLauncher &launcher,
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual void remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
       virtual void fill_fields(const FillLauncher &launcher);
+      virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
+      virtual void issue_copy(const IndexCopyLauncher &launcher);
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
@@ -1592,14 +1599,16 @@ namespace Legion {
                                                     FieldSpace handle);
     public:
       virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexLauncher &launcher);
-      virtual Future execute_index_space(const IndexLauncher &launcher,
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual void remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
       virtual void fill_fields(const FillLauncher &launcher);
+      virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
+      virtual void issue_copy(const IndexCopyLauncher &launcher);
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);

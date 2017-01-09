@@ -1295,6 +1295,127 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::perform_projection_version_analysis(
+                                const ProjectionInfo &proj_info, 
+                                const RegionRequirement &owner_req,
+                                const RegionRequirement &local_req, 
+                                const unsigned idx,
+                                const UniqueID logical_context_uid, 
+                                VersionInfo &version_info, 
+                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeNode *parent_node;
+      if (owner_req.handle_type == PART_PROJECTION)
+        parent_node = runtime->forest->get_node(owner_req.partition);
+      else
+        parent_node = runtime->forest->get_node(owner_req.region);
+#ifdef DEBUG_LEGION
+      assert(local_req.handle_type == SINGULAR);
+#endif
+      RegionTreeNode *child_node = 
+        runtime->forest->get_node(local_req.region);
+      // If they are the same node, we are already done
+      if (child_node == parent_node)
+        return;
+      // Compute our privilege full projection path 
+      RegionTreePath projection_path;
+      runtime->forest->initialize_path(child_node->get_row_source(),
+                     parent_node->get_row_source(), projection_path);
+      // Any opens/advances have already been generated to the
+      // upper bound node, so we don't have to handle that node, 
+      // therefore all our paths must start at one node below the
+      // upper bound node
+      RegionTreeNode *one_below = parent_node->get_tree_child(
+              projection_path.get_child(parent_node->get_depth()));
+      RegionTreePath one_below_path;
+      one_below_path.initialize(projection_path.get_min_depth()+1, 
+                                projection_path.get_max_depth());
+      for (unsigned idx2 = projection_path.get_min_depth()+1; 
+            idx2 < projection_path.get_max_depth(); idx2++)
+        one_below_path.register_child(idx2, projection_path.get_child(idx2));
+      const LegionMap<ProjectionEpochID,FieldMask>::aligned &proj_epochs = 
+        proj_info.get_projection_epochs();
+      const LegionMap<unsigned,FieldMask>::aligned empty_dirty_previous;
+      // Do the analysis to see if we've opened all the nodes to the child
+      {
+        for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
+              it = proj_epochs.begin(); it != proj_epochs.end(); it++)
+        {
+          // Advance version numbers from one below the upper bound
+          // all the way down to the child
+          runtime->forest->advance_version_numbers(this, idx, 
+              false/*update parent state*/, false/*doesn't matter*/,
+              logical_context_uid, true/*dedup opens*/, 
+              false/*dedup advance*/, it->first, 0/*id*/, one_below, 
+              one_below_path, it->second, empty_dirty_previous, ready_events);
+        }
+      }
+      // If we're doing something other than reading, we need
+      // to also do the advance for anything open below, we do
+      // this from the one below node to the node above the child node
+      // The exception is if we are reducing in which case we go from
+      // the all the way to the bottom so that the first reduction
+      // point bumps the version number appropriately. Another exception is 
+      // for dirty reductions where we know that there is already a write 
+      // at the base level so we don't need to do an advance to get our 
+      // reduction registered with the parent VersionState object
+
+      if (!IS_READ_ONLY(local_req) && 
+          ((one_below != child_node) || 
+           (IS_REDUCE(local_req) && !proj_info.is_dirty_reduction())))
+      {
+        RegionTreePath advance_path;
+        // If we're a reduction we go all the way to the bottom
+        // otherwise if we're read-write we go to the level above
+        // because our version_analysis call will do the advance
+        // at the destination node.           
+        if (IS_REDUCE(local_req) && !proj_info.is_dirty_reduction())
+        {
+#ifdef DEBUG_LEGION
+          assert((one_below->get_depth() < child_node->get_depth()) ||
+                 (one_below == child_node)); 
+#endif
+          advance_path = one_below_path;
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(one_below->get_depth() < child_node->get_depth()); 
+#endif
+          advance_path.initialize(one_below_path.get_min_depth(), 
+                                  one_below_path.get_max_depth()-1);
+          for (unsigned idx2 = one_below_path.get_min_depth(); 
+                idx2 < (one_below_path.get_max_depth()-1); idx2++)
+            advance_path.register_child(idx2, one_below_path.get_child(idx2));
+        }
+        const bool parent_is_upper_bound = 
+          (owner_req.handle_type != PART_PROJECTION) && 
+          (owner_req.region == owner_req.parent);
+        for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
+              it = proj_epochs.begin(); it != proj_epochs.end(); it++)
+        {
+          // Advance version numbers from the upper bound to one above
+          // the target child for split version numbers
+          runtime->forest->advance_version_numbers(this, idx, 
+              true/*update parent state*/, parent_is_upper_bound,
+              logical_context_uid, false/*dedup opens*/, 
+              true/*dedup advances*/, 0/*id*/, it->first, one_below, 
+              advance_path, it->second, empty_dirty_previous, ready_events);
+        }
+      }
+      // Now we can record our version numbers just like everyone else
+      // We can skip the check for virtual version information because
+      // our owner slice already did it
+      runtime->forest->perform_versioning_analysis(this, idx, local_req,
+                                    one_below_path, version_info, 
+                                    ready_events, false/*partial*/, 
+                                    false/*disjoint close*/, NULL/*filter*/,
+                                    one_below, logical_context_uid, 
+                                    &proj_epochs, true/*skip parent check*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Operation::MappingDependenceTracker::issue_stage_triggers(
                       Operation *op, Runtime *runtime, MustEpochOp *must_epoch)
     //--------------------------------------------------------------------------
@@ -3135,7 +3256,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::activate(void)
+    void CopyOp::activate_copy(void)
     //--------------------------------------------------------------------------
     {
       activate_speculative();
@@ -3146,7 +3267,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::deactivate(void)
+    void CopyOp::deactivate_copy(void)
     //--------------------------------------------------------------------------
     {
       deactivate_speculative();
@@ -3172,6 +3293,20 @@ namespace Legion {
       map_applied_conditions.clear();
       restrict_postconditions.clear();
       profiling_requests.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_copy(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_copy(); 
       // Return this operation to the runtime
       runtime->free_copy_op(this);
     }
@@ -3885,11 +4020,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyOp::check_copy_privilege(const RegionRequirement &requirement, 
-                                      unsigned idx, bool src)
+                                      unsigned idx, bool src, bool permit_proj)
     //--------------------------------------------------------------------------
     {
-      if ((requirement.handle_type == PART_PROJECTION) ||
-          (requirement.handle_type == REG_PROJECTION))
+      if (!permit_proj && ((requirement.handle_type == PART_PROJECTION) ||
+          (requirement.handle_type == REG_PROJECTION)))
       {
         log_region.error("Projection region requirements are not "
                                "permitted for copy operations (in task %s)",
@@ -4314,6 +4449,850 @@ namespace Legion {
       // If we're the last one then we trigger the result
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Index Copy Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexCopyOp::IndexCopyOp(Runtime *rt)
+      : CopyOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCopyOp::IndexCopyOp(const IndexCopyOp &rhs)
+      : CopyOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCopyOp::~IndexCopyOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCopyOp& IndexCopyOp::operator=(const IndexCopyOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::initialize(TaskContext *ctx, 
+                                 const IndexCopyLauncher &launcher,
+                                 bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      parent_task = ctx->get_task();
+      initialize_speculation(ctx, true/*track*/, 
+                             launcher.src_requirements.size() + 
+                               launcher.dst_requirements.size(), 
+                             launcher.predicate);
+      point_domain = launcher.domain;
+      src_requirements.resize(launcher.src_requirements.size());
+      dst_requirements.resize(launcher.dst_requirements.size());
+      src_versions.resize(launcher.src_requirements.size());
+      dst_versions.resize(launcher.dst_requirements.size());
+      src_restrict_infos.resize(launcher.src_requirements.size());
+      dst_restrict_infos.resize(launcher.dst_requirements.size());
+      src_projection_infos.resize(launcher.src_requirements.size());
+      dst_projection_infos.resize(launcher.dst_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        if (launcher.src_requirements[idx].privilege_fields.empty())
+        {
+          log_task.warning("WARNING: SOURCE REGION REQUIREMENT %d OF "
+                           "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
+        }
+        src_requirements[idx] = launcher.src_requirements[idx];
+        src_requirements[idx].flags |= NO_ACCESS_FLAG;
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        if (launcher.src_requirements[idx].privilege_fields.empty())
+        {
+          log_task.warning("WARNING: DESTINATION REGION REQUIREMENT %d OF"
+                           " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
+        }
+        dst_requirements[idx] = launcher.dst_requirements[idx];
+        dst_requirements[idx].flags |= NO_ACCESS_FLAG;
+        // If our privilege is not reduce, then shift it to write discard
+        // since we are going to write all over the region
+        if (dst_requirements[idx].privilege != REDUCE)
+          dst_requirements[idx].privilege = WRITE_DISCARD;
+      }
+      grants = launcher.grants;
+      // Register ourselves with all the grants
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        grants[idx].impl->register_operation(completion_event);
+      wait_barriers = launcher.wait_barriers;
+#ifdef LEGION_SPY
+      for (std::vector<PhaseBarrier>::const_iterator it = 
+            launcher.arrive_barriers.begin(); it != 
+            launcher.arrive_barriers.end(); it++)
+      {
+        arrive_barriers.push_back(*it);
+        LegionSpy::log_event_dependence(it->phase_barrier,
+            arrive_barriers.back().phase_barrier);
+      }
+#else
+      arrive_barriers = launcher.arrive_barriers;
+#endif
+      map_id = launcher.map_id;
+      tag = launcher.tag;
+      if (check_privileges)
+      {
+        if (src_requirements.size() != dst_requirements.size())
+        {
+          log_run.error("Number of source requirements (%zd) does not "
+                        "match number of destination requirements (%zd) "
+                        "for copy operation (ID %lld) with parent "
+                        "task %s (ID %lld)",
+                        src_requirements.size(), dst_requirements.size(),
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_COPY_REQUIREMENTS_MISMATCH);
+        }
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        {
+          if (src_requirements[idx].privilege_fields.size() != 
+              src_requirements[idx].instance_fields.size())
+          {
+            log_run.error("Copy source requirement %d for copy operation "
+                          "(ID %lld) in parent task %s (ID %lld) has %zd "
+                          "privilege fields and %zd instance fields.  "
+                          "Copy requirements must have exactly the same "
+                          "number of privilege and instance fields.",
+                          idx, get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          src_requirements[idx].privilege_fields.size(),
+                          src_requirements[idx].instance_fields.size());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_COPY_FIELDS_SIZE);
+          }
+          if (!IS_READ_ONLY(src_requirements[idx]))
+          {
+            log_run.error("Copy source requirement %d for copy operation "
+                          "(ID %lld) in parent task %s (ID %lld) must "
+                          "be requested with a read-only privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_COPY_PRIVILEGE);
+          }
+          check_copy_privilege(src_requirements[idx], idx, 
+                               true/*src*/, true/*permit projection*/);
+        }
+        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+        {
+          if (dst_requirements[idx].privilege_fields.size() != 
+              dst_requirements[idx].instance_fields.size())
+          {
+            log_run.error("Copy destination requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) has %zd privilege fields and %zd "
+                          "instance fields.  Copy requirements must "
+                          "have exactly the same number of privilege "
+                          "and instance fields.", idx, 
+                          get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          dst_requirements[idx].privilege_fields.size(),
+                          dst_requirements[idx].instance_fields.size());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_COPY_FIELDS_SIZE);
+          }
+          if (!HAS_WRITE(dst_requirements[idx]))
+          {
+            log_run.error("Copy destination requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) must be requested with a "
+                          "read-write or write-discard privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_COPY_PRIVILEGE);
+          }
+          check_copy_privilege(dst_requirements[idx], idx, 
+                               false/*src*/, true/*permit projection*/);
+        }
+      }
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
+                                      unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_copy();
+      point_domain = Domain::NO_DOMAIN;
+      points_committed = 0;
+      commit_request = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_copy();
+      src_projection_infos.clear();
+      dst_projection_infos.clear();
+      // We can deactivate all of our point operations
+      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+        (*it)->deactivate();
+      points.clear();
+      commit_preconditions.clear();
+      // Return this operation to the runtime
+      runtime->free_index_copy_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the parent indexes
+      compute_parent_indexes();
+      // Initialize the privilege and mapping paths for all of the
+      // region requirements that we have
+      src_privilege_paths.resize(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        initialize_privilege_path(src_privilege_paths[idx],
+                                  src_requirements[idx]);
+      }
+      dst_privilege_paths.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        initialize_privilege_path(dst_privilege_paths[idx],
+                                  dst_requirements[idx]);
+      }
+      if (Runtime::legion_spy_enabled)
+      { 
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = src_requirements[idx];
+          const bool reg = (req.handle_type == SINGULAR) ||
+                           (req.handle_type == REG_PROJECTION);
+          const bool proj = (req.handle_type == REG_PROJECTION) ||
+                            (req.handle_type == PART_PROJECTION); 
+
+          LegionSpy::log_logical_requirement(unique_op_id, idx, reg,
+              reg ? req.region.index_space.id :
+                    req.partition.index_partition.id,
+              reg ? req.region.field_space.id :
+                    req.partition.field_space.id,
+              reg ? req.region.tree_id : 
+                    req.partition.tree_id,
+              req.privilege, req.prop, req.redop, req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, idx, 
+                                            req.instance_fields);
+          if (proj)
+            LegionSpy::log_requirement_projection(unique_op_id, idx, 
+                                                  req.projection);
+        }
+        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = dst_requirements[idx];
+          const bool reg = (req.handle_type == SINGULAR) ||
+                           (req.handle_type == REG_PROJECTION);
+          const bool proj = (req.handle_type == REG_PROJECTION) ||
+                            (req.handle_type == PART_PROJECTION); 
+
+          LegionSpy::log_logical_requirement(unique_op_id, 
+              src_requirements.size() + idx, reg,
+              reg ? req.region.index_space.id :
+                    req.partition.index_partition.id,
+              reg ? req.region.field_space.id :
+                    req.partition.field_space.id,
+              reg ? req.region.tree_id : 
+                    req.partition.tree_id,
+              req.privilege, req.prop, req.redop, req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, 
+                                            src_requirements.size()+idx, 
+                                            req.instance_fields);
+          if (proj)
+            LegionSpy::log_requirement_projection(unique_op_id,
+                src_requirements.size() + idx, req.projection);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Register a dependence on our predicate
+      register_predicate_dependence();
+      src_versions.resize(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        src_projection_infos[idx] = 
+          ProjectionInfo(runtime, src_requirements[idx], point_domain);
+        runtime->forest->perform_dependence_analysis(this, idx, 
+                                                     src_requirements[idx],
+                                                     src_restrict_infos[idx],
+                                                     src_versions[idx],
+                                                     src_projection_infos[idx],
+                                                     src_privilege_paths[idx]);
+      }
+      dst_versions.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        dst_projection_infos[idx] = 
+          ProjectionInfo(runtime, dst_requirements[idx], point_domain);
+        unsigned index = src_requirements.size()+idx;
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        runtime->forest->perform_dependence_analysis(this, index, 
+                                                     dst_requirements[idx],
+                                                     dst_restrict_infos[idx],
+                                                     dst_versions[idx],
+                                                     dst_projection_infos[idx],
+                                                     dst_privilege_paths[idx]);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the upper bound version analysis first
+      std::set<RtEvent> preconditions;
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        VersionInfo &version_info = src_versions[idx];
+        // If we already have physical state for it then we've 
+        // done this before so there is no need to do it again
+        if (version_info.has_physical_states())
+          continue;
+        ProjectionInfo &proj_info = src_projection_infos[idx];
+        const bool partial_traversal = 
+          (proj_info.projection_type == PART_PROJECTION) ||
+          ((proj_info.projection_type != SINGULAR) && 
+           (proj_info.projection->depth > 0));
+        runtime->forest->perform_versioning_analysis(this, idx, 
+                                                     src_requirements[idx],
+                                                     src_privilege_paths[idx],
+                                                     version_info,
+                                                     preconditions,
+                                                     partial_traversal);
+      }
+      const unsigned offset = src_requirements.size();
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        VersionInfo &version_info = dst_versions[idx];
+        // If we already have physical state for it then we've 
+        // done this before so there is no need to do it again
+        if (version_info.has_physical_states())
+          continue;
+        ProjectionInfo &proj_info = dst_projection_infos[idx];
+        const bool partial_traversal = 
+          (proj_info.projection_type == PART_PROJECTION) ||
+          ((proj_info.projection_type != SINGULAR) && 
+           (proj_info.projection->depth > 0));
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        runtime->forest->perform_versioning_analysis(this, offset + idx,
+                                                     dst_requirements[idx],
+                                                     dst_privilege_paths[idx],
+                                                     version_info,
+                                                     preconditions,
+                                                     partial_traversal);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+      // Now enumerate the points
+      size_t num_points = point_domain.get_volume();
+#ifdef DEBUG_LEGION
+      assert(num_points > 0);
+#endif
+      unsigned point_idx = 0;
+      points.resize(num_points);
+      for (Domain::DomainPointIterator itr(point_domain); 
+            itr; itr++, point_idx++)
+      {
+        PointCopyOp *point = runtime->get_available_point_copy_op(false);
+        point->initialize(this, itr.p);
+        points[point_idx] = point;
+      }
+      // Perform the projections
+      std::vector<ProjectionPoint*> projection_points(points.begin(),
+                                                      points.end());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        if (src_requirements[idx].handle_type == SINGULAR)
+          continue;
+        ProjectionFunction *function = 
+          runtime->find_projection_function(src_requirements[idx].projection);
+        function->project_points(this, idx, src_requirements[idx],
+                                 runtime, projection_points);
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        if (dst_requirements[idx].handle_type == SINGULAR)
+          continue;
+        ProjectionFunction *function = 
+          runtime->find_projection_function(dst_requirements[idx].projection);
+        function->project_points(this, src_requirements.size() + idx, 
+                                 dst_requirements[idx], runtime, 
+                                 projection_points);
+      }
+#ifdef DEBUG_LEGION
+      // Check for interfering point requirements in debug mode
+      check_point_requirements();
+      // Also check to make sure source requirements dominate
+      // the destination requirements for each point
+      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+        (*it)->check_domination();
+#endif
+      // Launch the points
+      std::set<RtEvent> mapped_preconditions;
+      std::set<ApEvent> executed_preconditions;
+      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+      {
+        mapped_preconditions.insert((*it)->get_mapped_event());
+        executed_preconditions.insert((*it)->get_completion_event());
+        (*it)->launch(preconditions);
+      }
+      // Record that we are mapped when all our points are mapped
+      // and we are executed when all our points are executed
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      complete_execution(Runtime::protect_event(
+                          Runtime::merge_events(executed_preconditions)));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called as this operation doesn't
+      // go through the rest of the queue normally
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!commit_request);
+#endif
+        commit_request = true;
+        commit_now = (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/, 
+                          Runtime::merge_events(commit_preconditions));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::handle_point_commit(RtEvent point_committed)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      RtEvent commit_pre;
+      {
+        AutoLock o_lock(op_lock);
+        points_committed++;
+        if (point_committed.exists())
+          commit_preconditions.insert(point_committed);
+        commit_now = commit_request && (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/,
+                          Runtime::merge_events(commit_preconditions));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::report_interfering_requirements(unsigned idx1,
+                                                      unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+      bool is_src1 = idx1 < src_requirements.size();
+      bool is_src2 = idx2 < src_requirements.size();
+      unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
+      unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
+      log_run.warning("Region requirements %d and %d of index copy %lld in "
+                      "parent task %s (UID %lld) are potentially interfering. "
+                      "It's possible that this is a false positive if there "
+                      "are projection region requirements and each of the "
+                      "point copies are non-interfering. If the runtime is "
+                      "built in debug mode then it will check that the region "
+                      "requirements of all points are actually "
+                      "non-interfering. If you see no further error messages "
+                      "for this index task launch then everything is good.",
+                      actual_idx1, actual_idx2, unique_op_id, 
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+      interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
+#endif
+    }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::check_point_requirements(void)
+    //--------------------------------------------------------------------------
+    {
+      // Handle any region requirements which can interfere with itself
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        if (!IS_WRITE(dst_requirements[idx]))
+          continue;
+        const unsigned index = src_requirements.size() + idx;
+        interfering_requirements.insert(
+            std::pair<unsigned,unsigned>(index,index));
+      }
+      // Nothing to do if there are no interfering requirements
+      if (interfering_requirements.empty())
+        return;
+      std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
+      for (std::vector<PointCopyOp*>::const_iterator pit = points.begin();
+            pit != points.end(); pit++)
+      {
+        const DomainPoint &current_point = (*pit)->get_domain_point();
+        std::vector<LogicalRegion> &point_reqs = 
+          point_requirements[current_point];
+        point_reqs.resize(src_requirements.size() + dst_requirements.size());
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+          point_reqs[idx] = (*pit)->src_requirements[idx].region;
+        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+          point_reqs[src_requirements.size() + idx] = 
+            (*pit)->dst_requirements[idx].region;
+        // Check against all the prior points
+        for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator
+              oit = point_requirements.begin(); 
+              oit != point_requirements.end(); oit++)
+        {
+          const bool same_point = (current_point == oit->first);
+          const std::vector<LogicalRegion> &other_reqs = oit->second;
+          // Now check for interference with any other points
+          for (std::set<std::pair<unsigned,unsigned> >::const_iterator it =
+                interfering_requirements.begin(); it !=
+                interfering_requirements.end(); it++)
+          {
+            // Can skip comparing against ourself
+            if (same_point && (it->first == it->second))
+              continue;
+            if (!runtime->forest->are_disjoint(
+                  point_reqs[it->first].get_index_space(), 
+                  other_reqs[it->second].get_index_space()))
+            {
+              if (current_point.get_dim() <= 1)
+                log_run.error("ERROR: Index space copy launch has intefering "
+                              "region requirements %d of point %lld and region "
+                              "requirement %d of point %lld of %s (UID %lld) "
+                              "in parent task %s (UID %lld) are interfering.",
+                              it->first, current_point[0], it->second, 
+                              oit->first[0], get_logging_name(), 
+                              get_unique_id(), parent_ctx->get_task_name(), 
+                              parent_ctx->get_unique_id());
+              else if (current_point.get_dim() == 2)
+                log_run.error("ERROR: Index space copy launch has intefering "
+                              "region requirements %d of point (%lld,%lld) and "
+                              "region requirement %d of point (%lld,%lld) of "
+                              "%s (UID %lld) in parent task %s (UID %lld) are "
+                              "interfering.", it->first, current_point[0], 
+                              current_point[1], it->second, oit->first[0], 
+                              oit->first[1], get_logging_name(), 
+                              get_unique_id(), parent_ctx->get_task_name(), 
+                              parent_ctx->get_unique_id());
+              else if (current_point.get_dim() == 3)
+                log_run.error("ERROR: Index space copy launch has intefering "
+                              "region requirements %d of point (%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld) of %s (UID %lld) in parent "
+                              "task %s (UID %lld) are interfering.", it->first, 
+                              current_point[0], current_point[1], 
+                              current_point[2], it->second, oit->first[0], 
+                              oit->first[1], oit->first[2], get_logging_name(),
+                              get_unique_id(), parent_ctx->get_task_name(), 
+                              parent_ctx->get_unique_id());
+              assert(false);
+            }
+          }
+        }
+      }
+    }
+#endif
+
+    /////////////////////////////////////////////////////////////
+    // Point Copy Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointCopyOp::PointCopyOp(Runtime *rt)
+      : CopyOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointCopyOp::PointCopyOp(const PointCopyOp &rhs)
+      : CopyOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PointCopyOp::~PointCopyOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointCopyOp& PointCopyOp::operator=(const PointCopyOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::initialize(IndexCopyOp *own, const DomainPoint &p)
+    //--------------------------------------------------------------------------
+    {
+      // Initialize the operation
+      initialize_operation(own->get_context(), false/*track*/, 
+          own->src_requirements.size() + own->dst_requirements.size());
+      point = p;
+      owner = own;
+      // From Copy
+      src_requirements   = owner->src_requirements;
+      dst_requirements   = owner->dst_requirements;
+      grants             = owner->grants;
+      wait_barriers      = owner->wait_barriers;
+      arrive_barriers    = owner->arrive_barriers;
+      parent_task        = owner->parent_task;
+      // From CopyOp
+      src_parent_indexes = owner->src_parent_indexes;
+      dst_parent_indexes = owner->dst_parent_indexes;
+      src_restrict_infos = owner->src_restrict_infos;
+      dst_restrict_infos = owner->dst_restrict_infos;
+      predication_guard  = owner->predication_guard;
+    }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void PointCopyOp::check_domination(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        IndexSpace src_space = src_requirements[idx].region.get_index_space();
+        IndexSpace dst_space = dst_requirements[idx].region.get_index_space();
+        if (!runtime->forest->are_compatible(src_space, dst_space))
+        {
+          log_run.error("Copy launcher index space mismatch at index "
+                        "%d of cross-region copy (ID %lld) in task %s "
+                        "(ID %lld). Source requirement with index "
+                        "space %x and destination requirement "
+                        "with index space %x do not have the "
+                        "same number of dimensions or the same number "
+                        "of elements in their element masks.",
+                        idx, get_unique_id(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id(),
+                        src_space.id, dst_space.id);
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_COPY_SPACE_MISMATCH);
+        }
+        else if (!runtime->forest->is_dominated(src_space, dst_space))
+        {
+          log_run.error("Destination index space %x for "
+                        "requirement %d of cross-region copy "
+                        "(ID %lld) in task %s (ID %lld) is not "
+                        "a sub-region of the source index space %x.", 
+                        dst_space.id, idx, get_unique_id(),
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id(),
+                        src_space.id);
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_COPY_SPACE_MISMATCH);
+        }
+      }
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_copy();
+      owner = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_copy();
+      runtime->free_point_copy_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::launch(const std::set<RtEvent> &index_preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Copy over the version infos from our owner
+      src_versions = owner->src_versions;
+      dst_versions = owner->dst_versions;
+      // Perform the version analysis
+      std::set<RtEvent> preconditions(index_preconditions);
+      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        perform_projection_version_analysis(owner->src_projection_infos[idx],
+                  owner->src_requirements[idx], src_requirements[idx],
+                  idx, logical_context_uid, src_versions[idx], preconditions); 
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        perform_projection_version_analysis(owner->dst_projection_infos[idx],
+                  owner->dst_requirements[idx], dst_requirements[idx],
+                  src_requirements.size() + idx, logical_context_uid,
+                  dst_versions[idx], preconditions);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+      // Then put ourselves in the queue of operations ready to map
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+      // We can also mark this as having our resolved any predication
+      resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<VersionInfo>::iterator it = src_versions.begin();
+            it != src_versions.end(); it++)
+        it->clear();
+      for (std::vector<VersionInfo>::iterator it = dst_versions.begin();
+            it != dst_versions.end(); it++)
+        it->clear();
+      // Tell our owner that we are done
+      owner->handle_point_commit(profiling_reported);
+      // Don't commit this operation until we've reported our profiling
+      // Out index owner will deactivate the operation
+      commit_operation(false/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    const DomainPoint& PointCopyOp::get_domain_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return point;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::set_projection_result(unsigned idx, LogicalRegion result)
+    //--------------------------------------------------------------------------
+    {
+      if (idx < src_requirements.size())
+      {
+#ifdef DEBUG_LEGION
+        assert(src_requirements[idx].handle_type != SINGULAR);
+#endif
+        src_requirements[idx].region = result;
+        src_requirements[idx].handle_type = SINGULAR;
+      }
+      else
+      {
+        idx -= src_requirements.size();
+#ifdef DEBUG_LEGION
+        assert(idx < dst_requirements.size());
+        assert(dst_requirements[idx].handle_type != SINGULAR);
+#endif
+        dst_requirements[idx].region = result;
+        dst_requirements[idx].handle_type = SINGULAR;
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -10732,7 +11711,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::activate(void)
+    void FillOp::activate_fill(void)
     //--------------------------------------------------------------------------
     {
       activate_speculative();
@@ -10743,7 +11722,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::deactivate(void)
+    void FillOp::deactivate_fill(void)
     //--------------------------------------------------------------------------
     {
       deactivate_speculative();
@@ -10760,6 +11739,20 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_fill(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_fill(); 
       runtime->free_fill_op(this);
     }
 
@@ -11260,9 +12253,9 @@ namespace Legion {
                                parent_ctx->get_task_name(), 
                                parent_ctx->get_unique_id(),
                                unique_op_id, 
-                               requirement.region.index_space.id,
-                               requirement.region.field_space.id, 
-                               requirement.region.tree_id);
+                               requirement.parent.index_space.id,
+                               requirement.parent.field_space.id, 
+                               requirement.parent.tree_id);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -11300,6 +12293,470 @@ namespace Legion {
         }
       }
       return Runtime::merge_events(sync_preconditions);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Index Fill Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexFillOp::IndexFillOp(Runtime *rt)
+      : FillOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillOp::IndexFillOp(const IndexFillOp &rhs)
+      : FillOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillOp::~IndexFillOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillOp& IndexFillOp::operator=(const IndexFillOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::initialize(TaskContext *ctx,
+                                 const IndexFillLauncher &launcher,
+                                 bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      parent_ctx = ctx;
+      initialize_speculation(ctx, true/*track*/, 1, launcher.predicate);
+      point_domain = launcher.domain;
+      if (launcher.region.exists())
+      {
+#ifdef DEBUG_LEGION
+        assert(!launcher.partition.exists());
+#endif
+        requirement = RegionRequirement(launcher.region, launcher.projection,
+                                        WRITE_DISCARD, EXCLUSIVE,
+                                        launcher.parent);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(launcher.partition.exists());
+#endif
+        requirement = RegionRequirement(launcher.partition, launcher.projection,
+                                        WRITE_DISCARD, EXCLUSIVE,
+                                        launcher.parent);
+      }
+      requirement.privilege_fields = launcher.fields;
+      value_size = launcher.argument.get_size();
+      if (value_size > 0)
+      {
+        value = malloc(value_size);
+        memcpy(value, launcher.argument.get_ptr(), value_size);
+      }
+      else
+        future = launcher.future;
+      grants = launcher.grants;
+      wait_barriers = launcher.wait_barriers;
+      arrive_barriers = launcher.arrive_barriers;
+      if (check_privileges)
+        check_fill_privilege();
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
+                                      unique_op_id);
+        if ((value_size == 0) && (future.impl != NULL) &&
+            future.impl->get_ready_event().exists())
+          LegionSpy::log_future_use(unique_op_id, 
+                                    future.impl->get_ready_event());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_fill();
+      point_domain = Domain::NO_DOMAIN;
+      points_committed = 0;
+      commit_request = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_fill();
+      projection_info.clear();
+      // We can deactivate our point operations
+      for (std::vector<PointFillOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+        (*it)->deactivate();
+      points.clear();
+      // Return the operation to the runtime
+      runtime->free_index_fill_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the parent index
+      compute_parent_index();
+      initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+      { 
+        const bool reg = (requirement.handle_type == SINGULAR) ||
+                         (requirement.handle_type == REG_PROJECTION);
+        const bool proj = (requirement.handle_type == REG_PROJECTION) ||
+                          (requirement.handle_type == PART_PROJECTION); 
+
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, reg,
+            reg ? requirement.region.index_space.id :
+                  requirement.partition.index_partition.id,
+            reg ? requirement.region.field_space.id :
+                  requirement.partition.field_space.id,
+            reg ? requirement.region.tree_id : 
+                  requirement.partition.tree_id,
+            requirement.privilege, requirement.prop, 
+            requirement.redop, requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, 
+                                          requirement.instance_fields);
+        if (proj)
+          LegionSpy::log_requirement_projection(unique_op_id, 0/*idx*/, 
+                                                requirement.projection);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Register a dependence on our predicate
+      register_predicate_dependence();
+      // If we are waiting on a future register a dependence
+      if (future.impl != NULL)
+        future.impl->register_dependence(this);
+      projection_info = ProjectionInfo(runtime, requirement, point_domain);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement,
+                                                   restrict_info,
+                                                   version_info,
+                                                   projection_info,
+                                                   privilege_path);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the upper bound version analysis first
+      std::set<RtEvent> preconditions;
+      if (!version_info.has_physical_states())
+      {
+        const bool partial_traversal = 
+          (projection_info.projection_type == PART_PROJECTION) ||
+          ((projection_info.projection_type != SINGULAR) && 
+           (projection_info.projection->depth > 0));
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/, 
+                                                     requirement,
+                                                     privilege_path,
+                                                     version_info,
+                                                     preconditions,
+                                                     partial_traversal);
+      }
+      // Now enumerate the points
+      size_t num_points = point_domain.get_volume();
+#ifdef DEBUG_LEGION
+      assert(num_points > 0);
+#endif
+      unsigned point_idx = 0;
+      points.resize(num_points);
+      for (Domain::DomainPointIterator itr(point_domain); 
+            itr; itr++, point_idx++)
+      {
+        PointFillOp *point = runtime->get_available_point_fill_op(false);
+        point->initialize(this, itr.p);
+        points[point_idx] = point;
+      }
+      // Now we have to do the projection
+      ProjectionFunction *function = 
+        runtime->find_projection_function(requirement.projection);
+      std::vector<ProjectionPoint*> projection_points(points.begin(),
+                                                      points.end());
+      function->project_points(this, 0/*idx*/, requirement,
+                               runtime, projection_points);
+#ifdef DEBUG_LEGION
+      // Check for interfering point requirements in debug mode
+      check_point_requirements();
+#endif
+      // Launch the points
+      std::set<RtEvent> mapped_preconditions;
+      std::set<ApEvent> executed_preconditions;
+      for (std::vector<PointFillOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+      {
+        mapped_preconditions.insert((*it)->get_mapped_event());
+        executed_preconditions.insert((*it)->get_completion_event());
+        (*it)->launch(preconditions);
+      }
+      // Record that we are mapped when all our points are mapped
+      // and we are executed when all our points are executed
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      complete_execution(Runtime::protect_event(
+                          Runtime::merge_events(executed_preconditions)));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called as this operation doesn't
+      // go through the rest of the queue normally
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!commit_request);
+#endif
+        commit_request = true;
+        commit_now = (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::handle_point_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      RtEvent commit_pre;
+      {
+        AutoLock o_lock(op_lock);
+        points_committed++;
+        commit_now = commit_request && (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/);
+    }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void IndexFillOp::check_point_requirements(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx1 = 0; idx1 < points.size(); idx1++)
+      {
+        const RegionRequirement &req1 = points[idx1]->get_requirement();
+        for (unsigned idx2 = 0; idx2 < idx1; idx2++)
+        {
+          const RegionRequirement &req2 = points[idx2]->get_requirement();
+          if (!runtime->forest->are_disjoint(
+                req1.region.get_index_space(), req2.region.get_index_space()))
+          {
+            const DomainPoint &p1 = points[idx1]->get_domain_point();
+            const DomainPoint &p2 = points[idx2]->get_domain_point();
+            if (p1.get_dim() <= 1)
+              log_run.error("ERROR: Index space fill launch has intefering "
+                            "region requirements 0 of point %lld and region "
+                            "requirement 0 of point %lld of %s (UID %lld) "
+                            "in parent task %s (UID %lld) are interfering.",
+                            p1[0], p2[0], get_logging_name(), 
+                            get_unique_op_id(), parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id());
+            else if (p1.get_dim() == 2)
+              log_run.error("ERROR: Index space fill launch has intefering "
+                            "region requirements 0 of point (%lld,%lld) and "
+                            "region requirement 0 of point (%lld,%lld) of "
+                            "%s (UID %lld) in parent task %s (UID %lld) are "
+                            "interfering.", p1[0], p1[1], p2[0], p2[1],
+                            get_logging_name(), get_unique_op_id(), 
+                            parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id());
+            else if (p1.get_dim() == 3)
+              log_run.error("ERROR: Index space fill launch has intefering "
+                            "region requirements 0 of point (%lld,%lld,%lld)"
+                            " and region requirement 0 of point "
+                            "(%lld,%lld,%lld) of %s (UID %lld) in parent "
+                            "task %s (UID %lld) are interfering.",
+                            p1[0], p1[1], p1[2], p2[0], p2[1], p2[2],
+                            get_logging_name(), get_unique_op_id(), 
+                            parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id());
+            assert(false);
+          }
+        }
+      }
+    }
+#endif
+
+    ///////////////////////////////////////////////////////////// 
+    // Point Fill Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointFillOp::PointFillOp(Runtime *rt)
+      : FillOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointFillOp::PointFillOp(const PointFillOp &rhs)
+      : FillOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PointFillOp::~PointFillOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointFillOp& PointFillOp::operator=(const PointFillOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::initialize(IndexFillOp *own, const DomainPoint &p)
+    //--------------------------------------------------------------------------
+    {
+      // Initialize the operation
+      initialize_operation(own->get_context(), false/*track*/, 1/*regions*/); 
+      point = p;
+      owner = own;
+      // From Fill
+      requirement        = owner->get_requirement();
+      grants             = owner->grants;
+      wait_barriers      = owner->wait_barriers;
+      arrive_barriers    = owner->arrive_barriers;
+      // From FillOp
+      parent_req_index   = owner->parent_req_index;
+      restrict_info      = owner->restrict_info;
+      true_guard         = owner->true_guard;
+      false_guard        = owner->false_guard;
+      future             = owner->future;
+      value_size         = owner->value_size;
+      if (value_size > 0)
+      {
+        value = malloc(value_size);
+        memcpy(value, owner->value, value_size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_fill();
+      owner = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_fill();
+      runtime->free_point_fill_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::launch(const std::set<RtEvent> &index_preconditions)
+    //--------------------------------------------------------------------------
+    {
+      version_info = owner->version_info;
+      // Perform the version info
+      std::set<RtEvent> preconditions(index_preconditions);
+      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+      perform_projection_version_analysis(owner->projection_info, 
+          owner->get_requirement(), requirement, 0/*idx*/, 
+          logical_context_uid, version_info, preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+      // We can also mark this as having our resolved any predication
+      resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.clear();
+      // Tell our owner that we are done
+      owner->handle_point_commit();
+      // Don't commit this operation until we've reported our profiling
+      // Out index owner will deactivate the operation
+      commit_operation(false/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    const DomainPoint& PointFillOp::get_domain_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return point;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointFillOp::set_projection_result(unsigned idx, LogicalRegion result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx == 0);
+#endif
+      requirement.region = result;
+      requirement.handle_type = SINGULAR;
     }
 
     ///////////////////////////////////////////////////////////// 

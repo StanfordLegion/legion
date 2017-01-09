@@ -85,7 +85,8 @@ namespace Legion {
   struct IndexSpaceRequirement;
   struct FieldSpaceRequirement;
   struct TaskLauncher;
-  struct IndexLauncher;
+  struct IndexTaskLauncher;
+  typedef IndexTaskLauncher IndexLauncher; // for backwards compatibility
   struct InlineLauncher;
   struct CopyLauncher;
   struct AcquireLauncher;
@@ -1129,6 +1130,8 @@ namespace Legion {
     class SpeculativeOp;
     class MapOp;
     class CopyOp;
+    class IndexCopyOp;
+    class PointCopyOp;
     class FenceOp;
     class FrameOp;
     class DeletionOp;
@@ -1151,6 +1154,8 @@ namespace Legion {
     class PendingPartitionOp;
     class DependentPartitionOp;
     class FillOp;
+    class IndexFillOp;
+    class PointFillOp;
     class AttachOp;
     class DetachOp;
     class TimingOp;
@@ -1296,6 +1301,8 @@ namespace Legion {
     friend class Internal::SpeculativeOp;                   \
     friend class Internal::MapOp;                           \
     friend class Internal::CopyOp;                          \
+    friend class Internal::IndexCopyOp;                     \
+    friend class Internal::PointCopyOp;                     \
     friend class Internal::FenceOp;                         \
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
@@ -1316,6 +1323,8 @@ namespace Legion {
     friend class Internal::PendingPartitionOp;              \
     friend class Internal::DependentPartitionOp;            \
     friend class Internal::FillOp;                          \
+    friend class Internal::IndexFillOp;                     \
+    friend class Internal::PointFillOp;                     \
     friend class Internal::AttachOp;                        \
     friend class Internal::DetachOp;                        \
     friend class Internal::TimingOp;                        \
