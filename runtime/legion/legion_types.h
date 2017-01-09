@@ -1404,6 +1404,7 @@ namespace Legion {
   typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
   typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
   typedef Realm::ElementMask::Enumerator Enumerator;
+  typedef ::legion_lowlevel_coord_t coord_t;
   typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;

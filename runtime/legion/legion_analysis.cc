@@ -3268,24 +3268,30 @@ namespace Legion {
               {
                 case 1:
                   {
-                    Rect<1> prev_rect = dit->first.get_rect<1>();
-                    Rect<1> next_rect = it->first.get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1>
+		      prev_rect = dit->first.get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1>
+		      next_rect = it->first.get_rect<1>();
                     if (next_rect.dominates(prev_rect))
                       overlap -= dom_overlap;
                     break;
                   }
                 case 2:
                   {
-                    Rect<2> prev_rect = dit->first.get_rect<2>();
-                    Rect<2> next_rect = it->first.get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2>
+		      prev_rect = dit->first.get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2>
+		      next_rect = it->first.get_rect<2>();
                     if (next_rect.dominates(prev_rect))
                       overlap -= dom_overlap;
                     break;
                   }
                 case 3:
                   {
-                    Rect<3> prev_rect = dit->first.get_rect<3>();
-                    Rect<3> next_rect = it->first.get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3>
+		      prev_rect = dit->first.get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3>
+		      next_rect = it->first.get_rect<3>();
                     if (next_rect.dominates(prev_rect))
                       overlap -= dom_overlap;
                     break;

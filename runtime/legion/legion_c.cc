@@ -38,6 +38,9 @@ typedef CObjectWrapper::SOA SOA;
 typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
 typedef CObjectWrapper::AccessorArray AccessorArray;
 
+// for Point<DIM>, Rect<DIM>, Blockify<DIM>
+using namespace LegionRuntime::Arrays;
+
 // -----------------------------------------------------------------------
 // Pointer Operations
 // -----------------------------------------------------------------------

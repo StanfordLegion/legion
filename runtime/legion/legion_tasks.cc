@@ -4121,50 +4121,11 @@ namespace Legion {
         // Check to make sure the domain is not empty
         const Domain &d = slice.domain;
         bool empty = false;
-        switch (d.dim)
-        {
-          case 0:
-            {
-              size_t volume = d.get_volume();
-              if (volume == 0)
-                empty = true;
-              else
-                total_points += volume;
-              break;
-            }
-          case 1:
-            {
-              Rect<1> rec = d.get_rect<1>();
-              size_t volume = rec.volume();
-              if (volume == 0)
-                empty = true;
-              else
-                total_points += volume;
-              break;
-            }
-          case 2:
-            {
-              Rect<2> rec = d.get_rect<2>();
-              size_t volume = rec.volume();
-              if (volume == 0)
-                empty = true;
-              else
-                total_points += volume;
-              break;
-            }
-          case 3:
-            {
-              Rect<3> rec = d.get_rect<3>();
-              size_t volume = rec.volume();
-              if (volume == 0)
-                empty = true;
-              else
-                total_points += volume;
-              break;
-            }
-          default:
-            assert(false);
-        }
+	size_t volume = d.get_volume();
+	if (volume == 0)
+	  empty = true;
+	else
+	  total_points += volume;
         if (empty)
         {
           log_run.error("Invalid mapper output from invocation of 'slice_task' "
@@ -6510,21 +6471,21 @@ namespace Legion {
         {
           case 1:
             {
-              Rect<1> rect = index_domain.get_rect<1>();
+	      LegionRuntime::Arrays::Rect<1> rect = index_domain.get_rect<1>();
               LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 2:
             {
-              Rect<2> rect = index_domain.get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> rect = index_domain.get_rect<2>();
               LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 3:
             {
-              Rect<3> rect = index_domain.get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> rect = index_domain.get_rect<3>();
               LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;

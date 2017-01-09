@@ -33,6 +33,9 @@
 using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::Accessor;
 
+// for Point<DIM> and Rect<DIM>
+using namespace LegionRuntime::Arrays;
+
 // Data type definitions
 
 enum PointerLocation {

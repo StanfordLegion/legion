@@ -20,6 +20,9 @@
 #include "legion.h"
 using namespace Legion;
 
+// for Point<DIM> and Rect<DIM>
+using namespace LegionRuntime::Arrays;
+
 /*
  * In this section we use a sequential
  * implementation of daxpy to show how

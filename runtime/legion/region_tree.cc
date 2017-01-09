@@ -4718,24 +4718,24 @@ namespace Legion {
           }
         case 1:
           {
-            Rect<1> leftr = left.get_rect<1>();
-            Rect<1> rightr = right.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rightr = right.get_rect<1>();
             if (leftr.overlaps(rightr))
               disjoint = false;
             break;
           }
         case 2:
           {
-            Rect<2> leftr = left.get_rect<2>();
-            Rect<2> rightr = right.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rightr = right.get_rect<2>();
             if (leftr.overlaps(rightr))
               disjoint = false;
             break;
           }
         case 3:
           {
-            Rect<3> leftr = left.get_rect<3>();
-            Rect<3> rightr = right.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rightr = right.get_rect<3>();
             if (leftr.overlaps(rightr))
               disjoint = false;
             break;
@@ -5110,9 +5110,9 @@ namespace Legion {
           }
         case 1:
           {
-            Rect<1> leftr = left.get_rect<1>();
-            Rect<1> rightr = right.get_rect<1>();
-            Rect<1> temp = leftr.intersection(rightr);
+            LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rightr = right.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> temp = leftr.intersection(rightr);
             if (temp.volume() > 0)
             {
               non_empty = true;
@@ -5123,9 +5123,9 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> leftr = left.get_rect<2>();
-            Rect<2> rightr = right.get_rect<2>();
-            Rect<2> temp = leftr.intersection(rightr);
+            LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rightr = right.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> temp = leftr.intersection(rightr);
             if (temp.volume() > 0)
             {
               non_empty = true;
@@ -5136,9 +5136,9 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> leftr = left.get_rect<3>();
-            Rect<3> rightr = right.get_rect<3>();
-            Rect<3> temp = leftr.intersection(rightr);
+            LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rightr = right.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> temp = leftr.intersection(rightr);
             if (temp.volume() > 0)
             {
               non_empty = true;
@@ -5226,12 +5226,12 @@ namespace Legion {
         {
           case 1:
             {
-              Rect<1> leftr = left.get_rect<1>();
+              LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<1> right = it->get_rect<1>(); 
+                LegionRuntime::Arrays::Rect<1> right = it->get_rect<1>(); 
                 if ((right.intersection(leftr)) != right)
                 {
                   dominates = false;
@@ -5242,12 +5242,12 @@ namespace Legion {
             }
           case 2:
             {
-              Rect<2> leftr = left.get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<2> right = it->get_rect<2>(); 
+                LegionRuntime::Arrays::Rect<2> right = it->get_rect<2>(); 
                 if ((right.intersection(leftr)) != right)
                 {
                   dominates = false;
@@ -5258,12 +5258,12 @@ namespace Legion {
             }
           case 3:
             {
-              Rect<3> leftr = left.get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<3> right = it->get_rect<3>(); 
+                LegionRuntime::Arrays::Rect<3> right = it->get_rect<3>(); 
                 if ((right.intersection(leftr)) != right)
                 {
                   dominates = false;
@@ -5290,14 +5290,14 @@ namespace Legion {
               for (std::set<Domain>::const_iterator it = left_set.begin();
                     it != left_set.end(); it++)
               {
-                Rect<1> left_rect = it->get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> left_rect = it->get_rect<1>();
                 intervals.insert(left_rect.lo[0], left_rect.hi[0]);
               }
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<1> right_rect = it->get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> right_rect = it->get_rect<1>();
                 if (!intervals.dominates(right_rect.lo[0], right_rect.hi[0]))
                 {
                   dominates = false;
@@ -5312,7 +5312,7 @@ namespace Legion {
               for (std::set<Domain>::const_iterator it = left_set.begin();
                     it != left_set.end(); it++)
               {
-                Rect<2> left_rect = it->get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> left_rect = it->get_rect<2>();
                 if (left_rect.volume() > 0)
                   rectangles.add_rectangle(left_rect.lo[0], left_rect.lo[1],
                                            left_rect.hi[0], left_rect.hi[1]);
@@ -5321,7 +5321,7 @@ namespace Legion {
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<2> right_rect = it->get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> right_rect = it->get_rect<2>();
                 if (right_rect.volume() > 0 &&
                     !rectangles.covers(right_rect.lo[0], right_rect.lo[1],
                                        right_rect.hi[0], right_rect.hi[1]))
@@ -5339,13 +5339,13 @@ namespace Legion {
               for (std::set<Domain>::const_iterator rit = right_set.begin();
                     (rit != right_set.end()) && dominates; rit++)
               {
-                Rect<3> right_rect = rit->get_rect<3>();
+                LegionRuntime::Arrays::Rect<3> right_rect = rit->get_rect<3>();
                 bool has_dominator = false;
                 // See if any of the rectangles on the left dominate it
                 for (std::set<Domain>::const_iterator lit = left_set.begin();
                       lit != left_set.end(); lit++)
                 {
-                  Rect<3> left_rect = lit->get_rect<3>();
+                  LegionRuntime::Arrays::Rect<3> left_rect = lit->get_rect<3>();
                   if (right_rect.intersection(left_rect) == right_rect)
                   {
                     has_dominator = true;
@@ -6782,7 +6782,7 @@ namespace Legion {
           }
         case 1:
           {
-            Rect<1> rect = dom.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rect = dom.get_rect<1>();
             if (rect.volume() > 0)
               LegionSpy::log_index_space_rect<1>(handle.id,rect.lo.x,rect.hi.x);
             else
@@ -6791,7 +6791,7 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> rect = dom.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rect = dom.get_rect<2>();
             if (rect.volume() > 0)
               LegionSpy::log_index_space_rect<2>(handle.id,rect.lo.x,rect.hi.x);
             else
@@ -6800,7 +6800,7 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> rect = dom.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rect = dom.get_rect<3>();
             if (rect.volume() > 0)
               LegionSpy::log_index_space_rect<3>(handle.id,rect.lo.x,rect.hi.x);
             else

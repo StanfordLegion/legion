@@ -31,6 +31,7 @@
 #endif
 
 namespace Realm {
+  typedef ::legion_lowlevel_coord_t coord_t;
 
   class ProfilingRequestSet;
 
