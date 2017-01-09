@@ -1,6 +1,10 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 17.01.0 (January ??, 2017)
+  * General
+    - Bumped copyright dates
+
 Version 16.10.0 (October 7, 2016)
   * Realm
     - HDF5 support: moved to Realm module, added DMA channels
