@@ -794,9 +794,12 @@ namespace Realm {
     // class Gauge
     //
 
+    static bool ignore_gauges = false;
+
     template <typename T>
     /*static*/ void Gauge::add_gauge(T *gauge, SamplingProfiler *profiler)
     {
+      if(ignore_gauges) return;
       if(profiler)
 	gauge->sampler = profiler->add_gauge(gauge);
       else
@@ -812,10 +815,12 @@ namespace Realm {
 
     size_t Gauge::instantiate_templates(void)
     {
-      // materializing these catches all the other templated things too
-      return(reinterpret_cast<size_t>(Gauge::add_gauge<AbsoluteGauge<size_t> >) +
-	     reinterpret_cast<size_t>(Gauge::add_gauge<AbsoluteGauge<unsigned long> >) +
-	     reinterpret_cast<size_t>(Gauge::add_gauge<AbsoluteRangeGauge<int> >));
+      ignore_gauges = true;
+      AbsoluteGauge<size_t> foo("foo");
+      AbsoluteGauge<unsigned long> bar("bar");
+      AbsoluteRangeGauge<int> baz("baz");
+      ignore_gauges = false;
+      return 0;
     }
 
     size_t gauge_template_inst_helper = Gauge::instantiate_templates();
