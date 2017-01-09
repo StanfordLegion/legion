@@ -1818,6 +1818,7 @@ namespace Legion {
             {
               // Someone else has already resolved us to true so
               // we are good to go
+              speculated = false;
               break;
             }
           case RESOLVE_FALSE_STATE:
@@ -1826,6 +1827,7 @@ namespace Legion {
               // do the opposite thing
               continue_false = true;
               continue_true = false;
+              speculated = false;
               break;
             }
           default:
@@ -2002,7 +2004,6 @@ namespace Legion {
                 // We guessed wrong
                 speculation_state = RESOLVE_FALSE_STATE;
                 misspec_true = true;
-                continue_false = true;
               }
               break;
             }

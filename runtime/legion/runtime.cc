@@ -15309,7 +15309,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T, MessageKind MK, VirtualChannelKind VC>
     DistributedCollectable* Runtime::find_or_request_distributed_collectable(
-                                              DistributedID did, RtEvent &ready) 
+                                              DistributedID did, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
