@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University
+/* Copyright 2017 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -136,7 +136,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_future_t, Future *);
       NEW_OPAQUE_WRAPPER(legion_future_map_t, FutureMap *);
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
-      NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexTaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
       NEW_OPAQUE_WRAPPER(legion_copy_launcher_t, CopyLauncher *);
       NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);

@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1294,7 +1294,22 @@ namespace Legion {
                                     unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
+      virtual LogicalRegion project(LogicalRegion upper_bound,
+                                    const DomainPoint &point);
+      virtual LogicalRegion project(LogicalPartition upper_bound,
+                                    const DomainPoint &point);
       virtual unsigned get_depth(void) const;
+    };
+
+    /**
+     * \class ProjectionPoint
+     * An abstract class for passing to projection functions
+     * for recording the results of a projection
+     */
+    class ProjectionPoint {
+    public:
+      virtual const DomainPoint& get_domain_point(void) const = 0;
+      virtual void set_projection_result(unsigned idx,LogicalRegion result) = 0;
     };
 
     /**
@@ -1309,16 +1324,29 @@ namespace Legion {
     public:
       ProjectionFunction& operator=(const ProjectionFunction &rhs);
     public:
+      // The old path explicitly for tasks
       LogicalRegion project_point(Task *task, unsigned idx, Runtime *runtime,
                                   const DomainPoint &point);
       void project_points(Task *task, unsigned idx, Runtime *runtime,
                           std::vector<MinimalPoint> &minimal_points);
+      // Generalized and annonymized
+      void project_points(Operation *op, unsigned idx, 
+                          const RegionRequirement &req, Runtime *runtime,
+                          const std::vector<ProjectionPoint*> &points);
     protected:
+      // Old checking code explicitly for tasks
       void check_projection_region_result(const RegionRequirement &req,
                                           const Task *task, unsigned idx,
                                           LogicalRegion result, Runtime *rt);
       void check_projection_partition_result(const RegionRequirement &req,
                                              const Task *task, unsigned idx,
+                                             LogicalRegion result, Runtime *rt);
+      // Annonymized checking code
+      void check_projection_region_result(const RegionRequirement &req,
+                                          const Operation *op, unsigned idx,
+                                          LogicalRegion result, Runtime *rt);
+      void check_projection_partition_result(const RegionRequirement &req,
+                                             const Operation *op, unsigned idx,
                                              LogicalRegion result, Runtime *rt);
     public:
       const int depth; 
@@ -1725,9 +1753,9 @@ namespace Legion {
     public:
       Future execute_task(Context ctx, const TaskLauncher &launcher);
       FutureMap execute_index_space(Context ctx, 
-                                            const IndexLauncher &launcher);
+                                    const IndexTaskLauncher &launcher);
       Future execute_index_space(Context ctx, 
-                        const IndexLauncher &launcher, ReductionOpID redop);
+                    const IndexTaskLauncher &launcher, ReductionOpID redop);
     public:
       PhysicalRegion map_region(Context ctx, 
                                 const InlineLauncher &launcher);
@@ -1738,10 +1766,12 @@ namespace Legion {
       void unmap_all_regions(Context ctx);
     public:
       void fill_fields(Context ctx, const FillLauncher &launcher);
+      void fill_fields(Context ctx, const IndexFillLauncher &launcher);
       PhysicalRegion attach_external_resource(Context ctx,
                                               const AttachLauncher &launcher);
       void detach_external_resource(Context ctx, PhysicalRegion region);
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
+      void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:
       Predicate create_predicate(Context ctx, const Future &f);
       Predicate predicate_not(Context ctx, const Predicate &p);
@@ -2349,6 +2379,10 @@ namespace Legion {
                                                   bool has_lock = false);
       CopyOp*               get_available_copy_op(bool need_cont,
                                                   bool has_lock = false);
+      IndexCopyOp*          get_available_index_copy_op(bool need_cont,
+                                                  bool has_lock = false);
+      PointCopyOp*          get_available_point_copy_op(bool need_cont,
+                                                  bool has_lock = false);
       FenceOp*              get_available_fence_op(bool need_cont,
                                                   bool has_lock = false);
       FrameOp*              get_available_frame_op(bool need_cont,
@@ -2393,6 +2427,10 @@ namespace Legion {
                                                   bool has_lock = false);
       FillOp*               get_available_fill_op(bool need_cont,
                                                   bool has_lock = false);
+      IndexFillOp*          get_available_index_fill_op(bool need_cont,
+                                                  bool has_lock = false);
+      PointFillOp*          get_available_point_fill_op(bool need_cont,
+                                                  bool has_lock = false);
       AttachOp*             get_available_attach_op(bool need_cont,
                                                   bool has_lock = false);
       DetachOp*             get_available_detach_op(bool need_cont,
@@ -2406,6 +2444,8 @@ namespace Legion {
       void free_slice_task(SliceTask *task);
       void free_map_op(MapOp *op);
       void free_copy_op(CopyOp *op);
+      void free_index_copy_op(IndexCopyOp *op);
+      void free_point_copy_op(PointCopyOp *op);
       void free_fence_op(FenceOp *op);
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
@@ -2428,6 +2468,8 @@ namespace Legion {
       void free_pending_partition_op(PendingPartitionOp *op);
       void free_dependent_partition_op(DependentPartitionOp* op);
       void free_fill_op(FillOp *op);
+      void free_index_fill_op(IndexFillOp *op);
+      void free_point_fill_op(PointFillOp *op);
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
@@ -2694,6 +2736,8 @@ namespace Legion {
       std::deque<SliceTask*>            available_slice_tasks;
       std::deque<MapOp*>                available_map_ops;
       std::deque<CopyOp*>               available_copy_ops;
+      std::deque<IndexCopyOp*>          available_index_copy_ops;
+      std::deque<PointCopyOp*>          available_point_copy_ops;
       std::deque<FenceOp*>              available_fence_ops;
       std::deque<FrameOp*>              available_frame_ops;
       std::deque<DeletionOp*>           available_deletion_ops;
@@ -2716,6 +2760,8 @@ namespace Legion {
       std::deque<PendingPartitionOp*>   available_pending_partition_ops;
       std::deque<DependentPartitionOp*> available_dependent_partition_ops;
       std::deque<FillOp*>               available_fill_ops;
+      std::deque<IndexFillOp*>          available_index_fill_ops;
+      std::deque<PointFillOp*>          available_point_fill_ops;
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;

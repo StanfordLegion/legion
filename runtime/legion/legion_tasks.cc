@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4862,8 +4862,8 @@ namespace Legion {
         Runtime::trigger_event(false_guard);
         return;
       }
-      bool trigger = true;
       // Set the future to the false result
+      RtEvent execution_condition;
       if (predicate_false_future.impl != NULL)
       {
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
@@ -4885,9 +4885,9 @@ namespace Legion {
           args.target = result.impl;
           args.result = predicate_false_future.impl;
           args.task_op = this;
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
-                                           Runtime::protect_event(wait_on));
-          trigger = false;
+          execution_condition = 
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
+                                             Runtime::protect_event(wait_on));
         }
       }
       else
@@ -4897,9 +4897,8 @@ namespace Legion {
                                   predicate_false_size, false/*own*/);
       }
       // Then clean up this task instance
-      if (trigger)
-        complete_execution();
       complete_mapping();
+      complete_execution(execution_condition);
       resolve_speculation();
       trigger_children_complete();
     }
@@ -6262,7 +6261,6 @@ namespace Legion {
       restrict_postconditions.clear();
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
-      point_requirements.clear();
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -6271,7 +6269,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap IndexTask::initialize_task(TaskContext *ctx,
-                                         const IndexLauncher &launcher,
+                                         const IndexTaskLauncher &launcher,
                                          bool check_privileges,
                                          bool track /*= true*/)
     //--------------------------------------------------------------------------
@@ -6331,7 +6329,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future IndexTask::initialize_task(TaskContext *ctx,
-                                      const IndexLauncher &launcher,
+                                      const IndexTaskLauncher &launcher,
                                       ReductionOpID redop_id, 
                                       bool check_privileges,
                                       bool track /*= true*/)
@@ -6429,7 +6427,7 @@ namespace Legion {
                           "false.  Please set either the "
                           "'predicate_false_result' or "
                           "'predicate_false_future' fields of the "
-                          "IndexLauncher struct.",
+                          "IndexTaskLauncher struct.",
                           get_task_name(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
@@ -6640,7 +6638,7 @@ namespace Legion {
         Runtime::trigger_event(false_guard);
         return;
       }
-      bool trigger = true;
+      RtEvent execution_condition;
       // Fill in the index task map with the default future value
       if (redop == 0)
       {
@@ -6672,9 +6670,9 @@ namespace Legion {
             args.result = predicate_false_future.impl;
             args.domain = index_domain;
             args.task_op = this;
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
-                                             Runtime::protect_event(wait_on));
-            trigger = false;
+            execution_condition = 
+              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
+                                               Runtime::protect_event(wait_on));
           }
         }
         else
@@ -6713,9 +6711,9 @@ namespace Legion {
             args.target = reduction_future.impl;
             args.result = predicate_false_future.impl;
             args.task_op = this;
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
-                                             Runtime::protect_event(wait_on));
-            trigger = false;
+            execution_condition = 
+              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
+                                               Runtime::protect_event(wait_on));
           }
         }
         else
@@ -6726,9 +6724,8 @@ namespace Legion {
         }
       }
       // Then clean up this task execution
-      if (trigger)
-        complete_execution();
       complete_mapping();
+      complete_execution(execution_condition);
       resolve_speculation();
       trigger_children_complete();
     }
@@ -7333,9 +7330,17 @@ namespace Legion {
             const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs)
     //--------------------------------------------------------------------------
     {
+      // Handle any region requirements that interfere with itself
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (!IS_WRITE(regions[idx]))
+          continue;
+        interfering_requirements.insert(std::pair<unsigned,unsigned>(idx,idx));
+      }
       // Nothing to do if there are no interfering requirements
       if (interfering_requirements.empty())
         return;
+      std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
       for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator 
             pit = point_reqs.begin(); pit != point_reqs.end(); pit++)
       {
@@ -7347,11 +7352,15 @@ namespace Legion {
               oit != point_requirements.end(); oit++)
         {
           const std::vector<LogicalRegion> &other_reqs = oit->second;
+          const bool same_point = (pit->first == oit->first);
           // Now check for interference with any other points
           for (std::set<std::pair<unsigned,unsigned> >::const_iterator it =
                 interfering_requirements.begin(); it !=
                 interfering_requirements.end(); it++)
           {
+            // Skip same region requireemnt for same point
+            if (same_point && (it->first == it->second))
+              continue;
             if (!runtime->forest->are_disjoint(
                   point_reqs[it->first].get_index_space(), 
                   other_reqs[it->second].get_index_space()))

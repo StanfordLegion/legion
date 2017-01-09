@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -563,7 +563,7 @@ namespace Legion {
      * held during the course of the operation while still avoiding
      * any stalls in the task's execution.
      * @see TaskLauncher
-     * @see IndexLauncher
+     * @see IndexTaskLauncher
      * @see CopyLauncher
      * @see InlineLauncher
      * @see Runtime
@@ -655,7 +655,7 @@ namespace Legion {
      * perform the necessary operations on barriers before an after
      * the operation is executed.
      * @see TaskLauncher
-     * @see IndexLauncher
+     * @see IndexTaskLauncher
      * @see CopyLauncher
      * @see InlineLauncher
      * @see Runtime
@@ -1176,24 +1176,24 @@ namespace Legion {
     };
 
     /**
-     * \struct IndexLauncher
+     * \struct IndexTaskLauncher
      * Index launchers are objects that describe the launch
      * of an index space of tasks to the runtime.  They can
      * be re-used and safely modified between calls to 
      * index space launches.
      * @see Runtime
      */
-    struct IndexLauncher {
+    struct IndexTaskLauncher {
     public:
-      IndexLauncher(void);
-      IndexLauncher(Processor::TaskFuncID tid,
-                    Domain domain,
-                    TaskArgument global_arg,
-                    ArgumentMap map,
-                    Predicate pred = Predicate::TRUE_PRED,
-                    bool must = false,
-                    MapperID id = 0,
-                    MappingTagID tag = 0);
+      IndexTaskLauncher(void);
+      IndexTaskLauncher(Processor::TaskFuncID tid,
+                        Domain domain,
+                        TaskArgument global_arg,
+                        ArgumentMap map,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        bool must = false,
+                        MapperID id = 0,
+                        MappingTagID tag = 0);
     public:
       inline IndexSpaceRequirement&
                   add_index_requirement(const IndexSpaceRequirement &req);
@@ -1323,6 +1323,45 @@ namespace Legion {
     };
 
     /**
+     * \struct IndexCopyLauncher
+     * An index copy launcher is the same as a normal copy launcher
+     * but it supports the ability to launch multiple copies all 
+     * over a single index space domain. This means that region 
+     * requirements can use projection functions the same as with
+     * index task launches.
+     * @see CopyLauncher
+     * @see Runtime
+     */
+    struct IndexCopyLauncher {
+    public:
+      IndexCopyLauncher(Domain domain, Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+    public:
+      inline unsigned add_copy_requirements(const RegionRequirement &src,
+					    const RegionRequirement &dst);
+      inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
+      inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
+    public:
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
+    public:
+      std::vector<RegionRequirement>  src_requirements;
+      std::vector<RegionRequirement>  dst_requirements;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+      Domain                          domain;
+      Predicate                       predicate;
+      MapperID                        map_id;
+      MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
+    };
+
+    /**
      * \struct FillLauncher
      * Fill launchers are objects that describe the parameters
      * for issuing a fill operation.
@@ -1347,6 +1386,62 @@ namespace Legion {
     public:
       LogicalRegion                   handle;
       LogicalRegion                   parent;
+      TaskArgument                    argument;
+      Future                          future;
+      Predicate                       predicate;
+      std::set<FieldID>               fields;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+    public:
+      bool                            silence_warnings;
+    };
+
+    /**
+     * \struct IndexFillLauncher
+     * Index fill launchers are objects that are used to describe
+     * a fill over a particular domain. They can be used with 
+     * projeciton functions to describe a fill over an arbitrary
+     * set of logical regions.
+     * @see FillLauncher
+     * @see Runtime
+     */
+    struct IndexFillLauncher {
+    public:
+      IndexFillLauncher(void);
+      // Region projection
+      IndexFillLauncher(Domain domain, LogicalRegion handle, 
+                        LogicalRegion parent, TaskArgument arg,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED);
+      IndexFillLauncher(Domain domain, LogicalRegion handle, 
+                        LogicalRegion parent, Future f,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED);
+      // Partition projection
+      IndexFillLauncher(Domain domain, LogicalPartition handle, 
+                        LogicalRegion parent, TaskArgument arg,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED);
+      IndexFillLauncher(Domain domain, LogicalPartition handle, 
+                        LogicalRegion parent, Future f,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED);
+    public:
+      inline void set_argument(TaskArgument arg);
+      inline void set_future(Future f);
+      inline void add_field(FieldID fid);
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
+    public:
+      Domain                          domain;
+      LogicalRegion                   region;
+      LogicalPartition                partition;
+      LogicalRegion                   parent;
+      ProjectionID                    projection;
       TaskArgument                    argument;
       Future                          future;
       Predicate                       predicate;
@@ -1810,14 +1905,14 @@ namespace Legion {
     public:
       inline void add_single_task(const DomainPoint &point,
                                   const TaskLauncher &launcher);
-      inline void add_index_task(const IndexLauncher &launcher);
+      inline void add_index_task(const IndexTaskLauncher &launcher);
     public:
-      MapperID                      map_id;
-      MappingTagID                  mapping_tag;
-      std::vector<TaskLauncher>     single_tasks;
-      std::vector<IndexLauncher>    index_tasks;
+      MapperID                       map_id;
+      MappingTagID                   mapping_tag;
+      std::vector<TaskLauncher>      single_tasks;
+      std::vector<IndexTaskLauncher> index_tasks;
     public:
-      bool                          silence_warnings;
+      bool                           silence_warnings;
     };
 
     //==========================================================================
@@ -2164,6 +2259,24 @@ namespace Legion {
       virtual LogicalRegion project(Context ctx, Task *task, 
                                     unsigned index,
                                     LogicalPartition upper_bound,
+                                    const DomainPoint &point) = 0;
+      /**
+       * Same as the above projection, but annonymous with
+       * respect to the operation. This one will be invoked
+       * by any operation which is not a task. At some point
+       * in the near future this may become the default 
+       * projection functor interface.
+       */
+      virtual LogicalRegion project(LogicalRegion upper_bound,
+                                    const DomainPoint &point) = 0;
+      /**
+       * Same as the projection function above for partitions,
+       * but annonymous with respect to the operation. This one
+       * will be invoked by any operation which is not a task.
+       * At some point in the near future this may become
+       * the default projection functor interface.
+       */
+      virtual LogicalRegion project(LogicalPartition upper_bound,
                                     const DomainPoint &point) = 0;
       /**
        * Indicate whether calls to this projection functor
@@ -3432,13 +3545,14 @@ namespace Legion {
       /**
        * Launch an index space of tasks with arguments specified
        * by the index launcher configuration.
-       * @see IndexLauncher
+       * @see IndexTaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
        * @return a future map for return values of the points
        *    in the index space of tasks
        */
-      FutureMap execute_index_space(Context ctx, const IndexLauncher &launcher);
+      FutureMap execute_index_space(Context ctx, 
+                                    const IndexTaskLauncher &launcher);
 
       /**
        * Launch an index space of tasks with arguments specified
@@ -3446,14 +3560,14 @@ namespace Legion {
        * return values into a single value using the specified
        * reduction operator into a single future value.  The reduction
        * operation must be a foldable reduction.
-       * @see IndexLauncher
+       * @see IndexTaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
        * @param redop ID for the reduction op to use for reducing return values
        * @return a future result representing the reduction of
        *    all the return values from the index space of tasks
        */
-      Future execute_index_space(Context ctx, const IndexLauncher &launcher,
+      Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
                                  ReductionOpID redop);
 
       /**
@@ -3723,6 +3837,14 @@ namespace Legion {
        * @param launcher the launcher that describes the fill operation
        */
       void fill_fields(Context ctx, const FillLauncher &launcher);
+
+      /**
+       * Perform an index fill operation using a launcher which
+       * specifies all the parameters of the launch.
+       * @param ctx enclosing task context
+       * @param launcher the launcher that describes the index fill operation
+       */
+      void fill_fields(Context ctx, const IndexFillLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // Attach Operations
@@ -3820,14 +3942,21 @@ namespace Legion {
       //------------------------------------------------------------------------
       /**
        * Launch a copy operation from the given configuration of
-       * the given copy launcher.  Return a void future that can
-       * be used for indicating when the copy has completed.
+       * the given copy launcher.
        * @see CopyLauncher
        * @param ctx enclosing task context
        * @param launcher copy launcher object
-       * @return future for when the copy is finished
        */
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
+
+      /**
+       * Launch an index copy operation from the given configuration
+       * of the given copy launcher
+       * @see IndexCopyLauncher
+       * @param ctx enclosing task context
+       * @param launcher index copy launcher object
+       */
+      void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // Predicate Operations

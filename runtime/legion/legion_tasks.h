@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -793,11 +793,11 @@ namespace Legion {
       IndexTask& operator=(const IndexTask &rhs);
     public:
       FutureMap initialize_task(TaskContext *ctx,
-                                const IndexLauncher &launcher,
+                                const IndexTaskLauncher &launcher,
                                 bool check_privileges,
                                 bool track = true);
       Future initialize_task(TaskContext *ctx,
-                             const IndexLauncher &launcher,
+                             const IndexTaskLauncher &launcher,
                              ReductionOpID redop,
                              bool check_privileges,
                              bool track = true);
@@ -892,7 +892,6 @@ namespace Legion {
     protected:
       // For checking aliasing of points in debug mode only
       std::set<std::pair<unsigned,unsigned> > interfering_requirements;
-      std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
     public:
       void check_point_requirements(
           const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs);

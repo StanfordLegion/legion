@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -7683,18 +7683,6 @@ namespace Legion {
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      if (point.get_dim() > 3)
-      {
-        log_task.error("Projection ID 0 is invalid for tasks whose "
-                       "points are larger than three dimensional "
-                       "unsigned integers.  Points for task %s "
-                       "have elements of %d dimensions",
-                        task->get_task_name(), point.get_dim());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
-      }
       return upper_bound;
     }
 
@@ -7703,8 +7691,23 @@ namespace Legion {
          unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_subregion_by_color(
-                            task->regions[index].partition, point);
+      return runtime->get_logical_subregion_by_color(upper_bound, point);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion IdentityProjectionFunctor::project(LogicalRegion upper_bound,
+                                                     const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      return upper_bound;
+    }
+    
+    //--------------------------------------------------------------------------
+    LogicalRegion IdentityProjectionFunctor::project(
+                         LogicalPartition upper_bound, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_logical_subregion_by_color(upper_bound, point);
     }
 
     //--------------------------------------------------------------------------
@@ -7859,6 +7862,68 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ProjectionFunction::project_points(Operation *op, unsigned idx,
+                         const RegionRequirement &req, Runtime *runtime, 
+                         const std::vector<ProjectionPoint*> &points)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type != SINGULAR);
+#endif
+      if (projection_reservation.exists())
+      {
+        AutoLock p_lock(projection_reservation);
+        if (req.handle_type == PART_PROJECTION)
+        {
+          for (std::vector<ProjectionPoint*>::const_iterator it = 
+                points.begin(); it != points.end(); it++)
+          {
+            LogicalRegion result = functor->project(req.partition, 
+                                          (*it)->get_domain_point());
+            check_projection_partition_result(req, op, idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
+          }
+        }
+        else
+        {
+          for (std::vector<ProjectionPoint*>::const_iterator it = 
+                points.begin(); it != points.end(); it++)
+          {
+            LogicalRegion result = functor->project(req.region, 
+                                              (*it)->get_domain_point());
+            check_projection_region_result(req, op, idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
+          }
+        }
+      }
+      else
+      {
+        if (req.handle_type == PART_PROJECTION)
+        {
+          for (std::vector<ProjectionPoint*>::const_iterator it = 
+                points.begin(); it != points.end(); it++)
+          {
+            LogicalRegion result = functor->project(req.partition, 
+                                          (*it)->get_domain_point());
+            check_projection_partition_result(req, op, idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
+          }
+        }
+        else
+        {
+          for (std::vector<ProjectionPoint*>::const_iterator it = 
+                points.begin(); it != points.end(); it++)
+          {
+            LogicalRegion result = functor->project(req.region, 
+                                              (*it)->get_domain_point());
+            check_projection_region_result(req, op, idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ProjectionFunction::check_projection_region_result(
         const RegionRequirement &req, const Task *task, unsigned idx,
         LogicalRegion result, Runtime *runtime)
@@ -7947,6 +8012,100 @@ namespace Legion {
             "which is %d for region requirement %d of task %s (ID %lld)",
             projection_id, projection_depth, functor->get_depth(),
             idx, task->get_task_name(), task->get_unique_id());
+        assert(false);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_projection_region_result(
+        const RegionRequirement &req, const Operation *op, unsigned idx,
+        LogicalRegion result, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // NO_REGION is always an acceptable answer
+      if (result == LogicalRegion::NO_REGION)
+        return;
+      if (result.get_tree_id() != req.region.get_tree_id())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion of tree ID %d for region requirement %d "
+            "of operation %s (UID %lld) which is different from the upper "
+            "bound node of tree ID %d", projection_id, 
+            result.get_tree_id(), idx, op->get_logging_name(), 
+            op->get_unique_op_id(), req.region.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PROJECTION_RESULT);
+      }
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->is_subregion(result, req.region))
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which is not a subregion of the "
+            "upper bound region for region requirement %d of "
+            "operation %s (UID %lld)", projection_id, idx,
+            op->get_logging_name(), op->get_unique_op_id());
+        assert(false);
+      }
+      const unsigned projection_depth = 
+        runtime->forest->get_projection_depth(result, req.region);
+      if (projection_depth != functor->get_depth())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which has projection depth %d which "
+            "is different from stated projection depth of the functor "
+            "which is %d for region requirement %d of operation %s (ID %lld)",
+            projection_id, projection_depth, functor->get_depth(),
+            idx, op->get_logging_name(), op->get_unique_op_id());
+        assert(false);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_projection_partition_result(
+        const RegionRequirement &req, const Operation *op, unsigned idx,
+        LogicalRegion result, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // NO_REGION is always an acceptable answer
+      if (result == LogicalRegion::NO_REGION)
+        return;
+      if (result.get_tree_id() != req.partition.get_tree_id())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion of tree ID %d for region requirement %d "
+            "of operation %s (UID %lld) which is different from the upper "
+            "bound node of tree ID %d", projection_id, 
+            result.get_tree_id(), idx, op->get_logging_name(), 
+            op->get_unique_op_id(), req.partition.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PROJECTION_RESULT);
+      }
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->is_subregion(result, req.partition))
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which is not a subregion of the "
+            "upper bound region for region requirement %d of "
+            "operation %s (UID %lld)", projection_id, idx,
+            op->get_logging_name(), op->get_unique_op_id());
+        assert(false);
+      }
+      const unsigned projection_depth = 
+        runtime->forest->get_projection_depth(result, req.partition);
+      if (projection_depth != functor->get_depth())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which has projection depth %d which "
+            "is different from stated projection depth of the functor "
+            "which is %d for region requirement %d of operation %s (ID %lld)",
+            projection_id, projection_depth, functor->get_depth(),
+            idx, op->get_logging_name(), op->get_unique_op_id());
         assert(false);
       }
 #endif
@@ -10812,7 +10971,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::execute_index_space(Context ctx, 
-                                                  const IndexLauncher &launcher)
+                                           const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -10828,7 +10987,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                            const IndexLauncher &launcher, ReductionOpID redop)
+                         const IndexTaskLauncher &launcher, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -10935,6 +11094,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->fill_fields(launcher);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_external_resource(Context ctx, 
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -10978,6 +11152,22 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       ctx->issue_copy(launcher); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::issue_copy_operation(Context ctx,
+                                       const IndexCopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context issue copy operation!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->issue_copy(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -15631,6 +15821,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexCopyOp* Runtime::get_available_index_copy_op(bool need_cont, 
+                                                      bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<IndexCopyOp*,
+                     &Runtime::get_available_index_copy_op> 
+                       continuation(this, copy_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(copy_op_lock, available_index_copy_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    PointCopyOp* Runtime::get_available_point_copy_op(bool need_cont, 
+                                                      bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<PointCopyOp*,
+                     &Runtime::get_available_point_copy_op> 
+                       continuation(this, copy_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(copy_op_lock, available_point_copy_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     FenceOp* Runtime::get_available_fence_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -16034,6 +16260,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexFillOp* Runtime::get_available_index_fill_op(bool need_cont, 
+                                                      bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<IndexFillOp*,
+                     &Runtime::get_available_index_fill_op> 
+                       continuation(this, fill_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(fill_op_lock, available_index_fill_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    PointFillOp* Runtime::get_available_point_fill_op(bool need_cont, 
+                                                      bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<PointFillOp*,
+                     &Runtime::get_available_point_fill_op> 
+                       continuation(this, fill_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(fill_op_lock, available_point_fill_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     AttachOp* Runtime::get_available_attach_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -16156,6 +16418,22 @@ namespace Legion {
     {
       AutoLock c_lock(copy_op_lock);
       available_copy_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_index_copy_op(IndexCopyOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(copy_op_lock);
+      available_index_copy_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_copy_op(PointCopyOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(copy_op_lock);
+      available_point_copy_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -16332,6 +16610,22 @@ namespace Legion {
     {
       AutoLock f_lock(fill_op_lock);
       available_fill_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_index_fill_op(IndexFillOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(fill_op_lock);
+      available_index_fill_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_fill_op(PointFillOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(fill_op_lock);
+      available_point_fill_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -18947,12 +19241,10 @@ namespace Legion {
               future_args->target->set_result(
                   future_args->result->get_untyped_result(),
                   result_size, false/*own*/);
-            future_args->target->complete_future();
             if (future_args->target->remove_base_gc_ref(DEFERRED_TASK_REF))
               legion_delete(future_args->target);
             if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF)) 
               legion_delete(future_args->result);
-            future_args->task_op->complete_execution();
             break;
           }
         case LG_DEFERRED_FUTURE_MAP_SET_ID:
