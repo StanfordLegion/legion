@@ -545,6 +545,8 @@ namespace LegionRuntime {
 	  req->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
 				    &e, sizeof(e));	
 	assert(did_cancel);
+        // then poison the after event
+        req->trigger_finish_event(true/*poisoned*/);
 	return false;
       }
 
