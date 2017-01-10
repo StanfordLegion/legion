@@ -513,13 +513,7 @@ namespace Realm {
       if (start_event.has_triggered_faultaware(poisoned)) {
 	if(poisoned) {
 	  log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-#ifndef NDEBUG
-	  bool did_cancel =
-#endif
-	    task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-				       &start_event, sizeof(start_event));
-	  assert(did_cancel);
-	  task->mark_finished(false);
+	  task->handle_poisoned_precondition(start_event);
 	} else
 	  enqueue_task(task);
       } else
@@ -537,13 +531,7 @@ namespace Realm {
       if(poisoned) {
 	// cancel the task - this has to work
 	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-#ifndef NDEBUG
-	bool did_cancel =
-#endif
-	  task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-				     &e, sizeof(e));	
-	assert(did_cancel);
-	task->mark_finished(false);
+	task->handle_poisoned_precondition(e);
 	return true;
       }
 
@@ -855,13 +843,7 @@ namespace Realm {
     if (start_event.has_triggered_faultaware(poisoned)) {
       if(poisoned) {
 	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-#ifndef NDEBUG
-	bool did_cancel =
-#endif
-	  task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-				     &start_event, sizeof(start_event));	
-	assert(did_cancel);
-	task->mark_finished(false);
+	task->handle_poisoned_precondition(start_event);
       } else
 	enqueue_task(task);
     } else {

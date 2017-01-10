@@ -538,15 +538,7 @@ namespace LegionRuntime {
     {
       if(poisoned) {
 	Realm::log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
-	// cancel the dma operation - this has to work
-#ifndef NDEBUG
-	bool did_cancel =
-#endif
-	  req->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-				    &e, sizeof(e));	
-	assert(did_cancel);
-        // then poison the after event
-        req->trigger_finish_event(true/*poisoned*/);
+	req->handle_poisoned_precondition(e);
 	return false;
       }
 
@@ -657,9 +649,16 @@ namespace LegionRuntime {
       // make sure our functional precondition has occurred
       if(state == STATE_BEFORE_EVENT) {
 	// has the before event triggered?  if not, wait on it
-	if(before_copy.has_triggered()) {
-	  log_dma.debug("request %p - before event triggered", this);
-	  state = STATE_READY;
+	bool poisoned = false;
+	if(before_copy.has_triggered_faultaware(poisoned)) {
+	  if(poisoned) {
+	    log_dma.debug("request %p - poisoned precondition", this);
+	    handle_poisoned_precondition(before_copy);
+	    return true;  // not enqueued, but never going to be
+	  } else {
+	    log_dma.debug("request %p - before event triggered", this);
+	    state = STATE_READY;
+	  }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);
 	  if(just_check) return false;
@@ -3479,17 +3478,24 @@ namespace LegionRuntime {
       // make sure our functional precondition has occurred
       if(state == STATE_BEFORE_EVENT) {
 	// has the before event triggered?  if not, wait on it
-	if(before_copy.has_triggered()) {
-	  log_dma.debug("request %p - before event triggered", this);
-	  if(inst_lock_needed) {
-	    // request an exclusive lock on the instance to protect reductions
-	    inst_lock_event = get_runtime()->get_instance_impl(dst.inst)->lock.acquire(0, true /*excl*/, ReservationImpl::ACQUIRE_BLOCKING);
-	    state = STATE_INST_LOCK;
-	    log_dma.debug("request %p - instance lock acquire event " IDFMT,
-			 this, inst_lock_event.id);
+	bool poisoned = false;
+	if(before_copy.has_triggered_faultaware(poisoned)) {
+	  if(poisoned) {
+	    log_dma.debug("request %p - poisoned precondition", this);
+	    handle_poisoned_precondition(before_copy);
+	    return true;  // not enqueued, but never going to be
 	  } else {
-	    // go straight to ready
-	    state = STATE_READY;
+	    log_dma.debug("request %p - before event triggered", this);
+	    if(inst_lock_needed) {
+	      // request an exclusive lock on the instance to protect reductions
+	      inst_lock_event = get_runtime()->get_instance_impl(dst.inst)->lock.acquire(0, true /*excl*/, ReservationImpl::ACQUIRE_BLOCKING);
+	      state = STATE_INST_LOCK;
+	      log_dma.debug("request %p - instance lock acquire event " IDFMT,
+			    this, inst_lock_event.id);
+	    } else {
+	      // go straight to ready
+	      state = STATE_READY;
+	    }
 	  }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);

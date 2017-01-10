@@ -344,7 +344,8 @@ namespace Realm {
 			 enclosing.id, enclosing.gen);
 #endif
 
-    if(!wait_on.has_triggered()) {
+    bool poisoned = false;
+    if(!wait_on.has_triggered_faultaware(poisoned)) {
       // deferred trigger
       log_event.info() << "deferring user event trigger: event=" << *this << " wait_on=" << wait_on;
       if(Config::event_loop_detection_limit > 0) {
@@ -360,8 +361,9 @@ namespace Realm {
       return;
     }
 
-    log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on;
-    GenEventImpl::trigger(*this, false /*!poisoned*/);
+    log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on
+		     << (poisoned ? " (poisoned)" : "");
+    GenEventImpl::trigger(*this, poisoned);
   }
 
   void UserEvent::cancel(void) const
