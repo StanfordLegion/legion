@@ -21,6 +21,9 @@
 using namespace Legion;
 using namespace LegionRuntime::Accessor;
 
+// for Point<DIM> and Rect<DIM>
+using namespace LegionRuntime::Arrays;
+
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
   INIT_FIELD_TASK_ID,

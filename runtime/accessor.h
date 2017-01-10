@@ -32,8 +32,6 @@
 // for fprintf
 #include <stdio.h>
 
-using namespace LegionRuntime::Arrays;
-
 namespace Realm {
   class DomainPoint;
   class Domain;
@@ -266,17 +264,17 @@ namespace LegionRuntime {
 	  void *raw_rect_ptr(ByteOffset *offsets) const;
 
 	  template <int DIM>
-	  void *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets) const;
+	  void *raw_rect_ptr(const LegionRuntime::Arrays::Rect<DIM>& r, LegionRuntime::Arrays::Rect<DIM> &subrect, ByteOffset *offsets) const;
 
 	  template <int DIM>
-	  void *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets,
+	  void *raw_rect_ptr(const LegionRuntime::Arrays::Rect<DIM>& r, LegionRuntime::Arrays::Rect<DIM> &subrect, ByteOffset *offsets,
 			     const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const;
 
 	  template <int DIM>
-	  void *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride) const;
+	  void *raw_dense_ptr(const LegionRuntime::Arrays::Rect<DIM>& r, LegionRuntime::Arrays::Rect<DIM> &subrect, ByteOffset &elem_stride) const;
 
 	  template <int DIM>
-	  void *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride,
+	  void *raw_dense_ptr(const LegionRuntime::Arrays::Rect<DIM>& r, LegionRuntime::Arrays::Rect<DIM> &subrect, ByteOffset &elem_stride,
 			      const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const;
 
 	  void *internal;
@@ -385,16 +383,16 @@ namespace LegionRuntime {
 	  { return (T*)(Untyped::raw_rect_ptr<DIM>(offsets)); }
 
 	  template <int DIM>
-	  T *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets) const
+	  T *raw_rect_ptr(const LegionRuntime::Arrays::Rect<DIM>& r, LegionRuntime::Arrays::Rect<DIM> &subrect, ByteOffset *offsets) const
 	  { return (T*)(Untyped::raw_rect_ptr<DIM>(r, subrect, offsets)); }
 
 	  template <int DIM>
-	    T *raw_rect_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset *offsets,
+	    T *raw_rect_ptr(const LegionRuntime::Arrays::Rect<DIM>& r, LegionRuntime::Arrays::Rect<DIM> &subrect, ByteOffset *offsets,
 			    const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
 	  { return (T*)(Untyped::raw_rect_ptr<DIM>(r, subrect, offsets, field_offsets, field_stride)); }
 
 	  template <int DIM>
-	  T *raw_dense_ptr(const Rect<DIM>& r, Rect<DIM> &subrect, ByteOffset &elem_stride) const
+	  T *raw_dense_ptr(const LegionRuntime::Arrays::Rect<DIM>& r, LegionRuntime::Arrays::Rect<DIM> &subrect, ByteOffset &elem_stride) const
 	  { return (T*)(Untyped::raw_dense_ptr<DIM>(r, subrect, elem_stride)); }
 
 	  typedef AOS<sizeof(PT)> AOS_TYPE;
@@ -958,7 +956,7 @@ namespace LegionRuntime {
 	  Untyped(void) : base(0) {}
 
           CUDAPREFIX
-	  inline void *elem_ptr(const Point<DIM>& p)
+	  inline void *elem_ptr(const LegionRuntime::Arrays::Point<DIM>& p)
 	  {
 	    void *ptr = base;
 	    for(unsigned i = 0; i < DIM; i++)
@@ -982,25 +980,25 @@ namespace LegionRuntime {
 	  Typed(void) : Untyped() {}
 
           CUDAPREFIX
-	  inline T& ref(const Point<DIM>& p)
+	  inline T& ref(const LegionRuntime::Arrays::Point<DIM>& p)
 	  {
 	    return *(T *)(Untyped::elem_ptr(p));
 	  }
 
           CUDAPREFIX
-	  inline T& operator[](const Point<DIM>& p)
+	  inline T& operator[](const LegionRuntime::Arrays::Point<DIM>& p)
 	  {
 	    return ref(p);
 	  }
 
           CUDAPREFIX
-	  inline T read(const Point<DIM>& p)
+	  inline T read(const LegionRuntime::Arrays::Point<DIM>& p)
 	  {
 	    return ref(p);
 	  }
 
           CUDAPREFIX
-	  inline void write(const Point<DIM>& p, T newval)
+	  inline void write(const LegionRuntime::Arrays::Point<DIM>& p, T newval)
 	  {
 	    ref(p) = newval;
 	  }

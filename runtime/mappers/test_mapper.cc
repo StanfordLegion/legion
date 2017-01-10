@@ -26,6 +26,8 @@
 namespace Legion {
   namespace Mapping {
 
+    using namespace LegionRuntime::Arrays;
+
     LegionRuntime::Logger::Category log_test_mapper("test_mapper");
 
     //--------------------------------------------------------------------------

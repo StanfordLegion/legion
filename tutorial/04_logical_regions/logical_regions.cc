@@ -20,6 +20,9 @@
 #include "legion.h"
 using namespace Legion;
 
+// for Point<DIM> and Rect<DIM>
+using namespace LegionRuntime::Arrays;
+
 /*
  * This example shows how to create index
  * spaces, field spaces, and logical regions.

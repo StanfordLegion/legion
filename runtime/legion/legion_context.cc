@@ -2551,11 +2551,11 @@ namespace Legion {
       {
         case 1:
           {
-            Rect<1> base = hull.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> base = hull.get_rect<1>();
             for (std::set<Domain>::const_iterator it = domains.begin();
                   it != domains.end(); it++)
             {
-              Rect<1> next = it->get_rect<1>();
+              LegionRuntime::Arrays::Rect<1> next = it->get_rect<1>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<1>(base);
@@ -2563,11 +2563,11 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> base = hull.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> base = hull.get_rect<2>();
             for (std::set<Domain>::const_iterator it = domains.begin();
                   it != domains.end(); it++)
             {
-              Rect<2> next = it->get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> next = it->get_rect<2>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<2>(base);
@@ -2575,11 +2575,11 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> base = hull.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> base = hull.get_rect<3>();
             for (std::set<Domain>::const_iterator it = domains.begin();
                   it != domains.end(); it++)
             {
-              Rect<3> next = it->get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> next = it->get_rect<3>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<3>(base);
@@ -2701,9 +2701,9 @@ namespace Legion {
 #endif
         exit(ERROR_EMPTY_INDEX_PARTITION);
       }
-      Point<1> lower_bound(coloring.begin()->first);
-      Point<1> upper_bound(coloring.rbegin()->first);
-      Rect<1> color_range(lower_bound,upper_bound);
+      LegionRuntime::Arrays::Point<1> lower_bound(coloring.begin()->first);
+      LegionRuntime::Arrays::Point<1> upper_bound(coloring.rbegin()->first);
+      LegionRuntime::Arrays::Rect<1> color_range(lower_bound,upper_bound);
       Domain color_space = Domain::from_rect<1>(color_range);
       // Perform the coloring by iterating over all the colors in the
       // range.  For unspecified colors there is nothing wrong with
@@ -2715,7 +2715,8 @@ namespace Legion {
         parent_dom.get_index_space().get_valid_mask().get_num_elmts();
       const int first_element =
         parent_dom.get_index_space().get_valid_mask().get_first_element();
-      for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
+      for (LegionRuntime::Arrays::GenericPointInRectIterator<1>
+	     pir(color_range); pir; pir++)
       {
         Realm::ElementMask child_mask(num_elmts, first_element);
         Color c = pir.p;
@@ -2921,7 +2922,8 @@ namespace Legion {
             coloring.begin(); it != coloring.end(); it++)
       {
         Domain hull = runtime->construct_convex_hull(it->second);
-        DomainPoint color = DomainPoint::from_point<1>(Point<1>(it->first));
+	LegionRuntime::Arrays::Point<1> pcolor(it->first);
+        DomainPoint color = DomainPoint::from_point<1>(pcolor);
         convex_hulls[color] = hull;
         color_sets[color] = it->second; 
       }
@@ -2995,14 +2997,15 @@ namespace Legion {
           }
         }
         // Now make the index spaces and their domains
-        Point<1> lower_bound(child_masks.begin()->first);
-        Point<1> upper_bound(child_masks.rbegin()->first);
-        Rect<1> color_range(lower_bound,upper_bound);
+        LegionRuntime::Arrays::Point<1> lower_bound(child_masks.begin()->first);
+        LegionRuntime::Arrays::Point<1> upper_bound(child_masks.rbegin()->first);
+        LegionRuntime::Arrays::Rect<1> color_range(lower_bound,upper_bound);
         color_space = Domain::from_rect<1>(color_range);
         // Iterate over all the colors in the range from the lower
         // bound to upper bound so we can store the color space as
         // a dense array of colors.
-        for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
+        for (LegionRuntime::Arrays::GenericPointInRectIterator<1>
+	       pir(color_range); pir; pir++)
         {
           Color c = pir.p;
           std::map<Color,Realm::ElementMask>::const_iterator finder = 

@@ -197,9 +197,9 @@ namespace Legion {
         return t;                                    \
       }
 
-      NEW_POINT_WRAPPER(legion_point_1d_t, Point<1>, 1);
-      NEW_POINT_WRAPPER(legion_point_2d_t, Point<2>, 2);
-      NEW_POINT_WRAPPER(legion_point_3d_t, Point<3>, 3);
+      NEW_POINT_WRAPPER(legion_point_1d_t, LegionRuntime::Arrays::Point<1>, 1);
+      NEW_POINT_WRAPPER(legion_point_2d_t, LegionRuntime::Arrays::Point<2>, 2);
+      NEW_POINT_WRAPPER(legion_point_3d_t, LegionRuntime::Arrays::Point<3>, 3);
 #undef NEW_POINT_WRAPPER
 
 #define NEW_RECT_WRAPPER(T_, T)                         \
@@ -214,9 +214,9 @@ namespace Legion {
         return t;                                       \
       }
 
-      NEW_RECT_WRAPPER(legion_rect_1d_t, Rect<1>);
-      NEW_RECT_WRAPPER(legion_rect_2d_t, Rect<2>);
-      NEW_RECT_WRAPPER(legion_rect_3d_t, Rect<3>);
+      NEW_RECT_WRAPPER(legion_rect_1d_t, LegionRuntime::Arrays::Rect<1>);
+      NEW_RECT_WRAPPER(legion_rect_2d_t, LegionRuntime::Arrays::Rect<2>);
+      NEW_RECT_WRAPPER(legion_rect_3d_t, LegionRuntime::Arrays::Rect<3>);
 #undef NEW_RECT_WRAPPER
 
 #define NEW_BLOCKIFY_WRAPPER(T_, T)                     \
@@ -225,9 +225,9 @@ namespace Legion {
         return t;                                       \
       }
 
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_1d_t, Blockify<1>);
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_2d_t, Blockify<2>);
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_3d_t, Blockify<3>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_1d_t, LegionRuntime::Arrays::Blockify<1>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_2d_t, LegionRuntime::Arrays::Blockify<2>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_3d_t, LegionRuntime::Arrays::Blockify<3>);
 #undef NEW_RECT_WRAPPER
       static legion_domain_t
       wrap(Domain domain) {

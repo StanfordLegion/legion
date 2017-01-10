@@ -509,9 +509,20 @@ namespace Realm {
                             start_event, finish_event, priority);
       get_runtime()->optable.add_local_operation(finish_event, task);
 
-      if (start_event.has_triggered())
-        enqueue_task(task);
-      else
+      bool poisoned = false;
+      if (start_event.has_triggered_faultaware(poisoned)) {
+	if(poisoned) {
+	  log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+#ifndef NDEBUG
+	  bool did_cancel =
+#endif
+	    task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+				       &start_event, sizeof(start_event));
+	  assert(did_cancel);
+	  task->mark_finished(false);
+	} else
+	  enqueue_task(task);
+      } else
 	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
     }
 
@@ -840,8 +851,19 @@ namespace Realm {
     get_runtime()->optable.add_local_operation(finish_event, task);
 
     // if the start event has already triggered, we can enqueue right away
-    if(start_event.has_triggered()) {
-      enqueue_task(task);
+    bool poisoned = false;
+    if (start_event.has_triggered_faultaware(poisoned)) {
+      if(poisoned) {
+	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+#ifndef NDEBUG
+	bool did_cancel =
+#endif
+	  task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
+				     &start_event, sizeof(start_event));	
+	assert(did_cancel);
+	task->mark_finished(false);
+      } else
+	enqueue_task(task);
     } else {
       EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
     }

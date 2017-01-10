@@ -1818,6 +1818,7 @@ namespace Legion {
             {
               // Someone else has already resolved us to true so
               // we are good to go
+              speculated = false;
               break;
             }
           case RESOLVE_FALSE_STATE:
@@ -1826,6 +1827,7 @@ namespace Legion {
               // do the opposite thing
               continue_false = true;
               continue_true = false;
+              speculated = false;
               break;
             }
           default:
@@ -2002,7 +2004,6 @@ namespace Legion {
                 // We guessed wrong
                 speculation_state = RESOLVE_FALSE_STATE;
                 misspec_true = true;
-                continue_false = true;
               }
               break;
             }
@@ -4649,8 +4650,36 @@ namespace Legion {
         }
       }
       if (Runtime::legion_spy_enabled)
+      {
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
+        switch (point_domain.get_dim())
+        {
+          case 1:
+            {
+	      LegionRuntime::Arrays::Rect<1> rect = point_domain.get_rect<1>();
+              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 2:
+            {
+              LegionRuntime::Arrays::Rect<2> rect = point_domain.get_rect<2>();
+              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 3:
+            {
+              LegionRuntime::Arrays::Rect<3> rect = point_domain.get_rect<3>();
+              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          default:
+            assert(false);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12379,6 +12408,32 @@ namespace Legion {
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
+        switch (point_domain.get_dim())
+        {
+          case 1:
+            {
+	      LegionRuntime::Arrays::Rect<1> rect = point_domain.get_rect<1>();
+              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 2:
+            {
+              LegionRuntime::Arrays::Rect<2> rect = point_domain.get_rect<2>();
+              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          case 3:
+            {
+              LegionRuntime::Arrays::Rect<3> rect = point_domain.get_rect<3>();
+              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
+                                                        rect.lo.x, rect.hi.x);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
     }
 
@@ -12431,7 +12486,7 @@ namespace Legion {
             requirement.privilege, requirement.prop, 
             requirement.redop, requirement.parent.index_space.id);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, 
-                                          requirement.instance_fields);
+                                          requirement.privilege_fields);
         if (proj)
           LegionSpy::log_requirement_projection(unique_op_id, 0/*idx*/, 
                                                 requirement.projection);

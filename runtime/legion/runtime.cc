@@ -9274,8 +9274,8 @@ namespace Legion {
           {
             case 1:
               {
-                Rect<1> d1 = it1->second.get_rect<1>();
-                Rect<1> d2 = it2->second.get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> d1 = it1->second.get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> d2 = it2->second.get_rect<1>();
                 if (d1.overlaps(d2))
                 {
                   log_run.error("ERROR: colors %d and %d of "
@@ -9289,8 +9289,8 @@ namespace Legion {
               }
             case 2:
               {
-                Rect<2> d1 = it1->second.get_rect<2>();
-                Rect<2> d2 = it2->second.get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> d1 = it1->second.get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> d2 = it2->second.get_rect<2>();
                 if (d1.overlaps(d2))
                 {
                   log_run.error("ERROR: colors (%d,%d) and "
@@ -9306,8 +9306,8 @@ namespace Legion {
               }
             case 3:
               {
-                Rect<3> d1 = it1->second.get_rect<3>();
-                Rect<3> d2 = it2->second.get_rect<3>();
+                LegionRuntime::Arrays::Rect<3> d1 = it1->second.get_rect<3>();
+                LegionRuntime::Arrays::Rect<3> d2 = it2->second.get_rect<3>();
                 if (d1.overlaps(d2))
                 {
                   log_run.error("ERROR: colors (%d,%d,%d) and "
@@ -9358,8 +9358,8 @@ namespace Legion {
               {
                 case 1:
                   {
-                    Rect<1> d1 = it3->get_rect<1>();
-                    Rect<1> d2 = it4->get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1> d1 = it3->get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1> d2 = it4->get_rect<1>();
                     if (d1.overlaps(d2))
                     {
                       log_run.error("ERROR: colors %d and %d of "
@@ -9375,8 +9375,8 @@ namespace Legion {
                   }
                 case 2:
                   {
-                    Rect<2> d1 = it3->get_rect<2>();
-                    Rect<2> d2 = it4->get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2> d1 = it3->get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2> d2 = it4->get_rect<2>();
                     if (d1.overlaps(d2))
                     {
                       log_run.error("ERROR: colors (%d,%d) and (%d,%d) "
@@ -9394,8 +9394,8 @@ namespace Legion {
                   }
                 case 3:
                   {
-                    Rect<3> d1 = it3->get_rect<3>();
-                    Rect<3> d2 = it4->get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3> d1 = it3->get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3> d2 = it4->get_rect<3>();
                     if (d1.overlaps(d2))
                     {
                       log_run.error("ERROR: colors (%d,%d,%d) and "
@@ -9431,14 +9431,14 @@ namespace Legion {
       {
         case 1:
           {
-            Rect<1> base = hull.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> base = hull.get_rect<1>();
             for (std::set<Domain>::const_iterator dom_it =
                   domains.begin(); dom_it != domains.end(); dom_it++)
             {
 #ifdef DEBUG_LEGION
               assert(dom_it->get_dim() == 1);
 #endif
-              Rect<1> next = dom_it->get_rect<1>();
+              LegionRuntime::Arrays::Rect<1> next = dom_it->get_rect<1>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<1>(base);
@@ -9446,14 +9446,14 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> base = hull.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> base = hull.get_rect<2>();
             for (std::set<Domain>::const_iterator dom_it =
                   domains.begin(); dom_it != domains.end(); dom_it++)
             {
 #ifdef DEBUG_LEGION
               assert(dom_it->get_dim() == 2);
 #endif
-              Rect<2> next = dom_it->get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> next = dom_it->get_rect<2>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<2>(base);
@@ -9461,14 +9461,14 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> base = hull.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> base = hull.get_rect<3>();
             for (std::set<Domain>::const_iterator dom_it =
                   domains.begin(); dom_it != domains.end(); dom_it++)
             {
 #ifdef DEBUG_LEGION
               assert(dom_it->get_dim() == 3);
 #endif
-              Rect<3> next = dom_it->get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> next = dom_it->get_rect<3>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<3>(base);
@@ -15309,7 +15309,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T, MessageKind MK, VirtualChannelKind VC>
     DistributedCollectable* Runtime::find_or_request_distributed_collectable(
-                                              DistributedID did, RtEvent &ready) 
+                                              DistributedID did, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;

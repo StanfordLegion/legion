@@ -20,6 +20,9 @@
 #include "legion.h"
 using namespace Legion;
 
+// for Point<DIM> and Rect<DIM>
+using namespace LegionRuntime::Arrays;
+
 /*
  * This example is a redux version of hello world 
  * which shows how launch a large array of tasks

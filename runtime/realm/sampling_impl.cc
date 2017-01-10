@@ -810,15 +810,11 @@ namespace Realm {
 	profiler->remove_gauge(this, sampler);
     }
 
-    size_t Gauge::instantiate_templates(void)
-    {
-      // materializing these catches all the other templated things too
-      return(reinterpret_cast<size_t>(Gauge::add_gauge<AbsoluteGauge<size_t> >) +
-	     reinterpret_cast<size_t>(Gauge::add_gauge<AbsoluteGauge<unsigned long> >) +
-	     reinterpret_cast<size_t>(Gauge::add_gauge<AbsoluteRangeGauge<int> >));
-    }
-
-    size_t gauge_template_inst_helper = Gauge::instantiate_templates();
+    // yet another try at forcibly instantiating the right templates
+    template void Gauge::add_gauge<AbsoluteGauge<unsigned long long> >(AbsoluteGauge<unsigned long long>*, SamplingProfiler*);
+    template void Gauge::add_gauge<AbsoluteGauge<unsigned long> >(AbsoluteGauge<unsigned long>*, SamplingProfiler*);
+    template void Gauge::add_gauge<AbsoluteGauge<unsigned> >(AbsoluteGauge<unsigned>*, SamplingProfiler*);
+    template void Gauge::add_gauge<AbsoluteRangeGauge<int> >(AbsoluteRangeGauge<int>*, SamplingProfiler*);
 
   };
 
