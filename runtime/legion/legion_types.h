@@ -309,6 +309,8 @@ namespace Legion {
       LG_DISJOINT_CLOSE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
+      LG_DEFER_PHI_VIEW_REF_TASK_ID,
+      LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -403,6 +405,8 @@ namespace Legion {
         "Disjoint Close",                                         \
         "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
+        "Defer Phi View Reference",                               \
+        "Defer Phi View Registration",                            \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -592,6 +596,7 @@ namespace Legion {
       SEND_MATERIALIZED_VIEW,
       SEND_COMPOSITE_VIEW,
       SEND_FILL_VIEW,
+      SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
@@ -712,6 +717,7 @@ namespace Legion {
         "Send Materialized View",                                     \
         "Send Composite View",                                        \
         "Send Fill View",                                             \
+        "Send Phi View",                                              \
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
@@ -1249,6 +1255,7 @@ namespace Legion {
     class CompositeVersionInfo;
     class CompositeNode;
     class FillView;
+    class PhiView;
     class MappingRef;
     class InstanceRef;
     class InstanceSet;

@@ -5455,6 +5455,11 @@ namespace Legion {
               runtime->handle_send_fill_view(derez, remote_address_space);
               break;
             }
+          case SEND_PHI_VIEW:
+            {
+              runtime->handle_send_phi_view(derez, remote_address_space);
+              break;
+            }
           case SEND_REDUCTION_VIEW:
             {
               runtime->handle_send_reduction_view(derez, remote_address_space);
@@ -13239,6 +13244,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_phi_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_PHI_VIEW,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_reduction_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14183,6 +14196,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FillView::handle_send_fill_view(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_phi_view(Deserializer &derez,
+                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhiView::handle_send_phi_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -19598,6 +19619,16 @@ namespace Legion {
             const SingleTask::MisspeculationTaskArgs *targs = 
               (const SingleTask::MisspeculationTaskArgs*)args;
             targs->task->handle_misspeculation();
+            break;
+          }
+        case LG_DEFER_PHI_VIEW_REF_TASK_ID:
+          {
+            PhiView::handle_deferred_view_ref(args);
+            break;
+          }
+        case LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID:
+          {
+            PhiView::handle_deferred_view_registration(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

@@ -2003,6 +2003,7 @@ namespace Legion {
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
+      void send_phi_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
@@ -2152,6 +2153,7 @@ namespace Legion {
       void handle_send_composite_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
+      void handle_send_phi_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,

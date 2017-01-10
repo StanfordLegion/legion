@@ -6592,6 +6592,304 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // PhiView 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PhiView::PhiView(RegionTreeForest *ctx, DistributedID did, 
+                     AddressSpaceID owner_space, AddressSpaceID local_space,
+                     RegionTreeNode *node, ApEvent tguard, 
+                     ApEvent fguard, bool register_now) 
+      : DeferredView(ctx, did, owner_space, local_space, node, register_now),
+        true_guard(tguard), false_guard(fguard)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_GC
+      log_garbage.info("GC Phi View %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PhiView::PhiView(const PhiView &rhs)
+      : DeferredView(NULL, 0, 0, 0, NULL, false),
+        true_guard(ApEvent::NO_AP_EVENT), false_guard(ApEvent::NO_AP_EVENT)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PhiView::~PhiView(void)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            true_views.begin(); it != true_views.end(); it++)
+      {
+        if (it->first->remove_nested_resource_ref(did))
+          LogicalView::delete_logical_view(it->first);
+      }
+      true_views.clear();
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+      {
+        if (it->first->remove_nested_resource_ref(did))
+          LogicalView::delete_logical_view(it->first);
+      }
+      false_views.clear();
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    PhiView& PhiView::operator=(const PhiView &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalView* PhiView::get_subview(const ColorPoint &c)
+    //--------------------------------------------------------------------------
+    {
+      // Phi views don't need subviews
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner())
+        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner())
+        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->notify_valid(mutator);
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->notify_valid(mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->notify_invalid(mutator);
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->notify_invalid(mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::issue_deferred_copies(const TraversalInfo &info,
+                                        MaterializedView *dst,
+                                        FieldMask copy_mask,
+                                        const RestrictInfo &restrict_info,
+                                        bool restrict_out)
+    //--------------------------------------------------------------------------
+    {
+      
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::issue_deferred_copies(const TraversalInfo &info,
+                                        MaterializedView *dst,
+                                        FieldMask copy_mask,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                        std::set<ApEvent> &postconditions,
+                                        CopyAcrossHelper *helper)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::pack_phi_view(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(true_views.size());
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            true_views.begin(); it != true_views.end(); it++)
+      {
+        rez.serialize(it->first->did);
+        rez.serialize(it->second);
+      }
+      rez.serialize<size_t>(false_views.size());
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            false_views.begin(); it != false_views.end(); it++)
+      {
+        rez.serialize(it->first->did);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::unpack_phi_view(Deserializer &derez, 
+                                  std::set<RtEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_true_views;
+      derez.deserialize(num_true_views);
+      for (unsigned idx = 0; idx < num_true_views; idx++)
+      {
+        DistributedID view_did;
+        derez.deserialize(view_did);
+        RtEvent ready;
+        LogicalView *view = static_cast<LogicalView*>(
+            runtime->find_or_request_logical_view(view_did, ready));
+        derez.deserialize(true_views[view]);
+        if (ready.exists() && !ready.has_triggered())
+          preconditions.insert(defer_add_reference(view, ready));
+        else // Otherwise we can add the reference now
+          view->add_nested_resource_ref(did);
+      }
+      size_t num_false_views;
+      derez.deserialize(num_false_views);
+      for (unsigned idx = 0; idx < num_false_views; idx++)
+      {
+        DistributedID view_did;
+        derez.deserialize(view_did);
+        RtEvent ready;
+        LogicalView *view = static_cast<LogicalView*>(
+            runtime->find_or_request_logical_view(view_did, ready));
+        derez.deserialize(false_views[view]);
+        if (ready.exists() && !ready.has_triggered())
+          preconditions.insert(defer_add_reference(view, ready));
+        else // Otherwise we can add the reference now
+          view->add_nested_resource_ref(did);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhiView::defer_add_reference(DistributedCollectable *dc,
+                                         RtEvent precondition) const
+    //--------------------------------------------------------------------------
+    {
+      DeferPhiViewRefArgs args;
+      args.dc = dc;
+      args.did = did;
+      return context->runtime->issue_runtime_meta_task(args,
+          LG_LATENCY_PRIORITY, NULL/*op*/, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::send_view(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(owner_space);
+        bool is_region = logical_node->is_region();
+        rez.serialize(is_region);
+        if (is_region)
+          rez.serialize(logical_node->as_region_node()->handle);
+        else
+          rez.serialize(logical_node->as_partition_node()->handle);
+        rez.serialize(true_guard);
+        rez.serialize(false_guard);
+        pack_phi_view(rez);
+      }
+      runtime->send_phi_view(target, rez);
+      update_remote_instances(target);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhiView::handle_send_phi_view(Runtime *runtime,
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      AddressSpaceID owner;
+      derez.deserialize(owner);
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *target_node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        target_node = runtime->forest->get_node(handle);
+      }
+      ApEvent true_guard, false_guard;
+      derez.deserialize(true_guard);
+      derez.deserialize(false_guard);
+      // Make the phi view but don't register it yet
+      void *location;
+      PhiView *view = NULL;
+      if (runtime->find_pending_collectable_location(did, location))
+        view = legion_new_in_place<PhiView>(location, runtime->forest,
+                                        did, owner, runtime->address_space,
+                                        target_node, true_guard,
+                                        false_guard, false/*register_now*/);
+      else
+        view = legion_new<PhiView>(runtime->forest, did, owner,
+                                   runtime->address_space, target_node,
+                                   true_guard, false_guard, 
+                                   false/*register now*/);
+      // Unpack all the internal data structures
+      std::set<RtEvent> ready_events;
+      view->unpack_phi_view(derez, ready_events);
+      if (!ready_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(ready_events);
+        DeferPhiViewRegistrationArgs args;
+        args.view = view;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                         NULL/*op*/, wait_on);
+        return;
+      }
+      view->register_with_runtime(NULL/*remote registration not needed*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhiView::handle_deferred_view_ref(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferPhiViewRefArgs *rargs = (const DeferPhiViewRefArgs*)args;
+      rargs->dc->add_nested_resource_ref(rargs->did); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhiView::handle_deferred_view_registration(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferPhiViewRegistrationArgs *pargs = 
+        (const DeferPhiViewRegistrationArgs*)args;
+      pargs->view->register_with_runtime(NULL/*no remote registration*/);
+    }
+
+    /////////////////////////////////////////////////////////////
     // ReductionView 
     /////////////////////////////////////////////////////////////
 

@@ -1419,6 +1419,86 @@ namespace Legion {
       FillViewValue *const value;
     };
 
+    /**
+     * \class PhiView
+     * A phi view is exactly what it sounds like: a view to merge two
+     * different views together from different control flow paths.
+     * Specifically it is able to merge together different paths for
+     * predication so that we can issue copies from both a true and
+     * a false version of a predicate. This allows us to map past lazy
+     * predicated operations such as fills and virtual mappings and
+     * continue to get ahead of actual execution. It's not pretty
+     * but it seems to work.
+     */
+    class PhiView : public DeferredView {
+    public:
+      struct DeferPhiViewRefArgs : 
+        public LgTaskArgs<DeferPhiViewRefArgs> {
+      public:
+        static const LgTaskID TASK_ID =
+          LG_DEFER_PHI_VIEW_REF_TASK_ID;
+      public:
+        DistributedCollectable *dc;
+        DistributedID did; 
+      };
+      struct DeferPhiViewRegistrationArgs : 
+        public LgTaskArgs<DeferPhiViewRegistrationArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID;
+      public:
+        PhiView *view;
+      };
+    public:
+      PhiView(RegionTreeForest *ctx, DistributedID did,
+              AddressSpaceID owner_proc, AddressSpaceID local_proc,
+              RegionTreeNode *node, ApEvent true_guard,
+              ApEvent false_guard, bool register_now);
+      PhiView(const PhiView &rhs);
+      virtual ~PhiView(void);
+    public:
+      PhiView& operator=(const PhiView &rhs);
+    public:
+      virtual bool has_parent(void) const { return false; }
+      virtual LogicalView* get_parent(void) const 
+        { assert(false); return NULL; }
+      virtual LogicalView* get_subview(const ColorPoint &c);
+    public:
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+    public:
+      virtual void send_view(AddressSpaceID target);
+    public:
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
+                                         FieldMask copy_mask,
+                                         const RestrictInfo &restrict_info,
+                                         bool restrict_out);
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
+                                         FieldMask copy_mask,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                         std::set<ApEvent> &postconditions,
+                                         CopyAcrossHelper *helper = NULL);
+    public:
+      void pack_phi_view(Serializer &rez);
+      void unpack_phi_view(Deserializer &derez,std::set<RtEvent> &ready_events);
+      RtEvent defer_add_reference(DistributedCollectable *dc, 
+                                  RtEvent precondition) const;
+      static void handle_send_phi_view(Runtime *runtime, Deserializer &derez,
+                                       AddressSpaceID source);
+      static void handle_deferred_view_ref(const void *args);
+      static void handle_deferred_view_registration(const void *args);
+    public:
+      const ApEvent true_guard;
+      const ApEvent false_guard;
+    protected:
+      LegionMap<LogicalView*,FieldMask>::aligned true_views;
+      LegionMap<LogicalView*,FieldMask>::aligned false_views;
+    };
+
     //--------------------------------------------------------------------------
     /*static*/ inline DistributedID LogicalView::encode_materialized_did(
                                                     DistributedID did, bool top)
