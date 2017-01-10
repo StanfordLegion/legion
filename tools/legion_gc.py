@@ -39,6 +39,7 @@ fold_manager_pat = re.compile(prefix + r'GC Fold Reduction Manager (?P<did>[0-9]
 materialize_pat = re.compile(prefix + r'GC Materialized View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
 composite_pat = re.compile(prefix + r'GC Composite View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 fill_pat = re.compile(prefix + r'GC Fill View (?P<did>[0-9]+) (?P<node>[0-9]+)')
+phi_pat = re.compile(prefix + r'GC Phi View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 reduction_pat = re.compile(prefix + r'GC Reduction View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
 # Version State
 version_state_pat = re.compile(prefix + r'GC Version State (?P<did>[0-9]+) (?P<node>[0-9]+)')
@@ -671,6 +672,10 @@ class State(object):
                     self.log_fill_view(long(m.group('did')),
                                        long(m.group('node')))
                     continue
+                m = phi_pat.match(line)
+                if m is not None:
+                    self.log_phi_view(long(m.group('did')),
+                                      long(m.group('node')))
                 m = reduction_pat.match(line)
                 if m is not None:
                     self.log_reduction_view(long(m.group('did')),
@@ -775,6 +780,9 @@ class State(object):
 
     def log_fill_view(self, did, node):
         self.get_view(did, node, 'Fill')
+
+    def log_phi_view(self, did, node):
+        self.get_view(did, node, 'Phi')
 
     def log_reduction_view(self, did, node, inst):
         manager = self.get_manager(inst, node)
