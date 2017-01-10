@@ -5032,7 +5032,6 @@ class Operation(object):
             assert self.kind == POST_CLOSE_OP_KIND
 
     def set_launch_rect(self, rect):
-        assert self.kind == INDEX_TASK_KIND
         assert not self.launch_rect
         self.launch_rect = rect
 
