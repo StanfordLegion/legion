@@ -219,6 +219,7 @@ namespace Legion {
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
+      inline unsigned get_ctx_index(void) const { return context_index; }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -604,13 +605,6 @@ namespace Legion {
         SPECULATE_FALSE_STATE,
         RESOLVE_TRUE_STATE,
         RESOLVE_FALSE_STATE,
-        // intermediate states to get callbacks ordered
-        PENDING_SPECULATE_TRUE_STATE,
-        PENDING_SPECULATE_FALSE_STATE,
-        PENDING_RESOLVE_TRUE_STATE,
-        PENDING_RESOLVE_FALSE_STATE,
-        PENDING_MISSPECULATE_TRUE_STATE,
-        PENDING_MISSPECULATE_FALSE_STATE,
       };
     public:
       SpeculativeOp(Runtime *rt);
@@ -637,20 +631,14 @@ namespace Legion {
       // to determine whether they should speculate 
       virtual bool query_speculate(bool &value, bool &mapping_only) = 0;
     public:
-      // If this operation was asked to speculate do it
-      // These calls will always finish before the
-      // corresponding misspeculate calls below run
-      virtual void speculate_true(bool mapping_only) = 0;
-      virtual void speculate_false(bool mapping_only) = 0;
-    public:
-      // If this operation misspeculated then we report it
-      virtual void misspeculate_true(bool mapping_only) = 0;
-      virtual void misspeculate_false(bool mapping_only) = 0;
-    public:
-      // If the operation didn't speculate then handle the predicate resolution
-      // Will only get a resolve true call if we speculated
-      virtual void resolve_true(void) = 0;
-      virtual void resolve_false(bool speculated) = 0;
+      // Every speculative operation will always get exactly one
+      // call back to one of these methods after the predicate has
+      // resolved. The 'speculated' parameter indicates whether the
+      // operation was speculated by the mapper. The 'launch' parameter
+      // indicates whether the operation has been issued into the 
+      // pipeline for execution yet
+      virtual void resolve_true(bool speculated, bool launched) = 0;
+      virtual void resolve_false(bool speculated, bool launched) = 0;
     public:
       virtual void notify_predicate_value(GenerationID gen, bool value);
     protected:
@@ -791,12 +779,8 @@ namespace Legion {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
-      virtual void speculate_true(bool mapping_only);
-      virtual void speculate_false(bool mapping_only);
-      virtual void misspeculate_true(bool mapping_only);
-      virtual void misspeculate_false(bool mapping_only);
-      virtual void resolve_true(void);
-      virtual void resolve_false(bool speculated);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
@@ -1479,12 +1463,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
-      virtual void speculate_true(bool mapping_only);
-      virtual void speculate_false(bool mapping_only);
-      virtual void misspeculate_true(bool mapping_only);
-      virtual void misspeculate_false(bool mapping_only);
-      virtual void resolve_true(void);
-      virtual void resolve_false(bool speculated);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -1555,12 +1535,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
-      virtual void speculate_true(bool mapping_only);
-      virtual void speculate_false(bool mapping_only);
-      virtual void misspeculate_true(bool mapping_only);
-      virtual void misspeculate_false(bool mapping_only);
-      virtual void resolve_true(void);
-      virtual void resolve_false(bool speculated);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -2294,12 +2270,8 @@ namespace Legion {
       virtual void deferred_execute(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
-      virtual void speculate_true(bool mapping_only);
-      virtual void speculate_false(bool mapping_only);
-      virtual void misspeculate_true(bool mapping_only);
-      virtual void misspeculate_false(bool mapping_only);
-      virtual void resolve_true(void);
-      virtual void resolve_false(bool speculated);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);

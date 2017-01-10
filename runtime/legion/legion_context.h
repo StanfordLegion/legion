@@ -973,6 +973,12 @@ namespace Legion {
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
       LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
       LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children; 
+#ifdef DEBUG_LEGION
+      // In debug mode also keep track of them in context order so
+      // we can see what the longest outstanding operation is which
+      // is often useful when things hang
+      std::map<unsigned,Operation*> outstanding_children;
+#endif
     protected:
       // Traces for this task's execution
       LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;

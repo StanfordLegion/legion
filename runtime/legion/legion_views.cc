@@ -2075,7 +2075,7 @@ namespace Legion {
       if (cit == current_epoch_users.end())
         return;
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-      if (cit->first.has_triggered())
+      if (cit->first.has_triggered_faultignorant())
       {
         EventUsers &current_users = cit->second;
         if (current_users.single)
@@ -2357,7 +2357,7 @@ namespace Legion {
       if (pit == previous_epoch_users.end())
         return;
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-      if (pit->first.has_triggered())
+      if (pit->first.has_triggered_faultignorant())
       {
         EventUsers &previous_users = pit->second;
         if (previous_users.single)
@@ -2475,7 +2475,7 @@ namespace Legion {
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (cit->first.has_triggered())
+        if (cit->first.has_triggered_faultignorant())
         {
           dead_events.insert(cit->first);
           continue;
@@ -2548,7 +2548,7 @@ namespace Legion {
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (pit->first.has_triggered())
+        if (pit->first.has_triggered_faultignorant())
         {
           dead_events.insert(pit->first);
           continue;
@@ -2607,7 +2607,7 @@ namespace Legion {
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (cit->first.has_triggered())
+        if (cit->first.has_triggered_faultignorant())
         {
           dead_events.insert(cit->first);
           continue;
@@ -2687,7 +2687,7 @@ namespace Legion {
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (pit->first.has_triggered())
+        if (pit->first.has_triggered_faultignorant())
         {
           dead_events.insert(pit->first);
           continue;

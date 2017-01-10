@@ -1642,6 +1642,8 @@ namespace Legion {
   public:
     inline ApEvent& operator=(const ApEvent &rhs)
       { id = rhs.id; return *this; }
+    inline bool has_triggered_faultignorant(void) const
+      { bool poisoned; return has_triggered_faultaware(poisoned); }
   };
 
   class ApUserEvent : public ApEvent {

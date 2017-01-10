@@ -1053,76 +1053,34 @@ namespace Legion {
                          get_task_name(), get_unique_id());
           assert(false);
         }
+#ifdef DEBUG_LEGION
+        assert(!true_guard.exists());
+        assert(!false_guard.exists());
+#endif
+        true_guard = Runtime::create_ap_user_event();
+        false_guard = Runtime::create_rt_user_event();
+        // Switch any write-discard privileges back to read-write
+        // so we can make sure we get the right data if we end up
+        // predicating false
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          RegionRequirement &req = regions[idx];
+          if (IS_WRITE_ONLY(req))
+            req.privilege = READ_WRITE;
+        }
       }
       return output.speculate;
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::speculate_true(bool mapping_only)
+    void TaskOp::resolve_true(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!true_guard.exists());
-      assert(!false_guard.exists());
-#endif
-      true_guard = Runtime::create_ap_user_event();
-      false_guard = Runtime::create_rt_user_event();
-      // Switch any write-discard privileges back to read-write
-      // so we can make sure we get the right data if we end up
-      // predicating false
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (speculated)
       {
-        RegionRequirement &req = regions[idx];
-        if (IS_WRITE_ONLY(req))
-          req.privilege = READ_WRITE;
+        Runtime::trigger_event(true_guard);
+        Runtime::poison_event(false_guard);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::speculate_false(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!true_guard.exists());
-      assert(!false_guard.exists());
-#endif
-      true_guard = Runtime::create_ap_user_event();
-      false_guard = Runtime::create_rt_user_event();
-      // Switch any write-discard privileges back to read-write
-      // so we can make sure we get the right data if we end up
-      // predicating false
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        RegionRequirement &req = regions[idx];
-        if (IS_WRITE_ONLY(req))
-          req.privilege = READ_WRITE;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::misspeculate_true(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // Guessed true, but actually false
-      Runtime::poison_event(true_guard);
-      Runtime::trigger_event(false_guard);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::misspeculate_false(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // Guessed false, but actually true
-      Runtime::trigger_event(true_guard);
-      Runtime::poison_event(false_guard);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::resolve_true(void)
-    //--------------------------------------------------------------------------
-    {
-      Runtime::trigger_event(true_guard);
-      Runtime::poison_event(false_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -4812,17 +4770,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::resolve_false(bool speculated)
+    void IndividualTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       if (speculated)
       {
-        // Just do the triggering and then return
-        // The normal execution will path will handle everything
+        // Trigger our events if we speculated
         Runtime::poison_event(true_guard);
         Runtime::trigger_event(false_guard);
-        return;
       }
+      // If we already launched, then return, otherwise continue
+      // through and do the work to clean up the task 
+      if (launched)
+        return;
       // Set the future to the false result
       RtEvent execution_condition;
       if (predicate_false_future.impl != NULL)
@@ -5749,7 +5709,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::resolve_false(bool speculated)
+    void PointTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6588,17 +6548,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::resolve_false(bool speculated)
+    void IndexTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       if (speculated)
       {
-        // Just do the triggering and then return
-        // The normal execution will path will handle everything
+        // If we speculated then trigger/poison our guards
         Runtime::poison_event(true_guard);
         Runtime::trigger_event(false_guard);
-        return;
       }
+      // If we already launched, then we can just return
+      // otherwise continue through to do the cleanup work
+      if (launched)
+        return;
       RtEvent execution_condition;
       // Fill in the index task map with the default future value
       if (redop == 0)
@@ -6689,6 +6651,7 @@ namespace Legion {
       complete_execution(execution_condition);
       resolve_speculation();
       trigger_children_complete();
+      trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -6844,8 +6807,6 @@ namespace Legion {
         Runtime::trigger_event(completion_event, restrict_done);
       }
       complete_operation();
-      if (speculation_state == RESOLVE_FALSE_STATE)
-        trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -7466,7 +7427,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::resolve_false(bool speculated)
+    void SliceTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       // should never be called

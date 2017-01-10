@@ -1749,10 +1749,13 @@ namespace Legion {
             LegionSpy::log_predicated_false_op(unique_op_id);
           // Still need a commit tracker here
           dependence_tracker.commit = new CommitDependenceTracker();
-          resolve_false(false/*speculated*/);
+          resolve_false(false/*speculated*/, false/*launched*/);
         }
         else
+        {
+          resolve_true(false/*speculated*/, false/*launched*/);
           Operation::execute_dependence_analysis();
+        }
         return;
       }
       // Register ourselves as a waiter on the predicate value
@@ -1769,10 +1772,9 @@ namespace Legion {
         speculated = query_speculate(value, speculate_mapping_only);
 #endif
       // Now hold the lock and figure out what we should do
-      bool continue_true = true;
+      bool continue_true = false;
       bool continue_false = false;
-      bool spec_true = false;
-      bool spec_false = false;
+      bool launch_speculation = false;
       RtEvent wait_on;
       {
         AutoLock o_lock(op_lock);
@@ -1783,26 +1785,24 @@ namespace Legion {
               if (valid)
               {
                 if (value)
+                {
                   speculation_state = RESOLVE_TRUE_STATE;
+                  continue_true = true;
+                }
                 else
                 {
                   speculation_state = RESOLVE_FALSE_STATE;
                   continue_false = true;
-                  continue_true = false;
                 }
               }
               else if (speculated)
               {
+                // Always launch in the speculated state
+                launch_speculation = true;
                 if (value)
-                {
-                  speculation_state = PENDING_SPECULATE_TRUE_STATE;
-                  spec_true = true;
-                }
+                  speculation_state = SPECULATE_TRUE_STATE;
                 else
-                {
-                  speculation_state = PENDING_SPECULATE_FALSE_STATE;
-                  spec_false = true;
-                }
+                  speculation_state = SPECULATE_FALSE_STATE;
               }
               // Otherwise just stay in pending analysis state
               // and wait for the result of the predicate
@@ -1818,7 +1818,7 @@ namespace Legion {
             {
               // Someone else has already resolved us to true so
               // we are good to go
-              speculated = false;
+              continue_true = true;
               break;
             }
           case RESOLVE_FALSE_STATE:
@@ -1826,81 +1826,11 @@ namespace Legion {
               // Someone else has already resolved us to false so
               // do the opposite thing
               continue_false = true;
-              continue_true = false;
-              speculated = false;
               break;
             }
           default:
             assert(false); // shouldn't be in the other states
         }
-      }
-      // Perform any of the speculation calls first and then see if
-      // we are done early before doing the analysis
-      bool misspec_true = false;
-      if (spec_true)
-      {
-        speculate_true(speculate_mapping_only);
-        // Retake the lock and update the states
-        AutoLock o_lock(op_lock);
-        switch (speculation_state)
-        {
-          case PENDING_SPECULATE_TRUE_STATE:
-            {
-              speculation_state = SPECULATE_TRUE_STATE;
-              break;
-            }
-          case PENDING_RESOLVE_TRUE_STATE:
-            {
-              speculation_state = RESOLVE_TRUE_STATE;
-              break;
-            }
-          case PENDING_MISSPECULATE_TRUE_STATE:
-            {
-              continue_true = false;
-              continue_false = true;
-              misspec_true = true;
-              speculation_state = RESOLVE_FALSE_STATE;
-              break;
-            }
-          default:
-            assert(false); // should not be in any other states
-        }
-      }
-      if (misspec_true)
-        misspeculate_true(speculate_mapping_only);
-      bool misspec_false = false;
-      if (spec_false)
-      {
-        speculate_false(speculate_mapping_only);
-        // Retake the lock and update the states
-        switch (speculation_state)
-        {
-          case PENDING_SPECULATE_FALSE_STATE:
-            {
-              speculation_state = SPECULATE_FALSE_STATE;
-              break;
-            }
-          case PENDING_RESOLVE_FALSE_STATE:
-            {
-              continue_true = false;
-              continue_false = true;
-              speculation_state = RESOLVE_FALSE_STATE;
-              break;
-            }
-          case PENDING_MISSPECULATE_FALSE_STATE:
-            {
-              misspec_false = true;
-              speculation_state = RESOLVE_TRUE_STATE;
-              break;
-            }
-          default:
-            assert(false); // should not be in any other states
-        }
-      }
-      if (misspec_false)
-      {
-        misspeculate_false(speculate_mapping_only);
-        resolve_true();
       }
       // Handle the waiting case if necessary
       if (wait_on.exists())
@@ -1912,13 +1842,11 @@ namespace Legion {
         {
           case RESOLVE_TRUE_STATE:
             {
-              // Nothing to do
+              continue_true = true;
               break;
             }
           case RESOLVE_FALSE_STATE:
             {
-              // Switch to false
-              continue_true = false;
               continue_false = true;
               break;
             }
@@ -1926,17 +1854,26 @@ namespace Legion {
             assert(false); // should not be in any other states
         }
       }
-      // If we continue true, then we just do the normal thing
+      // At most one of these should be true
+#ifdef DEBUG_LEGION
+      assert(!continue_true || !continue_false);
+#endif
       if (continue_true)
-        Operation::execute_dependence_analysis();
-      if (continue_false)
+        resolve_true(speculated, false/*launched*/);
+      else if (continue_false)
       {
         // Can remove our predicate reference since we don't need it anymore
         predicate->remove_predicate_reference();
         // Still need a commit tracker here
         dependence_tracker.commit = new CommitDependenceTracker();
-        resolve_false(false/*not in the pipe yet*/);
+        resolve_false(speculated, false/*launched*/);
       }
+#ifdef DEBUG_LEGION
+      else
+        assert(launch_speculation);
+#endif
+      if (continue_true || launch_speculation)
+        Operation::execute_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -1969,17 +1906,15 @@ namespace Legion {
     {
       bool continue_true = false;
       bool continue_false = false;
-      bool misspec_true = false;
-      bool misspec_false = false;
-      bool speculated = false;
-      bool need_resolve = false;
       bool need_trigger = false;
+      bool need_resolve = false;
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
         assert(pred_gen == get_generation());
 #endif
         need_trigger = predicate_waiter.exists();
+        need_resolve = received_trigger_resolution;
         switch (speculation_state)
         {
           case PENDING_ANALYSIS_STATE:
@@ -1992,8 +1927,6 @@ namespace Legion {
             }
           case SPECULATE_TRUE_STATE:
             {
-              speculated = true;
-              need_resolve = received_trigger_resolution;
               if (value) // We guessed right
               {
                 speculation_state = RESOLVE_TRUE_STATE;
@@ -2003,18 +1936,15 @@ namespace Legion {
               {
                 // We guessed wrong
                 speculation_state = RESOLVE_FALSE_STATE;
-                misspec_true = true;
+                continue_false = true;
               }
               break;
             }
           case SPECULATE_FALSE_STATE:
             {
-              speculated = true;
-              need_resolve = received_trigger_resolution;  
               if (value)
               {
                 speculation_state = RESOLVE_TRUE_STATE;
-                misspec_false = true;
                 continue_true = true;
               }
               else
@@ -2024,40 +1954,16 @@ namespace Legion {
               }
               break;
             }
-          case PENDING_SPECULATE_TRUE_STATE:
-            {
-              if (value)
-                speculation_state = PENDING_RESOLVE_TRUE_STATE;
-              else
-                speculation_state = PENDING_MISSPECULATE_TRUE_STATE;
-              break;
-            }
-          case PENDING_SPECULATE_FALSE_STATE:
-            {
-              if (value)
-                speculation_state = PENDING_MISSPECULATE_FALSE_STATE;
-              else
-                speculation_state = PENDING_RESOLVE_FALSE_STATE;
-              break;
-            }
           default:
             assert(false); // shouldn't be in any of the other states
         }
       }
       if (need_trigger)
         Runtime::trigger_event(predicate_waiter);
-      if (misspec_true)
-        misspeculate_true(speculate_mapping_only);
-      if (misspec_false)
-        misspeculate_false(speculate_mapping_only);
       if (continue_true)
-        resolve_true();
-      if (continue_false)
-      {
-        if (Runtime::legion_spy_enabled)
-          LegionSpy::log_predicated_false_op(unique_op_id);
-        resolve_false(speculated);
-      }
+        resolve_true(true/*speculated*/, true/*launched*/);
+      else if (continue_false)
+        resolve_false(true/*speculated*/, true/*launched*/);
       if (need_resolve)
         resolve_speculation();
     }
@@ -3443,19 +3349,11 @@ namespace Legion {
       output.speculate = false;
       output.speculate_mapping_only = true;
       mapper->invoke_copy_speculate(this, &output);
-      if (output.speculate)
-      {
-        value = output.speculative_value;
-        mapping_only = output.speculate_mapping_only;
-        return true;
-      }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::speculate_true(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
+      if (!output.speculate)
+        return false;
+      value = output.speculative_value;
+      mapping_only = output.speculate_mapping_only;
+      // Make our predicate guard
 #ifdef DEBUG_LEGION
       assert(!predication_guard.exists());
 #endif
@@ -3471,72 +3369,38 @@ namespace Legion {
         if (IS_WRITE_ONLY(req))
           req.privilege = READ_WRITE;
       }
+      return true;
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::speculate_false(bool mapping_only)
+    void CopyOp::resolve_true(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!predication_guard.exists());
-#endif
-      // Make the copy across precondition guard 
-      predication_guard = Runtime::create_ap_user_event();
-      // If we're speculating then we make all the destination
-      // privileges that are write-discard read-write instead so
-      // that we get the earlier version of the data in case we
-      // actually are predicated false
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        RegionRequirement &req = dst_requirements[idx];
-        if (IS_WRITE_ONLY(req))
-          req.privilege = READ_WRITE;
-      }
+      // Resolved true, so trigger our guard
+      if (speculated)
+        Runtime::trigger_event(predication_guard);
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::misspeculate_true(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // We guessed true but it's false so poison the event
-      Runtime::poison_event(predication_guard);
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::misspeculate_false(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // We guessed false but it's true so trigger the event
-      Runtime::trigger_event(predication_guard);
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::resolve_true(void)
-    //--------------------------------------------------------------------------
-    {
-      // If we speculated then trigger the copy guard
-      Runtime::trigger_event(predication_guard);
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::resolve_false(bool speculated)
+    void CopyOp::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       // If we speculated then poison the predication guard to prevent the copy
       if (speculated)
         Runtime::poison_event(predication_guard);
+      // If we already launched then we are done
+      if (launched)
+        return;
+      // Otherwise we need to do the things to clean up this operation
+      // Mark that this operation has completed both
+      // execution and mapping indicating that we are done
+      // Do it in this order to avoid calling 'execute_trigger'
+      complete_execution();
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
-      {
-        // Mark that this operation has completed both
-        // execution and mapping indicating that we are done
-        // Do it in this order to avoid calling 'execute_trigger'
-        complete_execution();
-        if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
-        else
-          complete_mapping();
-        resolve_speculation();
-      }
+        complete_mapping();
+      resolve_speculation();
     } 
 
     //--------------------------------------------------------------------------
@@ -7953,48 +7817,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::speculate_true(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // nothing special for speculation currently
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::speculate_false(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // nothing special for speculation currently
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::misspeculate_true(bool mapping_only)
+    void AcquireOp::resolve_true(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       // nothing for speculation currently
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::misspeculate_false(bool mapping_only)
+    void AcquireOp::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      // nothing for speculation currently
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::resolve_true(void)
-    //--------------------------------------------------------------------------
-    {
-      // nothing for speculation currently
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::resolve_false(bool speculated)
-    //--------------------------------------------------------------------------
-    {
-      // If we speculated there is nothing to do
-      if (speculated)
+      // If we launched there is nothing to do
+      if (launched)
         return;
-      // Clean up this operation
+      // Otherwise do the things needed to clean up this operation
       complete_execution();
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -8570,48 +8406,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::speculate_true(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // nothing special for speculation right now 
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::speculate_false(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // nothing special for speculation right now
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::misspeculate_true(bool mapping_only)
+    void ReleaseOp::resolve_true(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       // nothing for speculation right now
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::misspeculate_false(bool mapping_only)
+    void ReleaseOp::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      // nothing for speculation right now
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::resolve_true(void)
-    //--------------------------------------------------------------------------
-    {
-      // nothing for speculation right now
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::resolve_false(bool speculated)
-    //--------------------------------------------------------------------------
-    {
-      // If we speculated then there is nothing to do
-      if (speculated)
+      // If we launched then there is nothing to do
+      if (launched)
         return;
-      // Clean up this operation
+      // Do the things needed to clean up this operation
       complete_execution();
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -11862,6 +11670,13 @@ namespace Legion {
         return false;
       value = true;
       mapping_only = true;
+#ifdef DEBUG_LEGION
+      assert(!true_guard.exists());
+      assert(!false_guard.exists());
+#endif
+      // Make the copy across precondition guard 
+      true_guard = Runtime::create_ap_user_event();
+      false_guard = Runtime::create_ap_user_event();
       return true;
 #else
       return false;
@@ -11869,60 +11684,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::speculate_true(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!true_guard.exists());
-      assert(!false_guard.exists());
-#endif
-      // Make the copy across precondition guard 
-      true_guard = Runtime::create_ap_user_event();
-      false_guard = Runtime::create_ap_user_event();
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::speculate_false(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!true_guard.exists());
-      assert(!false_guard.exists());
-#endif
-      // Make the copy across precondition guard 
-      true_guard = Runtime::create_ap_user_event();
-      false_guard = Runtime::create_ap_user_event();
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::misspeculate_true(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // We guessed true but it's false so poison the event
-      Runtime::poison_event(true_guard);
-      Runtime::trigger_event(false_guard);
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::misspeculate_false(bool mapping_only)
-    //--------------------------------------------------------------------------
-    {
-      // We guessed false but it's true so trigger the event
-      Runtime::trigger_event(true_guard);
-      Runtime::poison_event(false_guard);
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::resolve_true(void)
+    void FillOp::resolve_true(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       // If we speculated then trigger the fill guard
-      Runtime::trigger_event(true_guard);
-      Runtime::poison_event(false_guard);
+      if (speculated)
+      {
+        Runtime::trigger_event(true_guard);
+        Runtime::poison_event(false_guard);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::resolve_false(bool speculated)
+    void FillOp::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       // If we speculated then poison the predication guard to prevent the fill
@@ -11931,18 +11705,19 @@ namespace Legion {
         Runtime::poison_event(true_guard);
         Runtime::trigger_event(false_guard);
       }
+      // If we already launched then there is nothing to do
+      if (launched)
+        return;
+      // Otherwise do the work to clean up this operation
+      // Mark that this operation has completed both
+      // execution and mapping indicating that we are done
+      // Do it in this order to avoid calling 'execute_trigger'
+      complete_execution();
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
-      {
-        // Mark that this operation has completed both
-        // execution and mapping indicating that we are done
-        // Do it in this order to avoid calling 'execute_trigger'
-        complete_execution();
-        if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
-        else
-          complete_mapping();
-        resolve_speculation();
-      }
+        complete_mapping();
+      resolve_speculation();
     } 
 
     //--------------------------------------------------------------------------

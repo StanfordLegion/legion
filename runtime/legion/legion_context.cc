@@ -4730,6 +4730,7 @@ namespace Legion {
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
+        outstanding_children[op->get_ctx_index()] = op;
 #endif       
         executing_children.insert(op);
       }
@@ -4843,6 +4844,7 @@ namespace Legion {
         assert(finder != complete_children.end());
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
+        outstanding_children.erase(op->get_ctx_index());
 #endif
         complete_children.erase(finder);
         // See if we need to trigger the all children commited call
@@ -4870,6 +4872,9 @@ namespace Legion {
         executing_children.erase(op);
         executed_children.erase(op);
         complete_children.erase(op);
+#ifdef DEBUG_LEGION
+        outstanding_children.erase(op->get_ctx_index());
+#endif
         int outstanding_count = 
           __sync_add_and_fetch(&outstanding_children_count,-1);
 #ifdef DEBUG_LEGION
