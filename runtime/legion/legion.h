@@ -2370,7 +2370,7 @@ namespace Legion {
        * Same method as above, but with a partition as an upper bound
        * @param mappable the operation requesting the projection
        * @param index the index of the region requirement being projected
-       * @param upper_bound the upper bound logical region
+       * @param upper_bound the upper bound logical partition
        * @param point the point being projected
        * @return logical region result
        */
