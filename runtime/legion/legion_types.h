@@ -183,7 +183,6 @@ namespace Legion {
   class TaskLayoutConstraintSet;
 
   namespace Mapping {
-    class Mappable; 
     class PhysicalInstance;
     class MapperEvent;
     class ProfilingRequestSet;
