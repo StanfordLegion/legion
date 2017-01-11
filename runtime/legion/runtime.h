@@ -1286,17 +1286,11 @@ namespace Legion {
       IdentityProjectionFunctor(Legion::Runtime *rt);
       virtual ~IdentityProjectionFunctor(void);
     public:
-      virtual LogicalRegion project(Context ctx, Task *task,
-                                    unsigned index,
+      virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalRegion upper_bound,
                                     const DomainPoint &point);
-      virtual LogicalRegion project(Context ctx, Task *task, 
-                                    unsigned index,
+      virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalPartition upper_bound,
-                                    const DomainPoint &point);
-      virtual LogicalRegion project(LogicalRegion upper_bound,
-                                    const DomainPoint &point);
-      virtual LogicalRegion project(LogicalPartition upper_bound,
                                     const DomainPoint &point);
       virtual unsigned get_depth(void) const;
     };
@@ -1343,11 +1337,11 @@ namespace Legion {
                                              LogicalRegion result, Runtime *rt);
       // Annonymized checking code
       void check_projection_region_result(const RegionRequirement &req,
-                                          const Operation *op, unsigned idx,
+                                          Operation *op, unsigned idx,
                                           LogicalRegion result, Runtime *rt);
       void check_projection_partition_result(const RegionRequirement &req,
-                                             const Operation *op, unsigned idx,
-                                             LogicalRegion result, Runtime *rt);
+                                          Operation *op, unsigned idx,
+                                          LogicalRegion result, Runtime *rt);
     public:
       const int depth; 
       const bool is_exclusive;

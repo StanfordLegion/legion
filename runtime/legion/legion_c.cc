@@ -5552,22 +5552,6 @@ public:
     return CObjectWrapper::unwrap(result);
   }
 
-  LogicalRegion project(LogicalRegion upper_bound,
-                        const DomainPoint &point)
-  {
-    // TODO: add support for these
-    assert(false);
-    return LogicalRegion::NO_REGION;
-  }
-
-  LogicalRegion project(LogicalPartition upper_bound,
-                        const DomainPoint &point)
-  {
-    // TODO: add support for these
-    assert(false);
-    return LogicalRegion::NO_REGION;
-  }
-
   unsigned get_depth(void) const { return depth; }
 
 private:

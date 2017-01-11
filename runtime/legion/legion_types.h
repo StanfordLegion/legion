@@ -109,6 +109,7 @@ namespace Legion {
   class Acquire;
   class Release;
   class Close;
+  class Fill;
   class Runtime;
   class MPILegionHandshake;
   // For backwards compatibility

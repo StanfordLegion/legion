@@ -5008,6 +5008,8 @@ namespace Legion {
       wait_barriers      = owner->wait_barriers;
       arrive_barriers    = owner->arrive_barriers;
       parent_task        = owner->parent_task;
+      map_id             = owner->map_id;
+      tag                = owner->tag;
       // From CopyOp
       src_parent_indexes = owner->src_parent_indexes;
       dst_parent_indexes = owner->dst_parent_indexes;
@@ -6309,6 +6311,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    Mappable* CloseOp::get_mappable(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
     }
 
     //--------------------------------------------------------------------------
@@ -11484,14 +11493,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(Runtime *rt)
-      : SpeculativeOp(rt)
+      : SpeculativeOp(rt), Fill()
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(const FillOp &rhs)
-      : SpeculativeOp(NULL)
+      : SpeculativeOp(NULL), Fill()
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11519,6 +11528,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
+      parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 1, launcher.predicate);
       requirement = RegionRequirement(launcher.handle, WRITE_DISCARD,
                                       EXCLUSIVE, launcher.parent);
@@ -11534,6 +11544,8 @@ namespace Legion {
       grants = launcher.grants;
       wait_barriers = launcher.wait_barriers;
       arrive_barriers = launcher.arrive_barriers;
+      map_id = launcher.map_id;
+      tag = launcher.tag;
       if (check_privileges)
         check_fill_privilege();
       if (Runtime::legion_spy_enabled)
@@ -11612,6 +11624,34 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    Mappable* FillOp::get_mappable(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID FillOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned FillOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index; 
+    }
+
+    //--------------------------------------------------------------------------
+    int FillOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
     }
 
     //--------------------------------------------------------------------------
@@ -12141,6 +12181,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
+      parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 1, launcher.predicate);
       point_domain = launcher.domain;
       if (launcher.region.exists())
@@ -12173,6 +12214,8 @@ namespace Legion {
       grants = launcher.grants;
       wait_barriers = launcher.wait_barriers;
       arrive_barriers = launcher.arrive_barriers;
+      map_id = launcher.map_id;
+      tag = launcher.tag;
       if (check_privileges)
         check_fill_privilege();
       if (Runtime::legion_spy_enabled)
@@ -12486,6 +12529,9 @@ namespace Legion {
       grants             = owner->grants;
       wait_barriers      = owner->wait_barriers;
       arrive_barriers    = owner->arrive_barriers;
+      parent_task        = owner->parent_task;
+      map_id             = owner->map_id;
+      tag                = owner->tag;
       // From FillOp
       parent_req_index   = owner->parent_req_index;
       restrict_info      = owner->restrict_info;

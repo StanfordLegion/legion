@@ -117,6 +117,17 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Fill 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Fill::Fill(void)
+      : Mappable(), parent_task(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // IndexSpace 
     /////////////////////////////////////////////////////////////
 
@@ -1410,7 +1421,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(void)
       : handle(LogicalRegion::NO_REGION), parent(LogicalRegion::NO_REGION),
-        silence_warnings(false)
+        map_id(0), tag(0), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1418,18 +1429,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p,
                                TaskArgument arg, 
-                               Predicate pred /*= Predicate::TRUE_PRED*/)
+                               Predicate pred /*= Predicate::TRUE_PRED*/,
+                               MapperID id /*=0*/, MappingTagID t /*=0*/)
       : handle(h), parent(p), argument(arg), 
-        predicate(pred), silence_warnings(false)
+        predicate(pred), map_id(id), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
-                               Predicate pred /*= Predicate::TRUE_PRED*/)
+                               Predicate pred /*= Predicate::TRUE_PRED*/,
+                               MapperID id /*=0*/, MappingTagID t /*=0*/)
       : handle(h), parent(p), future(f), 
-        predicate(pred), silence_warnings(false)
+        predicate(pred), map_id(id), tag(t), silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
@@ -1442,7 +1455,7 @@ namespace Legion {
     IndexFillLauncher::IndexFillLauncher(void)
       : domain(Domain::NO_DOMAIN), region(LogicalRegion::NO_REGION),
         partition(LogicalPartition::NO_PART), projection(0), 
-        silence_warnings(false)
+        map_id(0), tag(0), silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
@@ -1450,10 +1463,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalRegion h, 
                                LogicalRegion p, TaskArgument arg, 
-                               ProjectionID proj, Predicate pred)
+                               ProjectionID proj, Predicate pred,
+                               MapperID id /*=0*/, MappingTagID t /*=0*/)
       : domain(dom), region(h), partition(LogicalPartition::NO_PART),
         parent(p), projection(proj), argument(arg), predicate(pred),
-        silence_warnings(false)
+        map_id(id), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1461,10 +1475,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalRegion h,
                                 LogicalRegion p, Future f,
-                                ProjectionID proj, Predicate pred)
+                                ProjectionID proj, Predicate pred,
+                                MapperID id /*=0*/, MappingTagID t /*=0*/)
       : domain(dom), region(h), partition(LogicalPartition::NO_PART),
         parent(p), projection(proj), future(f), predicate(pred),
-        silence_warnings(false)
+        map_id(id), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1472,10 +1487,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
                                          LogicalRegion p, TaskArgument arg,
-                                         ProjectionID proj, Predicate pred)
+                                         ProjectionID proj, Predicate pred,
+                                         MapperID id /*=0*/, 
+                                         MappingTagID t /*=0*/)
       : domain(dom), region(LogicalRegion::NO_REGION), partition(h),
         parent(p), projection(proj), argument(arg), predicate(pred),
-        silence_warnings(false)
+        map_id(id), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1483,10 +1500,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
                                          LogicalRegion p, Future f,
-                                         ProjectionID proj, Predicate pred)
+                                         ProjectionID proj, Predicate pred,
+                                         MapperID id /*=0*/, 
+                                         MappingTagID t /*=0*/)
       : domain(dom), region(LogicalRegion::NO_REGION), partition(h),
         parent(p), projection(proj), future(f), predicate(pred),
-        silence_warnings(false)
+        map_id(id), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2115,23 +2134,71 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
-                                             const DomainPoint &point)
+    LogicalRegion ProjectionFunctor::project(const Mappable *mappable, 
+            unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      return project((Context)0, (Task *)0, 0 /*index*/,
-                     upper_bound, point);
+      Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                 "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
+      switch (mappable->get_mappable_type())
+      {
+        case Mappable::TASK_MAPPABLE:
+          return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
+                         index, upper_bound, point);
+        default:
+          Internal::log_run.error("Unknown mappable type passed to projection "
+                                  "functor! You must override the default "
+                                  "implementations of the non-deprecated "
+                                  "'project' methods!");
+          assert(false);
+      }
+      return LogicalRegion::NO_REGION;
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion ProjectionFunctor::project(LogicalPartition upper_bound,
-                                             const DomainPoint &point)
+    LogicalRegion ProjectionFunctor::project(const Mappable *mappable,
+         unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      return project((Context)0, (Task *)0, 0 /*index*/,
-                     upper_bound, point);
+      Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                 "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
+      switch (mappable->get_mappable_type())
+      {
+        case Mappable::TASK_MAPPABLE:
+          return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
+                         index, upper_bound, point);
+        default:
+          Internal::log_run.error("Unknown mappable type passed to projection "
+                                  "functor! You must override the default "
+                                  "implementations of the non-deprecated "
+                                  "'project' methods!");
+          assert(false);
+      }
+      return LogicalRegion::NO_REGION;
     }
 
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(Context ctx, Task *task,
+            unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      Internal::log_run.error("ERROR: INVOCATION OF DEPRECATED PROJECTION "
+                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      assert(false);
+      return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(Context ctx, Task *task,
+         unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      Internal::log_run.error("ERROR: INVOCATION OF DEPRECATED PROJECTION "
+                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      assert(false);
+      return LogicalRegion::NO_REGION;
+    }
+    
     /////////////////////////////////////////////////////////////
     // Coloring Serializer 
     /////////////////////////////////////////////////////////////

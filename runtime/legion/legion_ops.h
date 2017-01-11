@@ -1192,6 +1192,7 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
+      virtual Mappable* get_mappable(void);
     public:
       void activate_close(void);
       void deactivate_close(void);
@@ -2239,7 +2240,7 @@ namespace Legion {
      * Fill operations are used to initialize a field to a
      * specific value for a particular logical region.
      */
-    class FillOp : public SpeculativeOp {
+    class FillOp : public SpeculativeOp, public Fill {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
     public:
@@ -2261,6 +2262,10 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual Mappable* get_mappable(void);
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual int get_depth(void) const;
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
@@ -2281,7 +2286,6 @@ namespace Legion {
       void compute_parent_index(void);
       ApEvent compute_sync_precondition(void) const;
     public:
-      RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
       RestrictInfo restrict_info;
@@ -2291,10 +2295,6 @@ namespace Legion {
       Future future;
       std::set<RtEvent> map_applied_conditions;
       ApUserEvent true_guard, false_guard;
-    public:
-      std::vector<Grant>        grants;
-      std::vector<PhaseBarrier> wait_barriers;
-      std::vector<PhaseBarrier> arrive_barriers;
     };
     
     /**
