@@ -1114,17 +1114,20 @@ namespace Legion {
           context->end_task_wait();
       }
       // Now wait for the reference to be ready
-      
       std::set<ApEvent> wait_on;
       references.update_wait_on_events(wait_on);
       ApEvent ref_ready = Runtime::merge_events(wait_on);
-      if (!ref_ready.has_triggered())
+      bool poisoned;
+      if (!ref_ready.has_triggered_faultaware(poisoned))
       {
-        if (context != NULL)
-          context->begin_task_wait(false/*from runtime*/);
-        ref_ready.wait();
-        if (context != NULL)
-          context->end_task_wait();
+        if (!poisoned)
+        {
+          if (context != NULL)
+            context->begin_task_wait(false/*from runtime*/);
+          ref_ready.wait_faultaware(poisoned);
+          if (context != NULL)
+            context->end_task_wait();
+        }
       }
       valid = true;
     }
@@ -1350,13 +1353,18 @@ namespace Legion {
       // before we return, this usually occurs because we had restricted
       // coherence on the region and we have to issue copies back to 
       // the restricted instances before we are officially unmapped
-      if (wait_for_unmap.exists() && !wait_for_unmap.has_triggered())
+      bool poisoned;
+      if (wait_for_unmap.exists() && 
+          !wait_for_unmap.has_triggered_faultaware(poisoned))
       {
-        if (context != NULL)
-          context->begin_task_wait(false/*from runtime*/);
-        wait_for_unmap.wait();
-        if (context != NULL)
-          context->end_task_wait();
+        if (!poisoned)
+        {
+          if (context != NULL)
+            context->begin_task_wait(false/*from runtime*/);
+          wait_for_unmap.wait();
+          if (context != NULL)
+            context->end_task_wait();
+        }
       }
     }
 
