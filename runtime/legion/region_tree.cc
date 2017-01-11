@@ -13142,7 +13142,7 @@ namespace Legion {
       // Prepare to make the new view
       DistributedID did = context->runtime->get_available_distributed_id(false);
       // Copy the version info that we need
-      CompositeVersionInfo *view_info = new CompositeVersionInfo();
+      DeferredVersionInfo *view_info = new DeferredVersionInfo();
       version_info.copy_to(*view_info);
       // Make the view
       CompositeView *result = legion_new<CompositeView>(context, did, 

@@ -942,24 +942,24 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                         std::set<ApEvent> &postconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL) = 0; 
     };
 
     /**
-     * \class CompositeVersionInfo
+     * \class DeferredVersionInfo
      * This is a wrapper class for keeping track of the version
      * information for all the composite nodes in a composite instance.
      * TODO: do we need synchronization on computing field versions
      * because these objects can be shared between composite views
      */
-    class CompositeVersionInfo : public VersionInfo, public Collectable {
+    class DeferredVersionInfo : public VersionInfo, public Collectable {
     public:
-      CompositeVersionInfo(void);
-      CompositeVersionInfo(const CompositeVersionInfo &rhs);
-      ~CompositeVersionInfo(void);
+      DeferredVersionInfo(void);
+      DeferredVersionInfo(const DeferredVersionInfo &rhs);
+      ~DeferredVersionInfo(void);
     public:
-      CompositeVersionInfo& operator=(const CompositeVersionInfo &rhs);
+      DeferredVersionInfo& operator=(const DeferredVersionInfo &rhs);
     };
 
     /**
@@ -1162,7 +1162,7 @@ namespace Legion {
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
-                    AddressSpaceID local_proc, CompositeVersionInfo *info,
+                    AddressSpaceID local_proc, DeferredVersionInfo *info,
                     ClosedNode *closed_tree, InnerContext *context,
                     bool register_now);
       CompositeView(const CompositeView &rhs);
@@ -1198,7 +1198,7 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                         std::set<ApEvent> &postconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL);
     public:
       // From VersionTracker
@@ -1245,7 +1245,7 @@ namespace Legion {
       static void handle_deferred_view_ref(const void *args);
     public:
       // The path version info for this composite instance
-      CompositeVersionInfo *const version_info;
+      DeferredVersionInfo *const version_info;
       // The abstraction of the tree that we closed
       ClosedNode *const closed_tree;
       // The translation context if any
@@ -1405,13 +1405,8 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                         std::set<ApEvent> &postconditions,
-                                         CopyAcrossHelper *helper = NULL);
-      void issue_fill_across(const TraversalInfo &info,
-                             MaterializedView *dst, const FieldMask &copy_mask,
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                         CopyAcrossHelper *helper = NULL) const;
+                                         CopyAcrossHelper *helper = NULL);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
@@ -1429,8 +1424,9 @@ namespace Legion {
      * predicated operations such as fills and virtual mappings and
      * continue to get ahead of actual execution. It's not pretty
      * but it seems to work.
+     * TODO: Prune these and build copy trees correctly
      */
-    class PhiView : public DeferredView {
+    class PhiView : public DeferredView, public VersionTracker {
     public:
       struct DeferPhiViewRefArgs : 
         public LgTaskArgs<DeferPhiViewRefArgs> {
@@ -1452,6 +1448,7 @@ namespace Legion {
     public:
       PhiView(RegionTreeForest *ctx, DistributedID did,
               AddressSpaceID owner_proc, AddressSpaceID local_proc,
+              DeferredVersionInfo *version_info,
               RegionTreeNode *node, ApEvent true_guard,
               ApEvent false_guard, bool register_now);
       PhiView(const PhiView &rhs);
@@ -1471,6 +1468,17 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target);
     public:
+      virtual bool is_upper_bound_node(RegionTreeNode *node) const;
+      virtual void get_field_versions(RegionTreeNode *node, bool split_prev, 
+                                      const FieldMask &needed_fields,
+                                      FieldVersions &field_versions);
+      virtual void get_advance_versions(RegionTreeNode *node, bool base,
+                                        const FieldMask &needed_fields,
+                                        FieldVersions &field_versions);
+      virtual void get_split_mask(RegionTreeNode *node, 
+                                  const FieldMask &needed_fields,
+                                  FieldMask &split);
+    public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
@@ -1480,8 +1488,19 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                         std::set<ApEvent> &postconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          CopyAcrossHelper *helper = NULL);
+    protected:
+      void issue_guarded_update_copies(const TraversalInfo &info,
+                                       MaterializedView *dst,
+                                       FieldMask copy_mask,
+                                       ApEvent predicate_guard,
+                  const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
+                                       const RestrictInfo &restrict_info,
+                                       bool restrict_out,
+                  const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                        LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                       CopyAcrossHelper *helper = NULL);
     public:
       void pack_phi_view(Serializer &rez);
       void unpack_phi_view(Deserializer &derez,std::set<RtEvent> &ready_events);
@@ -1494,6 +1513,7 @@ namespace Legion {
     public:
       const ApEvent true_guard;
       const ApEvent false_guard;
+      DeferredVersionInfo *const version_info;
     protected:
       LegionMap<LogicalView*,FieldMask>::aligned true_views;
       LegionMap<LogicalView*,FieldMask>::aligned false_views;

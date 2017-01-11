@@ -2899,6 +2899,10 @@ namespace Legion {
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);
       static inline ApEvent merge_events(const std::set<ApEvent> &events);
     public:
+      static inline ApEvent ignore_faults(ApEvent event);
+      static inline ApEvent merge_events_ignore_faults(
+                                         const std::set<ApEvent> &events);
+    public:
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
       static inline RtEvent merge_events(const std::set<RtEvent> &events);
@@ -3173,6 +3177,47 @@ namespace Legion {
       const std::set<Realm::Event> *realm_events = 
         reinterpret_cast<const std::set<Realm::Event>*>(&events);
       ApEvent result(Realm::Event::merge_events(*realm_events));
+#ifdef LEGION_SPY
+      if (!result.exists() || (events.find(result) != events.end()))
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        if (events.find(result) != events.end())
+          rename.trigger(result);
+        else
+          rename.trigger();
+        result = ApEvent(rename);
+      }
+      for (std::set<ApEvent>::const_iterator it = events.begin();
+            it != events.end(); it++)
+        LegionSpy::log_event_dependence(*it, result);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::ignore_faults(ApEvent event)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent result(Realm::Event::ignorefaults(event));
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::merge_events_ignore_faults(
+                                                const std::set<ApEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+      const std::set<Realm::Event> *realm_events = 
+        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      ApEvent result(Realm::Event::merge_events_ignorefaults(*realm_events));
 #ifdef LEGION_SPY
       if (!result.exists() || (events.find(result) != events.end()))
       {
