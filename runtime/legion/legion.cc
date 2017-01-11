@@ -2114,6 +2114,24 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
+                                             const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      return project((Context)0, (Task *)0, 0 /*index*/,
+                     upper_bound, point);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalPartition upper_bound,
+                                             const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      return project((Context)0, (Task *)0, 0 /*index*/,
+                     upper_bound, point);
+    }
+
     /////////////////////////////////////////////////////////////
     // Coloring Serializer 
     /////////////////////////////////////////////////////////////

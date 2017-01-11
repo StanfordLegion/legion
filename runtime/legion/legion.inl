@@ -2540,6 +2540,8 @@ namespace Legion {
 // This is for backwards compatibility with the old namespace scheme
 namespace LegionRuntime {
   namespace HighLevel {
+    using namespace LegionRuntime::Arrays;
+
     typedef Legion::IndexSpace IndexSpace;
     typedef Legion::IndexPartition IndexPartition;
     typedef Legion::FieldSpace FieldSpace;
