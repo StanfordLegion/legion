@@ -425,7 +425,8 @@ namespace Legion {
                           VersionInfo &version_info,
                           RestrictInfo &restrict_info,
                           InstanceSet &instances, ApEvent precondition,
-                          std::set<RtEvent> &map_applied_events);
+                          std::set<RtEvent> &map_applied_events,
+                          ApEvent true_guard, ApEvent false_guard);
       InstanceManager* create_file_instance(AttachOp *attach_op,
                                             const RegionRequirement &req);
       InstanceRef attach_file(AttachOp *attach_op, unsigned index,
@@ -1821,14 +1822,15 @@ namespace Legion {
                        const void *value, size_t value_size, 
                        UniqueID logical_ctx_uid, InnerContext *context, 
                        VersionInfo &version_info,
-                       std::set<RtEvent> &map_applied_events);
+                       std::set<RtEvent> &map_applied_events,
+                       ApEvent true_guard, ApEvent false_guard);
       ApEvent eager_fill_fields(ContextID ctx, Operation *op,
                               const unsigned index, 
                               UniqueID logical_ctx_uid, InnerContext *context,
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceSet &instances,
-                              ApEvent precondition,
+                              ApEvent precondition, ApEvent true_guard,
                               std::set<RtEvent> &map_applied_events);
       InstanceRef attach_file(ContextID ctx, InnerContext *parent_ctx,
                            const FieldMask &attach_mask,

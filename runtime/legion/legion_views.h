@@ -48,6 +48,7 @@ namespace Legion {
       inline bool is_reduction_view(void) const;
       inline bool is_composite_view(void) const;
       inline bool is_fill_view(void) const;
+      inline bool is_phi_view(void) const;
     public:
       inline InstanceView* as_instance_view(void) const;
       inline DeferredView* as_deferred_view(void) const;
@@ -55,6 +56,7 @@ namespace Legion {
       inline ReductionView* as_reduction_view(void) const;
       inline CompositeView* as_composite_view(void) const;
       inline FillView* as_fill_view(void) const;
+      inline PhiView *as_phi_view(void) const;
     public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
@@ -82,10 +84,12 @@ namespace Legion {
       static inline DistributedID encode_reduction_did(DistributedID did);
       static inline DistributedID encode_composite_did(DistributedID did);
       static inline DistributedID encode_fill_did(DistributedID did);
+      static inline DistributedID encode_phi_did(DistributedID did);
       static inline bool is_materialized_did(DistributedID did);
       static inline bool is_reduction_did(DistributedID did);
       static inline bool is_composite_did(DistributedID did);
       static inline bool is_fill_did(DistributedID did);
+      static inline bool is_phi_did(DistributedID did);
       static inline bool is_top_did(DistributedID did);
     public:
       RegionTreeForest *const context;
@@ -1502,6 +1506,9 @@ namespace Legion {
                         LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                        CopyAcrossHelper *helper = NULL);
     public:
+      void record_true_view(LogicalView *view, const FieldMask &view_mask);
+      void record_false_view(LogicalView *view, const FieldMask &view_mask);
+    public:
       void pack_phi_view(Serializer &rez);
       void unpack_phi_view(Deserializer &derez,std::set<RtEvent> &ready_events);
       RtEvent defer_add_reference(DistributedCollectable *dc, 
@@ -1525,7 +1532,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (top)
-        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL | (1ULL << 2));
+        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL | (1ULL << 3));
       else
         return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL);
     }
@@ -1535,7 +1542,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1ULL | (1ULL << 2));
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1ULL | (1ULL << 3));
     }
 
     //--------------------------------------------------------------------------
@@ -1543,7 +1550,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2ULL | (1ULL << 2));
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2ULL | (1ULL << 3));
     }
 
     //--------------------------------------------------------------------------
@@ -1551,35 +1558,50 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x3ULL | (1ULL << 2));
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x3ULL | (1ULL << 3));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID LogicalView::encode_phi_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x4ULL | (1ULL << 3));
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_materialized_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3ULL) == 0x0ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x0ULL);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_reduction_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3ULL) == 0x1ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x1ULL);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_composite_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3ULL) == 0x2ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x2ULL);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_fill_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3ULL) == 0x3ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x3ULL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_phi_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x4ULL);
     }
 
     //--------------------------------------------------------------------------
@@ -1600,7 +1622,7 @@ namespace Legion {
     inline bool LogicalView::is_deferred_view(void) const
     //--------------------------------------------------------------------------
     {
-      return (is_composite_did(did) || is_fill_did(did));
+      return (is_composite_did(did) || is_fill_did(did) || is_phi_did(did));
     }
 
     //--------------------------------------------------------------------------
@@ -1629,6 +1651,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return is_fill_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_phi_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_phi_did(did);
     }
 
     //--------------------------------------------------------------------------
@@ -1689,6 +1718,16 @@ namespace Legion {
       assert(is_composite_view());
 #endif
       return static_cast<CompositeView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline PhiView* LogicalView::as_phi_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_phi_view());
+#endif
+      return static_cast<PhiView*>(const_cast<LogicalView*>(this));
     }
 
     //--------------------------------------------------------------------------

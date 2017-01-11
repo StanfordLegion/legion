@@ -3896,6 +3896,19 @@ namespace Legion {
         args.task = this;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
                                          this, false_guard);
+        // Fun little trick here: decrement the outstanding meta-task
+        // counts for the mis-speculation task in case it doesn't run
+        // If it does run, we'll increment the counts again
+#ifdef DEBUG_LEGION
+        runtime->decrement_total_outstanding_tasks(
+            MisspeculationTaskArgs::TASK_ID, true/*meta*/);
+#else
+        runtime-decrement_total_outstanding_tasks();
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+        __sync_fetch_and_add(
+            &runtime->outstanding_counts[MisspeculationTaskArgs::TASK_ID],-1);
+#endif
       }
     }
 
@@ -5179,6 +5192,18 @@ namespace Legion {
     void IndividualTask::handle_misspeculation(void)
     //--------------------------------------------------------------------------
     {
+      // First thing: increment the meta-task counts since we decremented
+      // them in case we didn't end up running
+#ifdef DEBUG_LEGION
+      runtime->increment_total_outstanding_tasks(
+          MisspeculationTaskArgs::TASK_ID, true/*meta*/);
+#else
+      runtime->increment_total_outstanding_tasks();
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(
+            &runtime->outstanding_counts[MisspeculationTaskArgs::TASK_ID],1);
+#endif
       // Pretend like we executed the task
       execution_context->begin_task();
       if (predicate_false_future.impl != NULL)
@@ -6067,6 +6092,18 @@ namespace Legion {
     void PointTask::handle_misspeculation(void)
     //--------------------------------------------------------------------------
     {
+      // First thing: increment the meta-task counts since we decremented
+      // them in case we didn't end up running
+#ifdef DEBUG_LEGION
+      runtime->increment_total_outstanding_tasks(
+          MisspeculationTaskArgs::TASK_ID, true/*meta*/);
+#else
+      runtime->increment_total_outstanding_tasks();
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(
+            &runtime->outstanding_counts[MisspeculationTaskArgs::TASK_ID],1);
+#endif
       // Pretend like we executed the task
       execution_context->begin_task();
       size_t result_size;
@@ -6790,7 +6827,8 @@ namespace Legion {
       // and then trigger it
       if (redop != 0)
       {
-        if (speculation_state != RESOLVE_FALSE_STATE)
+        // Set the future if we actually ran the task or we speculated
+        if ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists())
           reduction_future.impl->set_result(reduction_state,
                                             reduction_state_size, 
                                             false/*owner*/);

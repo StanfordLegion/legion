@@ -77,6 +77,8 @@ namespace Legion {
           legion_delete(deferred_view->as_composite_view());
         else if (deferred_view->is_fill_view())
           legion_delete(deferred_view->as_fill_view());
+        else if (deferred_view->is_phi_view())
+          legion_delete(deferred_view->as_phi_view());
         else
           assert(false);
       }
@@ -6575,7 +6577,8 @@ namespace Legion {
                      AddressSpaceID owner_space, AddressSpaceID local_space,
                      DeferredVersionInfo *info, RegionTreeNode *node, 
                      ApEvent tguard, ApEvent fguard, bool register_now) 
-      : DeferredView(ctx, did, owner_space, local_space, node, register_now),
+      : DeferredView(ctx, encode_phi_did(did), owner_space, local_space, node, 
+          register_now), 
         true_guard(tguard), false_guard(fguard), version_info(info)
     //--------------------------------------------------------------------------
     {
@@ -6662,10 +6665,10 @@ namespace Legion {
     {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
             true_views.begin(); it != true_views.end(); it++)
-        it->first->notify_valid(mutator);
+        it->first->add_nested_valid_ref(did, mutator);
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             false_views.begin(); it != false_views.end(); it++)
-        it->first->notify_valid(mutator);
+        it->first->add_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -6674,10 +6677,10 @@ namespace Legion {
     {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
             true_views.begin(); it != true_views.end(); it++)
-        it->first->notify_invalid(mutator);
+        it->first->remove_nested_valid_ref(did, mutator);
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             false_views.begin(); it != false_views.end(); it++)
-        it->first->notify_invalid(mutator);
+        it->first->remove_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -6866,6 +6869,36 @@ namespace Legion {
               deferred_preconditions, postconditions, across_helper);
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::record_true_view(LogicalView *view, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+        true_views.find(view);
+      if (finder == true_views.end())
+      {
+        true_views[view] = mask;
+        view->add_nested_resource_ref(did);
+      }
+      else
+        finder->second |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::record_false_view(LogicalView *view, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
+        false_views.find(view);
+      if (finder == false_views.end())
+      {
+        false_views[view] = mask;
+        view->add_nested_resource_ref(did);
+      }
+      else
+        finder->second |= mask;
     }
 
     //--------------------------------------------------------------------------

@@ -15550,6 +15550,7 @@ namespace Legion {
       {
         shutdown_manager->record_outstanding_tasks();
 #ifdef DEBUG_LEGION
+        LG_TASK_DESCRIPTIONS(meta_task_names);
         AutoLock out_lock(outstanding_task_lock,1,false/*exclusive*/);
         for (std::map<std::pair<unsigned,bool>,unsigned>::const_iterator it =
               outstanding_task_counts.begin(); it != 
@@ -15557,9 +15558,13 @@ namespace Legion {
         {
           if (it->second == 0)
             continue;
-          log_shutdown.info("RT %d: %d outstanding %s task(s) %d",
-                          address_space, it->second, it->first.second ? 
-                           "meta" : "application", it->first.first);
+          if (it->first.second)
+            log_shutdown.info("RT %d: %d outstanding meta task(s) %s",
+                              address_space, it->second, 
+                              meta_task_names[it->first.first]);
+          else                
+            log_shutdown.info("RT %d: %d outstanding application task(s) %d",
+                              address_space, it->second, it->first.first);
         }
 #endif
       }

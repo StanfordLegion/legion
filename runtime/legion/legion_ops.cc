@@ -11701,13 +11701,7 @@ namespace Legion {
     {
       // Always speculate on fill ops, but mapping only since
       // we know that there is an easy way to defer them
-      // One exception is if we are restricted in which case we're
-      // going to have to fill to a specific instance so we know
-      // that we can't build a deferred view so there is no point
-      // in speculation
-#if 0
-      if (restrict_info.has_restrictions())
-        return false;
+#if 1
       value = true;
       mapping_only = true;
 #ifdef DEBUG_LEGION
@@ -11811,7 +11805,8 @@ namespace Legion {
                                        0/*idx*/, value, value_size, 
                                        version_info, restrict_info, 
                                        mapped_instances, sync_precondition,
-                                       map_applied_conditions);
+                                       map_applied_conditions, 
+                                       true_guard, false_guard);
         if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
         {
           runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -11897,7 +11892,8 @@ namespace Legion {
                                        0/*idx*/, value, value_size, 
                                        version_info, restrict_info, 
                                        mapped_instances, sync_precondition,
-                                       map_applied_conditions);
+                                       map_applied_conditions,
+                                       true_guard, false_guard);
       if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
