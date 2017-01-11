@@ -2138,8 +2138,10 @@ namespace Legion {
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
       Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
                  "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
+#endif
       switch (mappable->get_mappable_type())
       {
         case Mappable::TASK_MAPPABLE:
@@ -2160,8 +2162,10 @@ namespace Legion {
          unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
       Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
                  "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
+#endif
       switch (mappable->get_mappable_type())
       {
         case Mappable::TASK_MAPPABLE:
