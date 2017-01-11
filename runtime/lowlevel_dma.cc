@@ -4064,9 +4064,16 @@ namespace LegionRuntime {
       // make sure our functional precondition has occurred
       if(state == STATE_BEFORE_EVENT) {
 	// has the before event triggered?  if not, wait on it
-	if(before_fill.has_triggered()) {
-	  log_dma.debug("request %p - before event triggered", this);
-	  state = STATE_READY;
+        bool poisoned = false;
+	if(before_fill.has_triggered_faultaware(poisoned)) {
+          if(poisoned) {
+            log_dma.debug("request %p - poisoned precondition", this);
+            handle_poisoned_precondition(before_fill);
+            return true; // not enqueued, but never going to be
+          } else {
+            log_dma.debug("request %p - before event triggered", this);
+            state = STATE_READY;
+          }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);
 	  if(just_check) return false;
