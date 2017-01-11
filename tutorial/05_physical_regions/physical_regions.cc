@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University
+/* Copyright 2017 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,9 @@
 #include <cstdlib>
 #include "legion.h"
 using namespace Legion;
+
+// for Point<DIM> and Rect<DIM>
+using namespace LegionRuntime::Arrays;
 
 /*
  * In this section we use a sequential

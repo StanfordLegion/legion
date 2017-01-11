@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -3268,24 +3268,30 @@ namespace Legion {
               {
                 case 1:
                   {
-                    Rect<1> prev_rect = dit->first.get_rect<1>();
-                    Rect<1> next_rect = it->first.get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1>
+		      prev_rect = dit->first.get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1>
+		      next_rect = it->first.get_rect<1>();
                     if (next_rect.dominates(prev_rect))
                       overlap -= dom_overlap;
                     break;
                   }
                 case 2:
                   {
-                    Rect<2> prev_rect = dit->first.get_rect<2>();
-                    Rect<2> next_rect = it->first.get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2>
+		      prev_rect = dit->first.get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2>
+		      next_rect = it->first.get_rect<2>();
                     if (next_rect.dominates(prev_rect))
                       overlap -= dom_overlap;
                     break;
                   }
                 case 3:
                   {
-                    Rect<3> prev_rect = dit->first.get_rect<3>();
-                    Rect<3> next_rect = it->first.get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3>
+		      prev_rect = dit->first.get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3>
+		      next_rect = it->first.get_rect<3>();
                     if (next_rect.dominates(prev_rect))
                       overlap -= dom_overlap;
                     break;
@@ -4487,6 +4493,7 @@ namespace Legion {
 #endif
         }
       }
+      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
       for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
             vit = current_version_infos.begin(); vit != 
             current_version_infos.end(); vit++)

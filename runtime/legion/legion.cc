@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -111,6 +111,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Close::Close(void)
+      : Mappable(), parent_task(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Fill 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Fill::Fill(void)
       : Mappable(), parent_task(NULL)
     //--------------------------------------------------------------------------
     {
@@ -1299,11 +1310,11 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // IndexLauncher 
+    // IndexTaskLauncher 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndexLauncher::IndexLauncher(void)
+    IndexTaskLauncher::IndexTaskLauncher(void)
       : task_id(0), launch_domain(Domain::NO_DOMAIN), 
         global_arg(TaskArgument()), argument_map(ArgumentMap()), 
         predicate(Predicate::TRUE_PRED), must_parallelism(false), 
@@ -1314,12 +1325,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexLauncher::IndexLauncher(Processor::TaskFuncID tid, Domain dom,
-                                 TaskArgument global,
-                                 ArgumentMap map,
-                                 Predicate pred /*= Predicate::TRUE_PRED*/,
-                                 bool must /*=false*/, MapperID mid /*=0*/,
-                                 MappingTagID t /*=0*/)
+    IndexTaskLauncher::IndexTaskLauncher(Processor::TaskFuncID tid, Domain dom,
+                                     TaskArgument global,
+                                     ArgumentMap map,
+                                     Predicate pred /*= Predicate::TRUE_PRED*/,
+                                     bool must /*=false*/, MapperID mid /*=0*/,
+                                     MappingTagID t /*=0*/)
       : task_id(tid), launch_domain(dom), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must),
         map_id(mid), tag(t), independent_requirements(false), 
@@ -1361,6 +1372,19 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // IndexCopyLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexCopyLauncher::IndexCopyLauncher(Domain dom, 
+                                    Predicate pred /*= Predicate::TRUE_PRED*/,
+                                    MapperID mid /*=0*/, MappingTagID t /*=0*/) 
+      : domain(dom), predicate(pred), map_id(mid),tag(t),silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // AcquireLauncher 
     /////////////////////////////////////////////////////////////
 
@@ -1395,20 +1419,117 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    FillLauncher::FillLauncher(void)
+      : handle(LogicalRegion::NO_REGION), parent(LogicalRegion::NO_REGION),
+        map_id(0), tag(0), silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p,
                                TaskArgument arg, 
-                               Predicate pred /*= Predicate::TRUE_PRED*/)
+                               Predicate pred /*= Predicate::TRUE_PRED*/,
+                               MapperID id /*=0*/, MappingTagID t /*=0*/)
       : handle(h), parent(p), argument(arg), 
-        predicate(pred), silence_warnings(false)
+        predicate(pred), map_id(id), tag(t), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
-                               Predicate pred /*= Predicate::TRUE_PRED*/)
+                               Predicate pred /*= Predicate::TRUE_PRED*/,
+                               MapperID id /*=0*/, MappingTagID t /*=0*/)
       : handle(h), parent(p), future(f), 
-        predicate(pred), silence_warnings(false)
+        predicate(pred), map_id(id), tag(t), silence_warnings(false) 
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // IndexFillLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(void)
+      : domain(Domain::NO_DOMAIN), region(LogicalRegion::NO_REGION),
+        partition(LogicalPartition::NO_PART), projection(0), 
+        map_id(0), tag(0), silence_warnings(false) 
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalRegion h, 
+                               LogicalRegion p, TaskArgument arg, 
+                               ProjectionID proj, Predicate pred,
+                               MapperID id /*=0*/, MappingTagID t /*=0*/)
+      : domain(dom), region(h), partition(LogicalPartition::NO_PART),
+        parent(p), projection(proj), argument(arg), predicate(pred),
+        map_id(id), tag(t), silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalRegion h,
+                                LogicalRegion p, Future f,
+                                ProjectionID proj, Predicate pred,
+                                MapperID id /*=0*/, MappingTagID t /*=0*/)
+      : domain(dom), region(h), partition(LogicalPartition::NO_PART),
+        parent(p), projection(proj), future(f), predicate(pred),
+        map_id(id), tag(t), silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
+                                         LogicalRegion p, TaskArgument arg,
+                                         ProjectionID proj, Predicate pred,
+                                         MapperID id /*=0*/, 
+                                         MappingTagID t /*=0*/)
+      : domain(dom), region(LogicalRegion::NO_REGION), partition(h),
+        parent(p), projection(proj), argument(arg), predicate(pred),
+        map_id(id), tag(t), silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexFillLauncher::IndexFillLauncher(Domain dom, LogicalPartition h,
+                                         LogicalRegion p, Future f,
+                                         ProjectionID proj, Predicate pred,
+                                         MapperID id /*=0*/, 
+                                         MappingTagID t /*=0*/)
+      : domain(dom), region(LogicalRegion::NO_REGION), partition(h),
+        parent(p), projection(proj), future(f), predicate(pred),
+        map_id(id), tag(t), silence_warnings(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // AttachLauncher
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AttachLauncher::AttachLauncher(ExternalResource r, 
+                                   LogicalRegion h, LogicalRegion p)
+      : resource(r), handle(h), parent(p), 
+        file_name(NULL), mode(LEGION_FILE_READ_ONLY)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // AttachLauncher
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TimingLauncher::TimingLauncher(TimingMeasurement m)
+      : measurement(m)
     //--------------------------------------------------------------------------
     {
     }
@@ -2012,6 +2133,76 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(const Mappable *mappable, 
+            unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                 "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
+#endif
+      switch (mappable->get_mappable_type())
+      {
+        case Mappable::TASK_MAPPABLE:
+          return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
+                         index, upper_bound, point);
+        default:
+          Internal::log_run.error("Unknown mappable type passed to projection "
+                                  "functor! You must override the default "
+                                  "implementations of the non-deprecated "
+                                  "'project' methods!");
+          assert(false);
+      }
+      return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(const Mappable *mappable,
+         unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                 "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
+#endif
+      switch (mappable->get_mappable_type())
+      {
+        case Mappable::TASK_MAPPABLE:
+          return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
+                         index, upper_bound, point);
+        default:
+          Internal::log_run.error("Unknown mappable type passed to projection "
+                                  "functor! You must override the default "
+                                  "implementations of the non-deprecated "
+                                  "'project' methods!");
+          assert(false);
+      }
+      return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(Context ctx, Task *task,
+            unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      Internal::log_run.error("ERROR: INVOCATION OF DEPRECATED PROJECTION "
+                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      assert(false);
+      return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(Context ctx, Task *task,
+         unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      Internal::log_run.error("ERROR: INVOCATION OF DEPRECATED PROJECTION "
+                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      assert(false);
+      return LogicalRegion::NO_REGION;
+    }
+    
     /////////////////////////////////////////////////////////////
     // Coloring Serializer 
     /////////////////////////////////////////////////////////////
@@ -3223,7 +3414,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::execute_index_space(Context ctx, 
-                                                  const IndexLauncher &launcher)
+                                              const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       return runtime->execute_index_space(ctx, launcher);
@@ -3231,7 +3422,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                            const IndexLauncher &launcher, ReductionOpID redop)
+                         const IndexTaskLauncher &launcher, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
       return runtime->execute_index_space(ctx, launcher, redop);
@@ -3249,8 +3440,10 @@ namespace Legion {
                         MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_task(ctx, task_id, indexes, fields, regions,
-                                   arg, predicate, id, tag);
+      TaskLauncher launcher(task_id, arg, predicate, id, tag);
+      launcher.index_requirements = indexes;
+      launcher.region_requirements = regions;
+      return runtime->execute_task(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -3268,10 +3461,11 @@ namespace Legion {
                         MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, task_id, domain, indexes,
-                                          fields, regions, global_arg,
-                                          arg_map, predicate,
-                                          must_parallelism, id, tag);
+      IndexTaskLauncher launcher(task_id, domain, global_arg, arg_map,
+                                 predicate, must_parallelism, id, tag);
+      launcher.index_requirements = indexes;
+      launcher.region_requirements = regions;
+      return runtime->execute_index_space(ctx, launcher);
     }
 
 
@@ -3292,10 +3486,11 @@ namespace Legion {
                         MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, task_id, domain, indexes,
-                                          fields, regions, global_arg, arg_map,
-                                          reduction, initial_value, predicate,
-                                          must_parallelism, id, tag);
+      IndexTaskLauncher launcher(task_id, domain, global_arg, arg_map,
+                                 predicate, must_parallelism, id, tag);
+      launcher.index_requirements = indexes;
+      launcher.region_requirements = regions;
+      return runtime->execute_index_space(ctx, launcher, reduction);
     }
 
     //--------------------------------------------------------------------------
@@ -3311,7 +3506,8 @@ namespace Legion {
                     const RegionRequirement &req, MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      return runtime->map_region(ctx, req, id, tag);
+      InlineLauncher launcher(req, id, tag);
+      return runtime->map_region(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -3346,11 +3542,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::fill_field(Context ctx, LogicalRegion handle,
                                       LogicalRegion parent, FieldID fid,
-                                      const void *value, size_t value_size,
+                                      const void *value, size_t size,
                                       Predicate pred)
     //--------------------------------------------------------------------------
     {
-      runtime->fill_field(ctx, handle, parent, fid, value, value_size, pred);
+      FillLauncher launcher(handle, parent, TaskArgument(value, size), pred);
+      launcher.add_field(fid);
+      runtime->fill_fields(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -3359,7 +3557,10 @@ namespace Legion {
                                       Future f, Predicate pred)
     //--------------------------------------------------------------------------
     {
-      runtime->fill_field(ctx, handle, parent, fid, f, pred);
+      FillLauncher launcher(handle, parent, TaskArgument(), pred);
+      launcher.set_future(f);
+      launcher.add_field(fid);
+      runtime->fill_fields(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -3370,7 +3571,9 @@ namespace Legion {
                                        Predicate pred)
     //--------------------------------------------------------------------------
     {
-      runtime->fill_fields(ctx, handle, parent, fields, value, size, pred);
+      FillLauncher launcher(handle, parent, TaskArgument(value, size), pred);
+      launcher.fields = fields;
+      runtime->fill_fields(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -3380,7 +3583,10 @@ namespace Legion {
                                        Future f, Predicate pred)
     //--------------------------------------------------------------------------
     {
-      runtime->fill_fields(ctx, handle, parent, fields, f, pred);
+      FillLauncher launcher(handle, parent, TaskArgument(), pred);
+      launcher.set_future(f);
+      launcher.fields = fields;
+      runtime->fill_fields(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -3388,6 +3594,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->fill_fields(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      runtime->fill_fields(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_external_resource(Context ctx, 
+                                                 const AttachLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->attach_external_resource(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_external_resource(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      runtime->detach_external_resource(ctx, region);
     }
 
     //--------------------------------------------------------------------------
@@ -3399,15 +3627,16 @@ namespace Legion {
                                                  LegionFileMode mode)
     //--------------------------------------------------------------------------
     {
-      return runtime->attach_hdf5(ctx, file_name, handle, 
-                                  parent, field_map, mode);
+      AttachLauncher launcher(EXTERNAL_HDF5_FILE, handle, parent);
+      launcher.attach_hdf5(file_name, field_map, mode);
+      return runtime->attach_external_resource(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::detach_hdf5(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_hdf5(ctx, region);
+      runtime->detach_external_resource(ctx, region);
     }
 
     //--------------------------------------------------------------------------
@@ -3419,20 +3648,28 @@ namespace Legion {
                                                  LegionFileMode mode)
     //--------------------------------------------------------------------------
     {
-      return runtime->attach_file(ctx, file_name, handle,
-                                  parent, field_vec, mode);
+      AttachLauncher launcher(EXTERNAL_POSIX_FILE, handle, parent);
+      launcher.attach_file(file_name, field_vec, mode);
+      return runtime->attach_external_resource(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::detach_file(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_file(ctx, region);
+      runtime->detach_external_resource(ctx, region);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::issue_copy_operation(Context ctx, 
-                                                const CopyLauncher &launcher)
+    void Runtime::issue_copy_operation(Context ctx,const CopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      runtime->issue_copy_operation(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::issue_copy_operation(Context ctx,
+                                       const IndexCopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       runtime->issue_copy_operation(ctx, launcher);
@@ -3656,21 +3893,35 @@ namespace Legion {
     Future Runtime::get_current_time(Context ctx, Future precondition)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_current_time(ctx, precondition);
+      TimingLauncher launcher(MEASURE_SECONDS);
+      launcher.add_precondition(precondition);
+      return runtime->issue_timing_measurement(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
     Future Runtime::get_current_time_in_microseconds(Context ctx, Future pre)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_current_time_in_microseconds(ctx, pre);
+      TimingLauncher launcher(MEASURE_MICRO_SECONDS);
+      launcher.add_precondition(pre);
+      return runtime->issue_timing_measurement(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
     Future Runtime::get_current_time_in_nanoseconds(Context ctx, Future pre)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_current_time_in_nanoseconds(ctx, pre);
+      TimingLauncher launcher(MEASURE_NANO_SECONDS);
+      launcher.add_precondition(pre);
+      return runtime->issue_timing_measurement(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    Future Runtime::issue_timing_measurement(Context ctx, 
+                                             const TimingLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->issue_timing_measurement(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------

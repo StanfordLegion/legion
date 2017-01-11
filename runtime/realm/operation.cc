@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -202,6 +202,20 @@ namespace Realm {
     // otherwise we return false - a subclass might override and add additional ways to
     //  cancel an already-running operation
     return false;
+  }
+
+  // a common reason for cancellation is a poisoned precondition - this helper takes care
+  //  of recording the error code and marking the operation as (unsuccessfully) finished
+  void Operation::handle_poisoned_precondition(Event pre)
+  {
+    // there should be no race conditions for this - state should be WAITING because we
+    //  know there's a precondition that didn't successfully trigger
+    assert(status.result == Status::WAITING);
+    status.error_code = Faults::ERROR_POISONED_PRECONDITION;
+    status.error_details.set(&pre, sizeof(pre));
+
+    status.result = Status::CANCELLED;
+    mark_finished(false /*unsuccessful*/);
   }
 
   void Operation::send_profiling_data(void)

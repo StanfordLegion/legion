@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1286,15 +1286,24 @@ namespace Legion {
       IdentityProjectionFunctor(Legion::Runtime *rt);
       virtual ~IdentityProjectionFunctor(void);
     public:
-      virtual LogicalRegion project(Context ctx, Task *task,
-                                    unsigned index,
+      virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalRegion upper_bound,
                                     const DomainPoint &point);
-      virtual LogicalRegion project(Context ctx, Task *task, 
-                                    unsigned index,
+      virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
       virtual unsigned get_depth(void) const;
+    };
+
+    /**
+     * \class ProjectionPoint
+     * An abstract class for passing to projection functions
+     * for recording the results of a projection
+     */
+    class ProjectionPoint {
+    public:
+      virtual const DomainPoint& get_domain_point(void) const = 0;
+      virtual void set_projection_result(unsigned idx,LogicalRegion result) = 0;
     };
 
     /**
@@ -1309,17 +1318,30 @@ namespace Legion {
     public:
       ProjectionFunction& operator=(const ProjectionFunction &rhs);
     public:
+      // The old path explicitly for tasks
       LogicalRegion project_point(Task *task, unsigned idx, Runtime *runtime,
                                   const DomainPoint &point);
       void project_points(Task *task, unsigned idx, Runtime *runtime,
                           std::vector<MinimalPoint> &minimal_points);
+      // Generalized and annonymized
+      void project_points(Operation *op, unsigned idx, 
+                          const RegionRequirement &req, Runtime *runtime,
+                          const std::vector<ProjectionPoint*> &points);
     protected:
+      // Old checking code explicitly for tasks
       void check_projection_region_result(const RegionRequirement &req,
                                           const Task *task, unsigned idx,
                                           LogicalRegion result, Runtime *rt);
       void check_projection_partition_result(const RegionRequirement &req,
                                              const Task *task, unsigned idx,
                                              LogicalRegion result, Runtime *rt);
+      // Annonymized checking code
+      void check_projection_region_result(const RegionRequirement &req,
+                                          Operation *op, unsigned idx,
+                                          LogicalRegion result, Runtime *rt);
+      void check_projection_partition_result(const RegionRequirement &req,
+                                          Operation *op, unsigned idx,
+                                          LogicalRegion result, Runtime *rt);
     public:
       const int depth; 
       const bool is_exclusive;
@@ -1725,86 +1747,25 @@ namespace Legion {
     public:
       Future execute_task(Context ctx, const TaskLauncher &launcher);
       FutureMap execute_index_space(Context ctx, 
-                                            const IndexLauncher &launcher);
+                                    const IndexTaskLauncher &launcher);
       Future execute_index_space(Context ctx, 
-                        const IndexLauncher &launcher, ReductionOpID redop);
-      Future execute_task(Context ctx, 
-                          Processor::TaskFuncID task_id,
-                          const std::vector<IndexSpaceRequirement> &indexes,
-                          const std::vector<FieldSpaceRequirement> &fields,
-                          const std::vector<RegionRequirement> &regions,
-                          const TaskArgument &arg, 
-                          const Predicate &predicate = Predicate::TRUE_PRED,
-                          MapperID id = 0, 
-                          MappingTagID tag = 0);
-      FutureMap execute_index_space(Context ctx, 
-                          Processor::TaskFuncID task_id,
-                          const Domain domain,
-                          const std::vector<IndexSpaceRequirement> &indexes,
-                          const std::vector<FieldSpaceRequirement> &fields,
-                          const std::vector<RegionRequirement> &regions,
-                          const TaskArgument &global_arg, 
-                          const ArgumentMap &arg_map,
-                          const Predicate &predicate = Predicate::TRUE_PRED,
-                          bool must_paralleism = false, 
-                          MapperID id = 0, 
-                          MappingTagID tag = 0);
-      Future execute_index_space(Context ctx, 
-                          Processor::TaskFuncID task_id,
-                          const Domain domain,
-                          const std::vector<IndexSpaceRequirement> &indexes,
-                          const std::vector<FieldSpaceRequirement> &fields,
-                          const std::vector<RegionRequirement> &regions,
-                          const TaskArgument &global_arg, 
-                          const ArgumentMap &arg_map,
-                          ReductionOpID reduction, 
-                          const TaskArgument &initial_value,
-                          const Predicate &predicate = Predicate::TRUE_PRED,
-                          bool must_parallelism = false, 
-                          MapperID id = 0, 
-                          MappingTagID tag = 0);
+                    const IndexTaskLauncher &launcher, ReductionOpID redop);
     public:
       PhysicalRegion map_region(Context ctx, 
                                 const InlineLauncher &launcher);
-      PhysicalRegion map_region(Context ctx, 
-                                const RegionRequirement &req, 
-                                MapperID id = 0, MappingTagID tag = 0);
       PhysicalRegion map_region(Context ctx, unsigned idx, 
                                 MapperID id = 0, MappingTagID tag = 0);
       void remap_region(Context ctx, PhysicalRegion region);
       void unmap_region(Context ctx, PhysicalRegion region);
       void unmap_all_regions(Context ctx);
     public:
-      void fill_field(Context ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid,
-                      const void *value, size_t value_size,
-                      const Predicate &pred);
-      void fill_field(Context ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid,
-                      Future f, const Predicate &pred);
-      void fill_fields(Context ctx, LogicalRegion handle,
-                       LogicalRegion parent,
-                       const std::set<FieldID> &fields,
-                       const void *value, size_t value_size,
-                       const Predicate &pred);
-      void fill_fields(Context ctx, LogicalRegion handle,
-                       LogicalRegion parent,
-                       const std::set<FieldID> &fields,
-                       Future f, const Predicate &pred);
       void fill_fields(Context ctx, const FillLauncher &launcher);
-    public:
-      PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
-                                 LogicalRegion handle, LogicalRegion parent,
-                                 const std::map<FieldID,const char*> field_map,
-                                 LegionFileMode);
-      void detach_hdf5(Context ctx, PhysicalRegion region);
-      PhysicalRegion attach_file(Context ctx, const char *file_name,
-                                 LogicalRegion handle, LogicalRegion parent,
-                                 const std::vector<FieldID> field_vec,
-                                 LegionFileMode);
-      void detach_file(Context ctx, PhysicalRegion region);
-    public:
+      void fill_fields(Context ctx, const IndexFillLauncher &launcher);
+      PhysicalRegion attach_external_resource(Context ctx,
+                                              const AttachLauncher &launcher);
+      void detach_external_resource(Context ctx, PhysicalRegion region);
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
+      void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:
       Predicate create_predicate(Context ctx, const Future &f);
       Predicate predicate_not(Context ctx, const Predicate &p);
@@ -1848,16 +1809,14 @@ namespace Legion {
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
+      Future issue_timing_measurement(Context ctx,
+                                      const TimingLauncher &launcher);
     public:
       Future select_tunable_value(Context ctx, TunableID tid,
                                   MapperID mid, MappingTagID tag);
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mid, MappingTagID tag);
       void perform_tunable_selection(const SelectTunableArgs *args);
-    public:
-      Future get_current_time(Context ctx, const Future &precondition);
-      Future get_current_time_in_microseconds(Context ctx, const Future &pre);
-      Future get_current_time_in_nanoseconds(Context ctx, const Future &pre);
     public:
       Mapper* get_mapper(Context ctx, MapperID id, Processor target);
       Processor get_executing_processor(Context ctx);
@@ -2038,6 +1997,7 @@ namespace Legion {
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
+      void send_phi_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
@@ -2187,6 +2147,7 @@ namespace Legion {
       void handle_send_composite_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
+      void handle_send_phi_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
@@ -2327,11 +2288,7 @@ namespace Legion {
       void activate_context(InnerContext *context);
       void deactivate_context(InnerContext *context);
     public:
-      void remap_unmapped_regions(Processor proc, Context ctx,
-            const std::vector<PhysicalRegion> &unmapped_regions);
-      void execute_task_launch(Context ctx, TaskOp *task_op, 
-                               bool index, bool silence_warnings);
-      void add_to_dependence_queue(Processor p, Operation *op);
+      void add_to_dependence_queue(TaskContext *ctx, Processor p,Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
       void add_to_local_queue(Processor p, Operation *op);
@@ -2418,6 +2375,10 @@ namespace Legion {
                                                   bool has_lock = false);
       CopyOp*               get_available_copy_op(bool need_cont,
                                                   bool has_lock = false);
+      IndexCopyOp*          get_available_index_copy_op(bool need_cont,
+                                                  bool has_lock = false);
+      PointCopyOp*          get_available_point_copy_op(bool need_cont,
+                                                  bool has_lock = false);
       FenceOp*              get_available_fence_op(bool need_cont,
                                                   bool has_lock = false);
       FrameOp*              get_available_frame_op(bool need_cont,
@@ -2462,6 +2423,10 @@ namespace Legion {
                                                   bool has_lock = false);
       FillOp*               get_available_fill_op(bool need_cont,
                                                   bool has_lock = false);
+      IndexFillOp*          get_available_index_fill_op(bool need_cont,
+                                                  bool has_lock = false);
+      PointFillOp*          get_available_point_fill_op(bool need_cont,
+                                                  bool has_lock = false);
       AttachOp*             get_available_attach_op(bool need_cont,
                                                   bool has_lock = false);
       DetachOp*             get_available_detach_op(bool need_cont,
@@ -2475,6 +2440,8 @@ namespace Legion {
       void free_slice_task(SliceTask *task);
       void free_map_op(MapOp *op);
       void free_copy_op(CopyOp *op);
+      void free_index_copy_op(IndexCopyOp *op);
+      void free_point_copy_op(PointCopyOp *op);
       void free_fence_op(FenceOp *op);
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
@@ -2497,6 +2464,8 @@ namespace Legion {
       void free_pending_partition_op(PendingPartitionOp *op);
       void free_dependent_partition_op(DependentPartitionOp* op);
       void free_fill_op(FillOp *op);
+      void free_index_fill_op(IndexFillOp *op);
+      void free_point_fill_op(PointFillOp *op);
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
@@ -2763,6 +2732,8 @@ namespace Legion {
       std::deque<SliceTask*>            available_slice_tasks;
       std::deque<MapOp*>                available_map_ops;
       std::deque<CopyOp*>               available_copy_ops;
+      std::deque<IndexCopyOp*>          available_index_copy_ops;
+      std::deque<PointCopyOp*>          available_point_copy_ops;
       std::deque<FenceOp*>              available_fence_ops;
       std::deque<FrameOp*>              available_frame_ops;
       std::deque<DeletionOp*>           available_deletion_ops;
@@ -2785,6 +2756,8 @@ namespace Legion {
       std::deque<PendingPartitionOp*>   available_pending_partition_ops;
       std::deque<DependentPartitionOp*> available_dependent_partition_ops;
       std::deque<FillOp*>               available_fill_ops;
+      std::deque<IndexFillOp*>          available_index_fill_ops;
+      std::deque<PointFillOp*>          available_point_fill_ops;
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
@@ -2920,6 +2893,10 @@ namespace Legion {
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);
       static inline ApEvent merge_events(const std::set<ApEvent> &events);
     public:
+      static inline ApEvent ignore_faults(ApEvent event);
+      static inline ApEvent merge_events_ignore_faults(
+                                         const std::set<ApEvent> &events);
+    public:
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
       static inline RtEvent merge_events(const std::set<RtEvent> &events);
@@ -2927,9 +2904,11 @@ namespace Legion {
       static inline ApUserEvent create_ap_user_event(void);
       static inline void trigger_event(ApUserEvent to_trigger,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
+      static inline void poison_event(ApUserEvent to_poison);
       static inline RtUserEvent create_rt_user_event(void);
       static inline void trigger_event(RtUserEvent to_trigger,
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
+      static inline void poison_event(RtUserEvent to_poison);
     public:
       static inline RtEvent protect_event(ApEvent to_protect);
       static inline RtEvent protect_merge_events(
@@ -3210,6 +3189,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::ignore_faults(ApEvent event)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent result(Realm::Event::ignorefaults(event));
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::merge_events_ignore_faults(
+                                                const std::set<ApEvent> &events)
+    //--------------------------------------------------------------------------
+    {
+      const std::set<Realm::Event> *realm_events = 
+        reinterpret_cast<const std::set<Realm::Event>*>(&events);
+      ApEvent result(Realm::Event::merge_events_ignorefaults(*realm_events));
+#ifdef LEGION_SPY
+      if (!result.exists() || (events.find(result) != events.end()))
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        if (events.find(result) != events.end())
+          rename.trigger(result);
+        else
+          rename.trigger();
+        result = ApEvent(rename);
+      }
+      for (std::set<ApEvent>::const_iterator it = events.begin();
+            it != events.end(); it++)
+        LegionSpy::log_event_dependence(*it, result);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ inline RtEvent Runtime::merge_events(RtEvent e1, RtEvent e2)
     //--------------------------------------------------------------------------
     {
@@ -3271,6 +3291,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::poison_event(ApUserEvent to_poison)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_poison;
+      copy.cancel();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ inline RtUserEvent Runtime::create_rt_user_event(void)
     //--------------------------------------------------------------------------
     {
@@ -3293,6 +3321,14 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_rt_user_event_trigger(to_trigger);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::poison_event(RtUserEvent to_poison)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_poison;
+      copy.cancel();
     }
 
     //--------------------------------------------------------------------------

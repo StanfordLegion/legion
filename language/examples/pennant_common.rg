@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -184,6 +184,7 @@ local config_fields_cmd = terralib.newlist({
   {field = "print_ts", type = bool, default_value = false},
   {field = "enable", type = bool, default_value = true},
   {field = "warmup", type = bool, default_value = false},
+  {field = "prune", type = int64, default_value = 0},
   {field = "compact", type = bool, default_value = true},
   {field = "internal", type = bool, default_value = true},
   {field = "interior", type = bool, default_value = true},
@@ -552,6 +553,11 @@ terra read_config()
   var warmup = get_optional_arg("-warmup")
   if warmup ~= nil then
     conf.warmup = [bool](c.atoll(warmup))
+  end
+
+  var prune = get_optional_arg("-prune")
+  if prune ~= nil then
+    conf.prune = c.atoll(prune)
   end
 
   var compact = get_optional_arg("-compact")
