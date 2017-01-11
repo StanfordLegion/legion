@@ -3903,7 +3903,7 @@ namespace Legion {
         runtime->decrement_total_outstanding_tasks(
             MisspeculationTaskArgs::TASK_ID, true/*meta*/);
 #else
-        runtime-decrement_total_outstanding_tasks();
+        runtime->decrement_total_outstanding_tasks();
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
         __sync_fetch_and_add(
