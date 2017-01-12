@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -821,6 +821,14 @@ function check_vectorizability.expr(cx, node)
       if std.is_region(value_type) and not value_type:is_opaque() then
         cx:report_error_when_demanded(node, error_prefix ..
           "a scattered read from a structured region")
+        return false
+      -- TODO: This should be supported
+      elseif std.is_region(value_type) and value_type:is_opaque() and
+             not data.all(unpack(std.as_read(node.index.expr_type):bounds():map(function(ty)
+                   return std.type_eq(ty, value_type) end)))
+      then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "a scattered read from a different region")
         return false
       elseif value_type:isarray() then
         cx:report_error_when_demanded(node,

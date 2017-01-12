@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1485,7 +1485,7 @@ namespace LegionRuntime {
     }
 
     template <int DIM>
-    void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets) const
+    void *AccessorType::Generic::Untyped::raw_rect_ptr(const Arrays::Rect<DIM>& r, Arrays::Rect<DIM>& subrect, ByteOffset *offsets) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
       MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
@@ -1495,8 +1495,8 @@ namespace LegionRuntime {
 
       Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
-      Point<1> strides[DIM];
-      coord_t index = mapping->image_linear_subrect(r, subrect, strides);
+      Arrays::Point<1> strides[DIM];
+      Arrays::coord_t index = mapping->image_linear_subrect(r, subrect, strides);
 
       off_t offset = impl->metadata.alloc_offset;
       off_t elmt_stride;
@@ -1531,19 +1531,19 @@ namespace LegionRuntime {
     void *AccessorType::Generic::Untyped::raw_rect_ptr(ByteOffset *offsets) const
     {
       // caller didn't give us a rectangle, so ask for something really big...
-      Point<DIM> lo = Point<DIM>::ZEROES();
-      Point<DIM> hi;
+      Arrays::Point<DIM> lo = Arrays::Point<DIM>::ZEROES();
+      Arrays::Point<DIM> hi;
       for(unsigned i = 0; i < DIM; i++)
 	hi.x[i] = INT_MAX;
-      Rect<DIM> r(lo, hi);
-      Rect<DIM> subrect;
+      Arrays::Rect<DIM> r(lo, hi);
+      Arrays::Rect<DIM> subrect;
       void *ptr = raw_rect_ptr<DIM>(r, subrect, offsets);
       assert(r == subrect);
       return ptr;
     }
 
     template <int DIM>
-    void *AccessorType::Generic::Untyped::raw_rect_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset *offsets,
+    void *AccessorType::Generic::Untyped::raw_rect_ptr(const Arrays::Rect<DIM>& r, Arrays::Rect<DIM>& subrect, ByteOffset *offsets,
 						       const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
     {
       if(field_offsets.size() < 1)
@@ -1557,7 +1557,7 @@ namespace LegionRuntime {
 
       Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
-      Point<1> strides[DIM];
+      Arrays::Point<1> strides[DIM];
       int index = mapping->image_linear_subrect(r, subrect, strides);
 
       off_t offset = impl->metadata.alloc_offset;
@@ -1629,7 +1629,7 @@ namespace LegionRuntime {
     }
 
     template <int DIM>
-    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride) const
+    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Arrays::Rect<DIM>& r, Arrays::Rect<DIM>& subrect, ByteOffset &elem_stride) const
     {
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
       MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
@@ -1639,7 +1639,7 @@ namespace LegionRuntime {
 
       Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
 
-      Rect<1> ir = mapping->image_dense_subrect(r, subrect);
+      Arrays::Rect<1> ir = mapping->image_dense_subrect(r, subrect);
       int index = ir.lo;
 
       off_t offset = impl->metadata.alloc_offset;
@@ -1671,7 +1671,7 @@ namespace LegionRuntime {
     }
 
     template <int DIM>
-    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Rect<DIM>& r, Rect<DIM>& subrect, ByteOffset &elem_stride,
+    void *AccessorType::Generic::Untyped::raw_dense_ptr(const Arrays::Rect<DIM>& r, Arrays::Rect<DIM>& subrect, ByteOffset &elem_stride,
 							const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
     {
       if(field_offsets.size() < 1)
@@ -1756,12 +1756,12 @@ namespace LegionRuntime {
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(ByteOffset *offset) const;
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(ByteOffset *offset) const;
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(ByteOffset *offset) const;
-    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset *offset) const;
-    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset *offset) const;
-    template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset *offset) const;
-    template void *AccessorType::Generic::Untyped::raw_dense_ptr<1>(const Rect<1>& r, Rect<1>& subrect, ByteOffset &elem_stride) const;
-    template void *AccessorType::Generic::Untyped::raw_dense_ptr<2>(const Rect<2>& r, Rect<2>& subrect, ByteOffset &elem_stride) const;
-    template void *AccessorType::Generic::Untyped::raw_dense_ptr<3>(const Rect<3>& r, Rect<3>& subrect, ByteOffset &elem_stride) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(const Arrays::Rect<1>& r, Arrays::Rect<1>& subrect, ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<2>(const Arrays::Rect<2>& r, Arrays::Rect<2>& subrect, ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_rect_ptr<3>(const Arrays::Rect<3>& r, Arrays::Rect<3>& subrect, ByteOffset *offset) const;
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<1>(const Arrays::Rect<1>& r, Arrays::Rect<1>& subrect, ByteOffset &elem_stride) const;
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<2>(const Arrays::Rect<2>& r, Arrays::Rect<2>& subrect, ByteOffset &elem_stride) const;
+    template void *AccessorType::Generic::Untyped::raw_dense_ptr<3>(const Arrays::Rect<3>& r, Arrays::Rect<3>& subrect, ByteOffset &elem_stride) const;
 
     void AccessorType::Generic::Untyped::report_fault(ptr_t ptr, size_t bytes, off_t offset /*= 0*/) const
     {

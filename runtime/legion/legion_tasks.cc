@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -696,6 +696,8 @@ namespace Legion {
       children_commit = false;
       stealable = false;
       map_locally = false;
+      true_guard = PredEvent::NO_PRED_EVENT;
+      false_guard = PredEvent::NO_PRED_EVENT;
       local_cached = false;
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
@@ -775,6 +777,8 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
+      rez.serialize(true_guard);
+      rez.serialize(false_guard);
       rez.serialize(early_mapped_regions.size());
       for (std::map<unsigned,InstanceSet>::iterator it = 
             early_mapped_regions.begin(); it != 
@@ -809,6 +813,8 @@ namespace Legion {
           derez.deserialize(atomic_locks[lock]);
         }
       }
+      derez.deserialize(true_guard);
+      derez.deserialize(false_guard);
       size_t num_early;
       derez.deserialize(num_early);
       for (unsigned idx = 0; idx < num_early; idx++)
@@ -1023,27 +1029,53 @@ namespace Legion {
       }
       if (task_commit)
         trigger_task_commit();
-    }
+    } 
 
     //--------------------------------------------------------------------------
-    void TaskOp::resolve_true(bool misspeculated)
+    bool TaskOp::query_speculate(bool &value, bool &mapping_only)
     //--------------------------------------------------------------------------
     {
-      // Tasks always go on the task ready queue
-      enqueue_ready_task();
-    }
-
-    //--------------------------------------------------------------------------
-    bool TaskOp::speculate(bool &value)
-    //--------------------------------------------------------------------------
-    {
-      Mapper::SpeculativeOutput output;
       if (mapper == NULL)  
         mapper = runtime->find_mapper(current_proc, map_id);
+      Mapper::SpeculativeOutput output;
+      output.speculate = false;
+      output.speculate_mapping_only = true;
       mapper->invoke_task_speculate(this, &output);
       if (output.speculate)
+      {
         value = output.speculative_value;
+        mapping_only = output.speculate_mapping_only;
+        if (!mapping_only)
+        {
+          log_task.error("Mapper requested execution speculation for task %s "
+                         "(UID %lld). Full execution speculation is a planned "
+                         "feature but is not currently supported.",
+                         get_task_name(), get_unique_id());
+          assert(false);
+        }
+#ifdef DEBUG_LEGION
+        assert(!true_guard.exists());
+        assert(!false_guard.exists());
+#endif
+        predicate->get_predicate_guards(true_guard, false_guard);
+        // Switch any write-discard privileges back to read-write
+        // so we can make sure we get the right data if we end up
+        // predicating false
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          RegionRequirement &req = regions[idx];
+          if (IS_WRITE_ONLY(req))
+            req.privilege = READ_WRITE;
+        }
+      }
       return output.speculate;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::resolve_true(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------
@@ -1722,7 +1754,6 @@ namespace Legion {
       this->stealable = can_steal;
       this->speculated = rhs->speculated;
       this->parent_task = rhs->parent_task;
-      // Premapping should never get cloned
       this->map_locally = rhs->map_locally;
       // From TaskOp
       this->atomic_locks = rhs->atomic_locks;
@@ -1730,6 +1761,8 @@ namespace Legion {
       this->parent_req_indexes = rhs->parent_req_indexes;
       this->current_proc = rhs->current_proc;
       this->target_proc = p;
+      this->true_guard = rhs->true_guard;
+      this->false_guard = rhs->false_guard;
     }
 
     //--------------------------------------------------------------------------
@@ -2348,14 +2381,6 @@ namespace Legion {
         no_access_regions[idx] = IS_NO_ACCESS(regions[idx]) || 
                                   regions[idx].privilege_fields.empty();
     } 
-
-    //--------------------------------------------------------------------------
-    void SingleTask::restart_task(void)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: figure out how to restart tasks
-      assert(false);
-    }
 
     //--------------------------------------------------------------------------
     void SingleTask::pack_single_task(Serializer &rez, AddressSpaceID target)
@@ -3840,7 +3865,8 @@ namespace Legion {
       }
 #endif
       ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
-         execution_context, start_condition, task_priority, profiling_requests);
+                                 execution_context, start_condition, true_guard, 
+                                 task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
         Runtime::trigger_event(chain_complete_event, task_launch_event);
@@ -3853,6 +3879,29 @@ namespace Legion {
         {
           Runtime::release_reservation(it->first, term_event);
         }
+      }
+      // Finally if this is a predicated task and we have a speculative
+      // guard then we need to launch a meta task to handle the case
+      // where the task misspeculates
+      if (false_guard.exists())
+      {
+        MisspeculationTaskArgs args;
+        args.task = this;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+                                         this, RtEvent(false_guard));
+        // Fun little trick here: decrement the outstanding meta-task
+        // counts for the mis-speculation task in case it doesn't run
+        // If it does run, we'll increment the counts again
+#ifdef DEBUG_LEGION
+        runtime->decrement_total_outstanding_tasks(
+            MisspeculationTaskArgs::TASK_ID, true/*meta*/);
+#else
+        runtime->decrement_total_outstanding_tasks();
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+        __sync_fetch_and_add(
+            &runtime->outstanding_counts[MisspeculationTaskArgs::TASK_ID],-1);
+#endif
       }
     }
 
@@ -3944,6 +3993,8 @@ namespace Legion {
       reduction_state = NULL;
       children_complete_invoked = false;
       children_commit_invoked = false;
+      predicate_false_result = NULL;
+      predicate_false_size = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -3966,6 +4017,14 @@ namespace Legion {
       version_infos.clear();
       restrict_infos.clear();
       projection_infos.clear();
+      if (predicate_false_result != NULL)
+      {
+        legion_free(PREDICATE_ALLOC, predicate_false_result, 
+                    predicate_false_size);
+        predicate_false_result = NULL;
+        predicate_false_size = 0;
+      }
+      predicate_false_future = Future();
     }
 
     //--------------------------------------------------------------------------
@@ -4026,50 +4085,11 @@ namespace Legion {
         // Check to make sure the domain is not empty
         const Domain &d = slice.domain;
         bool empty = false;
-        switch (d.dim)
-        {
-          case 0:
-            {
-              size_t volume = d.get_volume();
-              if (volume == 0)
-                empty = true;
-              else
-                total_points += volume;
-              break;
-            }
-          case 1:
-            {
-              Rect<1> rec = d.get_rect<1>();
-              size_t volume = rec.volume();
-              if (volume == 0)
-                empty = true;
-              else
-                total_points += volume;
-              break;
-            }
-          case 2:
-            {
-              Rect<2> rec = d.get_rect<2>();
-              size_t volume = rec.volume();
-              if (volume == 0)
-                empty = true;
-              else
-                total_points += volume;
-              break;
-            }
-          case 3:
-            {
-              Rect<3> rec = d.get_rect<3>();
-              size_t volume = rec.volume();
-              if (volume == 0)
-                empty = true;
-              else
-                total_points += volume;
-              break;
-            }
-          default:
-            assert(false);
-        }
+	size_t volume = d.get_volume();
+	if (volume == 0)
+	  empty = true;
+	else
+	  total_points += volume;
         if (empty)
         {
           log_run.error("Invalid mapper output from invocation of 'slice_task' "
@@ -4141,6 +4161,17 @@ namespace Legion {
       }
       this->restrict_infos = rhs->restrict_infos;
       this->projection_infos = rhs->projection_infos;
+      this->predicate_false_future = rhs->predicate_false_future;
+      this->predicate_false_size = rhs->predicate_false_size;
+      if (this->predicate_false_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(this->predicate_false_result == NULL);
+#endif
+        this->predicate_false_result = malloc(this->predicate_false_size);
+        memcpy(this->predicate_false_result, rhs->predicate_false_result,
+               this->predicate_false_size);
+      }
       // Copy over the version infos that we need, we can skip this if
       // we are remote and locally mapped
       if (!is_remote() || !is_locally_mapped())
@@ -4569,49 +4600,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future IndividualTask::initialize_task(TaskContext *ctx,
-              Processor::TaskFuncID tid,
-              const std::vector<IndexSpaceRequirement> &index_requirements,
-              const std::vector<RegionRequirement> &region_requirements,
-              const TaskArgument &arg,
-              const Predicate &pred,
-              MapperID mid, MappingTagID t,
-              bool check_privileges, bool track /*=true*/)
-    //--------------------------------------------------------------------------
-    {
-      parent_ctx = ctx;
-      task_id = tid;
-      indexes = index_requirements;
-      regions = region_requirements;
-      arglen = arg.get_size();
-      if (arglen > 0)
-      {
-        args = legion_malloc(TASK_ARGS_ALLOC, arglen);
-        memcpy(args,arg.get_ptr(),arglen);
-      }
-      map_id = mid;
-      tag = t;
-      is_index_space = false;
-      initialize_base_task(ctx, track, pred, task_id);
-      remote_owner_uid = ctx->get_unique_id();
-      if (check_privileges)
-        perform_privilege_checks();
-      result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
-            runtime->get_available_distributed_id(!top_level_task), 
-            runtime->address_space, runtime->address_space, this));
-      check_empty_field_requirements();
-      if (Runtime::legion_spy_enabled)
-      {
-        LegionSpy::log_individual_task(parent_ctx->get_unique_id(),
-                                       unique_op_id,
-                                       task_id, get_task_name());
-        LegionSpy::log_future_creation(unique_op_id, 
-              result.impl->get_ready_event(), index_point);
-      }
-      return result;
-    }  
-
-    //--------------------------------------------------------------------------
     void IndividualTask::set_top_level(void)
     //--------------------------------------------------------------------------
     {
@@ -4677,6 +4665,17 @@ namespace Legion {
         if (it->impl->producer_op != NULL)
           LegionSpy::log_mapping_dependence(
               parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
+              get_unique_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
+      if (predicate_false_future.impl != NULL)
+      {
+        predicate_false_future.impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (predicate_false_future.impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_id(), 
+              predicate_false_future.impl->producer_uid, 0,
               get_unique_id(), 0, TRUE_DEPENDENCE);
 #endif
       }
@@ -4750,13 +4749,13 @@ namespace Legion {
                                                          unsigned idx2)
     //--------------------------------------------------------------------------
     {
-#if 0
-      log_run.error("Aliased region requirements for individual tasks "
-                          "are not permitted. Region requirements %d and %d "
-                          "of task %s (UID %lld) in parent task %s (UID %lld) "
-                          "are interfering.", idx1, idx2, get_task_name(),
-                          get_unique_id(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id());
+#if 1
+      log_run.error("Aliased and interfering region requirements for "
+                    "individual tasks are not permitted. Region requirements "
+                    "%d and %d of task %s (UID %lld) in parent task %s "
+                    "(UID %lld) are interfering.", idx1, idx2, get_task_name(),
+                    get_unique_id(), parent_ctx->get_task_name(),
+                    parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
 #endif
@@ -4788,11 +4787,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::resolve_false(bool misspeculated)
+    void IndividualTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      bool trigger = true;
+      // If we already launched, then return, otherwise continue
+      // through and do the work to clean up the task 
+      if (launched)
+        return;
       // Set the future to the false result
+      RtEvent execution_condition;
       if (predicate_false_future.impl != NULL)
       {
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
@@ -4814,9 +4817,9 @@ namespace Legion {
           args.target = result.impl;
           args.result = predicate_false_future.impl;
           args.task_op = this;
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
-                                           Runtime::protect_event(wait_on));
-          trigger = false;
+          execution_condition = 
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
+                                             Runtime::protect_event(wait_on));
         }
       }
       else
@@ -4826,25 +4829,9 @@ namespace Legion {
                                   predicate_false_size, false/*own*/);
       }
       // Then clean up this task instance
-      if (trigger)
-        complete_execution();
-      // "mapping" does not change the physical state
-      if (misspeculated)
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          // We don't mutate anything here so no need to do anything
-          if (IS_NO_ACCESS(regions[idx]) || IS_READ_ONLY(regions[idx]))
-            continue;
-          VersionInfo &version_info = version_infos[idx];
-          version_info.apply_mapping(map_applied_conditions,
-                                     true /*copy through*/);
-        }   
-      }
-      if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
+      complete_mapping();
+      complete_execution(execution_condition);
+      resolve_speculation();
       trigger_children_complete();
     }
 
@@ -5091,7 +5078,7 @@ namespace Legion {
       // See if we need to trigger that our children are complete
       // Note it is only safe to do this if we were not sent remotely
       bool need_commit = false;
-      if (!sent_remotely)
+      if (!sent_remotely && (execution_context != NULL))
         need_commit = execution_context->attempt_children_commit();
       if (must_epoch != NULL)
         must_epoch->notify_subop_complete(this);
@@ -5200,6 +5187,38 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void IndividualTask::handle_misspeculation(void)
+    //--------------------------------------------------------------------------
+    {
+      // First thing: increment the meta-task counts since we decremented
+      // them in case we didn't end up running
+#ifdef DEBUG_LEGION
+      runtime->increment_total_outstanding_tasks(
+          MisspeculationTaskArgs::TASK_ID, true/*meta*/);
+#else
+      runtime->increment_total_outstanding_tasks();
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(
+            &runtime->outstanding_counts[MisspeculationTaskArgs::TASK_ID],1);
+#endif
+      // Pretend like we executed the task
+      execution_context->begin_task();
+      if (predicate_false_future.impl != NULL)
+      {
+        // Wait for the future to be ready
+        ApEvent wait_on = predicate_false_future.impl->get_ready_event();
+        wait_on.wait();
+        void *ptr = predicate_false_future.impl->get_untyped_result(true);
+        size_t size = predicate_false_future.impl->get_untyped_size();
+        execution_context->end_task(ptr, size, false/*owned*/); 
+      }
+      else
+        execution_context->end_task(predicate_false_result,
+                                    predicate_false_size, false/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::record_reference_mutation_effect(RtEvent event)
     //--------------------------------------------------------------------------
     {
@@ -5239,6 +5258,13 @@ namespace Legion {
       else
         pack_version_infos(rez, version_infos, virtual_mapped);
       pack_restrict_infos(rez, restrict_infos);
+      if (predicate_false_future.impl != NULL)
+        rez.serialize(predicate_false_future.impl->did);
+      else
+        rez.serialize<DistributedID>(0);
+      rez.serialize(predicate_false_size);
+      if (predicate_false_size > 0)
+        rez.serialize(predicate_false_result, predicate_false_size);
       // Mark that we sent this task remotely
       sent_remotely = true;
       // If this task is remote, then deactivate it, otherwise
@@ -5277,6 +5303,24 @@ namespace Legion {
         runtime->add_to_ready_queue(current_proc, orig_task);
         deactivate();
         return false;
+      }
+      // Unpack the predicate false infos
+      DistributedID pred_false_did;
+      derez.deserialize(pred_false_did);
+      if (pred_false_did != 0)
+      {
+        WrapperReferenceMutator mutator(ready_events);
+        predicate_false_future = Future( 
+          runtime->find_or_create_future(pred_false_did, &mutator));
+      }
+      derez.deserialize(predicate_false_size);
+      if (predicate_false_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(predicate_false_result == NULL);
+#endif
+        predicate_false_result = malloc(predicate_false_size);
+        derez.deserialize(predicate_false_result, predicate_false_size);
       }
       // Figure out what our parent context is
       parent_ctx = runtime->find_context(remote_owner_uid);
@@ -5509,6 +5553,7 @@ namespace Legion {
       // Point tasks never have to resolve speculation
       resolve_speculation();
       slice_owner = NULL;
+      point_termination = ApUserEvent::NO_AP_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -5688,7 +5733,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::resolve_false(bool misspeculated)
+    void PointTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6043,6 +6088,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::handle_misspeculation(void)
+    //--------------------------------------------------------------------------
+    {
+      // First thing: increment the meta-task counts since we decremented
+      // them in case we didn't end up running
+#ifdef DEBUG_LEGION
+      runtime->increment_total_outstanding_tasks(
+          MisspeculationTaskArgs::TASK_ID, true/*meta*/);
+#else
+      runtime->increment_total_outstanding_tasks();
+#endif
+#ifdef DEBUG_SHUTDOWN_HANG
+      __sync_fetch_and_add(
+            &runtime->outstanding_counts[MisspeculationTaskArgs::TASK_ID],1);
+#endif
+      // Pretend like we executed the task
+      execution_context->begin_task();
+      size_t result_size;
+      const void *result = slice_owner->get_predicate_false_result(result_size);
+      execution_context->end_task(result, result_size, false/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::record_reference_mutation_effect(RtEvent event)
     //--------------------------------------------------------------------------
     {
@@ -6121,9 +6189,7 @@ namespace Legion {
       complete_points = 0;
       committed_points = 0;
       complete_received = false;
-      commit_received = false; 
-      predicate_false_result = NULL;
-      predicate_false_size = 0;
+      commit_received = false;
       need_intra_task_alias_analysis = true;
     }
 
@@ -6145,22 +6211,13 @@ namespace Legion {
         locally_mapped_slices.clear();
       } 
       // Remove our reference to the future map
-      future_map = FutureMap();
-      if (predicate_false_result != NULL)
-      {
-        legion_free(PREDICATE_ALLOC, predicate_false_result, 
-                    predicate_false_size);
-        predicate_false_result = NULL;
-        predicate_false_size = 0;
-      }
-      predicate_false_future = Future();
+      future_map = FutureMap(); 
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
       restrict_postconditions.clear();
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
-      point_requirements.clear();
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
@@ -6169,7 +6226,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap IndexTask::initialize_task(TaskContext *ctx,
-                                         const IndexLauncher &launcher,
+                                         const IndexTaskLauncher &launcher,
                                          bool check_privileges,
                                          bool track /*= true*/)
     //--------------------------------------------------------------------------
@@ -6229,7 +6286,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future IndexTask::initialize_task(TaskContext *ctx,
-                                      const IndexLauncher &launcher,
+                                      const IndexTaskLauncher &launcher,
                                       ReductionOpID redop_id, 
                                       bool check_privileges,
                                       bool track /*= true*/)
@@ -6305,126 +6362,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap IndexTask::initialize_task(TaskContext *ctx,
-            Processor::TaskFuncID tid,
-            const Domain &domain,
-            const std::vector<IndexSpaceRequirement> &index_requirements,
-            const std::vector<RegionRequirement> &region_requirements,
-            const TaskArgument &global_arg,
-            const ArgumentMap &arg_map,
-            const Predicate &pred,
-            bool must,
-            MapperID mid, MappingTagID t,
-            bool check_privileges)
-    //--------------------------------------------------------------------------
-    {
-      parent_ctx = ctx;
-      task_id = tid;
-      indexes = index_requirements;
-      regions = region_requirements;
-      arglen = global_arg.get_size();
-      if (arglen > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(arg_manager == NULL);
-#endif
-        arg_manager = legion_new<AllocManager>(arglen);
-        arg_manager->add_reference();
-        args = arg_manager->get_allocation();
-        memcpy(args, global_arg.get_ptr(), arglen);
-      }
-      argument_map = ArgumentMap(arg_map.impl->freeze());
-      map_id = mid;
-      tag = t;
-      is_index_space = true;
-      index_domain = domain;
-      internal_domain = domain;
-      initialize_base_task(ctx, true/*track*/, pred, task_id);
-      future_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime));
-#ifdef DEBUG_LEGION
-      future_map.impl->add_valid_domain(index_domain);
-#endif
-      check_empty_field_requirements();
-      if (check_privileges)
-        perform_privilege_checks();
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_index_task(parent_ctx->get_unique_id(),
-                                  unique_op_id, task_id,
-                                  get_task_name());
-      return future_map;
-    }
-    
-    //--------------------------------------------------------------------------
-    Future IndexTask::initialize_task(TaskContext *ctx,
-            Processor::TaskFuncID tid,
-            const Domain &domain,
-            const std::vector<IndexSpaceRequirement> &index_requirements,
-            const std::vector<RegionRequirement> &region_requirements,
-            const TaskArgument &global_arg,
-            const ArgumentMap &arg_map,
-            ReductionOpID redop_id,
-            const TaskArgument &init_value,
-            const Predicate &pred,
-            bool must,
-            MapperID mid, MappingTagID t,
-            bool check_privileges)
-    //--------------------------------------------------------------------------
-    {
-      parent_ctx = ctx;
-      task_id = tid;
-      indexes = index_requirements;
-      regions = region_requirements;
-      arglen = global_arg.get_size();
-      if (arglen > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(arg_manager == NULL);
-#endif
-        arg_manager = legion_new<AllocManager>(arglen);
-        arg_manager->add_reference();
-        args = arg_manager->get_allocation();
-        memcpy(args, global_arg.get_ptr(), arglen);
-      }
-      argument_map = ArgumentMap(arg_map.impl->freeze());
-      map_id = mid;
-      tag = t;
-      is_index_space = true;
-      index_domain = domain;
-      internal_domain = domain;
-      redop = redop_id;
-      reduction_op = Runtime::get_reduction_op(redop);
-      serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
-      if (!reduction_op->is_foldable)
-      {
-        log_run.error("Reduction operation %d for index task launch %s "
-                      "(ID %lld) is not foldable.",
-                      redop, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_UNFOLDABLE_REDUCTION_OP);
-      }
-      else
-        initialize_reduction_state();
-      initialize_base_task(ctx, true/*track*/, pred, task_id);
-      reduction_future = Future(legion_new<FutureImpl>(runtime, 
-            true/*register*/, runtime->get_available_distributed_id(true), 
-            runtime->address_space, runtime->address_space, this));
-      check_empty_field_requirements();
-      if (check_privileges)
-        perform_privilege_checks();
-      if (Runtime::legion_spy_enabled)
-      {
-        LegionSpy::log_index_task(parent_ctx->get_unique_id(),
-                                  unique_op_id, task_id,
-                                  get_task_name());
-        LegionSpy::log_future_creation(unique_op_id, 
-              reduction_future.impl->get_ready_event(), index_point);
-      }
-      return reduction_future;
-    }
-
-    //--------------------------------------------------------------------------
     void IndexTask::initialize_predicate(const Future &pred_future,
                                          const TaskArgument &pred_arg)
     //--------------------------------------------------------------------------
@@ -6447,7 +6384,7 @@ namespace Legion {
                           "false.  Please set either the "
                           "'predicate_false_result' or "
                           "'predicate_false_future' fields of the "
-                          "IndexLauncher struct.",
+                          "IndexTaskLauncher struct.",
                           get_task_name(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
@@ -6530,21 +6467,21 @@ namespace Legion {
         {
           case 1:
             {
-              Rect<1> rect = index_domain.get_rect<1>();
+	      LegionRuntime::Arrays::Rect<1> rect = index_domain.get_rect<1>();
               LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 2:
             {
-              Rect<2> rect = index_domain.get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> rect = index_domain.get_rect<2>();
               LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 3:
             {
-              Rect<3> rect = index_domain.get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> rect = index_domain.get_rect<3>();
               LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
@@ -6583,6 +6520,17 @@ namespace Legion {
         if (it->impl->producer_op != NULL)
           LegionSpy::log_mapping_dependence(
               parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
+              get_unique_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
+      if (predicate_false_future.impl != NULL)
+      {
+        predicate_false_future.impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (predicate_false_future.impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_id(), 
+              predicate_false_future.impl->producer_uid, 0,
               get_unique_id(), 0, TRUE_DEPENDENCE);
 #endif
       }
@@ -6647,10 +6595,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::resolve_false(bool misspeculated)
+    void IndexTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      bool trigger = true;
+      // If we already launched, then we can just return
+      // otherwise continue through to do the cleanup work
+      if (launched)
+        return;
+      RtEvent execution_condition;
       // Fill in the index task map with the default future value
       if (redop == 0)
       {
@@ -6682,9 +6634,9 @@ namespace Legion {
             args.result = predicate_false_future.impl;
             args.domain = index_domain;
             args.task_op = this;
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
-                                             Runtime::protect_event(wait_on));
-            trigger = false;
+            execution_condition = 
+              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
+                                               Runtime::protect_event(wait_on));
           }
         }
         else
@@ -6723,9 +6675,9 @@ namespace Legion {
             args.target = reduction_future.impl;
             args.result = predicate_false_future.impl;
             args.task_op = this;
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
-                                             Runtime::protect_event(wait_on));
-            trigger = false;
+            execution_condition = 
+              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
+                                               Runtime::protect_event(wait_on));
           }
         }
         else
@@ -6736,12 +6688,11 @@ namespace Legion {
         }
       }
       // Then clean up this task execution
-      if (trigger)
-        complete_execution();
-      if (misspeculated)
-        assert(0 && "TODO: advance mapping states if you care");
       complete_mapping();
+      complete_execution(execution_condition);
+      resolve_speculation();
       trigger_children_complete();
+      trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -6880,7 +6831,8 @@ namespace Legion {
       // and then trigger it
       if (redop != 0)
       {
-        if (speculation_state != RESOLVE_FALSE_STATE)
+        // Set the future if we actually ran the task or we speculated
+        if ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists())
           reduction_future.impl->set_result(reduction_state,
                                             reduction_state_size, 
                                             false/*owner*/);
@@ -6897,8 +6849,6 @@ namespace Legion {
         Runtime::trigger_event(completion_event, restrict_done);
       }
       complete_operation();
-      if (speculation_state == RESOLVE_FALSE_STATE)
-        trigger_children_committed();
     }
 
     //--------------------------------------------------------------------------
@@ -7344,9 +7294,17 @@ namespace Legion {
             const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs)
     //--------------------------------------------------------------------------
     {
+      // Handle any region requirements that interfere with itself
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (!IS_WRITE(regions[idx]))
+          continue;
+        interfering_requirements.insert(std::pair<unsigned,unsigned>(idx,idx));
+      }
       // Nothing to do if there are no interfering requirements
       if (interfering_requirements.empty())
         return;
+      std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
       for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator 
             pit = point_reqs.begin(); pit != point_reqs.end(); pit++)
       {
@@ -7358,11 +7316,15 @@ namespace Legion {
               oit != point_requirements.end(); oit++)
         {
           const std::vector<LogicalRegion> &other_reqs = oit->second;
+          const bool same_point = (pit->first == oit->first);
           // Now check for interference with any other points
           for (std::set<std::pair<unsigned,unsigned> >::const_iterator it =
                 interfering_requirements.begin(); it !=
                 interfering_requirements.end(); it++)
           {
+            // Skip same region requireemnt for same point
+            if (same_point && (it->first == it->second))
+              continue;
             if (!runtime->forest->are_disjoint(
                   point_reqs[it->first].get_index_space(), 
                   other_reqs[it->second].get_index_space()))
@@ -7507,7 +7469,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::resolve_false(bool misspeculated)
+    void SliceTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7819,6 +7781,13 @@ namespace Legion {
         pack_projection_infos(rez, projection_infos);
       else
         index_owner->pack_projection_infos(rez, index_owner->projection_infos);
+      if (predicate_false_future.impl != NULL)
+        rez.serialize(predicate_false_future.impl->did);
+      else
+        rez.serialize<DistributedID>(0);
+      rez.serialize(predicate_false_size);
+      if (predicate_false_size > 0)
+        rez.serialize(predicate_false_result, predicate_false_size);
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         points[idx]->pack_task(rez, target);
@@ -7897,6 +7866,24 @@ namespace Legion {
         parent_ctx = runtime->find_context(remote_owner_uid);
       else
         parent_ctx = index_owner->parent_ctx;
+      // Unpack the predicate false infos
+      DistributedID pred_false_did;
+      derez.deserialize(pred_false_did);
+      if (pred_false_did != 0)
+      {
+        WrapperReferenceMutator mutator(ready_events);
+        predicate_false_future = Future( 
+          runtime->find_or_create_future(pred_false_did, &mutator));
+      }
+      derez.deserialize(predicate_false_size);
+      if (predicate_false_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(predicate_false_result == NULL);
+#endif
+        predicate_false_result = malloc(predicate_false_size);
+        derez.deserialize(predicate_false_result, predicate_false_size);
+      }
       for (unsigned idx = 0; idx < num_points; idx++)
       {
         PointTask *point = runtime->get_available_point_task(false); 
@@ -8095,6 +8082,25 @@ namespace Legion {
             runtime->find_projection_function(regions[idx].projection);
           function->project_points(this, idx, runtime, minimal_points);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    const void* SliceTask::get_predicate_false_result(size_t &result_size)
+    //--------------------------------------------------------------------------
+    {
+      if (predicate_false_future.impl != NULL)
+      {
+        // Wait for the future to be ready
+        ApEvent wait_on = predicate_false_future.impl->get_ready_event();
+        wait_on.wait(); 
+        result_size = predicate_false_future.impl->get_untyped_size();
+        return predicate_false_future.impl->get_untyped_result(true);
+      }
+      else
+      {
+        result_size = predicate_false_size;
+        return predicate_false_result;
       }
     }
 

@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 #define __LEGION_OPERATIONS_H__
 
 #include "legion.h"
+#include "runtime.h"
 #include "region_tree.h"
 #include "legion_mapping.h"
 #include "legion_utilities.h"
@@ -218,6 +219,7 @@ namespace Legion {
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
+      inline unsigned get_ctx_index(void) const { return context_index; }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -252,8 +254,11 @@ namespace Legion {
       // Inherited from ReferenceMutator
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
-      void execute_dependence_analysis(void);
-      RtEvent issue_prepipeline_stage(void);
+      // This is a virtual method because SpeculativeOp overrides
+      // it to check for handling speculation before proceeding
+      // with the analysis
+      virtual void execute_dependence_analysis(void);
+      RtEvent issue_prepipeline_stage(void); 
     public:
       // The following calls may be implemented
       // differently depending on the operation, but we
@@ -324,7 +329,7 @@ namespace Legion {
       virtual void record_restrict_postcondition(ApEvent postcondition);
       virtual void add_copy_profiling_request(
                                         Realm::ProfilingRequestSet &reqeusts);
-      // Report a profiling resutl for this operation
+      // Report a profiling result for this operation
       virtual void report_profiling_response(
                                   const Realm::ProfilingResponse &result);
     protected:
@@ -454,6 +459,15 @@ namespace Legion {
           const InstanceSet                         &sources,
           std::vector<unsigned>                     &ranking);
     public:
+      // Perform the versioning analysis for a projection requirement
+      void perform_projection_version_analysis(const ProjectionInfo &proj_info,
+                                      const RegionRequirement &owner_req,
+                                      const RegionRequirement &local_req,
+                                      const unsigned idx,
+                                      const UniqueID logical_context_uid,
+                                      VersionInfo &version_info,
+                                      std::set<RtEvent> &ready_events);
+    public:
       Runtime *const runtime;
     protected:
       Reservation op_lock;
@@ -562,6 +576,9 @@ namespace Legion {
     public:
       bool register_waiter(PredicateWaiter *waiter, 
                            GenerationID gen, bool &value);
+      PredEvent get_true_guard(void);
+      PredEvent get_false_guard(void);
+      void get_predicate_guards(PredEvent &true_guard, PredEvent &false_guard);
     protected:
       void set_resolved_value(GenerationID pred_gen, bool value);
     protected:
@@ -571,6 +588,7 @@ namespace Legion {
     protected:
       RtUserEvent collect_predicate;
       unsigned predicate_references;
+      PredEvent true_guard, false_guard;
     };
 
     /**
@@ -586,7 +604,7 @@ namespace Legion {
     class SpeculativeOp : public Operation, PredicateWaiter {
     public:
       enum SpecState {
-        PENDING_MAP_STATE,
+        PENDING_ANALYSIS_STATE,
         SPECULATE_TRUE_STATE,
         SPECULATE_FALSE_STATE,
         RESOLVE_TRUE_STATE,
@@ -607,23 +625,30 @@ namespace Legion {
       // needs to wait for the value
       bool get_predicate_value(Processor proc);
     public:
-      // Override the mapping call so we can decide whether
-      // to continue mapping this operation or not 
-      // depending on the value of the predicate operation.
-      virtual void trigger_ready(void);
+      // Override the execute dependence analysis call so 
+      // we can decide whether to continue performing the 
+      // dependence analysis here or not
+      virtual void execute_dependence_analysis(void);
       virtual void trigger_resolution(void);
-      virtual void deferred_execute(void);
     public:
       // Call this method for inheriting classes 
-      // to indicate when they should map
-      virtual bool speculate(bool &value) = 0;
-      virtual void resolve_true(bool misspeculated) = 0;
-      virtual void resolve_false(bool misspeculated) = 0;
+      // to determine whether they should speculate 
+      virtual bool query_speculate(bool &value, bool &mapping_only) = 0;
+    public:
+      // Every speculative operation will always get exactly one
+      // call back to one of these methods after the predicate has
+      // resolved. The 'speculated' parameter indicates whether the
+      // operation was speculated by the mapper. The 'launch' parameter
+      // indicates whether the operation has been issued into the 
+      // pipeline for execution yet
+      virtual void resolve_true(bool speculated, bool launched) = 0;
+      virtual void resolve_false(bool speculated, bool launched) = 0;
     public:
       virtual void notify_predicate_value(GenerationID gen, bool value);
     protected:
       SpecState    speculation_state;
       PredicateOp *predicate;
+      bool speculate_mapping_only;
       bool received_trigger_resolution;
     protected:
       RtUserEvent predicate_waiter; // used only when needed
@@ -656,10 +681,6 @@ namespace Legion {
     public:
       PhysicalRegion initialize(TaskContext *ctx,
                                 const InlineLauncher &launcher,
-                                bool check_privileges);
-      PhysicalRegion initialize(TaskContext *ctx,
-                                const RegionRequirement &req,
-                                MapperID id, MappingTagID tag,
                                 bool check_privileges);
       void initialize(TaskContext *ctx, const PhysicalRegion &region);
       inline const RegionRequirement& get_requirement(void) const
@@ -743,6 +764,8 @@ namespace Legion {
       void initialize(TaskContext *ctx,
                       const CopyLauncher &launcher,
                       bool check_privileges);
+      void activate_copy(void);
+      void deactivate_copy(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -754,12 +777,15 @@ namespace Legion {
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual void resolve_true(bool misspeculated);
-      virtual void resolve_false(bool misspeculated);
-      virtual bool speculate(bool &value);
+    public:
+      virtual bool query_speculate(bool &value, bool &mapping_only);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
+    public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
@@ -778,7 +804,8 @@ namespace Legion {
       virtual int get_depth(void) const;
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
-                                unsigned idx, bool src);
+                                unsigned idx, bool src,
+                                bool permit_projection = false);
       void compute_parent_indexes(void);
       template<bool IS_SRC>
       int perform_conversion(unsigned idx, const RegionRequirement &req,
@@ -808,10 +835,96 @@ namespace Legion {
       std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> restrict_postconditions;
+    public:
+      PredEvent                   predication_guard;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                     outstanding_profiling_requests;
       RtUserEvent                         profiling_reported;
+    };
+
+    /**
+     * \class IndexCopyOp
+     * An index copy operation is the same as a copy operation
+     * except it is an index space operation for performing
+     * multiple copies with projection functions
+     */
+    class IndexCopyOp : public CopyOp {
+    public:
+      IndexCopyOp(Runtime *rt);
+      IndexCopyOp(const IndexCopyOp &rhs);
+      virtual ~IndexCopyOp(void);
+    public:
+      IndexCopyOp& operator=(const IndexCopyOp &rhs);
+    public:
+      void initialize(TaskContext *ctx,
+                      const IndexCopyLauncher &launcher,
+                      bool check_privileges);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+      virtual void trigger_commit(void);
+      virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+    public:
+      void handle_point_commit(RtEvent point_committed);
+#ifdef DEBUG_LEGION
+      void check_point_requirements(void);
+#endif
+    public:
+      std::vector<ProjectionInfo>   src_projection_infos;
+      std::vector<ProjectionInfo>   dst_projection_infos;
+    protected:
+      Domain                        point_domain;
+      std::vector<PointCopyOp*>     points;
+      unsigned                      points_committed;
+      bool                          commit_request;
+      std::set<RtEvent>             commit_preconditions;
+#ifdef DEBUG_LEGION
+    protected:
+      // For checking aliasing of points in debug mode only
+      std::set<std::pair<unsigned,unsigned> > interfering_requirements;
+#endif
+    };
+
+    /**
+     * \class PointCopyOp
+     * A point copy operation is used for executing the
+     * physical part of the analysis for an index copy
+     * operation.
+     */
+    class PointCopyOp : public CopyOp, public ProjectionPoint {
+    public:
+      PointCopyOp(Runtime *rt);
+      PointCopyOp(const PointCopyOp &rhs);
+      virtual ~PointCopyOp(void);
+    public:
+      PointCopyOp& operator=(const PointCopyOp &rhs);
+    public:
+      void initialize(IndexCopyOp *owner, const DomainPoint &point);
+#ifdef DEBUG_LEGION
+      void check_domination(void) const;
+#endif
+      void launch(const std::set<RtEvent> &preconditions);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      // trigger_mapping same as base class
+      virtual void trigger_commit(void);
+    public:
+      // From ProjectionPoint
+      virtual const DomainPoint& get_domain_point(void) const;
+      virtual void set_projection_result(unsigned idx,LogicalRegion result);
+    protected:
+      DomainPoint               point;
+      IndexCopyOp*              owner;
     };
 
     /**
@@ -1083,6 +1196,7 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
+      virtual Mappable* get_mappable(void);
     public:
       void activate_close(void);
       void deactivate_close(void);
@@ -1350,10 +1464,13 @@ namespace Legion {
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void resolve_true(bool misspeculated);
-      virtual void resolve_false(bool misspeculated);
-      virtual bool speculate(bool &value);
+    public:
+      virtual bool query_speculate(bool &value, bool &mapping_only);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
+    public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
@@ -1419,10 +1536,13 @@ namespace Legion {
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual void resolve_true(bool misspeculated);
-      virtual void resolve_false(bool misspeculated);
-      virtual bool speculate(bool &value);
+    public:
+      virtual bool query_speculate(bool &value, bool &mapping_only);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
+    public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
@@ -2124,7 +2244,7 @@ namespace Legion {
      * Fill operations are used to initialize a field to a
      * specific value for a particular logical region.
      */
-    class FillOp : public SpeculativeOp {
+    class FillOp : public SpeculativeOp, public Fill {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
     public:
@@ -2134,41 +2254,34 @@ namespace Legion {
     public:
       FillOp& operator=(const FillOp &rhs);
     public:
-      void initialize(TaskContext *ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid,
-                      const void *ptr, size_t size,
-                      const Predicate &pred, bool check_privileges);
-      void initialize(TaskContext *ctx, LogicalRegion handle,
-                      LogicalRegion parent, FieldID fid,const Future &f,
-                      const Predicate &pred, bool check_privileges);
-      void initialize(TaskContext *ctx, LogicalRegion handle,
-                      LogicalRegion parent, 
-                      const std::set<FieldID> &fields,
-                      const void *ptr, size_t size,
-                      const Predicate &pred, bool check_privileges);
-      void initialize(TaskContext *ctx, LogicalRegion handle,
-                      LogicalRegion parent, 
-                      const std::set<FieldID> &fields, const Future &f,
-                      const Predicate &pred, bool check_privileges);
       void initialize(TaskContext *ctx, const FillLauncher &launcher,
                       bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
+      void activate_fill(void);
+      void deactivate_fill(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual Mappable* get_mappable(void);
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual int get_depth(void) const;
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
-      virtual void resolve_true(bool misspeculated);
-      virtual void resolve_false(bool misspeculated);
-      virtual bool speculate(bool &value);
+    public:
+      virtual bool query_speculate(bool &value, bool &mapping_only);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
+    public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
       virtual ApEvent get_restrict_precondition(void) const;
@@ -2176,8 +2289,7 @@ namespace Legion {
       void check_fill_privilege(void);
       void compute_parent_index(void);
       ApEvent compute_sync_precondition(void) const;
-    protected:
-      RegionRequirement requirement;
+    public:
       RegionTreePath privilege_path;
       VersionInfo version_info;
       RestrictInfo restrict_info;
@@ -2186,10 +2298,80 @@ namespace Legion {
       size_t value_size;
       Future future;
       std::set<RtEvent> map_applied_conditions;
+      PredEvent true_guard, false_guard;
+    };
+    
+    /**
+     * \class IndexFillOp
+     * This is the same as a fill operation except for
+     * applying a number of fill operations over an 
+     * index space of points with projection functions.
+     */
+    class IndexFillOp : public FillOp {
+    public:
+      IndexFillOp(Runtime *rt);
+      IndexFillOp(const IndexFillOp &rhs);
+      virtual ~IndexFillOp(void);
+    public:
+      IndexFillOp& operator=(const IndexFillOp &rhs);
+    public:
+      void initialize(TaskContext *ctx,
+                      const IndexFillLauncher &launcher,
+                      bool check_privileges);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+      virtual void trigger_commit(void);
+    public:
+      void handle_point_commit(void);
+#ifdef DEBUG_LEGION
+      void check_point_requirements(void);
+#endif
+    public:
+      ProjectionInfo                projection_info;
     protected:
-      std::vector<Grant>        grants;
-      std::vector<PhaseBarrier> wait_barriers;
-      std::vector<PhaseBarrier> arrive_barriers;
+      Domain                        point_domain;
+      std::vector<PointFillOp*>     points;
+      unsigned                      points_committed;
+      bool                          commit_request;
+    };
+
+    /**
+     * \class PointFillOp
+     * A point fill op is used for executing the
+     * physical part of the analysis for an index
+     * fill operation.
+     */
+    class PointFillOp : public FillOp, public ProjectionPoint {
+    public:
+      PointFillOp(Runtime *rt);
+      PointFillOp(const PointFillOp &rhs);
+      virtual ~PointFillOp(void);
+    public:
+      PointFillOp& operator=(const PointFillOp &rhs);
+    public:
+      void initialize(IndexFillOp *owner, const DomainPoint &point);
+      void launch(const std::set<RtEvent> &preconditions);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      // trigger_mapping same as base class
+      virtual void trigger_commit(void);
+    public:
+      // From ProjectionPoint
+      virtual const DomainPoint& get_domain_point(void) const;
+      virtual void set_projection_result(unsigned idx,LogicalRegion result);
+    protected:
+      DomainPoint               point;
+      IndexFillOp*              owner;
     };
 
     /**
@@ -2199,11 +2381,6 @@ namespace Legion {
     class AttachOp : public Operation {
     public:
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
-      enum ExternalType {
-        HDF5_FILE,
-        NORMAL_FILE,
-        IN_MEMORY_DATA
-      };
     public:
       AttachOp(Runtime *rt);
       AttachOp(const AttachOp &rhs);
@@ -2211,16 +2388,9 @@ namespace Legion {
     public:
       AttachOp& operator=(const AttachOp &rhs);
     public:
-      PhysicalRegion initialize_hdf5(
-                                 TaskContext *ctx, const char *file_name,
-                                 LogicalRegion handle, LogicalRegion parent,
-                                 const std::map<FieldID,const char*> &field_map,
-                                 LegionFileMode mode, bool check_privileges);
-      PhysicalRegion initialize_file(
-                                     TaskContext *ctx, const char *file_name,
-                                     LogicalRegion handle, LogicalRegion parent,
-                                     const std::vector<FieldID> &field_vec,
-                                     LegionFileMode mode, bool check_privileges);
+      PhysicalRegion initialize(TaskContext *ctx,
+                                const AttachLauncher &launcher,
+                                bool check_privileges);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
@@ -2245,6 +2415,7 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
     public:
+      ExternalResource resource;
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
@@ -2252,7 +2423,6 @@ namespace Legion {
       const char *file_name;
       std::map<FieldID,const char*> field_map;
       LegionFileMode file_mode;
-      ExternalType file_type;
       PhysicalRegion region;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
@@ -2305,21 +2475,13 @@ namespace Legion {
      */
     class TimingOp : public Operation {
     public:
-      enum MeasurementKind {
-        ABSOLUTE_MEASUREMENT,
-        MICROSECOND_MEASUREMENT,
-        NANOSECOND_MEASUREMENT,
-      };
-    public:
       TimingOp(Runtime *rt);
       TimingOp(const TimingOp &rhs);
       virtual ~TimingOp(void);
     public:
       TimingOp& operator=(const TimingOp &rhs);
     public:
-      Future initialize(TaskContext *ctx, const Future &pre);
-      Future initialize_microseconds(TaskContext *ctx, const Future &pre);
-      Future initialize_nanoseconds(TaskContext *ctx, const Future &pre);
+      Future initialize(TaskContext *ctx, const TimingLauncher &launcher);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2331,8 +2493,8 @@ namespace Legion {
       virtual void deferred_execute(void);
       virtual void trigger_complete(void);
     protected:
-      MeasurementKind kind;
-      Future precondition;
+      TimingMeasurement measurement;
+      std::set<Future> preconditions;
       Future result;
     };
 

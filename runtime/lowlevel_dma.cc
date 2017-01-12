@@ -1,5 +1,5 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
- * Copyright 2016 Los Alamos National Laboratory
+/* Copyright 2017 Stanford University, NVIDIA Corporation
+ * Copyright 2017 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -604,13 +604,7 @@ namespace LegionRuntime {
     {
       if(poisoned) {
 	Realm::log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
-	// cancel the dma operation - this has to work
-#ifndef NDEBUG
-	bool did_cancel =
-#endif
-	  req->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-				    &e, sizeof(e));	
-	assert(did_cancel);
+	req->handle_poisoned_precondition(e);
 	return false;
       }
 
@@ -868,9 +862,16 @@ namespace LegionRuntime {
       // make sure our functional precondition has occurred
       if(state == STATE_BEFORE_EVENT) {
 	// has the before event triggered?  if not, wait on it
-	if(before_copy.has_triggered()) {
-	  log_dma.debug("request %p - before event triggered", this);
-	  state = STATE_READY;
+	bool poisoned = false;
+	if(before_copy.has_triggered_faultaware(poisoned)) {
+	  if(poisoned) {
+	    log_dma.debug("request %p - poisoned precondition", this);
+	    handle_poisoned_precondition(before_copy);
+	    return true;  // not enqueued, but never going to be
+	  } else {
+	    log_dma.debug("request %p - before event triggered", this);
+	    state = STATE_READY;
+	  }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);
 	  if(just_check) return false;
@@ -2929,10 +2930,10 @@ namespace LegionRuntime {
     }
 
     template <unsigned DIM>
-    static unsigned compress_strides(const Rect<DIM> &r,
-				     const Point<1> in1[DIM], const Point<1> in2[DIM],
-				     Point<DIM>& extents,
-				     Point<1> out1[DIM], Point<1> out2[DIM])
+    static unsigned compress_strides(const Arrays::Rect<DIM> &r,
+				     const Arrays::Point<1> in1[DIM], const Arrays::Point<1> in2[DIM],
+				     Arrays::Point<DIM>& extents,
+				     Arrays::Point<1> out1[DIM], Arrays::Point<1> out2[DIM])
     {
       // sort the dimensions by the first set of strides for maximum gathering goodness
       unsigned stride_order[DIM];
@@ -2947,13 +2948,13 @@ namespace LegionRuntime {
 	  }
 
       int curdim = -1;
-      coord_t exp1 = 0, exp2 = 0;
+      Arrays::coord_t exp1 = 0, exp2 = 0;
 
       // now go through dimensions, collapsing each if it matches the expected stride for
       //  both sets (can't collapse for first)
       for(unsigned i = 0; i < DIM; i++) {
 	unsigned d = stride_order[i];
-	coord_t e = r.dim_size(d);
+	Arrays::coord_t e = r.dim_size(d);
 	if(i && (exp1 == in1[d][0]) && (exp2 == in2[d][0])) {
 	  // collapse and grow extent
 	  extents.x[curdim] *= e;
@@ -3006,12 +3007,12 @@ namespace LegionRuntime {
 	}
 	
 	ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	coord_t rstart; size_t rlen;
+	Arrays::coord_t rstart; size_t rlen;
 	while(e->get_next(rstart, rlen)) {
 	  // do we want to copy extra elements to fill in some holes?
 	  while(rlen < rlen_target) {
 	    // see where the next valid elements are
-	    coord_t rstart2; size_t rlen2;
+	    Arrays::coord_t rstart2; size_t rlen2;
 	    // if none, stop
 	    if(!e->peek_next(rstart2, rlen2)) break;
 	    // or if they don't even start until outside the window, stop
@@ -3023,11 +3024,11 @@ namespace LegionRuntime {
 	    e->get_next(rstart2, rlen2);
 	  }
 
-	  int sstart = src_linearization->image((coord_t)rstart);
-	  int dstart = dst_linearization->image((coord_t)rstart);
+	  int sstart = src_linearization->image((Arrays::coord_t)rstart);
+	  int dstart = dst_linearization->image((Arrays::coord_t)rstart);
 #ifdef DEBUG_LOW_LEVEL
-	  assert(src_linearization->image_is_dense(Rect<1>((coord_t)rstart, (coord_t)(rstart + rlen - 1))));
-	  assert(dst_linearization->image_is_dense(Rect<1>((coord_t)rstart, (coord_t)(rstart + rlen - 1))));
+	  assert(src_linearization->image_is_dense(Arrays::Rect<1>((Arrays::coord_t)rstart, (Arrays::coord_t)(rstart + rlen - 1))));
+	  assert(dst_linearization->image_is_dense(Arrays::Rect<1>((Arrays::coord_t)rstart, (Arrays::coord_t)(rstart + rlen - 1))));
 #endif
 	  //printf("X: %d+%d %d %d\n", rstart, rlen, sstart, dstart);
 
@@ -3819,8 +3820,8 @@ namespace LegionRuntime {
 	for(typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lso(orig_rect, *dst_linearization); lso; lso++) {
 	  for(typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lsi(lso.subrect, *src_linearization); lsi; lsi++) {
 	    // see if we can compress the strides for a more efficient copy
-	    Point<1> src_cstrides[DIM], dst_cstrides[DIM];
-	    Point<DIM> extents;
+	    Arrays::Point<1> src_cstrides[DIM], dst_cstrides[DIM];
+	    Arrays::Point<DIM> extents;
 	    int cdim = compress_strides(lsi.subrect, lso.strides, lsi.strides,
 					extents, dst_cstrides, src_cstrides);
 
@@ -3864,10 +3865,10 @@ namespace LegionRuntime {
 	    for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso(lsi.subrect, *dst_linearization); dso; dso++) {
 	      // dense subrect in dst might not be dense in src
 	      for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dsi(dso.subrect, *src_linearization); dsi; dsi++) {
-		Rect<1> irect = dsi.image;
+		Arrays::Rect<1> irect = dsi.image;
 		// rectangle in output must be recalculated
-		Rect<DIM> subrect_check;
-		Rect<1> orect = dst_linearization->image_dense_subrect(dsi.subrect, subrect_check);
+		Arrays::Rect<DIM> subrect_check;
+		Arrays::Rect<1> orect = dst_linearization->image_dense_subrect(dsi.subrect, subrect_check);
 		assert(dsi.subrect == subrect_check);
 
 		//for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
@@ -4484,17 +4485,24 @@ namespace LegionRuntime {
       // make sure our functional precondition has occurred
       if(state == STATE_BEFORE_EVENT) {
 	// has the before event triggered?  if not, wait on it
-	if(before_copy.has_triggered()) {
-	  log_dma.debug("request %p - before event triggered", this);
-	  if(inst_lock_needed) {
-	    // request an exclusive lock on the instance to protect reductions
-	    inst_lock_event = get_runtime()->get_instance_impl(dst.inst)->lock.acquire(0, true /*excl*/, ReservationImpl::ACQUIRE_BLOCKING);
-	    state = STATE_INST_LOCK;
-	    log_dma.debug("request %p - instance lock acquire event " IDFMT,
-			 this, inst_lock_event.id);
+	bool poisoned = false;
+	if(before_copy.has_triggered_faultaware(poisoned)) {
+	  if(poisoned) {
+	    log_dma.debug("request %p - poisoned precondition", this);
+	    handle_poisoned_precondition(before_copy);
+	    return true;  // not enqueued, but never going to be
 	  } else {
-	    // go straight to ready
-	    state = STATE_READY;
+	    log_dma.debug("request %p - before event triggered", this);
+	    if(inst_lock_needed) {
+	      // request an exclusive lock on the instance to protect reductions
+	      inst_lock_event = get_runtime()->get_instance_impl(dst.inst)->lock.acquire(0, true /*excl*/, ReservationImpl::ACQUIRE_BLOCKING);
+	      state = STATE_INST_LOCK;
+	      log_dma.debug("request %p - instance lock acquire event " IDFMT,
+			    this, inst_lock_event.id);
+	    } else {
+	      // go straight to ready
+	      state = STATE_READY;
+	    }
 	  }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);
@@ -4589,8 +4597,8 @@ namespace LegionRuntime {
       for(typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lso(orig_rect, *dst_linearization); lso; lso++) {
 	for(typename Arrays::Mapping<DIM, 1>::LinearSubrectIterator lsi(lso.subrect, *src_linearization); lsi; lsi++) {
 	  // see if we can compress the strides for a more efficient copy
-	  Point<1> src_cstrides[DIM], dst_cstrides[DIM];
-	  Point<DIM> extents;
+	  Arrays::Point<1> src_cstrides[DIM], dst_cstrides[DIM];
+	  Arrays::Point<DIM> extents;
 	  int cdim = compress_strides(lsi.subrect, lso.strides, lsi.strides,
 				      extents, dst_cstrides, src_cstrides);
 
@@ -4634,10 +4642,10 @@ namespace LegionRuntime {
 	  for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dso(lsi.subrect, *dst_linearization); dso; dso++) {
 	    // dense subrect in dst might not be dense in src
 	    for(Arrays::GenericDenseSubrectIterator<Arrays::Mapping<DIM, 1> > dsi(dso.subrect, *src_linearization); dsi; dsi++) {
-	      Rect<1> irect = dsi.image;
+	      Arrays::Rect<1> irect = dsi.image;
 	      // rectangle in output must be recalculated
-	      Rect<DIM> subrect_check;
-	      Rect<1> orect = dst_linearization->image_dense_subrect(dsi.subrect, subrect_check);
+	      Arrays::Rect<DIM> subrect_check;
+	      Arrays::Rect<1> orect = dst_linearization->image_dense_subrect(dsi.subrect, subrect_check);
 	      assert(dsi.subrect == subrect_check);
 	      
 	      //for(OASVec::iterator it2 = oasvec.begin(); it2 != oasvec.end(); it2++)
@@ -4705,7 +4713,7 @@ namespace LegionRuntime {
 
 	      // if source and dest are ok, we can just walk the index space's spans
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	      coord_t rstart; size_t rlen;
+	      Arrays::coord_t rstart; size_t rlen;
 	      while(e->get_next(rstart, rlen)) {
 		if(red_fold)
 		  redop->fold_strided(((char *)dst_base) + (rstart * dst_stride),
@@ -4740,7 +4748,7 @@ namespace LegionRuntime {
 	      Arrays::Mapping<1, 1> *dst_linearization = dst_impl->metadata.linearization.get_mapping<1>();
 
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	      coord_t rstart; size_t rlen;
+	      Arrays::coord_t rstart; size_t rlen;
 
 	      // get an RDMA sequence number so we can have the far side trigger the event once all reductions have been
 	      //  applied
@@ -4755,11 +4763,11 @@ namespace LegionRuntime {
 		// do we want to copy extra elements to fill in some holes?
 		while(rlen < rlen_target) {
 		  // see where the next valid elements are
-		  coord_t rstart2; size_t rlen2;
+		  Arrays::coord_t rstart2; size_t rlen2;
 		  // if none, stop
 		  if(!e->peek_next(rstart2, rlen2)) break;
 		  // or if they don't even start until outside the window, stop
-		  if(rstart2 > (rstart + (coord_t)rlen_target)) break;
+		  if(rstart2 > (rstart + (Arrays::coord_t)rlen_target)) break;
 		  // ok, include the next valid element(s) and any invalid ones in between
 		  //printf("bloating from %d to %d\n", rlen, rstart2 + rlen2 - rstart);
 		  rlen = rstart2 + rlen2 - rstart;
@@ -4768,7 +4776,7 @@ namespace LegionRuntime {
 		}
 
 		// translate the index space point to the dst instance's linearization
-		int dstart = dst_linearization->image((coord_t)rstart);
+		int dstart = dst_linearization->image((Arrays::coord_t)rstart);
 
 		// now do an offset calculation for the destination
 		off_t dst_offset;
@@ -4821,10 +4829,10 @@ namespace LegionRuntime {
 
 	      // if source and dest are ok, we can just walk the index space's spans
 	      ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-	      coord_t rstart; size_t rlen;
+	      Arrays::coord_t rstart; size_t rlen;
 	      while(e->get_next(rstart, rlen)) {
 		// translate the index space point to the dst instance's linearization
-		int dstart = dst_linearization->image((coord_t)rstart);
+		int dstart = dst_linearization->image((Arrays::coord_t)rstart);
 
 		// now do an offset calculation for the destination
 		off_t dst_offset;
@@ -5076,9 +5084,16 @@ namespace LegionRuntime {
       // make sure our functional precondition has occurred
       if(state == STATE_BEFORE_EVENT) {
 	// has the before event triggered?  if not, wait on it
-	if(before_fill.has_triggered()) {
-	  log_dma.debug("request %p - before event triggered", this);
-	  state = STATE_READY;
+        bool poisoned = false;
+	if(before_fill.has_triggered_faultaware(poisoned)) {
+          if(poisoned) {
+            log_dma.debug("request %p - poisoned precondition", this);
+            handle_poisoned_precondition(before_fill);
+            return true; // not enqueued, but never going to be
+          } else {
+            log_dma.debug("request %p - before event triggered", this);
+            state = STATE_READY;
+          }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);
 	  if(just_check) return false;
@@ -5153,9 +5168,9 @@ namespace LegionRuntime {
               Arrays::Mapping<1, 1> *dst_linearization = 
                 inst_impl->metadata.linearization.get_mapping<1>();
               ElementMask::Enumerator *e = ispace->valid_mask->enumerate_enabled();
-              coord_t rstart; size_t elem_count;
+              Arrays::coord_t rstart; size_t elem_count;
               while(e->get_next(rstart, elem_count)) {
-                int dst_index = dst_linearization->image((coord_t)rstart); 
+                int dst_index = dst_linearization->image((Arrays::coord_t)rstart); 
                 size_t done = 0;
                 while (done < elem_count) {
                   int dst_in_this_block = inst_impl->metadata.block_size - 

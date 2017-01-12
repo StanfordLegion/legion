@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -265,7 +265,7 @@ namespace Realm {
 	assert(dl.get_dim() == 1);
 
 	LegionRuntime::Arrays::Mapping<1, 1> *mapping = dl.get_mapping<1>();
-	Rect<1> preimage = mapping->preimage((coord_t)0);
+	LegionRuntime::Arrays::Rect<1> preimage = mapping->preimage((coord_t)0);
 	assert(preimage.lo == preimage.hi);
 	// double-check that whole range maps densely
 	preimage.hi.x[0] += 1; // not perfect, but at least detects non-unit-stride case

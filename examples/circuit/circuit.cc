@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University
+/* Copyright 2017 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -211,16 +211,6 @@ void top_level_task(const Task *task,
     runtime->destroy_field_space(ctx,circuit.node_locator.get_field_space());
     runtime->destroy_index_space(ctx,circuit.all_nodes.get_index_space());
     runtime->destroy_index_space(ctx,circuit.all_wires.get_index_space());
-  }
-}
-
-static void update_mappers(Machine machine, HighLevelRuntime *rt,
-                           const std::set<Processor> &local_procs)
-{
-  for (std::set<Processor>::const_iterator it = local_procs.begin();
-        it != local_procs.end(); it++)
-  {
-    rt->replace_default_mapper(new CircuitMapper(machine, rt, *it), *it);
   }
 }
 

@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -207,9 +207,11 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void) = 0;
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
-      virtual void resolve_true(bool misspeculated);
-      virtual void resolve_false(bool misspeculated) = 0;
-      virtual bool speculate(bool &value);
+    public:
+      virtual bool query_speculate(bool &value, bool &mapping_only);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched) = 0;
+    public:
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
@@ -313,6 +315,10 @@ namespace Legion {
       bool commit_received;
     protected:
       bool map_locally;
+    protected:
+      // For managing predication
+      PredEvent true_guard;
+      PredEvent false_guard;
     private:
       mutable bool is_local;
       mutable bool local_cached;
@@ -350,6 +356,13 @@ namespace Legion {
         public LgTaskArgs<DeferredPostMappedArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_POST_MAPPED_ID;
+      public:
+        SingleTask *task;
+      };
+      struct MisspeculationTaskArgs :
+        public LgTaskArgs<MisspeculationTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_MISSPECULATE_TASK_ID;
       public:
         SingleTask *task;
       };
@@ -403,8 +416,6 @@ namespace Legion {
       void unpack_single_task(Deserializer &derez, 
                               std::set<RtEvent> &ready_events);
     public:
-      void restart_task(void);
-    public:
       virtual void add_copy_profiling_request(
                                       Realm::ProfilingRequestSet &requests);
       virtual void report_profiling_response(
@@ -414,7 +425,7 @@ namespace Legion {
       virtual void deactivate(void) = 0;
       virtual bool is_top_level_task(void) const { return false; }
     public:
-      virtual void resolve_false(bool misspeculated) = 0;
+      virtual void resolve_false(bool speculated, bool launched) = 0;
       virtual void launch_task(void);
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
@@ -446,6 +457,7 @@ namespace Legion {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
+      virtual void handle_misspeculation(void) = 0;
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
@@ -501,7 +513,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
-      virtual void resolve_false(bool misspeculated) = 0;
+      virtual void resolve_false(bool speculated, bool launched) = 0;
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
@@ -559,6 +571,10 @@ namespace Legion {
     protected:
       bool children_complete_invoked;
       bool children_commit_invoked;
+    protected:
+      Future predicate_false_future;
+      void *predicate_false_result;
+      size_t predicate_false_size;
     };
 
     /**
@@ -583,15 +599,6 @@ namespace Legion {
                              const TaskLauncher &launcher, 
                              bool check_privileges,
                              bool track = true);
-      Future initialize_task(TaskContext *ctx,
-              Processor::TaskFuncID task_id,
-              const std::vector<IndexSpaceRequirement> &indexes,
-              const std::vector<RegionRequirement> &regions,
-              const TaskArgument &arg,
-              const Predicate &predicate,
-              MapperID id, MappingTagID tag,
-              bool check_privileges,
-              bool track = true); 
       void set_top_level(void);
     public:
       RtEvent perform_versioning_analysis(void);
@@ -605,7 +612,7 @@ namespace Legion {
                                        get_acquired_instances_ref(void);
       virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
-      virtual void resolve_false(bool misspeculated);
+      virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
@@ -630,6 +637,7 @@ namespace Legion {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_misspeculation(void);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
@@ -710,7 +718,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
-      virtual void resolve_false(bool misspeculated);
+      virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
@@ -744,6 +752,7 @@ namespace Legion {
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_misspeculation(void);
     public:
       void initialize_point(SliceTask *owner, MinimalPoint &mp);
       void send_back_created_state(AddressSpaceID target);
@@ -780,38 +789,14 @@ namespace Legion {
       IndexTask& operator=(const IndexTask &rhs);
     public:
       FutureMap initialize_task(TaskContext *ctx,
-                                const IndexLauncher &launcher,
+                                const IndexTaskLauncher &launcher,
                                 bool check_privileges,
                                 bool track = true);
       Future initialize_task(TaskContext *ctx,
-                             const IndexLauncher &launcher,
+                             const IndexTaskLauncher &launcher,
                              ReductionOpID redop,
                              bool check_privileges,
                              bool track = true);
-      FutureMap initialize_task(TaskContext *ctx,
-            Processor::TaskFuncID task_id,
-            const Domain &launch_domain,
-            const std::vector<IndexSpaceRequirement> &indexes,
-            const std::vector<RegionRequirement> &regions,
-            const TaskArgument &global_arg,
-            const ArgumentMap &arg_map,
-            const Predicate &predicate,
-            bool must_parallelism,
-            MapperID id, MappingTagID tag,
-            bool check_privileges);
-      Future initialize_task(TaskContext *ctx,
-            Processor::TaskFuncID task_id,
-            const Domain &launch_domain,
-            const std::vector<IndexSpaceRequirement> &indexes,
-            const std::vector<RegionRequirement> &regions,
-            const TaskArgument &global_arg,
-            const ArgumentMap &arg_map,
-            ReductionOpID redop,
-            const TaskArgument &init_value,
-            const Predicate &predicate,
-            bool must_parallelism,
-            MapperID id, MappingTagID tag,
-            bool check_privileges);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
     public:
@@ -824,7 +809,7 @@ namespace Legion {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
-      virtual void resolve_false(bool misspeculated);
+      virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
@@ -888,11 +873,7 @@ namespace Legion {
       unsigned committed_points;
       // Track whether or not we've received our commit command
       bool complete_received;
-      bool commit_received;
-    protected:
-      Future predicate_false_future;
-      void *predicate_false_result;
-      size_t predicate_false_size;
+      bool commit_received; 
     protected:
       std::vector<RegionTreePath> privilege_paths;
       std::deque<SliceTask*> locally_mapped_slices;
@@ -907,7 +888,6 @@ namespace Legion {
     protected:
       // For checking aliasing of points in debug mode only
       std::set<std::pair<unsigned,unsigned> > interfering_requirements;
-      std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
     public:
       void check_point_requirements(
           const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs);
@@ -943,7 +923,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
-      virtual void resolve_false(bool misspeculated);
+      virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
@@ -971,6 +951,7 @@ namespace Legion {
       void enumerate_points(void);
       void project_region_requirements(
                              std::vector<MinimalPoint> &minimal_points);
+      const void* get_predicate_false_result(size_t &result_size);
     public:
       RtEvent perform_versioning_analysis(void);
       RtEvent perform_must_epoch_version_analysis(MustEpochOp *owner);

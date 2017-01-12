@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -3268,24 +3268,30 @@ namespace Legion {
               {
                 case 1:
                   {
-                    Rect<1> prev_rect = dit->first.get_rect<1>();
-                    Rect<1> next_rect = it->first.get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1>
+		      prev_rect = dit->first.get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1>
+		      next_rect = it->first.get_rect<1>();
                     if (next_rect.dominates(prev_rect))
                       overlap -= dom_overlap;
                     break;
                   }
                 case 2:
                   {
-                    Rect<2> prev_rect = dit->first.get_rect<2>();
-                    Rect<2> next_rect = it->first.get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2>
+		      prev_rect = dit->first.get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2>
+		      next_rect = it->first.get_rect<2>();
                     if (next_rect.dominates(prev_rect))
                       overlap -= dom_overlap;
                     break;
                   }
                 case 3:
                   {
-                    Rect<3> prev_rect = dit->first.get_rect<3>();
-                    Rect<3> next_rect = it->first.get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3>
+		      prev_rect = dit->first.get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3>
+		      next_rect = it->first.get_rect<3>();
                     if (next_rect.dominates(prev_rect))
                       overlap -= dom_overlap;
                     break;
@@ -3510,6 +3516,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LogicalCloser::record_overwriting_close(const FieldMask &mask,
+                                                 bool projection)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
+      // Overwriting closes do all the same stuff as read-only closes
+      // only they also get to clear the dirty-below bits in the state
+      overwriting_close_mask |= mask;
+      record_read_only_close(mask, projection);
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalCloser::record_read_only_close(const FieldMask &mask,
                                                bool projection)
     //--------------------------------------------------------------------------
@@ -3722,6 +3742,9 @@ namespace Legion {
       // closes already did this when we made the disjoint close op
       if (!!closed_projections)
         state.advance_projection_epochs(closed_projections);
+      // If we had any overwriting close operations remove dirty below bits
+      if (!!overwriting_close_mask)
+        state.dirty_below -= overwriting_close_mask;
       // If we only have read-only closes then we are done
       FieldMask closed_mask = normal_close_mask | flush_only_close_mask;
       if (!closed_mask)
@@ -4211,6 +4234,7 @@ namespace Legion {
     void VersionManager::reset(void)
     //--------------------------------------------------------------------------
     {
+      AutoLock m_lock(manager_lock);
       is_owner = false;
       current_context = NULL;
       remote_valid_fields.clear();
@@ -4469,6 +4493,7 @@ namespace Legion {
 #endif
         }
       }
+      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
       for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
             vit = current_version_infos.begin(); vit != 
             current_version_infos.end(); vit++)

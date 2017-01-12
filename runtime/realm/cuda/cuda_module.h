@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -156,6 +156,19 @@ namespace Realm {
       virtual ~GPUCompletionNotification(void) {}
 
       virtual void request_completed(void) = 0;
+    };
+
+    class GPUPreemptionWaiter : public GPUCompletionNotification {
+    public:
+      GPUPreemptionWaiter(GPU *gpu);
+      virtual ~GPUPreemptionWaiter(void) {}
+    public:
+      virtual void request_completed(void);
+    public:
+      void preempt(void);
+    private:
+      GPU *const gpu;
+      Event wait_event;
     };
 
     // An abstract base class for all GPU memcpy operations
@@ -566,6 +579,8 @@ namespace Realm {
 					size_t offset, cudaMemcpyKind kind,
 					cudaStream_t stream);
 
+      void gpu_memset(void *dst, int value, size_t count);
+      void gpu_memset_async(void *dst, int value, size_t count, cudaStream_t stream);
     public:
       GPU *gpu;
 

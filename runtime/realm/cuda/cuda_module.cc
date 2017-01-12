@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 #include "realm/tasks.h"
 #include "realm/logging.h"
 #include "realm/cmdline.h"
+#include "realm/event_impl.h"
 
 #include "lowlevel_dma.h"
 #include "channel.h"
@@ -1750,14 +1751,44 @@ namespace Realm {
     void GPUProcessor::stream_synchronize(cudaStream_t stream)
     {
       // same as device_synchronize for now
-      GPUStream *current = gpu->get_current_task_stream();
-      CHECK_CU( cuStreamSynchronize(current->get_stream()) );
+      device_synchronize();
+    }
+
+    GPUPreemptionWaiter::GPUPreemptionWaiter(GPU *g) : gpu(g)
+    {
+      GenEventImpl *impl = GenEventImpl::create_genevent();
+      wait_event = impl->current_event();
+    }
+
+    void GPUPreemptionWaiter::request_completed(void)
+    {
+      GenEventImpl::trigger(wait_event, false/*poisoned*/);
+    }
+
+    void GPUPreemptionWaiter::preempt(void)
+    {
+      // Realm threads don't obey a stack discipline for
+      // preemption so we can't leave our context on the stack
+      gpu->pop_context();
+      wait_event.wait();
+      // When we wake back up, we have to push our context again
+      gpu->push_context();
     }
 
     void GPUProcessor::device_synchronize(void)
     {
       GPUStream *current = gpu->get_current_task_stream();
-      CHECK_CU( cuStreamSynchronize(current->get_stream()) );
+      // We don't actually want to block the GPU processor
+      // when synchronizing, so we instead register a cuda
+      // event on the stream and then use it triggering to
+      // indicate that the stream is caught up
+      // Make a completion notification to be notified when
+      // the event has actually triggered
+      GPUPreemptionWaiter waiter(gpu);
+      // Register the waiter with the stream 
+      current->add_notification(&waiter); 
+      // Perform the wait, this will preempt the thread
+      waiter.preempt();
     }
     
     void GPUProcessor::event_create(cudaEvent_t *event, int flags)
@@ -1868,7 +1899,7 @@ namespace Realm {
       // the synchronous copy still uses cuMemcpyAsync so that we can limit the
       //  synchronization to just the right stream
       CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst, (CUdeviceptr)src, size, current) );
-      CHECK_CU( cuStreamSynchronize(current) );
+      stream_synchronize(current);
     }
 
     void GPUProcessor::gpu_memcpy_async(void *dst, const void *src, size_t size,
@@ -1887,7 +1918,7 @@ namespace Realm {
       CUdeviceptr var_base = gpu->lookup_variable(dst);
       CHECK_CU( cuMemcpyAsync(var_base + offset,
 			      (CUdeviceptr)src, size, current) );
-      CHECK_CU( cuStreamSynchronize(current) );
+      stream_synchronize(current);
     }
 
     void GPUProcessor::gpu_memcpy_to_symbol_async(const void *dst, const void *src,
@@ -1910,7 +1941,7 @@ namespace Realm {
       CHECK_CU( cuMemcpyAsync((CUdeviceptr)dst,
 			      var_base + offset,
 			      size, current) );
-      CHECK_CU( cuStreamSynchronize(current) );
+      stream_synchronize(current);
     }
 
     void GPUProcessor::gpu_memcpy_from_symbol_async(void *dst, const void *src,
@@ -1923,6 +1954,21 @@ namespace Realm {
 			      var_base + offset,
 			      size, current) );
       // no synchronization here
+    }
+
+    void GPUProcessor::gpu_memset(void *dst, int value, size_t count)
+    {
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CHECK_CU( cuMemsetD32Async((CUdeviceptr)dst, unsigned(value), 
+                                  count, current) );
+    }
+
+    void GPUProcessor::gpu_memset_async(void *dst, int value, 
+                                        size_t count, cudaStream_t stream)
+    {
+      CUstream current = gpu->get_current_task_stream()->get_stream();
+      CHECK_CU( cuMemsetD32Async((CUdeviceptr)dst, unsigned(value),
+                                  count, current) );
     }
 
 

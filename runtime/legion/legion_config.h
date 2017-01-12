@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -419,6 +419,19 @@ typedef enum legion_partition_kind_t {
   ALIASED_KIND,
   COMPUTE_KIND,
 } legion_partition_kind_t;
+
+typedef enum legion_external_resource_t {
+  EXTERNAL_POSIX_FILE,
+  EXTERNAL_HDF5_FILE,
+  EXTERNAL_C_ARRAY,
+  EXTERNAL_FORTRAN_ARRAY,
+} legion_external_resource_t;
+
+typedef enum legion_timing_measurement_t {
+  MEASURE_SECONDS,
+  MEASURE_MICRO_SECONDS,
+  MEASURE_NANO_SECONDS,
+} legion_timing_measurement_t;
 
 typedef enum legion_dependence_type_t {
   NO_DEPENDENCE = 0,

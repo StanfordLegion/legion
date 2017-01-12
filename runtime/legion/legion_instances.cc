@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1309,7 +1309,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionManager::ReductionManager(RegionTreeForest *ctx, DistributedID did,
-                                       FieldID f, AddressSpaceID owner_space, 
+                                       AddressSpaceID owner_space, 
                                        AddressSpaceID local_space,
                                        MemoryManager *mem,PhysicalInstance inst,
                                        LayoutDescription *desc, 
@@ -1319,8 +1319,7 @@ namespace Legion {
                                        const ReductionOp *o, bool register_now)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
         local_space, node, inst, inst_domain, own_dom, register_now),
-        op(o), redop(red), logical_field(f), 
-        manager_lock(Reservation::create_reservation())
+        op(o), redop(red), manager_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {  
       if (Runtime::legion_spy_enabled)
@@ -1349,41 +1348,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionManager::get_fields(std::set<FieldID> &fields) const
-    //--------------------------------------------------------------------------
-    {
-      fields.insert(logical_field);
-    }
-
-    //--------------------------------------------------------------------------
-    bool ReductionManager::has_field(FieldID fid) const
-    //--------------------------------------------------------------------------
-    {
-      return (logical_field == fid); 
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionManager::has_fields(std::map<FieldID,bool> &fields) const
-    //--------------------------------------------------------------------------
-    {
-      for (std::map<FieldID,bool>::iterator it = fields.begin();
-            it != fields.end(); it++)
-      {
-        if (it->first == logical_field)
-          it->second = true;
-        else
-          it->second = false;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionManager::remove_space_fields(std::set<FieldID> &fields) const
-    //--------------------------------------------------------------------------
-    {
-      fields.erase(logical_field);
-    }
-
-    //--------------------------------------------------------------------------
     void ReductionManager::send_manager(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -1399,7 +1363,6 @@ namespace Legion {
         rez.serialize(instance);
         rez.serialize(instance_domain);
         rez.serialize(redop);
-        rez.serialize(logical_field);
         rez.serialize(region_node->handle);
         rez.serialize<bool>(is_foldable());
         rez.serialize(get_pointer_space());
@@ -1430,8 +1393,6 @@ namespace Legion {
       derez.deserialize(inst_dom);
       ReductionOpID redop;
       derez.deserialize(redop);
-      FieldID logical_field;
-      derez.deserialize(logical_field);
       LogicalRegion handle;
       derez.deserialize(handle);
       bool foldable;
@@ -1455,8 +1416,7 @@ namespace Legion {
         if (runtime->find_pending_collectable_location(did, location))
           man = legion_new_in_place<FoldReductionManager>(location, 
                                                     runtime->forest,
-                                                    did, logical_field,
-                                                    owner_space,
+                                                    did, owner_space,
                                                     runtime->address_space,
                                                     memory, inst, layout,
                                                     pointer_constraint, 
@@ -1466,7 +1426,7 @@ namespace Legion {
                                                     false/*reg now*/);
         else
           man = legion_new<FoldReductionManager>(runtime->forest, 
-                                           did, logical_field, owner_space, 
+                                           did, owner_space, 
                                            runtime->address_space, memory, inst,
                                            layout, pointer_constraint, inst_dom,
                                            false/*own*/, target_node, redop, op,
@@ -1478,8 +1438,7 @@ namespace Legion {
         if (runtime->find_pending_collectable_location(did, location))
           man = legion_new_in_place<ListReductionManager>(location, 
                                                     runtime->forest,
-                                                    did, logical_field,
-                                                    owner_space, 
+                                                    did, owner_space, 
                                                     runtime->address_space,
                                                     memory, inst, layout,
                                                     pointer_constraint, 
@@ -1489,7 +1448,7 @@ namespace Legion {
                                                     false/*reg now*/);
         else
           man = legion_new<ListReductionManager>(runtime->forest, did, 
-                                           logical_field, owner_space, 
+                                           owner_space, 
                                            runtime->address_space, memory, inst,
                                            layout, pointer_constraint, inst_dom,
                                            false/*own*/, target_node, redop,op,
@@ -1638,7 +1597,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ListReductionManager::ListReductionManager(RegionTreeForest *ctx, 
                                                DistributedID did,
-                                               FieldID f,
                                                AddressSpaceID owner_space, 
                                                AddressSpaceID local_space,
                                                MemoryManager *mem,
@@ -1651,7 +1609,7 @@ namespace Legion {
                                                const ReductionOp *o, 
                                                Domain dom, 
                                                bool register_now)
-      : ReductionManager(ctx, encode_reduction_list_did(did), f, owner_space, 
+      : ReductionManager(ctx, encode_reduction_list_did(did), owner_space, 
                          local_space, mem, inst, desc, cons, d, own_dom, node, 
                          red, o, register_now), ptr_space(dom)
     //--------------------------------------------------------------------------
@@ -1670,7 +1628,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ListReductionManager::ListReductionManager(const ListReductionManager &rhs)
-      : ReductionManager(NULL, 0, 0, 0, 0, NULL,
+      : ReductionManager(NULL, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
                          Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
         ptr_space(Domain::NO_DOMAIN)
@@ -1755,19 +1713,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(instance.exists());
 #endif
-      // Assume that it's all the fields for right now
-      // but offset by the pointer size
-      fields.push_back(
-          Domain::CopySrcDstField(instance, sizeof(ptr_t), 
-                                  op->sizeof_rhs, logical_field));
+      // TODO: implement this for list reduction instances
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
     ApEvent ListReductionManager::issue_reduction(Operation *op, 
         const std::vector<Domain::CopySrcDstField> &src_fields,
         const std::vector<Domain::CopySrcDstField> &dst_fields,
-        RegionTreeNode *dst, ApEvent precondition, bool reduction_fold, 
-        bool precise, RegionTreeNode *intersect)
+        RegionTreeNode *dst, ApEvent precondition, PredEvent guard,
+        bool reduction_fold, bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1799,7 +1754,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FoldReductionManager::FoldReductionManager(RegionTreeForest *ctx, 
                                                DistributedID did,
-                                               FieldID f,
                                                AddressSpaceID owner_space, 
                                                AddressSpaceID local_space,
                                                MemoryManager *mem,
@@ -1812,7 +1766,7 @@ namespace Legion {
                                                const ReductionOp *o,
                                                ApEvent u_event,
                                                bool register_now)
-      : ReductionManager(ctx, encode_reduction_fold_did(did), f, owner_space, 
+      : ReductionManager(ctx, encode_reduction_fold_did(did), owner_space, 
                          local_space, mem, inst, desc, cons, d, own_dom, node, 
                          red, o, register_now), use_event(u_event)
     //--------------------------------------------------------------------------
@@ -1831,7 +1785,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
-      : ReductionManager(NULL, 0, 0, 0, 0, NULL,
+      : ReductionManager(NULL, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
                          Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
         use_event(ApEvent::NO_AP_EVENT)
@@ -1867,6 +1821,9 @@ namespace Legion {
         FoldReductionManager::get_accessor(void) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+#endif
       return instance.get_accessor();
     }
 
@@ -1876,9 +1833,15 @@ namespace Legion {
         FoldReductionManager::get_field_accessor(FieldID fid) const
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return instance.get_accessor();
+#ifdef DEBUG_LEGION
+      assert(instance.exists());
+      assert(layout != NULL);
+#endif
+      const Domain::CopySrcDstField &info = layout->find_field_info(fid);
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic> temp = 
+                                                    instance.get_accessor();
+      return temp.get_untyped_field_accessor(info.offset, info.size);
     }
 
     //--------------------------------------------------------------------------
@@ -1912,20 +1875,17 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(instance.exists());
+      assert(layout != NULL);
 #endif
-      // Assume that its all the fields for now
-      // until we find a different way to do reductions on a subset of fields
-      fields.push_back(
-          Domain::CopySrcDstField(instance, 0/*offset*/, 
-                                  op->sizeof_rhs, logical_field));
+      layout->compute_copy_offsets(reduce_mask, instance, fields);
     }
 
     //--------------------------------------------------------------------------
     ApEvent FoldReductionManager::issue_reduction(Operation *op,
         const std::vector<Domain::CopySrcDstField> &src_fields,
         const std::vector<Domain::CopySrcDstField> &dst_fields,
-        RegionTreeNode *dst, ApEvent precondition, bool reduction_fold, 
-        bool precise, RegionTreeNode *intersect)
+        RegionTreeNode *dst, ApEvent precondition, PredEvent guard,
+        bool reduction_fold, bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1933,7 +1893,7 @@ namespace Legion {
 #endif
       // Doesn't matter if this one is precise or not
       return dst->issue_copy(op, src_fields, dst_fields, precondition,
-                             intersect, redop, reduction_fold);
+                             guard, intersect, redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -2030,37 +1990,6 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualManager::get_fields(std::set<FieldID> &fields) const
-    //--------------------------------------------------------------------------
-    {
-      // do nothing - can't really insert "all fields"
-    }
-
-    //--------------------------------------------------------------------------
-    bool VirtualManager::has_field(FieldID fid) const
-    //--------------------------------------------------------------------------
-    {
-      // has all fields
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualManager::has_fields(std::map<FieldID,bool> &fields) const
-    //--------------------------------------------------------------------------
-    {
-      for (std::map<FieldID,bool>::iterator it = fields.begin();
-            it != fields.end(); it++)
-        it->second = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualManager::remove_space_fields(std::set<FieldID> &fields) const
-    //--------------------------------------------------------------------------
-    {
-      fields.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -2193,6 +2122,9 @@ namespace Legion {
           }
         case REDUCTION_FOLD_SPECIALIZE:
           {
+            // TODO: this can go away once realm understands reduction
+            // instances that contain multiple fields, Legion is ready
+            // though so all you should have to do is delete this check
             if (field_sizes.size() > 1)
             {
               log_run.error("ERROR: Illegal request for a reduction instance "
@@ -2210,9 +2142,13 @@ namespace Legion {
             // that we want Legion Spy to see
             void *fill_buffer = malloc(reduction_op->sizeof_rhs);
             reduction_op->init(fill_buffer, 1);
-            std::vector<Domain::CopySrcDstField> dsts(1,
-                Domain::CopySrcDstField(instance, 0/*offset*/, 
-                  field_sizes[0].second, field_sizes[0].first, 0));
+            std::vector<Domain::CopySrcDstField> dsts;
+            {
+              std::vector<FieldID> fill_fields(field_sizes.size());
+              for (unsigned idx = 0; idx < field_sizes.size(); idx++)
+                fill_fields[idx] = field_sizes[idx].first;
+              layout->compute_copy_offsets(fill_fields, instance, dsts);
+            }
             Realm::ProfilingRequestSet requests;
             if (forest->runtime->profiler != NULL)
               forest->runtime->profiler->add_fill_request(requests, creator_id);
@@ -2220,8 +2156,7 @@ namespace Legion {
                                  fill_buffer, reduction_op->sizeof_rhs, ready));
             // We can free the buffer after we've issued the fill
             free(fill_buffer);
-            result = legion_new<FoldReductionManager>(forest, did, 
-                                              field_sizes[0].first, local_space,
+            result = legion_new<FoldReductionManager>(forest, did, local_space,
                                               local_space, memory_manager, 
                                               instance, layout, 
                                               pointer_constraint, 
@@ -2438,16 +2373,42 @@ namespace Legion {
       serdez.resize(field_set.size());
       field_node->compute_create_offsets(field_set, field_sizes,
                                          mask_index_map, serdez, instance_mask);
+#ifndef NEW_INSTANCE_CREATION
       sizes_only.resize(field_sizes.size());
       for (unsigned idx = 0; idx < field_sizes.size(); idx++)
         sizes_only[idx] = field_sizes[idx].second;
+#endif
       // Now figure out what kind of instance we're going to make, look at
       // the constraints and see if we recognize any of them
       switch (constraints.specialized_constraint.get_kind())
       {
+        case REDUCTION_FOLD_SPECIALIZE:
+          {
+            // Reduction folds are a special case of normal specialize
+            redop_id = constraints.specialized_constraint.get_reduction_op();
+            reduction_op = Runtime::get_reduction_op(redop_id);
+            // Update the field sizes to be the RHS of the reduction operator
+            for (std::vector<std::pair<FieldID,size_t> >::iterator it =
+                  field_sizes.begin(); it != field_sizes.end(); it++)
+            {
+#ifdef DEBUG_LEGION
+              // This is an application bug meaning the reduction
+              // operator doesn't match field size, but we've caught
+              // it really late
+              assert(it->second == reduction_op->sizeof_lhs);
+#endif
+              it->second = reduction_op->sizeof_rhs;
+            }
+#ifndef NEW_INSTANCE_CREATION
+            for (unsigned idx = 0; idx < field_sizes.size(); idx++)
+              sizes_only[idx] = reduction_op->sizeof_rhs;
+#endif
+            // Then we fall through and do the normal layout routine
+          }
         case NO_SPECIALIZE:
         case NORMAL_SPECIALIZE:
           {
+#ifndef NEW_INSTANCE_CREATION
             const std::vector<DimensionKind> &ordering = 
                                       constraints.ordering_constraint.ordering;
             size_t max_block_size = instance_domain.get_volume();
@@ -2477,14 +2438,8 @@ namespace Legion {
             }
             else
               block_size = max_block_size;
+#endif
             // redop id is already zero
-            break;
-          }
-        case REDUCTION_FOLD_SPECIALIZE:
-          {
-            block_size = 1;
-            redop_id = constraints.specialized_constraint.get_reduction_op();
-            reduction_op = Runtime::get_reduction_op(redop_id);
             break;
           }
         case REDUCTION_LIST_SPECIALIZE:

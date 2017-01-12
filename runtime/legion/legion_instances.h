@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -148,11 +148,19 @@ namespace Legion {
       static void handle_manager_request(Deserializer &derez, 
                           Runtime *runtime, AddressSpaceID source);
     public:
-      // Support for mapper queries
-      virtual void get_fields(std::set<FieldID> &fields) const = 0;
-      virtual bool has_field(FieldID fid) const = 0;
-      virtual void has_fields(std::map<FieldID,bool> &fields) const = 0;
-      virtual void remove_space_fields(std::set<FieldID> &fields) const = 0;
+      // Interface to the mapper PhysicalInstance
+      inline void get_fields(std::set<FieldID> &fields) const
+        { if (layout != NULL) layout->get_fields(fields); }
+      inline bool has_field(FieldID fid) const
+        { if (layout != NULL) return layout->has_field(fid); return false; }
+      inline void has_fields(std::map<FieldID,bool> &fields) const
+        { if (layout != NULL) layout->has_fields(fields); 
+          else for (std::map<FieldID,bool>::iterator it = fields.begin();
+                    it != fields.end(); it++) it->second = false; } 
+      inline void remove_space_fields(std::set<FieldID> &fields) const
+        { if (layout != NULL) layout->remove_space_fields(fields);
+          else fields.clear(); }
+    public:
       inline bool is_normal_instance(void) const 
         { return is_instance_manager(); }
       inline bool is_reduction_instance(void) const
@@ -273,15 +281,7 @@ namespace Legion {
                                     const std::vector<unsigned> &src_indexes,
                                     const std::vector<unsigned> &dst_indexes);
     public:
-      // Interface to the mapper PhysicalInstance
-      virtual void get_fields(std::set<FieldID> &fields) const
-        { layout->get_fields(fields); }
-      virtual bool has_field(FieldID fid) const
-        { return layout->has_field(fid); }
-      virtual void has_fields(std::map<FieldID,bool> &fields) const
-        { return layout->has_fields(fields); } 
-      virtual void remove_space_fields(std::set<FieldID> &fields) const
-        { return layout->remove_space_fields(fields); }
+      
     public:
       void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
     public:
@@ -305,7 +305,7 @@ namespace Legion {
      */
     class ReductionManager : public PhysicalManager {
     public:
-      ReductionManager(RegionTreeForest *ctx, DistributedID did, FieldID fid,
+      ReductionManager(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_space, AddressSpaceID local_space,
                        MemoryManager *mem, PhysicalInstance inst, 
                        LayoutDescription *description,
@@ -330,17 +330,12 @@ namespace Legion {
       virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
-          bool precise_domain, RegionTreeNode *intersect) = 0;
+          RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
+          bool reduction_fold, bool precise_domain, 
+          RegionTreeNode *intersect) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
       virtual ApEvent get_use_event(void) const = 0;
-    public:
-      // Support for mapper queries
-      virtual void get_fields(std::set<FieldID> &fields) const;
-      virtual bool has_field(FieldID fid) const;
-      virtual void has_fields(std::map<FieldID,bool> &fields) const;
-      virtual void remove_space_fields(std::set<FieldID> &fields) const;
     public:
       virtual void send_manager(AddressSpaceID target);
     public:
@@ -358,7 +353,6 @@ namespace Legion {
     public:
       const ReductionOp *const op;
       const ReductionOpID redop;
-      const FieldID logical_field;
     protected:
       Reservation manager_lock;
 #if 0
@@ -377,7 +371,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = LIST_MANAGER_ALLOC;
     public:
-      ListReductionManager(RegionTreeForest *ctx, DistributedID did,FieldID fid,
+      ListReductionManager(RegionTreeForest *ctx, DistributedID did,
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
                            MemoryManager *mem, PhysicalInstance inst, 
@@ -406,8 +400,8 @@ namespace Legion {
       virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
-          bool precise_domain, RegionTreeNode *intersect);
+          RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
+          bool reduction_fold, bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
       virtual ApEvent get_use_event(void) const;
@@ -423,7 +417,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FOLD_MANAGER_ALLOC;
     public:
-      FoldReductionManager(RegionTreeForest *ctx, DistributedID did,FieldID fid,
+      FoldReductionManager(RegionTreeForest *ctx, DistributedID did,
                            AddressSpaceID owner_space, 
                            AddressSpaceID local_space,
                            MemoryManager *mem, PhysicalInstance inst, 
@@ -452,8 +446,8 @@ namespace Legion {
       virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
-          bool precise_domain, RegionTreeNode *intersect);
+          RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
+          bool reduction_fold, bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
       virtual ApEvent get_use_event(void) const;
@@ -486,10 +480,6 @@ namespace Legion {
     public: 
       virtual size_t get_instance_size(void) const;
       virtual void send_manager(AddressSpaceID target);
-      virtual void get_fields(std::set<FieldID> &fields) const;
-      virtual bool has_field(FieldID fid) const;
-      virtual void has_fields(std::map<FieldID,bool> &fields) const;
-      virtual void remove_space_fields(std::set<FieldID> &fields) const;
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
     public:

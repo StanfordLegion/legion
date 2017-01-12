@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -425,6 +425,11 @@ namespace Legion {
         log_spy.print("Close Index %llu %d %llu", parent_id, index, child_id);
       }
 
+      static inline void log_predicated_false_op(UniqueID unique_id)
+      {
+        log_spy.print("Predicate False %lld", unique_id);
+      }
+
       // Logger calls for mapping dependence analysis 
       static inline void log_logical_requirement(UniqueID unique_id, 
           unsigned index, bool region, IDType index_component,
@@ -744,6 +749,11 @@ namespace Legion {
         log_spy.print("Rt User Event " IDFMT, event.id);
       }
 
+      static inline void log_pred_event(PredEvent event)
+      {
+        log_spy.print("Pred Event " IDFMT, event.id);
+      }
+
       static inline void log_ap_user_event_trigger(ApUserEvent event)
       {
         log_spy.print("Ap User Event Trigger " IDFMT,
@@ -754,6 +764,11 @@ namespace Legion {
       {
         log_spy.print("Rt User Event Trigger " IDFMT,
 		      event.id);
+      }
+
+      static inline void log_pred_event_trigger(PredEvent event)
+      {
+        log_spy.print("Pred Event Trigger " IDFMT, event.id);
       }
 
       static inline void log_operation_events(UniqueID uid,

@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1641,7 +1641,7 @@ function type_check.expr_image(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not (std.is_bounded_type(field_type) and field_type:is_ptr()) then
+  if not (std.is_bounded_type(field_type) and field_type:is_ptr() or std.is_index_type(field_type)) then
     report.error(node, "type mismatch in argument 3: expected field of ptr type but got " .. tostring(field_type))
   end
 
@@ -1687,16 +1687,18 @@ function type_check.expr_image(cx, node)
     end
   end
 
-  -- Check that parent is a subregion of the field bounds.
-  for _, bound_symbol in ipairs(field_type.bounds_symbols) do
-    local constraint = std.constraint(
-      parent_symbol,
-      bound_symbol,
-      std.subregion)
-    if not std.check_constraint(cx, constraint) then
-      report.error(node, "invalid image missing constraint " ..
-                  tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
-                  " " .. tostring(constraint.rhs))
+  if std.is_bounded_type(field_type) and field_type:is_ptr() then
+    -- Check that parent is a subregion of the field bounds.
+    for _, bound_symbol in ipairs(field_type.bounds_symbols) do
+      local constraint = std.constraint(
+        parent_symbol,
+        bound_symbol,
+        std.subregion)
+      if not std.check_constraint(cx, constraint) then
+        report.error(node, "invalid image missing constraint " ..
+                    tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
+                    " " .. tostring(constraint.rhs))
+      end
     end
   end
 
@@ -1793,7 +1795,7 @@ function type_check.expr_preimage(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not (std.is_bounded_type(field_type) and field_type:is_ptr()) then
+  if not (std.is_bounded_type(field_type) and field_type:is_ptr() or std.is_index_type(field_type)) then
     report.error(node, "type mismatch in argument 3: expected field of ptr type but got " .. tostring(field_type))
   end
 
@@ -1839,16 +1841,18 @@ function type_check.expr_preimage(cx, node)
     end
   end
 
-  -- Check that partitions's parent is a subregion of the field bounds.
-  for _, bound_symbol in ipairs(field_type.bounds_symbols) do
-    local constraint = std.constraint(
-      partition_type.parent_region_symbol,
-      bound_symbol,
-      std.subregion)
-    if not std.check_constraint(cx, constraint) then
-      report.error(node, "invalid image missing constraint " ..
-                  tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
-                  " " .. tostring(constraint.rhs))
+  if std.is_bounded_type(field_type) and field_type:is_ptr() then
+    -- Check that partitions's parent is a subregion of the field bounds.
+    for _, bound_symbol in ipairs(field_type.bounds_symbols) do
+      local constraint = std.constraint(
+        partition_type.parent_region_symbol,
+        bound_symbol,
+        std.subregion)
+      if not std.check_constraint(cx, constraint) then
+        report.error(node, "invalid image missing constraint " ..
+                    tostring(constraint.lhs) .. " " .. tostring(constraint.op) ..
+                    " " .. tostring(constraint.rhs))
+      end
     end
   end
 

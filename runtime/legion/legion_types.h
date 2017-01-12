@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,8 @@ namespace Legion {
   typedef ::legion_region_flags_t RegionFlags;
   typedef ::legion_projection_type_t ProjectionType;
   typedef ::legion_partition_kind_t PartitionKind;
+  typedef ::legion_external_resource_t ExternalResource;
+  typedef ::legion_timing_measurement_t TimingMeasurement;
   typedef ::legion_dependence_type_t DependenceType;
   typedef ::legion_index_space_kind_t IndexSpaceKind;
   typedef ::legion_file_mode_t LegionFileMode;
@@ -83,7 +85,8 @@ namespace Legion {
   struct IndexSpaceRequirement;
   struct FieldSpaceRequirement;
   struct TaskLauncher;
-  struct IndexLauncher;
+  struct IndexTaskLauncher;
+  typedef IndexTaskLauncher IndexLauncher; // for backwards compatibility
   struct InlineLauncher;
   struct CopyLauncher;
   struct AcquireLauncher;
@@ -106,6 +109,7 @@ namespace Legion {
   class Acquire;
   class Release;
   class Close;
+  class Fill;
   class Runtime;
   class MPILegionHandshake;
   // For backwards compatibility
@@ -179,7 +183,6 @@ namespace Legion {
   class TaskLayoutConstraintSet;
 
   namespace Mapping {
-    class Mappable; 
     class PhysicalInstance;
     class MapperEvent;
     class ProfilingRequestSet;
@@ -210,7 +213,7 @@ namespace Legion {
       // Only projection states below here
       OPEN_READ_ONLY_PROJ     = 5, // read-only projection
       OPEN_READ_WRITE_PROJ    = 6, // read-write projection
-      OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW = 7, // depth=1, children disjoint
+      OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW = 7, // depth=0, children disjoint
       OPEN_REDUCE_PROJ        = 8, // reduction-only projection
       OPEN_REDUCE_PROJ_DIRTY  = 9, // same as above but already open dirty 
     }; 
@@ -305,6 +308,9 @@ namespace Legion {
       LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
       LG_DISJOINT_CLOSE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
+      LG_MISSPECULATE_TASK_ID,
+      LG_DEFER_PHI_VIEW_REF_TASK_ID,
+      LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -398,6 +404,9 @@ namespace Legion {
         "Version State Capture Dirty",                            \
         "Disjoint Close",                                         \
         "Defer Materialized View Creation",                       \
+        "Handle Mapping Misspeculation",                          \
+        "Defer Phi View Reference",                               \
+        "Defer Phi View Registration",                            \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -587,6 +596,7 @@ namespace Legion {
       SEND_MATERIALIZED_VIEW,
       SEND_COMPOSITE_VIEW,
       SEND_FILL_VIEW,
+      SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
@@ -707,6 +717,7 @@ namespace Legion {
         "Send Materialized View",                                     \
         "Send Composite View",                                        \
         "Send Fill View",                                             \
+        "Send Phi View",                                              \
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
@@ -905,7 +916,7 @@ namespace Legion {
       PHYSICAL_STATE_MAKE_LOCAL_CALL,
       VERSION_STATE_UPDATE_PATH_ONLY_CALL,
       VERSION_STATE_MERGE_PHYSICAL_STATE_CALL,
-      VERSION_STATE_REQUEST_CHILD_CALL,
+      VERSION_STATE_REQUEST_CHILDREN_CALL,
       VERSION_STATE_REQUEST_INITIAL_CALL,
       VERSION_STATE_REQUEST_FINAL_CALL,
       VERSION_STATE_SEND_STATE_CALL,
@@ -971,6 +982,7 @@ namespace Legion {
       "Activate Individual",                                          \
       "Deactivate Individual",                                        \
       "Individual Perform Mapping",                                   \
+      "Individual Return Virtual",                                    \
       "Individual Trigger Complete",                                  \
       "Individual Trigger Commit",                                    \
       "Individual Post Mapped",                                       \
@@ -1062,7 +1074,7 @@ namespace Legion {
       "Physical State Make Local",                                    \
       "Version State Update Path Only",                               \
       "Version State Merge Physical State",                           \
-      "Version State Request Child",                                  \
+      "Version State Request Children",                               \
       "Version State Request Initial",                                \
       "Version State Request Final",                                  \
       "Version State Send State",                                     \
@@ -1124,6 +1136,8 @@ namespace Legion {
     class SpeculativeOp;
     class MapOp;
     class CopyOp;
+    class IndexCopyOp;
+    class PointCopyOp;
     class FenceOp;
     class FrameOp;
     class DeletionOp;
@@ -1146,6 +1160,8 @@ namespace Legion {
     class PendingPartitionOp;
     class DependentPartitionOp;
     class FillOp;
+    class IndexFillOp;
+    class PointFillOp;
     class AttachOp;
     class DetachOp;
     class TimingOp;
@@ -1239,6 +1255,7 @@ namespace Legion {
     class CompositeVersionInfo;
     class CompositeNode;
     class FillView;
+    class PhiView;
     class MappingRef;
     class InstanceRef;
     class InstanceSet;
@@ -1291,6 +1308,8 @@ namespace Legion {
     friend class Internal::SpeculativeOp;                   \
     friend class Internal::MapOp;                           \
     friend class Internal::CopyOp;                          \
+    friend class Internal::IndexCopyOp;                     \
+    friend class Internal::PointCopyOp;                     \
     friend class Internal::FenceOp;                         \
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
@@ -1311,6 +1330,8 @@ namespace Legion {
     friend class Internal::PendingPartitionOp;              \
     friend class Internal::DependentPartitionOp;            \
     friend class Internal::FillOp;                          \
+    friend class Internal::IndexFillOp;                     \
+    friend class Internal::PointFillOp;                     \
     friend class Internal::AttachOp;                        \
     friend class Internal::DetachOp;                        \
     friend class Internal::TimingOp;                        \
@@ -1390,6 +1411,7 @@ namespace Legion {
   typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
   typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
   typedef Realm::ElementMask::Enumerator Enumerator;
+  typedef ::legion_lowlevel_coord_t coord_t;
   typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;
@@ -1617,6 +1639,20 @@ namespace Legion {
       { id = rhs.id; return *this; }
   };
 
+  class PredEvent : public LgEvent {
+  public:
+    static const PredEvent NO_PRED_EVENT;
+  public:
+    PredEvent(void) : LgEvent() { } 
+    PredEvent(const PredEvent &rhs) { id = rhs.id; }
+    explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
+  public:
+    inline PredEvent& operator=(const PredEvent &rhs)
+      { id = rhs.id; return *this; }
+    inline operator Realm::UserEvent() const
+      { Realm::UserEvent e; e.id = id; return e; }
+  };
+
   class ApEvent : public LgEvent {
   public:
     static const ApEvent NO_AP_EVENT;
@@ -1624,9 +1660,12 @@ namespace Legion {
     ApEvent(void) : LgEvent() { }
     ApEvent(const ApEvent &rhs) { id = rhs.id; }
     explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
+    explicit ApEvent(const PredEvent &e) { id = e.id; }
   public:
     inline ApEvent& operator=(const ApEvent &rhs)
       { id = rhs.id; return *this; }
+    inline bool has_triggered_faultignorant(void) const
+      { bool poisoned; return has_triggered_faultaware(poisoned); }
   };
 
   class ApUserEvent : public ApEvent {
@@ -1669,6 +1708,7 @@ namespace Legion {
     RtEvent(void) : LgEvent() { }
     RtEvent(const RtEvent &rhs) { id = rhs.id; }
     explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
+    explicit RtEvent(const PredEvent &e) { id = e.id; }
   public:
     inline RtEvent& operator=(const RtEvent &rhs)
       { id = rhs.id; return *this; }
@@ -1705,7 +1745,7 @@ namespace Legion {
         b.timestamp = timestamp; return b; } 
   public:
     Realm::Barrier::timestamp_t timestamp;
-  };
+  }; 
 
 }; // Legion namespace
 

@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -3693,7 +3693,8 @@ function codegen.expr_image(cx, node)
     cx:region(cx:region(region_type).root_region_type).logical_region
 
   local function is_index_type(ty)
-    return std.is_bounded_type(ty) and std.is_index_type(ty.index_type)
+    return (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
+           std.is_index_type(ty)
   end
   local field_paths, field_types =
     std.flatten_struct_fields(region_type:fspace(), is_index_type)
@@ -3749,7 +3750,8 @@ function codegen.expr_preimage(cx, node)
     cx:region(cx:region(region_type).root_region_type).logical_region
 
   local function is_index_type(ty)
-    return std.is_bounded_type(ty) and std.is_index_type(ty.index_type)
+    return (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
+           std.is_index_type(ty)
   end
   local field_paths, field_types =
     std.flatten_struct_fields(region_type:fspace(), is_index_type)
