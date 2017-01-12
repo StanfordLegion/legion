@@ -4675,6 +4675,17 @@ namespace Legion {
               get_unique_id(), 0, TRUE_DEPENDENCE);
 #endif
       }
+      if (predicate_false_future.impl != NULL)
+      {
+        predicate_false_future.impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (predicate_false_future.impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_id(), 
+              predicate_false_future.impl->producer_uid, 0,
+              get_unique_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       restrict_infos.resize(regions.size());
@@ -6529,6 +6540,17 @@ namespace Legion {
         if (it->impl->producer_op != NULL)
           LegionSpy::log_mapping_dependence(
               parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
+              get_unique_id(), 0, TRUE_DEPENDENCE);
+#endif
+      }
+      if (predicate_false_future.impl != NULL)
+      {
+        predicate_false_future.impl->register_dependence(this);
+#ifdef LEGION_SPY
+        if (predicate_false_future.impl->producer_op != NULL)
+          LegionSpy::log_mapping_dependence(
+              parent_ctx->get_unique_id(), 
+              predicate_false_future.impl->producer_uid, 0,
               get_unique_id(), 0, TRUE_DEPENDENCE);
 #endif
       }
