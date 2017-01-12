@@ -1784,6 +1784,7 @@ namespace Legion {
             {
               if (valid)
               {
+                speculated = false;
                 if (value)
                 {
                   speculation_state = RESOLVE_TRUE_STATE;
