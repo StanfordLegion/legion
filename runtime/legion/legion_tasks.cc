@@ -5596,13 +5596,6 @@ namespace Legion {
         remote_instances.clear();
       }
       version_infos.clear();
-#ifdef DEBUG_LEGION
-      if (point_termination.exists())
-      {
-        bool poisoned;
-        assert(point_termination.has_triggered_faultaware(poisoned));
-      }
-#endif
       runtime->free_point_task(this);
     }
 
