@@ -1632,7 +1632,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      speculation_state = RESOLVE_TRUE_STATE;
+      speculation_state = PENDING_ANALYSIS_STATE;
       predicate = NULL;
       speculate_mapping_only = false;
       received_trigger_resolution = false;
