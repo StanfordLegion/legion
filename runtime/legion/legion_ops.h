@@ -576,6 +576,9 @@ namespace Legion {
     public:
       bool register_waiter(PredicateWaiter *waiter, 
                            GenerationID gen, bool &value);
+      PredEvent get_true_guard(void);
+      PredEvent get_false_guard(void);
+      void get_predicate_guards(PredEvent &true_guard, PredEvent &false_guard);
     protected:
       void set_resolved_value(GenerationID pred_gen, bool value);
     protected:
@@ -585,6 +588,7 @@ namespace Legion {
     protected:
       RtUserEvent collect_predicate;
       unsigned predicate_references;
+      PredEvent true_guard, false_guard;
     };
 
     /**
@@ -832,7 +836,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> restrict_postconditions;
     public:
-      ApUserEvent                 predication_guard;
+      PredEvent                   predication_guard;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                     outstanding_profiling_requests;
@@ -2294,7 +2298,7 @@ namespace Legion {
       size_t value_size;
       Future future;
       std::set<RtEvent> map_applied_conditions;
-      ApUserEvent true_guard, false_guard;
+      PredEvent true_guard, false_guard;
     };
     
     /**

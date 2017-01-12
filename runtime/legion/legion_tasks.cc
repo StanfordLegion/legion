@@ -696,8 +696,8 @@ namespace Legion {
       children_commit = false;
       stealable = false;
       map_locally = false;
-      true_guard = ApUserEvent::NO_AP_USER_EVENT;
-      false_guard = RtUserEvent::NO_RT_USER_EVENT;
+      true_guard = PredEvent::NO_PRED_EVENT;
+      false_guard = PredEvent::NO_PRED_EVENT;
       local_cached = false;
       arg_manager = NULL;
       target_proc = Processor::NO_PROC;
@@ -1057,8 +1057,7 @@ namespace Legion {
         assert(!true_guard.exists());
         assert(!false_guard.exists());
 #endif
-        true_guard = Runtime::create_ap_user_event();
-        false_guard = Runtime::create_rt_user_event();
+        predicate->get_predicate_guards(true_guard, false_guard);
         // Switch any write-discard privileges back to read-write
         // so we can make sure we get the right data if we end up
         // predicating false
@@ -1076,11 +1075,7 @@ namespace Legion {
     void TaskOp::resolve_true(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      if (speculated)
-      {
-        Runtime::trigger_event(true_guard);
-        Runtime::poison_event(false_guard);
-      }
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------
@@ -3646,9 +3641,6 @@ namespace Legion {
         runtime->find_variant_impl(task_id, selected_variant);
       // STEP 1: Compute the precondition for the task launch
       std::set<ApEvent> wait_on_events;
-      // If we have a predicate guard include it in the events
-      if (true_guard.exists())
-        wait_on_events.insert(true_guard);
       // Get the event to wait on unless we are 
       // doing the inner task optimization
       const bool do_inner_task_optimization = variant->is_inner();
@@ -3873,7 +3865,8 @@ namespace Legion {
       }
 #endif
       ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
-         execution_context, start_condition, task_priority, profiling_requests);
+                                 execution_context, start_condition, true_guard, 
+                                 task_priority, profiling_requests);
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
         Runtime::trigger_event(chain_complete_event, task_launch_event);
@@ -3895,7 +3888,7 @@ namespace Legion {
         MisspeculationTaskArgs args;
         args.task = this;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
-                                         this, false_guard);
+                                         this, RtEvent(false_guard));
         // Fun little trick here: decrement the outstanding meta-task
         // counts for the mis-speculation task in case it doesn't run
         // If it does run, we'll increment the counts again
@@ -4797,12 +4790,6 @@ namespace Legion {
     void IndividualTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      if (speculated)
-      {
-        // Trigger our events if we speculated
-        Runtime::poison_event(true_guard);
-        Runtime::trigger_event(false_guard);
-      }
       // If we already launched, then return, otherwise continue
       // through and do the work to clean up the task 
       if (launched)
@@ -6611,12 +6598,6 @@ namespace Legion {
     void IndexTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      if (speculated)
-      {
-        // If we speculated then trigger/poison our guards
-        Runtime::poison_event(true_guard);
-        Runtime::trigger_event(false_guard);
-      }
       // If we already launched, then we can just return
       // otherwise continue through to do the cleanup work
       if (launched)

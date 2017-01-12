@@ -3735,8 +3735,8 @@ namespace Legion {
                                                      MaterializedView *dst,
                                       const std::vector<unsigned> &src_indexes,
                                       const std::vector<unsigned> &dst_indexes,
-                                                     ApEvent precondition,
-                                              std::set<ApEvent> &postconditions)
+                                         ApEvent precondition, PredEvent guard,
+                                         std::set<ApEvent> &postconditions)
     //--------------------------------------------------------------------------
     {
       bool perfect = true;
@@ -3758,7 +3758,7 @@ namespace Legion {
       if (perfect)
       {
         issue_deferred_copies(info, dst, src_mask, 
-                              preconditions, local_postconditions);
+                              preconditions, local_postconditions, guard);
       }
       else
       {
@@ -3766,8 +3766,8 @@ namespace Legion {
         CopyAcrossHelper across_helper(src_mask);
         dst->manager->initialize_across_helper(&across_helper, dst_mask, 
                                                src_indexes, dst_indexes);
-        issue_deferred_copies(info, dst, src_mask,
-                    preconditions, local_postconditions, &across_helper);
+        issue_deferred_copies(info, dst, src_mask, preconditions, 
+                              local_postconditions, guard, &across_helper);
       }
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
             local_postconditions.begin(); it != 
@@ -3920,7 +3920,7 @@ namespace Legion {
                   const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                         LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                         LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                        CopyAcrossHelper *helper) const
+                        PredEvent pred_guard, CopyAcrossHelper *helper) const
     //--------------------------------------------------------------------------
     {
       // We're doing the painter's algorithm
@@ -3935,7 +3935,7 @@ namespace Legion {
       {
         LegionMap<ApEvent,FieldMask>::aligned nested_postconditions;
         issue_nested_copies(traversal_info, dst, copy_mask, src_version_tracker,
-                            preconditions, nested_postconditions, helper);
+                      preconditions, nested_postconditions, pred_guard, helper);
         // Add the nested postconditions to our postconditions
         postconditions.insert(nested_postconditions.begin(),
                               nested_postconditions.end());
@@ -3957,7 +3957,8 @@ namespace Legion {
         // Uses local_preconditions
         LegionMap<ApEvent,FieldMask>::aligned local_postconditions;
         issue_local_copies(traversal_info, dst, copy_mask, src_version_tracker,
-                           *local_preconditions, local_postconditions, helper);
+                           *local_preconditions, local_postconditions, 
+                           pred_guard, helper);
         postconditions.insert(local_postconditions.begin(),
                               local_postconditions.end());
         // Makes new local_preconditions
@@ -3979,7 +3980,8 @@ namespace Legion {
         // Uses local_preconditions
         LegionMap<ApEvent,FieldMask>::aligned child_postconditions;
         issue_child_copies(traversal_info, dst, copy_mask, src_version_tracker,
-            *local_preconditions, child_postconditions, postreductions, helper);
+            *local_preconditions, child_postconditions, postreductions, 
+            pred_guard, helper);
         postconditions.insert(child_postconditions.begin(),
                               child_postconditions.end());
         // Makes new local_preconditions
@@ -4000,7 +4002,7 @@ namespace Legion {
       {
         // Uses local_preconditions
         issue_reductions(traversal_info, dst, copy_mask, src_version_tracker,
-                         *local_preconditions, postreductions, helper);
+                   *local_preconditions, postreductions, pred_guard, helper);
       }
     }
 
@@ -4010,7 +4012,8 @@ namespace Legion {
                             VersionTracker *src_version_tracker,
                 const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
                       LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                      AddressSpaceID local_space, bool restrict_out)
+                      PredEvent pred_guard, AddressSpaceID local_space, 
+                      bool restrict_out)
     //--------------------------------------------------------------------------
     {
       // Make a temporary instance and issue copies to it
@@ -4047,7 +4050,7 @@ namespace Legion {
       }
       LegionMap<ApEvent,FieldMask>::aligned empty_pre, local_pre, local_reduce;
       issue_copies(info, temporary_dst, copy_mask, src_version_tracker,
-                   empty_pre, local_pre, local_reduce, NULL/*across helper*/);
+         empty_pre, local_pre, local_reduce, pred_guard, NULL/*across helper*/);
       // Now that we've done all the copies to the temporary instance
       // we can compute the rest of the destination preconditions
       dst->find_copy_preconditions(0/*redop*/, false/*reading*/, 
@@ -4094,7 +4097,7 @@ namespace Legion {
         assert(src_fields.size() == dst_fields.size());
 #endif
         ApEvent copy_post = dst->logical_node->issue_copy(info.op, src_fields,
-                                          dst_fields, copy_pre, logical_node);
+                              dst_fields, copy_pre, pred_guard, logical_node);
         if (copy_post.exists())
         {
           dst->add_copy_user(0/*redop*/, copy_post, &info.version_info,
@@ -4119,7 +4122,7 @@ namespace Legion {
                               VersionTracker *src_version_tracker,
                   const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                         LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                        CopyAcrossHelper *helper) const
+                        PredEvent pred_guard, CopyAcrossHelper *helper) const
     //--------------------------------------------------------------------------
     {
       FieldMask nested_mask;
@@ -4136,7 +4139,7 @@ namespace Legion {
 #endif
         it->first->issue_copies(traversal_info, dst, overlap, 
             it->first->view_node, preconditions, postconditions,
-            postreductions, helper);
+            postreductions, pred_guard, helper);
       }
       // We have to merge everything back together into postconditions here
       // including the reductions because they have to finish before we issue
@@ -4172,7 +4175,7 @@ namespace Legion {
                               VersionTracker *src_version_tracker,
                   const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                         LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                        CopyAcrossHelper *across_helper) const
+                        PredEvent guard, CopyAcrossHelper *across_helper) const
     //--------------------------------------------------------------------------
     {
       // First check to see if the target is already valid
@@ -4237,7 +4240,7 @@ namespace Legion {
         // issue the grouped copies and put the result in the postconditions
         // We are the intersect
         dst->logical_node->issue_grouped_copies(info, dst,false/*restrict out*/,
-                                 src_preconditions, actual_copy_mask, 
+                                 guard, src_preconditions, actual_copy_mask, 
                                  src_instances, src_version_tracker, 
                                  postconditions, across_helper, logical_node);
       }
@@ -4256,7 +4259,7 @@ namespace Legion {
             deferred_preconditions[pre_it->first] = overlap;
           }
           it->first->issue_deferred_copies(info, dst, it->second,
-              deferred_preconditions, postconditions, across_helper);
+              deferred_preconditions, postconditions, guard, across_helper);
         }
       }
     }
@@ -4269,7 +4272,7 @@ namespace Legion {
                   const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                         LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                         LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                        CopyAcrossHelper *helper) const
+                        PredEvent pred_guard, CopyAcrossHelper *helper) const
     //--------------------------------------------------------------------------
     {
       bool multiple_children = false;
@@ -4285,7 +4288,7 @@ namespace Legion {
         single_child_mask |= overlap;
         it->first->issue_copies(traversal_info, dst, overlap, 
             src_version_tracker, preconditions, postconditions,
-            postreductions, helper);
+            postreductions, pred_guard, helper);
       }
       // Merge the postconditions from all the children to build a 
       // common output event for each field if there were multiple children
@@ -4320,7 +4323,7 @@ namespace Legion {
                               VersionTracker *src_version_tracker,
                   const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                         LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                        CopyAcrossHelper *across_helper) const
+                    PredEvent pred_guard, CopyAcrossHelper *across_helper) const
     //--------------------------------------------------------------------------
     {
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
@@ -4341,7 +4344,7 @@ namespace Legion {
         }
         ApEvent reduce_event = it->first->perform_deferred_reduction(dst,
             overlap, src_version_tracker, local_preconditions, info.op,
-            info.index, across_helper, 
+            info.index, pred_guard, across_helper, 
             (dst->logical_node == it->first->logical_node) ?
               NULL : it->first->logical_node, info.map_applied_events);
         if (reduce_event.exists())
@@ -5175,6 +5178,7 @@ namespace Legion {
         // We need to make a temporary instance 
         copy_tree->copy_to_temporary(info, dst, copy_mask, this,
                                      preconditions, postconditions, 
+                                     PredEvent::NO_PRED_EVENT,
                                      local_space, restrict_out);
       }
       else
@@ -5189,7 +5193,8 @@ namespace Legion {
         LegionMap<ApEvent,FieldMask>::aligned postreductions;
         // No temporary instance necessary here
         copy_tree->issue_copies(info, dst, copy_mask, this, 
-            preconditions, postconditions, postreductions, NULL);
+            preconditions, postconditions, postreductions, 
+            PredEvent::NO_PRED_EVENT, NULL);
         if (!postreductions.empty())
           postconditions.insert(postreductions.begin(),
                                 postreductions.end());
@@ -5239,7 +5244,7 @@ namespace Legion {
                                               FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                              CopyAcrossHelper *across_helper)
+                          PredEvent pred_guard, CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -5254,7 +5259,7 @@ namespace Legion {
       assert(copy_tree != NULL);
 #endif
       copy_tree->issue_copies(info, dst, copy_mask, this, preconditions, 
-                          postconditions, postreductions, across_helper);
+              postconditions, postreductions, pred_guard, across_helper);
       delete copy_tree;
       if (!postreductions.empty())
       {
@@ -6474,7 +6479,8 @@ namespace Legion {
         }
       }
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      issue_deferred_copies(info, dst, copy_mask, preconditions,postconditions);
+      issue_deferred_copies(info, dst, copy_mask, preconditions,
+                            postconditions, PredEvent::NO_PRED_EVENT);
       // We know there is at most one event per field so no need
       // to sort into event sets here
       // Register the resulting events as users of the destination
@@ -6506,7 +6512,7 @@ namespace Legion {
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                         CopyAcrossHelper *across_helper)
+                          PredEvent pred_guard, CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
       // Compute the precondition sets
@@ -6527,7 +6533,7 @@ namespace Legion {
         // Only apply an intersection if the destination logical node
         // is different than our logical node
         ApEvent fill_post = dst->logical_node->issue_fill(info.op, dst_fields,
-                                  value->value, value->value_size, fill_pre, 
+                        value->value, value->value_size, fill_pre, pred_guard, 
                   (logical_node == dst->logical_node) ? NULL : logical_node);
         if (fill_post.exists())
           postconditions[fill_post] = pre_set.set_mask;
@@ -6576,7 +6582,7 @@ namespace Legion {
     PhiView::PhiView(RegionTreeForest *ctx, DistributedID did, 
                      AddressSpaceID owner_space, AddressSpaceID local_space,
                      DeferredVersionInfo *info, RegionTreeNode *node, 
-                     ApEvent tguard, ApEvent fguard, bool register_now) 
+                     PredEvent tguard, PredEvent fguard, bool register_now) 
       : DeferredView(ctx, encode_phi_did(did), owner_space, local_space, node, 
           register_now), 
         true_guard(tguard), false_guard(fguard), version_info(info)
@@ -6592,8 +6598,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhiView::PhiView(const PhiView &rhs)
       : DeferredView(NULL, 0, 0, 0, NULL, false),
-        true_guard(ApEvent::NO_AP_EVENT), 
-        false_guard(ApEvent::NO_AP_EVENT), version_info(NULL)
+        true_guard(PredEvent::NO_PRED_EVENT), 
+        false_guard(PredEvent::NO_PRED_EVENT), version_info(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6711,7 +6717,7 @@ namespace Legion {
         }
       }
       LegionMap<ApEvent,FieldMask>::aligned postconditions;
-      // Now issue copies for both cases
+      // Now issue copies for both cases 
       issue_guarded_update_copies(info, dst, copy_mask, true_guard,
                                   true_views, restrict_info, restrict_out,
                                   preconditions, postconditions);
@@ -6727,7 +6733,7 @@ namespace Legion {
       for (LegionList<EventSet>::aligned::const_iterator it = 
             event_sets.begin(); it != event_sets.end(); it++)
       {
-        ApEvent post = Runtime::merge_events_ignore_faults(it->preconditions);
+        ApEvent post = Runtime::merge_events(it->preconditions);
         if (post.exists())
           dst->add_copy_user(0/*redop*/, post, &info.version_info,
                              info.op->get_unique_op_id(), info.index,
@@ -6744,27 +6750,30 @@ namespace Legion {
                                         FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                        CopyAcrossHelper *helper)
+                                 PredEvent pred_guard, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
       RestrictInfo dummy_restrict_info;
       LegionMap<ApEvent,FieldMask>::aligned local_postconditions;
       // Issue copies for both cases 
-      issue_guarded_update_copies(info, dst, copy_mask, true_guard,
-                                  true_views, dummy_restrict_info, 
-                                  false/*restrict out*/, preconditions, 
-                                  local_postconditions, helper);
-      issue_guarded_update_copies(info, dst, copy_mask, false_guard,
-                                  false_views, dummy_restrict_info,
-                                  false/*restrict out*/, preconditions,
-                                  local_postconditions, helper);
+      // We can skip the cases where the polarity is different for the guard
+      if (pred_guard != false_guard)
+        issue_guarded_update_copies(info, dst, copy_mask, true_guard,
+                                    true_views, dummy_restrict_info, 
+                                    false/*restrict out*/, preconditions, 
+                                    local_postconditions, helper);
+      if (pred_guard != true_guard)
+        issue_guarded_update_copies(info, dst, copy_mask, false_guard,
+                                    false_views, dummy_restrict_info,
+                                    false/*restrict out*/, preconditions,
+                                    local_postconditions, helper);
       // Now merge the postconditions and protect them for when we are done
       LegionList<EventSet>::aligned event_sets;
       RegionTreeNode::compute_event_sets(copy_mask, postconditions, event_sets);
       for (LegionList<EventSet>::aligned::const_iterator it = 
             event_sets.begin(); it != event_sets.end(); it++)
       {
-        ApEvent post = Runtime::merge_events_ignore_faults(it->preconditions);
+        ApEvent post = Runtime::merge_events(it->preconditions);
         if (post.exists())
           postconditions[post] = it->set_mask;
       }
@@ -6774,7 +6783,7 @@ namespace Legion {
     void PhiView::issue_guarded_update_copies(const TraversalInfo &info,
                                        MaterializedView *dst,
                                        FieldMask copy_mask,
-                                       ApEvent predicate_guard,
+                                       PredEvent predicate_guard,
                   const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                        const RestrictInfo &restrict_info,
                                        bool restrict_out,
@@ -6841,13 +6850,11 @@ namespace Legion {
           else
             finder->second |= overlap;
         }
-        // Add the guard to the preconditions too
-        src_preconditions[predicate_guard] = actual_copy_mask;
         // issue the grouped copies and put the result in the postconditions
         dst->logical_node->issue_grouped_copies(info, dst,false/*restrict out*/,
-                                 src_preconditions, actual_copy_mask, 
-                                 src_instances, this, postconditions, 
-                                 across_helper, logical_node);
+                                 predicate_guard, src_preconditions, 
+                                 actual_copy_mask, src_instances, this, 
+                                 postconditions, across_helper, logical_node);
       }
       if (!deferred_instances.empty())
       {
@@ -6863,10 +6870,9 @@ namespace Legion {
               continue;
             deferred_preconditions[pre_it->first] = overlap;
           }
-          // Add the guard to the preconditions too
-          deferred_preconditions[predicate_guard] = it->second;
           it->first->issue_deferred_copies(info, dst, it->second, 
-              deferred_preconditions, postconditions, across_helper);
+              deferred_preconditions, postconditions, 
+              predicate_guard, across_helper);
         }
       }
     }
@@ -7061,7 +7067,7 @@ namespace Legion {
         derez.deserialize(handle);
         target_node = runtime->forest->get_node(handle);
       }
-      ApEvent true_guard, false_guard;
+      PredEvent true_guard, false_guard;
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
       DeferredVersionInfo *version_info = new DeferredVersionInfo();
@@ -7194,6 +7200,7 @@ namespace Legion {
                                           VersionTracker *versions,
                                           Operation *op, unsigned index,
                                           std::set<RtEvent> &map_applied_events,
+                                          PredEvent pred_guard, 
                                           bool restrict_out)
     //--------------------------------------------------------------------------
     {
@@ -7223,7 +7230,7 @@ namespace Legion {
       ApEvent reduce_post = manager->issue_reduction(op, 
                                                      src_fields, dst_fields,
                                                      target->logical_node,
-                                                     reduce_pre,
+                                                     reduce_pre, pred_guard,
                                                      fold, true/*precise*/,
                                                      NULL/*intersect*/);
       target->add_copy_user(manager->redop, reduce_post, versions,
@@ -7244,6 +7251,7 @@ namespace Legion {
                                                     VersionTracker *versions,
                                                    const std::set<ApEvent> &pre,
                                                   Operation *op, unsigned index,
+                                                    PredEvent predicate_guard,
                                                     CopyAcrossHelper *helper,
                                                     RegionTreeNode *intersect,
                                           std::set<RtEvent> &map_applied_events)
@@ -7272,7 +7280,7 @@ namespace Legion {
       ApEvent reduce_pre = Runtime::merge_events(preconditions); 
       ApEvent reduce_post = target->logical_node->issue_copy(op, 
                              src_fields, dst_fields, reduce_pre, 
-                             intersect, manager->redop, fold);
+                             predicate_guard, intersect, manager->redop, fold);
       // No need to add the user to the destination as that will
       // be handled by the caller using the reduce post event we return
       add_copy_user(manager->redop, reduce_post, versions,
@@ -7289,6 +7297,7 @@ namespace Legion {
                               VersionTracker *versions,
                               const std::set<ApEvent> &preconds,
                               Operation *op, unsigned index,
+                              PredEvent predicate_guard,
                               RegionTreeNode *intersect,
                               std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
@@ -7318,6 +7327,7 @@ namespace Legion {
       ApEvent reduce_post = manager->issue_reduction(op, 
                                              src_fields, dst_fields,
                                              intersect, reduce_pre,
+                                             predicate_guard,
                                              fold, false/*precise*/,
                                              target->logical_node);
       // No need to add the user to the destination as that will

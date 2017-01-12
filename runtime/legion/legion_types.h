@@ -1639,6 +1639,20 @@ namespace Legion {
       { id = rhs.id; return *this; }
   };
 
+  class PredEvent : public LgEvent {
+  public:
+    static const PredEvent NO_PRED_EVENT;
+  public:
+    PredEvent(void) : LgEvent() { } 
+    PredEvent(const PredEvent &rhs) { id = rhs.id; }
+    explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
+  public:
+    inline PredEvent& operator=(const PredEvent &rhs)
+      { id = rhs.id; return *this; }
+    inline operator Realm::UserEvent() const
+      { Realm::UserEvent e; e.id = id; return e; }
+  };
+
   class ApEvent : public LgEvent {
   public:
     static const ApEvent NO_AP_EVENT;
@@ -1646,6 +1660,7 @@ namespace Legion {
     ApEvent(void) : LgEvent() { }
     ApEvent(const ApEvent &rhs) { id = rhs.id; }
     explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
+    explicit ApEvent(const PredEvent &e) : LgEvent(e) { }
   public:
     inline ApEvent& operator=(const ApEvent &rhs)
       { id = rhs.id; return *this; }
@@ -1693,6 +1708,7 @@ namespace Legion {
     RtEvent(void) : LgEvent() { }
     RtEvent(const RtEvent &rhs) { id = rhs.id; }
     explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
+    explicit RtEvent(const PredEvent &e) : LgEvent(e) { }
   public:
     inline RtEvent& operator=(const RtEvent &rhs)
       { id = rhs.id; return *this; }
@@ -1729,7 +1745,7 @@ namespace Legion {
         b.timestamp = timestamp; return b; } 
   public:
     Realm::Barrier::timestamp_t timestamp;
-  };
+  }; 
 
 }; // Legion namespace
 

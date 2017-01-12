@@ -1492,6 +1492,8 @@ namespace Legion {
       predicate_resolved = false;
       collect_predicate = RtUserEvent::NO_RT_USER_EVENT;
       predicate_references = 0;
+      true_guard = PredEvent::NO_PRED_EVENT;
+      false_guard = PredEvent::NO_PRED_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1587,12 +1589,102 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PredEvent PredicateImpl::get_true_guard(void)
+    //--------------------------------------------------------------------------
+    {
+      bool trigger = false;
+      bool poison = false;
+      PredEvent result;
+      {
+        AutoLock o_lock(op_lock);
+        if (!true_guard.exists())
+          true_guard = Runtime::create_pred_event();
+        result = true_guard;
+        if (predicate_resolved)
+        {
+          if (predicate_value)
+            trigger = true;
+          else
+            poison = true;
+        }
+      }
+      if (trigger)
+        Runtime::trigger_event(result);
+      else if (poison)
+        Runtime::poison_event(result);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    PredEvent PredicateImpl::get_false_guard(void)
+    //--------------------------------------------------------------------------
+    {
+      bool trigger = false;
+      bool poison = false;
+      PredEvent result;
+      {
+        AutoLock o_lock(op_lock);
+        if (!false_guard.exists())
+          false_guard = Runtime::create_pred_event();
+        result = false_guard;
+        if (predicate_resolved)
+        {
+          if (predicate_value)
+            poison = true;
+          else
+            trigger = true;
+        }
+      }
+      if (trigger)
+        Runtime::trigger_event(result);
+      else if (poison)
+        Runtime::poison_event(result);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void PredicateImpl::get_predicate_guards(PredEvent &true_result,
+                                             PredEvent &false_result)
+    //--------------------------------------------------------------------------
+    {
+      bool handle_true = false;
+      bool handle_false = false;
+      {
+        AutoLock o_lock(op_lock);
+        if (!true_guard.exists())
+          true_guard = Runtime::create_pred_event();
+        true_result = true_guard;
+        if (!false_guard.exists())
+          false_guard = Runtime::create_pred_event();
+        false_result = false_guard;
+        if (predicate_resolved)
+        {
+          if (predicate_value)
+            handle_true = true;
+          else
+            handle_false = true;
+        }
+      }
+      if (handle_true)
+      {
+        Runtime::trigger_event(true_result);
+        Runtime::poison_event(false_result);
+      }
+      else if (handle_false)
+      {
+        Runtime::poison_event(true_result);
+        Runtime::trigger_event(false_result);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PredicateImpl::set_resolved_value(GenerationID pred_gen, bool value)
     //--------------------------------------------------------------------------
     {
       bool need_trigger = true;
       // Make a copy of the waiters since we could get cleaned up in parallel
       std::map<PredicateWaiter*,GenerationID> copy_waiters;
+      PredEvent to_trigger, to_poison;
       {
         AutoLock o_lock(op_lock);
         if ((pred_gen == get_generation()) && !predicate_resolved)
@@ -1603,7 +1695,21 @@ namespace Legion {
         }
         else
           need_trigger= false;
+        if (predicate_value)
+        {
+          to_trigger = true_guard;
+          to_poison = false_guard;
+        }
+        else
+        {
+          to_poison = true_guard;
+          to_trigger = false_guard;
+        }
       }
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+      if (to_poison.exists())
+        Runtime::poison_event(to_poison);
       // Notify any waiters, no need to hold the lock since waiters can't
       // be added after we set the state to resolved
       for (std::map<PredicateWaiter*,GenerationID>::const_iterator it = 
@@ -3170,7 +3276,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
-      predication_guard = ApUserEvent::NO_AP_USER_EVENT;
+      predication_guard = PredEvent::NO_PRED_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -3358,7 +3464,7 @@ namespace Legion {
       assert(!predication_guard.exists());
 #endif
       // Make the copy across precondition guard 
-      predication_guard = Runtime::create_ap_user_event();
+      predication_guard = predicate->get_true_guard();
       // If we're speculating then we make all the destination
       // privileges that are write-discard read-write instead so
       // that we get the earlier version of the data in case we
@@ -3376,18 +3482,13 @@ namespace Legion {
     void CopyOp::resolve_true(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      // Resolved true, so trigger our guard
-      if (speculated)
-        Runtime::trigger_event(predication_guard);
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------
     void CopyOp::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      // If we speculated then poison the predication guard to prevent the copy
-      if (speculated)
-        Runtime::poison_event(predication_guard);
       // If we already launched then we are done
       if (launched)
         return;
@@ -3496,7 +3597,7 @@ namespace Legion {
             profiling_requests, true/*warn*/);
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
-      ApEvent sync_precondition = predication_guard;
+      ApEvent sync_precondition;
       if (!wait_barriers.empty() || !grants.empty())
       {
         std::set<ApEvent> preconditions;
@@ -3627,7 +3728,7 @@ namespace Legion {
                                   src_versions[idx], dst_versions[idx], 
                                   local_completion, this, idx,
                                   idx + src_requirements.size(),
-                                  local_sync_precondition, 
+                                  local_sync_precondition, predication_guard, 
                                   map_applied_conditions);
           Runtime::trigger_event(local_completion, across_done);
         }
@@ -3641,7 +3742,7 @@ namespace Legion {
             runtime->forest->reduce_across(
                                   src_requirements[idx], dst_requirements[idx],
                                   src_targets, dst_targets, this, 
-                                  local_sync_precondition);
+                                  local_sync_precondition, predication_guard);
           Runtime::trigger_event(local_completion, across_done);
         }
         // Apply our changes to the version states
@@ -11566,8 +11667,8 @@ namespace Legion {
       activate_speculative();
       value = NULL;
       value_size = 0;
-      true_guard = ApUserEvent::NO_AP_USER_EVENT;
-      false_guard = ApUserEvent::NO_AP_USER_EVENT;
+      true_guard = PredEvent::NO_PRED_EVENT;
+      false_guard = PredEvent::NO_PRED_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -11709,8 +11810,7 @@ namespace Legion {
       assert(!false_guard.exists());
 #endif
       // Make the copy across precondition guard 
-      true_guard = Runtime::create_ap_user_event();
-      false_guard = Runtime::create_ap_user_event();
+      predicate->get_predicate_guards(true_guard, false_guard);
       return true;
 #else
       return false;
@@ -11721,24 +11821,13 @@ namespace Legion {
     void FillOp::resolve_true(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      // If we speculated then trigger the fill guard
-      if (speculated)
-      {
-        Runtime::trigger_event(true_guard);
-        Runtime::poison_event(false_guard);
-      }
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------
     void FillOp::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
-      // If we speculated then poison the predication guard to prevent the fill
-      if (speculated)
-      {
-        Runtime::poison_event(true_guard);
-        Runtime::trigger_event(false_guard);
-      }
       // If we already launched then there is nothing to do
       if (launched)
         return;

@@ -750,12 +750,13 @@ namespace Legion {
                              VersionTracker *version_tracker, 
                              Operation *op, unsigned index,
                              std::set<RtEvent> &map_applied_events,
-                             bool restrict_out = false);
+                             PredEvent pred_guard, bool restrict_out = false);
       ApEvent perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         VersionTracker *version_tracker,
                                         const std::set<ApEvent> &preconditions,
                                         Operation *op, unsigned index,
+                                        PredEvent predicate_guard,
                                         CopyAcrossHelper *helper,
                                         RegionTreeNode *intersect,
                                         std::set<RtEvent> &map_applied_events);
@@ -766,6 +767,7 @@ namespace Legion {
                                               VersionTracker *version_tracker,
                                        const std::set<ApEvent> &preconditions,
                                        Operation *op, unsigned index,
+                                       PredEvent predicate_guard,
                                        RegionTreeNode *intersect,
                                        std::set<RtEvent> &map_applied_events);
     public:
@@ -927,7 +929,7 @@ namespace Legion {
                                         MaterializedView *dst,
                                   const std::vector<unsigned> &src_indexes,
                                   const std::vector<unsigned> &dst_indexes,
-                                        ApEvent precondition,
+                                        ApEvent precondition, PredEvent guard,
                                         std::set<ApEvent> &postconditions);
       void find_field_descriptors(ApEvent term_event,
                                   const RegionUsage &usage,
@@ -947,6 +949,7 @@ namespace Legion {
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL) = 0; 
     };
 
@@ -996,39 +999,40 @@ namespace Legion {
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
       void copy_to_temporary(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  AddressSpaceID local_space, bool restrict_out);
+                  PredEvent pred_guard, AddressSpaceID local_space, 
+                  bool restrict_out);
     protected:
       void issue_nested_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
       void issue_local_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, FieldMask copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
       void issue_child_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
       void issue_reductions(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
     public:
       RegionTreeNode *const logical_node;
       // Only valid at roots of copy trees
@@ -1203,6 +1207,7 @@ namespace Legion {
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL);
     public:
       // From VersionTracker
@@ -1410,6 +1415,7 @@ namespace Legion {
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
@@ -1453,8 +1459,8 @@ namespace Legion {
       PhiView(RegionTreeForest *ctx, DistributedID did,
               AddressSpaceID owner_proc, AddressSpaceID local_proc,
               DeferredVersionInfo *version_info,
-              RegionTreeNode *node, ApEvent true_guard,
-              ApEvent false_guard, bool register_now);
+              RegionTreeNode *node, PredEvent true_guard,
+              PredEvent false_guard, bool register_now);
       PhiView(const PhiView &rhs);
       virtual ~PhiView(void);
     public:
@@ -1493,12 +1499,13 @@ namespace Legion {
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL);
     protected:
       void issue_guarded_update_copies(const TraversalInfo &info,
                                        MaterializedView *dst,
                                        FieldMask copy_mask,
-                                       ApEvent predicate_guard,
+                                       PredEvent predicate_guard,
                   const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                        const RestrictInfo &restrict_info,
                                        bool restrict_out,
@@ -1518,8 +1525,8 @@ namespace Legion {
       static void handle_deferred_view_ref(const void *args);
       static void handle_deferred_view_registration(const void *args);
     public:
-      const ApEvent true_guard;
-      const ApEvent false_guard;
+      const PredEvent true_guard;
+      const PredEvent false_guard;
       DeferredVersionInfo *const version_info;
     protected:
       LegionMap<LogicalView*,FieldMask>::aligned true_views;

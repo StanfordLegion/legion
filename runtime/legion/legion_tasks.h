@@ -317,8 +317,8 @@ namespace Legion {
       bool map_locally;
     protected:
       // For managing predication
-      ApUserEvent true_guard;
-      RtUserEvent false_guard;
+      PredEvent true_guard;
+      PredEvent false_guard;
     private:
       mutable bool is_local;
       mutable bool local_cached;

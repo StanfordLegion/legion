@@ -1164,8 +1164,8 @@ namespace Legion {
         get_layout_constraints(void) const { return layout_constraints; } 
     public:
       ApEvent dispatch_task(Processor target, SingleTask *task, 
-          TaskContext *ctx, ApEvent precondition, int priority,
-                          Realm::ProfilingRequestSet &requests);
+          TaskContext *ctx, ApEvent precondition, PredEvent pred,
+          int priority, Realm::ProfilingRequestSet &requests);
       void dispatch_inline(Processor current, InlineContext *ctx);
     public:
       Processor::Kind get_processor_kind(bool warn) const;
@@ -2893,10 +2893,6 @@ namespace Legion {
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);
       static inline ApEvent merge_events(const std::set<ApEvent> &events);
     public:
-      static inline ApEvent ignore_faults(ApEvent event);
-      static inline ApEvent merge_events_ignore_faults(
-                                         const std::set<ApEvent> &events);
-    public:
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2);
       static inline RtEvent merge_events(RtEvent e1, RtEvent e2, RtEvent e3);
       static inline RtEvent merge_events(const std::set<RtEvent> &events);
@@ -2905,11 +2901,17 @@ namespace Legion {
       static inline void trigger_event(ApUserEvent to_trigger,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline void poison_event(ApUserEvent to_poison);
+    public:
       static inline RtUserEvent create_rt_user_event(void);
       static inline void trigger_event(RtUserEvent to_trigger,
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
       static inline void poison_event(RtUserEvent to_poison);
     public:
+      static inline PredEvent create_pred_event(void);
+      static inline void trigger_event(PredEvent to_trigger);
+      static inline void poison_event(PredEvent to_poison);
+    public:
+      static inline ApEvent ignorefaults(Realm::Event e);
       static inline RtEvent protect_event(ApEvent to_protect);
       static inline RtEvent protect_merge_events(
                                           const std::set<ApEvent> &events);
@@ -3189,47 +3191,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::ignore_faults(ApEvent event)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent result(Realm::Event::ignorefaults(event));
-#ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        rename.trigger();
-        result = ApEvent(rename);
-      }
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::merge_events_ignore_faults(
-                                                const std::set<ApEvent> &events)
-    //--------------------------------------------------------------------------
-    {
-      const std::set<Realm::Event> *realm_events = 
-        reinterpret_cast<const std::set<Realm::Event>*>(&events);
-      ApEvent result(Realm::Event::merge_events_ignorefaults(*realm_events));
-#ifdef LEGION_SPY
-      if (!result.exists() || (events.find(result) != events.end()))
-      {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        if (events.find(result) != events.end())
-          rename.trigger(result);
-        else
-          rename.trigger();
-        result = ApEvent(rename);
-      }
-      for (std::set<ApEvent>::const_iterator it = events.begin();
-            it != events.end(); it++)
-        LegionSpy::log_event_dependence(*it, result);
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ inline RtEvent Runtime::merge_events(RtEvent e1, RtEvent e2)
     //--------------------------------------------------------------------------
     {
@@ -3333,6 +3294,63 @@ namespace Legion {
     {
       Realm::UserEvent copy = to_poison;
       copy.cancel();
+#ifdef LEGION_SPY
+      // This counts as triggering
+      LegionSpy::log_rt_user_event_trigger(to_poison);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline PredEvent Runtime::create_pred_event(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      PredEvent result(Realm::UserEvent::create_user_event());
+      LegionSpy::log_pred_event(result);
+      return result;
+#else
+      return PredEvent(Realm::UserEvent::create_user_event());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::trigger_event(PredEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_trigger;
+      copy.trigger();
+#ifdef LEGION_SPY
+      LegionSpy::log_pred_event_trigger(to_trigger);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::poison_event(PredEvent to_poison)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_poison;
+      copy.cancel();
+#ifdef LEGION_SPY
+      // This counts as triggering
+      LegionSpy::log_pred_event_trigger(to_poison);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::ignorefaults(Realm::Event e)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent result(Realm::Event::ignorefaults(e));
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+      LegionSpy::log_event_dependence(ApEvent(e), result);
+#endif
+      return ApEvent(result);
     }
 
     //--------------------------------------------------------------------------
