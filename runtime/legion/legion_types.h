@@ -1660,7 +1660,7 @@ namespace Legion {
     ApEvent(void) : LgEvent() { }
     ApEvent(const ApEvent &rhs) { id = rhs.id; }
     explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
-    explicit ApEvent(const PredEvent &e) : LgEvent(e) { }
+    explicit ApEvent(const PredEvent &e) { id = e.id; }
   public:
     inline ApEvent& operator=(const ApEvent &rhs)
       { id = rhs.id; return *this; }
@@ -1708,7 +1708,7 @@ namespace Legion {
     RtEvent(void) : LgEvent() { }
     RtEvent(const RtEvent &rhs) { id = rhs.id; }
     explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
-    explicit RtEvent(const PredEvent &e) : LgEvent(e) { }
+    explicit RtEvent(const PredEvent &e) { id = e.id; }
   public:
     inline RtEvent& operator=(const RtEvent &rhs)
       { id = rhs.id; return *this; }
