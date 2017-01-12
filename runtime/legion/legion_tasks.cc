@@ -5555,6 +5555,7 @@ namespace Legion {
       // Point tasks never have to resolve speculation
       resolve_speculation();
       slice_owner = NULL;
+      point_termination = ApUserEvent::NO_AP_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -5584,6 +5585,13 @@ namespace Legion {
         remote_instances.clear();
       }
       version_infos.clear();
+#ifdef DEBUG_LEGION
+      if (point_termination.exists())
+      {
+        bool poisoned;
+        assert(point_termination.has_triggered_faultaware(poisoned));
+      }
+#endif
       runtime->free_point_task(this);
     }
 
