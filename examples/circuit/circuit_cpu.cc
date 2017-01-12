@@ -319,7 +319,7 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
     __m512 old_v[WIRE_SEGMENTS-1];
     __m512 dt = _mm512_set1_ps(piece.dt);
     __m512 recip_dt = _mm512_set1_ps(1.0/piece.dt);
-    while ((index+7) < piece.num_wires)
+    while ((index+15) < piece.num_wires)
     {
       // We can do pointer math!
       ptr_t current_wire = piece.first_wire+index;

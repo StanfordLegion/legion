@@ -214,16 +214,6 @@ void top_level_task(const Task *task,
   }
 }
 
-static void update_mappers(Machine machine, HighLevelRuntime *rt,
-                           const std::set<Processor> &local_procs)
-{
-  for (std::set<Processor>::const_iterator it = local_procs.begin();
-        it != local_procs.end(); it++)
-  {
-    rt->replace_default_mapper(new CircuitMapper(machine, rt, *it), *it);
-  }
-}
-
 int main(int argc, char **argv)
 {
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
