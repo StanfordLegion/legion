@@ -98,7 +98,6 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd(['git', 'clone', 'https://github.com/magnatelee/PRK.git', prk_dir])
     stencil_dir = os.path.join(prk_dir, 'LEGION', 'Stencil')
     stencil_env = dict(list(env.items()) + [
-        ('DEBUG', '0'),
         ('OUTFILE', 'stencil'),
         ('GEN_SRC', 'stencil.cc'),
         ('CC_FLAGS', (env['CC_FLAGS'] if 'CC_FLAGS' in env else '') +
