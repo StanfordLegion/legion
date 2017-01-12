@@ -1,6 +1,21 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 17.01.0 (January ??, 2017)
+  * General
+    - Bumped copyright dates
+  * Legion
+    - Merged versioning branch with support for a higher performance
+        version numbering computation
+    - More efficient analysis for index space task launches
+    - Updated custom projection function API
+    - Added support for speculative mapping of predicated operations
+    - Added index space copy and fill operations
+  * Legion Prof
+    - Added ability to collapse/expand each processor/channel/memory in
+        a timeline
+    - Added on-demand loading of each processor in a timeline
+
 Version 16.10.0 (October 7, 2016)
   * Realm
     - HDF5 support: moved to Realm module, added DMA channels

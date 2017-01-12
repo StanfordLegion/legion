@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -563,7 +563,7 @@ namespace Legion {
      * held during the course of the operation while still avoiding
      * any stalls in the task's execution.
      * @see TaskLauncher
-     * @see IndexLauncher
+     * @see IndexTaskLauncher
      * @see CopyLauncher
      * @see InlineLauncher
      * @see Runtime
@@ -655,7 +655,7 @@ namespace Legion {
      * perform the necessary operations on barriers before an after
      * the operation is executed.
      * @see TaskLauncher
-     * @see IndexLauncher
+     * @see IndexTaskLauncher
      * @see CopyLauncher
      * @see InlineLauncher
      * @see Runtime
@@ -1176,24 +1176,24 @@ namespace Legion {
     };
 
     /**
-     * \struct IndexLauncher
+     * \struct IndexTaskLauncher
      * Index launchers are objects that describe the launch
      * of an index space of tasks to the runtime.  They can
      * be re-used and safely modified between calls to 
      * index space launches.
      * @see Runtime
      */
-    struct IndexLauncher {
+    struct IndexTaskLauncher {
     public:
-      IndexLauncher(void);
-      IndexLauncher(Processor::TaskFuncID tid,
-                    Domain domain,
-                    TaskArgument global_arg,
-                    ArgumentMap map,
-                    Predicate pred = Predicate::TRUE_PRED,
-                    bool must = false,
-                    MapperID id = 0,
-                    MappingTagID tag = 0);
+      IndexTaskLauncher(void);
+      IndexTaskLauncher(Processor::TaskFuncID tid,
+                        Domain domain,
+                        TaskArgument global_arg,
+                        ArgumentMap map,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        bool must = false,
+                        MapperID id = 0,
+                        MappingTagID tag = 0);
     public:
       inline IndexSpaceRequirement&
                   add_index_requirement(const IndexSpaceRequirement &req);
@@ -1323,6 +1323,45 @@ namespace Legion {
     };
 
     /**
+     * \struct IndexCopyLauncher
+     * An index copy launcher is the same as a normal copy launcher
+     * but it supports the ability to launch multiple copies all 
+     * over a single index space domain. This means that region 
+     * requirements can use projection functions the same as with
+     * index task launches.
+     * @see CopyLauncher
+     * @see Runtime
+     */
+    struct IndexCopyLauncher {
+    public:
+      IndexCopyLauncher(Domain domain, Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+    public:
+      inline unsigned add_copy_requirements(const RegionRequirement &src,
+					    const RegionRequirement &dst);
+      inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
+      inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
+    public:
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
+    public:
+      std::vector<RegionRequirement>  src_requirements;
+      std::vector<RegionRequirement>  dst_requirements;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+      Domain                          domain;
+      Predicate                       predicate;
+      MapperID                        map_id;
+      MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
+    };
+
+    /**
      * \struct FillLauncher
      * Fill launchers are objects that describe the parameters
      * for issuing a fill operation.
@@ -1332,9 +1371,11 @@ namespace Legion {
     public:
       FillLauncher(void);
       FillLauncher(LogicalRegion handle, LogicalRegion parent,
-                   TaskArgument arg, Predicate pred = Predicate::TRUE_PRED);
+                   TaskArgument arg, Predicate pred = Predicate::TRUE_PRED,
+                   MapperID id = 0, MappingTagID tag = 0);
       FillLauncher(LogicalRegion handle, LogicalRegion parent,
-                   Future f, Predicate pred = Predicate::TRUE_PRED);
+                   Future f, Predicate pred = Predicate::TRUE_PRED,
+                   MapperID id = 0, MappingTagID tag = 0);
     public:
       inline void set_argument(TaskArgument arg);
       inline void set_future(Future f);
@@ -1354,6 +1395,70 @@ namespace Legion {
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
+      MapperID                        map_id;
+      MappingTagID                    tag;
+    public:
+      bool                            silence_warnings;
+    };
+
+    /**
+     * \struct IndexFillLauncher
+     * Index fill launchers are objects that are used to describe
+     * a fill over a particular domain. They can be used with 
+     * projeciton functions to describe a fill over an arbitrary
+     * set of logical regions.
+     * @see FillLauncher
+     * @see Runtime
+     */
+    struct IndexFillLauncher {
+    public:
+      IndexFillLauncher(void);
+      // Region projection
+      IndexFillLauncher(Domain domain, LogicalRegion handle, 
+                        LogicalRegion parent, TaskArgument arg,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+      IndexFillLauncher(Domain domain, LogicalRegion handle, 
+                        LogicalRegion parent, Future f,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+      // Partition projection
+      IndexFillLauncher(Domain domain, LogicalPartition handle, 
+                        LogicalRegion parent, TaskArgument arg,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+      IndexFillLauncher(Domain domain, LogicalPartition handle, 
+                        LogicalRegion parent, Future f,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+    public:
+      inline void set_argument(TaskArgument arg);
+      inline void set_future(Future f);
+      inline void add_field(FieldID fid);
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
+    public:
+      Domain                          domain;
+      LogicalRegion                   region;
+      LogicalPartition                partition;
+      LogicalRegion                   parent;
+      ProjectionID                    projection;
+      TaskArgument                    argument;
+      Future                          future;
+      Predicate                       predicate;
+      std::set<FieldID>               fields;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+      MapperID                        map_id;
+      MappingTagID                    tag;
     public:
       bool                            silence_warnings;
     };
@@ -1810,14 +1915,14 @@ namespace Legion {
     public:
       inline void add_single_task(const DomainPoint &point,
                                   const TaskLauncher &launcher);
-      inline void add_index_task(const IndexLauncher &launcher);
+      inline void add_index_task(const IndexTaskLauncher &launcher);
     public:
-      MapperID                      map_id;
-      MappingTagID                  mapping_tag;
-      std::vector<TaskLauncher>     single_tasks;
-      std::vector<IndexLauncher>    index_tasks;
+      MapperID                       map_id;
+      MappingTagID                   mapping_tag;
+      std::vector<TaskLauncher>      single_tasks;
+      std::vector<IndexTaskLauncher> index_tasks;
     public:
-      bool                          silence_warnings;
+      bool                           silence_warnings;
     };
 
     //==========================================================================
@@ -1891,11 +1996,7 @@ namespace Legion {
      * \class Mappable
      * The mappable class provides a base class for all 
      * the different types which can be passed to represent 
-     * an operation to a mapping call. The interface doesn't
-     * currently use this, but it is good to have a base
-     * class for all these operations in case mapper
-     * implementations want to abstract over different
-     * operation types.
+     * an operation to a mapping call.
      */
     class Mappable {
     protected:
@@ -1910,6 +2011,24 @@ namespace Legion {
       virtual unsigned get_context_index(void) const = 0;
       // Return the depth of this operation in the task tree
       virtual int get_depth(void) const = 0;
+    public:
+      enum MappableType {
+        TASK_MAPPABLE,
+        COPY_MAPPABLE,
+        INLINE_MAPPABLE,
+        ACQUIRE_MAPPABLE,
+        RELEASE_MAPPABLE,
+        CLOSE_MAPPABLE,
+        FILL_MAPPABLE,
+      };
+      virtual MappableType get_mappable_type(void) const = 0;
+      virtual const Task* as_task(void) const = 0;
+      virtual const Copy* as_copy(void) const = 0;
+      virtual const InlineMapping* as_inline(void) const = 0;
+      virtual const Acquire* as_acquire(void) const = 0;
+      virtual const Release* as_release(void) const = 0;
+      virtual const Close* as_close(void) const = 0;
+      virtual const Fill* as_fill(void) const = 0;
     public:
       MapperID                                  map_id;
       MappingTagID                              tag;
@@ -1929,6 +2048,16 @@ namespace Legion {
       Task(void);
     public:
       virtual const char* get_task_name(void) const = 0;
+    public:
+      virtual MappableType get_mappable_type(void) const 
+        { return TASK_MAPPABLE; }
+      virtual const Task* as_task(void) const { return this; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
     public:
       // Task argument information
       Processor::TaskFuncID task_id; 
@@ -1971,6 +2100,16 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       Copy(void);
     public:
+      virtual MappableType get_mappable_type(void) const 
+        { return COPY_MAPPABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return this; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
+    public:
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
       std::vector<RegionRequirement>    dst_requirements;
@@ -1992,6 +2131,16 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       InlineMapping(void);
     public:
+      virtual MappableType get_mappable_type(void) const 
+        { return INLINE_MAPPABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return this; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
+    public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
       LayoutConstraintID                layout_constraint_id; 
@@ -2009,6 +2158,16 @@ namespace Legion {
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
       Acquire(void);
+    public:
+      virtual MappableType get_mappable_type(void) const 
+        { return ACQUIRE_MAPPABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return this; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
     public:
       // Acquire Launcher arguments
       LogicalRegion                     logical_region;
@@ -2031,6 +2190,16 @@ namespace Legion {
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
       Release(void);
+    public:
+      virtual MappableType get_mappable_type(void) const 
+        { return RELEASE_MAPPABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return this; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
     public:
       // Release Launcher arguments
       LogicalRegion                     logical_region;
@@ -2058,11 +2227,52 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       Close(void);
     public:
+      virtual MappableType get_mappable_type(void) const 
+        { return CLOSE_MAPPABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return this; }
+      virtual const Fill* as_fill(void) const { return NULL; }
+    public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
     public:
       // Parent task for the inline operation
       Task*                             parent_task;
+    };
+
+    /**
+     * \class Fill
+     * This class represents a fill operation for the
+     * original launcher. See the fill launcher for
+     * more information.
+     */
+    class Fill : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES;
+      Fill(void);
+    public:
+      virtual MappableType get_mappable_type(void) const 
+        { return FILL_MAPPABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return this; }
+    public:
+      // Synthesized region requirement
+      RegionRequirement               requirement;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+    public:
+      // Parent task for the fill operation
+      Task*                           parent_task;
     };
 
     //==========================================================================
@@ -2138,6 +2348,38 @@ namespace Legion {
       virtual ~ProjectionFunctor(void);
     public:
       /**
+       * This is the more general implementation of projection
+       * functions that work for all kinds of operations. 
+       * Implementations can switch on the mappable type to
+       * figure out the kind of the operation that is requesting
+       * the projection. The default implementation of this method
+       * calls the deprecated version of this method for tasks and
+       * fails for all other kinds of operations. Note that this
+       * method is not passed a context, because it should only
+       * be invoking context free runtime methods.
+       * @param mappable the operation requesting the projection
+       * @param index the index of the region requirement being projected
+       * @param upper_bound the upper bound logical region
+       * @param point the point being projected
+       * @return logical region result
+       */
+      virtual LogicalRegion project(const Mappable *mappable, unsigned index,
+                                    LogicalRegion upper_bound,
+                                    const DomainPoint &point);
+      /**
+       * Same method as above, but with a partition as an upper bound
+       * @param mappable the operation requesting the projection
+       * @param index the index of the region requirement being projected
+       * @param upper_bound the upper bound logical partition
+       * @param point the point being projected
+       * @return logical region result
+       */
+      virtual LogicalRegion project(const Mappable *mappable, unsigned index,
+                                    LogicalPartition upper_bound,
+                                    const DomainPoint &point);
+
+      /**
+       * @deprecated
        * Compute the projection for a logical region projection
        * requirement down to a specific logical region.
        * @param ctx the context for this projection
@@ -2150,8 +2392,9 @@ namespace Legion {
       virtual LogicalRegion project(Context ctx, Task *task,
                                     unsigned index,
                                     LogicalRegion upper_bound,
-                                    const DomainPoint &point) = 0;
+                                    const DomainPoint &point);
       /**
+       * @deprecated
        * Compute the projection for a logical partition projection
        * requirement down to a specific logical region.
        * @param ctx the context for this projection
@@ -2164,7 +2407,8 @@ namespace Legion {
       virtual LogicalRegion project(Context ctx, Task *task, 
                                     unsigned index,
                                     LogicalPartition upper_bound,
-                                    const DomainPoint &point) = 0;
+                                    const DomainPoint &point);
+      
       /**
        * Indicate whether calls to this projection functor
        * must be serialized or can be performed in parallel.
@@ -3432,13 +3676,14 @@ namespace Legion {
       /**
        * Launch an index space of tasks with arguments specified
        * by the index launcher configuration.
-       * @see IndexLauncher
+       * @see IndexTaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
        * @return a future map for return values of the points
        *    in the index space of tasks
        */
-      FutureMap execute_index_space(Context ctx, const IndexLauncher &launcher);
+      FutureMap execute_index_space(Context ctx, 
+                                    const IndexTaskLauncher &launcher);
 
       /**
        * Launch an index space of tasks with arguments specified
@@ -3446,14 +3691,14 @@ namespace Legion {
        * return values into a single value using the specified
        * reduction operator into a single future value.  The reduction
        * operation must be a foldable reduction.
-       * @see IndexLauncher
+       * @see IndexTaskLauncher
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
        * @param redop ID for the reduction op to use for reducing return values
        * @return a future result representing the reduction of
        *    all the return values from the index space of tasks
        */
-      Future execute_index_space(Context ctx, const IndexLauncher &launcher,
+      Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
                                  ReductionOpID redop);
 
       /**
@@ -3723,6 +3968,14 @@ namespace Legion {
        * @param launcher the launcher that describes the fill operation
        */
       void fill_fields(Context ctx, const FillLauncher &launcher);
+
+      /**
+       * Perform an index fill operation using a launcher which
+       * specifies all the parameters of the launch.
+       * @param ctx enclosing task context
+       * @param launcher the launcher that describes the index fill operation
+       */
+      void fill_fields(Context ctx, const IndexFillLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // Attach Operations
@@ -3820,14 +4073,21 @@ namespace Legion {
       //------------------------------------------------------------------------
       /**
        * Launch a copy operation from the given configuration of
-       * the given copy launcher.  Return a void future that can
-       * be used for indicating when the copy has completed.
+       * the given copy launcher.
        * @see CopyLauncher
        * @param ctx enclosing task context
        * @param launcher copy launcher object
-       * @return future for when the copy is finished
        */
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
+
+      /**
+       * Launch an index copy operation from the given configuration
+       * of the given copy launcher
+       * @see IndexCopyLauncher
+       * @param ctx enclosing task context
+       * @param launcher index copy launcher object
+       */
+      void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // Predicate Operations

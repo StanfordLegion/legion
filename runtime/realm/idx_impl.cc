@@ -1,5 +1,5 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
- * Copyright 2016 Los Alamos National Laboratory 
+/* Copyright 2017 Stanford University, NVIDIA Corporation
+ * Copyright 2017 Los Alamos National Laboratory 
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -400,7 +400,7 @@ namespace Realm {
 	else
 	  num_elements = 1; // always have at least one element
 	// linearization is an identity translation
-	Translation<1> inst_offset(0);
+	LegionRuntime::Arrays::Translation<1> inst_offset(0);
 	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
 	dl.serialize(linearization_bits);
 #else
@@ -423,8 +423,8 @@ namespace Realm {
 
 	//printf("CI: %zd %zd %zd\n", data->num_elmts, data->first_elmt, data->last_elmt);
 
-	Translation<1> inst_offset(-offset);
-	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
+	LegionRuntime::Arrays::Translation<1> inst_offset(-offset);
+	DomainLinearization dl = DomainLinearization::from_mapping<1>(LegionRuntime::Arrays::Mapping<1,1>::new_dynamic_mapping(inst_offset));
 	dl.serialize(linearization_bits);
 #endif
       }
@@ -629,7 +629,7 @@ namespace Realm {
 #ifdef FULL_SIZE_INSTANCES
 	num_elements = data->last_elmt + 1;
 	// linearization is an identity translation
-	Translation<1> inst_offset(0);
+	LegionRuntime::Arrays::Translation<1> inst_offset(0);
 	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
 	dl.serialize(linearization_bits);
 #else
@@ -646,8 +646,8 @@ namespace Realm {
 
 	//printf("CI: %zd %zd %zd\n", data->num_elmts, data->first_elmt, data->last_elmt);
 
-	Translation<1> inst_offset(-(coord_t)(data->first_elmt));
-	DomainLinearization dl = DomainLinearization::from_mapping<1>(Mapping<1,1>::new_dynamic_mapping(inst_offset));
+	LegionRuntime::Arrays::Translation<1> inst_offset(-(coord_t)(data->first_elmt));
+	DomainLinearization dl = DomainLinearization::from_mapping<1>(LegionRuntime::Arrays::Mapping<1,1>::new_dynamic_mapping(inst_offset));
 	dl.serialize(linearization_bits);
 #endif
       }

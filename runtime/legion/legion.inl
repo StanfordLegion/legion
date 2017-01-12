@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -876,7 +876,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline IndexSpaceRequirement& IndexLauncher::add_index_requirement(
+    inline IndexSpaceRequirement& IndexTaskLauncher::add_index_requirement(
                                               const IndexSpaceRequirement &req)
     //--------------------------------------------------------------------------
     {
@@ -885,7 +885,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline RegionRequirement& IndexLauncher::add_region_requirement(
+    inline RegionRequirement& IndexTaskLauncher::add_region_requirement(
                                                   const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
@@ -894,7 +894,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_field(unsigned idx, FieldID fid, bool inst)
+    inline void IndexTaskLauncher::add_field(unsigned idx,FieldID fid,bool inst)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -904,21 +904,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_future(Future f)
+    inline void IndexTaskLauncher::add_future(Future f)
     //--------------------------------------------------------------------------
     {
       futures.push_back(f);
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_grant(Grant g)
+    inline void IndexTaskLauncher::add_grant(Grant g)
     //--------------------------------------------------------------------------
     {
       grants.push_back(g);
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_wait_barrier(PhaseBarrier bar)
+    inline void IndexTaskLauncher::add_wait_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
       assert(bar.exists());
@@ -926,7 +926,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_arrival_barrier(PhaseBarrier bar)
+    inline void IndexTaskLauncher::add_arrival_barrier(PhaseBarrier bar)
     //--------------------------------------------------------------------------
     {
       assert(bar.exists());
@@ -934,14 +934,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    inline void IndexTaskLauncher::add_wait_handshake(
+                                                   MPILegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
       wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::add_arrival_handshake(
+    inline void IndexTaskLauncher::add_arrival_handshake(
                                                    MPILegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
@@ -949,21 +950,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::set_predicate_false_future(Future f)
+    inline void IndexTaskLauncher::set_predicate_false_future(Future f)
     //--------------------------------------------------------------------------
     {
       predicate_false_future = f;
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::set_predicate_false_result(TaskArgument arg)
+    inline void IndexTaskLauncher::set_predicate_false_result(TaskArgument arg)
     //--------------------------------------------------------------------------
     {
       predicate_false_result = arg;
     }
 
     //--------------------------------------------------------------------------
-    inline void IndexLauncher::set_independent_requirements(bool independent)
+    inline void IndexTaskLauncher::set_independent_requirements(
+                                                               bool independent)
     //--------------------------------------------------------------------------
     {
       independent_requirements = independent;
@@ -1042,6 +1044,81 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void CopyLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline unsigned IndexCopyLauncher::add_copy_requirements(
+                     const RegionRequirement &src, const RegionRequirement &dst)
+    //--------------------------------------------------------------------------
+    {
+      unsigned result = src_requirements.size();
+#ifdef DEBUG_LEGION
+      assert(result == dst_requirements.size());
+#endif
+      src_requirements.push_back(src);
+      dst_requirements.push_back(dst);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::add_src_field(unsigned idx,
+                                                 FieldID fid, bool inst)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < src_requirements.size());
+#endif
+      src_requirements[idx].add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::add_dst_field(unsigned idx,
+                                                 FieldID fid, bool inst)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < dst_requirements.size());
+#endif
+      dst_requirements[idx].add_field(fid, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::add_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      grants.push_back(g);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::add_wait_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      assert(bar.exists());
+      wait_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::add_arrival_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      assert(bar.exists());
+      arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::add_wait_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexCopyLauncher::add_arrival_handshake(
                                                    MPILegionHandshake handshake)
     //--------------------------------------------------------------------------
     {
@@ -1200,6 +1277,66 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void IndexFillLauncher::set_argument(TaskArgument arg)
+    //--------------------------------------------------------------------------
+    {
+      argument = arg;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexFillLauncher::set_future(Future f)
+    //--------------------------------------------------------------------------
+    {
+      future = f;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexFillLauncher::add_field(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      fields.insert(fid);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexFillLauncher::add_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      grants.push_back(g);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexFillLauncher::add_wait_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      assert(pb.exists());
+      wait_barriers.push_back(pb);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexFillLauncher::add_arrival_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      assert(pb.exists());
+      arrive_barriers.push_back(pb);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexFillLauncher::add_wait_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void IndexFillLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_file(const char *name,
                                             const std::vector<FieldID> &fields,
                                             LegionFileMode m)
@@ -1254,7 +1391,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void MustEpochLauncher::add_index_task(const IndexLauncher &launcher)
+    inline void MustEpochLauncher::add_index_task(
+                                              const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       index_tasks.push_back(launcher);
@@ -2402,6 +2540,8 @@ namespace Legion {
 // This is for backwards compatibility with the old namespace scheme
 namespace LegionRuntime {
   namespace HighLevel {
+    using namespace LegionRuntime::Arrays;
+
     typedef Legion::IndexSpace IndexSpace;
     typedef Legion::IndexPartition IndexPartition;
     typedef Legion::FieldSpace FieldSpace;

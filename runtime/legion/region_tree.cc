@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -3187,7 +3187,9 @@ namespace Legion {
                                           RestrictInfo &restrict_info,
                                           InstanceSet &instances, 
                                           ApEvent precondition,
-                                          std::set<RtEvent> &map_applied_events)
+                                          std::set<RtEvent> &map_applied_events,
+                                          ApEvent true_guard, 
+                                          ApEvent false_guard)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
@@ -3211,14 +3213,15 @@ namespace Legion {
         FieldMask eager_fields;
         restrict_info.populate_restrict_fields(eager_fields);
         ApEvent done_event = fill_node->eager_fill_fields(ctx.get_id(), 
-           op, index, logical_ctx_uid, context, eager_fields, value, value_size,
-           version_info, instances, precondition, map_applied_events);
+         op, index, logical_ctx_uid, context, eager_fields, value, value_size,
+         version_info, instances, precondition, true_guard, map_applied_events);
         // Remove these fields from the fill set
         fill_mask -= eager_fields;
         // If we still have fields to fill, do that now
         if (!!fill_mask)
           fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-                 logical_ctx_uid, context, version_info, map_applied_events);
+                                 logical_ctx_uid, context, version_info, 
+                                 map_applied_events, true_guard, false_guard);
         // We know the sync precondition is chained off at least
         // one eager fill so we can return the done event
         return done_event;
@@ -3230,7 +3233,8 @@ namespace Legion {
 #endif
         // Fill in these fields on this node
         fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-               logical_ctx_uid, context, version_info, map_applied_events); 
+                               logical_ctx_uid, context, version_info, 
+                               map_applied_events, true_guard, false_guard);
         // We didn't actually use the precondition so just return it
         return precondition;
       }
@@ -4718,24 +4722,24 @@ namespace Legion {
           }
         case 1:
           {
-            Rect<1> leftr = left.get_rect<1>();
-            Rect<1> rightr = right.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rightr = right.get_rect<1>();
             if (leftr.overlaps(rightr))
               disjoint = false;
             break;
           }
         case 2:
           {
-            Rect<2> leftr = left.get_rect<2>();
-            Rect<2> rightr = right.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rightr = right.get_rect<2>();
             if (leftr.overlaps(rightr))
               disjoint = false;
             break;
           }
         case 3:
           {
-            Rect<3> leftr = left.get_rect<3>();
-            Rect<3> rightr = right.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rightr = right.get_rect<3>();
             if (leftr.overlaps(rightr))
               disjoint = false;
             break;
@@ -5110,9 +5114,9 @@ namespace Legion {
           }
         case 1:
           {
-            Rect<1> leftr = left.get_rect<1>();
-            Rect<1> rightr = right.get_rect<1>();
-            Rect<1> temp = leftr.intersection(rightr);
+            LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rightr = right.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> temp = leftr.intersection(rightr);
             if (temp.volume() > 0)
             {
               non_empty = true;
@@ -5123,9 +5127,9 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> leftr = left.get_rect<2>();
-            Rect<2> rightr = right.get_rect<2>();
-            Rect<2> temp = leftr.intersection(rightr);
+            LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rightr = right.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> temp = leftr.intersection(rightr);
             if (temp.volume() > 0)
             {
               non_empty = true;
@@ -5136,9 +5140,9 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> leftr = left.get_rect<3>();
-            Rect<3> rightr = right.get_rect<3>();
-            Rect<3> temp = leftr.intersection(rightr);
+            LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rightr = right.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> temp = leftr.intersection(rightr);
             if (temp.volume() > 0)
             {
               non_empty = true;
@@ -5226,12 +5230,12 @@ namespace Legion {
         {
           case 1:
             {
-              Rect<1> leftr = left.get_rect<1>();
+              LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<1> right = it->get_rect<1>(); 
+                LegionRuntime::Arrays::Rect<1> right = it->get_rect<1>(); 
                 if ((right.intersection(leftr)) != right)
                 {
                   dominates = false;
@@ -5242,12 +5246,12 @@ namespace Legion {
             }
           case 2:
             {
-              Rect<2> leftr = left.get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<2> right = it->get_rect<2>(); 
+                LegionRuntime::Arrays::Rect<2> right = it->get_rect<2>(); 
                 if ((right.intersection(leftr)) != right)
                 {
                   dominates = false;
@@ -5258,12 +5262,12 @@ namespace Legion {
             }
           case 3:
             {
-              Rect<3> leftr = left.get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<3> right = it->get_rect<3>(); 
+                LegionRuntime::Arrays::Rect<3> right = it->get_rect<3>(); 
                 if ((right.intersection(leftr)) != right)
                 {
                   dominates = false;
@@ -5290,14 +5294,14 @@ namespace Legion {
               for (std::set<Domain>::const_iterator it = left_set.begin();
                     it != left_set.end(); it++)
               {
-                Rect<1> left_rect = it->get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> left_rect = it->get_rect<1>();
                 intervals.insert(left_rect.lo[0], left_rect.hi[0]);
               }
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<1> right_rect = it->get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> right_rect = it->get_rect<1>();
                 if (!intervals.dominates(right_rect.lo[0], right_rect.hi[0]))
                 {
                   dominates = false;
@@ -5312,7 +5316,7 @@ namespace Legion {
               for (std::set<Domain>::const_iterator it = left_set.begin();
                     it != left_set.end(); it++)
               {
-                Rect<2> left_rect = it->get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> left_rect = it->get_rect<2>();
                 if (left_rect.volume() > 0)
                   rectangles.add_rectangle(left_rect.lo[0], left_rect.lo[1],
                                            left_rect.hi[0], left_rect.hi[1]);
@@ -5321,7 +5325,7 @@ namespace Legion {
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<2> right_rect = it->get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> right_rect = it->get_rect<2>();
                 if (right_rect.volume() > 0 &&
                     !rectangles.covers(right_rect.lo[0], right_rect.lo[1],
                                        right_rect.hi[0], right_rect.hi[1]))
@@ -5339,13 +5343,13 @@ namespace Legion {
               for (std::set<Domain>::const_iterator rit = right_set.begin();
                     (rit != right_set.end()) && dominates; rit++)
               {
-                Rect<3> right_rect = rit->get_rect<3>();
+                LegionRuntime::Arrays::Rect<3> right_rect = rit->get_rect<3>();
                 bool has_dominator = false;
                 // See if any of the rectangles on the left dominate it
                 for (std::set<Domain>::const_iterator lit = left_set.begin();
                       lit != left_set.end(); lit++)
                 {
-                  Rect<3> left_rect = lit->get_rect<3>();
+                  LegionRuntime::Arrays::Rect<3> left_rect = lit->get_rect<3>();
                   if (right_rect.intersection(left_rect) == right_rect)
                   {
                     has_dominator = true;
@@ -6782,7 +6786,7 @@ namespace Legion {
           }
         case 1:
           {
-            Rect<1> rect = dom.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rect = dom.get_rect<1>();
             if (rect.volume() > 0)
               LegionSpy::log_index_space_rect<1>(handle.id,rect.lo.x,rect.hi.x);
             else
@@ -6791,7 +6795,7 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> rect = dom.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rect = dom.get_rect<2>();
             if (rect.volume() > 0)
               LegionSpy::log_index_space_rect<2>(handle.id,rect.lo.x,rect.hi.x);
             else
@@ -6800,7 +6804,7 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> rect = dom.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rect = dom.get_rect<3>();
             if (rect.volume() > 0)
               LegionSpy::log_index_space_rect<3>(handle.id,rect.lo.x,rect.hi.x);
             else
@@ -13142,7 +13146,7 @@ namespace Legion {
       // Prepare to make the new view
       DistributedID did = context->runtime->get_available_distributed_id(false);
       // Copy the version info that we need
-      CompositeVersionInfo *view_info = new CompositeVersionInfo();
+      DeferredVersionInfo *view_info = new DeferredVersionInfo();
       version_info.copy_to(*view_info);
       // Make the view
       CompositeView *result = legion_new<CompositeView>(context, did, 
@@ -15954,9 +15958,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
                                  const void *value, size_t value_size,
-                                 UniqueID logical_ctx_uid,InnerContext *context,
+                                 UniqueID logical_ctx_uid,
+                                 InnerContext *inner_context,
                                  VersionInfo &version_info,
-                                 std::set<RtEvent> &map_applied_events)
+                                 std::set<RtEvent> &map_applied_events,
+                                 ApEvent true_guard, ApEvent false_guard)
     //--------------------------------------------------------------------------
     {
       // A fill is a kind of a write, so we have to do the advance
@@ -15965,24 +15971,56 @@ namespace Legion {
       const bool update_parent_state = 
         !version_info.is_upper_bound_node(this);
       const AddressSpaceID local_space = context->runtime->address_space;
-      manager.advance_versions(fill_mask, logical_ctx_uid, context,
+      manager.advance_versions(fill_mask, logical_ctx_uid, inner_context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
-      manager.record_advance_versions(fill_mask, context, 
+      manager.record_advance_versions(fill_mask, inner_context, 
                                       version_info, map_applied_events);
       // Make the fill instance
       DistributedID did = context->runtime->get_available_distributed_id(false);
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
-        legion_new<FillView>(this->context, did, local_space, local_space, 
+        legion_new<FillView>(context, did, local_space, local_space, 
                              this, fill_value, true/*register now*/);
       // Now update the physical state
       PhysicalState *state = get_physical_state(version_info);
-      // Invalidate any reduction views
-      if (!(fill_mask * state->reduction_mask))
-        invalidate_reduction_views(state, fill_mask);
-      update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
+      if (true_guard.exists())
+      {
+        // Special path for handling speculative execution of predicated fills
+#ifdef DEBUG_LEGION
+        assert(false_guard.exists());
+#endif
+        // Build a phi view and register that instead
+        DistributedID did = 
+          context->runtime->get_available_distributed_id(false);
+        // Copy the version info that we need
+        DeferredVersionInfo *view_info = new DeferredVersionInfo();
+        version_info.copy_to(*view_info); 
+        PhiView *phi_view = legion_new<PhiView>(context, did, local_space,
+                                                local_space, view_info,
+                                                this, true_guard, false_guard,
+                                                true/*register now*/);
+        // Record the true and false views
+        phi_view->record_true_view(fill_view, fill_mask);
+        LegionMap<LogicalView*,FieldMask>::aligned current_views;
+        find_valid_instance_views(ctx, state, fill_mask, fill_mask,
+                                  version_info, false/*needs space*/, 
+                                  current_views);
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+              current_views.begin(); it != current_views.end(); it++)
+          phi_view->record_false_view(it->first, it->second);
+        // Update the state with the phi view
+        update_valid_views(state, fill_mask, true/*dirty*/, phi_view);
+      }
+      else
+      {
+        // This is the non-predicated path
+        // Invalidate any reduction views
+        if (!(fill_mask * state->reduction_mask))
+          invalidate_reduction_views(state, fill_mask);
+        update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15995,6 +16033,7 @@ namespace Legion {
                                           VersionInfo &version_info, 
                                           InstanceSet &instances,
                                           ApEvent sync_precondition,
+                                          ApEvent true_guard,
                                           std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
@@ -16029,9 +16068,12 @@ namespace Legion {
         compute_event_sets(fill_mask, preconditions, event_sets);
         // Iterate over the event sets and issue the fill operations on 
         // the different fields
-        for (LegionList<EventSet>::aligned::const_iterator pit = 
+        for (LegionList<EventSet>::aligned::iterator pit = 
               event_sets.begin(); pit != event_sets.end(); pit++)
         {
+          // If we have a predicate guard we add that to the set now
+          if (true_guard.exists())
+            pit->preconditions.insert(true_guard);
           ApEvent precondition = Runtime::merge_events(pit->preconditions);
           std::vector<Domain::CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);

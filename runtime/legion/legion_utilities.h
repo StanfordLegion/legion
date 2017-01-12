@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -277,7 +277,7 @@ namespace Legion {
       // Make these constructors explicit so we know when
       // we are converting between things
       explicit ColorPoint(Color c)
-        : point(DomainPoint::from_point<1>(Point<1>((c)))), valid(true) { }
+        : point(DomainPoint::from_point<1>(LegionRuntime::Arrays::Point<1>((c)))), valid(true) { }
       explicit ColorPoint(const DomainPoint &p)
         : point(p), valid(true) { }
     public:

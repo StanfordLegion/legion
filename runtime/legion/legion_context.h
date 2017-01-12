@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -280,14 +280,17 @@ namespace Legion {
                                                     FieldSpace handle) = 0;
     public:
       virtual Future execute_task(const TaskLauncher &launcher) = 0;
-      virtual FutureMap execute_index_space(const IndexLauncher &launcher) = 0;
-      virtual Future execute_index_space(const IndexLauncher &launcher,
+      virtual FutureMap execute_index_space(
+                                         const IndexTaskLauncher &launcher) = 0;
+      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop) = 0; 
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual void remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
+      virtual void fill_fields(const IndexFillLauncher &launcher) = 0;
       virtual void issue_copy(const CopyLauncher &launcher) = 0;
+      virtual void issue_copy(const IndexCopyLauncher &launcher) = 0;
       virtual void issue_acquire(const AcquireLauncher &launcher) = 0;
       virtual void issue_release(const ReleaseLauncher &launcher) = 0;
       virtual PhysicalRegion attach_resource(
@@ -834,14 +837,16 @@ namespace Legion {
                                                     FieldSpace handle);
     public:
       virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexLauncher &launcher);
-      virtual Future execute_index_space(const IndexLauncher &launcher,
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual void remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
       virtual void fill_fields(const FillLauncher &launcher);
+      virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
+      virtual void issue_copy(const IndexCopyLauncher &launcher);
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
@@ -968,6 +973,12 @@ namespace Legion {
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
       LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
       LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children; 
+#ifdef DEBUG_LEGION
+      // In debug mode also keep track of them in context order so
+      // we can see what the longest outstanding operation is which
+      // is often useful when things hang
+      std::map<unsigned,Operation*> outstanding_children;
+#endif
     protected:
       // Traces for this task's execution
       LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;
@@ -1301,14 +1312,16 @@ namespace Legion {
                                                     FieldSpace handle);
     public:
       virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexLauncher &launcher);
-      virtual Future execute_index_space(const IndexLauncher &launcher,
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual void remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
       virtual void fill_fields(const FillLauncher &launcher);
+      virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
+      virtual void issue_copy(const IndexCopyLauncher &launcher);
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
@@ -1592,14 +1605,16 @@ namespace Legion {
                                                     FieldSpace handle);
     public:
       virtual Future execute_task(const TaskLauncher &launcher);
-      virtual FutureMap execute_index_space(const IndexLauncher &launcher);
-      virtual Future execute_index_space(const IndexLauncher &launcher,
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
                                          ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual void remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
       virtual void fill_fields(const FillLauncher &launcher);
+      virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
+      virtual void issue_copy(const IndexCopyLauncher &launcher);
       virtual void issue_acquire(const AcquireLauncher &launcher);
       virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);

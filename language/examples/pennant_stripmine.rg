@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1158,10 +1158,12 @@ task test()
 
   var subregion_0, subregion_1, subregion_2, subregion_3 = conf.subregion[0], conf.subregion[1], conf.subregion[2], conf.subregion[3]
 
+  var prune = conf.prune
+
   var alfa = conf.alfa
   var cfl = conf.cfl
   var cflv = conf.cflv
-  var cstop = conf.cstop
+  var cstop = conf.cstop + 2*prune
   var dtfac = conf.dtfac
   var dtinit = conf.dtinit
   var dtmax = conf.dtmax
@@ -1280,7 +1282,7 @@ task test()
       --   last_time = current_time
       -- end
 
-      print_ts = requested_print_ts and cycle == 0
+      print_ts = requested_print_ts and cycle == prune
 
       -- __demand(__parallel)
       for i = 0, npieces do
@@ -1343,7 +1345,7 @@ task test()
                              enable)
       end
 
-      print_ts = requested_print_ts and cycle == cstop - 1
+      print_ts = requested_print_ts and cycle == cstop - 1 - prune
 
       dthydro = dtmax
       -- __demand(__parallel)

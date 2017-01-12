@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2551,11 +2551,11 @@ namespace Legion {
       {
         case 1:
           {
-            Rect<1> base = hull.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> base = hull.get_rect<1>();
             for (std::set<Domain>::const_iterator it = domains.begin();
                   it != domains.end(); it++)
             {
-              Rect<1> next = it->get_rect<1>();
+              LegionRuntime::Arrays::Rect<1> next = it->get_rect<1>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<1>(base);
@@ -2563,11 +2563,11 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> base = hull.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> base = hull.get_rect<2>();
             for (std::set<Domain>::const_iterator it = domains.begin();
                   it != domains.end(); it++)
             {
-              Rect<2> next = it->get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> next = it->get_rect<2>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<2>(base);
@@ -2575,11 +2575,11 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> base = hull.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> base = hull.get_rect<3>();
             for (std::set<Domain>::const_iterator it = domains.begin();
                   it != domains.end(); it++)
             {
-              Rect<3> next = it->get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> next = it->get_rect<3>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<3>(base);
@@ -2701,9 +2701,9 @@ namespace Legion {
 #endif
         exit(ERROR_EMPTY_INDEX_PARTITION);
       }
-      Point<1> lower_bound(coloring.begin()->first);
-      Point<1> upper_bound(coloring.rbegin()->first);
-      Rect<1> color_range(lower_bound,upper_bound);
+      LegionRuntime::Arrays::Point<1> lower_bound(coloring.begin()->first);
+      LegionRuntime::Arrays::Point<1> upper_bound(coloring.rbegin()->first);
+      LegionRuntime::Arrays::Rect<1> color_range(lower_bound,upper_bound);
       Domain color_space = Domain::from_rect<1>(color_range);
       // Perform the coloring by iterating over all the colors in the
       // range.  For unspecified colors there is nothing wrong with
@@ -2715,7 +2715,8 @@ namespace Legion {
         parent_dom.get_index_space().get_valid_mask().get_num_elmts();
       const int first_element =
         parent_dom.get_index_space().get_valid_mask().get_first_element();
-      for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
+      for (LegionRuntime::Arrays::GenericPointInRectIterator<1>
+	     pir(color_range); pir; pir++)
       {
         Realm::ElementMask child_mask(num_elmts, first_element);
         Color c = pir.p;
@@ -2921,7 +2922,8 @@ namespace Legion {
             coloring.begin(); it != coloring.end(); it++)
       {
         Domain hull = runtime->construct_convex_hull(it->second);
-        DomainPoint color = DomainPoint::from_point<1>(Point<1>(it->first));
+	LegionRuntime::Arrays::Point<1> pcolor(it->first);
+        DomainPoint color = DomainPoint::from_point<1>(pcolor);
         convex_hulls[color] = hull;
         color_sets[color] = it->second; 
       }
@@ -2995,14 +2997,15 @@ namespace Legion {
           }
         }
         // Now make the index spaces and their domains
-        Point<1> lower_bound(child_masks.begin()->first);
-        Point<1> upper_bound(child_masks.rbegin()->first);
-        Rect<1> color_range(lower_bound,upper_bound);
+        LegionRuntime::Arrays::Point<1> lower_bound(child_masks.begin()->first);
+        LegionRuntime::Arrays::Point<1> upper_bound(child_masks.rbegin()->first);
+        LegionRuntime::Arrays::Rect<1> color_range(lower_bound,upper_bound);
         color_space = Domain::from_rect<1>(color_range);
         // Iterate over all the colors in the range from the lower
         // bound to upper bound so we can store the color space as
         // a dense array of colors.
-        for (GenericPointInRectIterator<1> pir(color_range); pir; pir++)
+        for (LegionRuntime::Arrays::GenericPointInRectIterator<1>
+	       pir(color_range); pir; pir++)
         {
           Color c = pir.p;
           std::map<Color,Realm::ElementMask>::const_iterator finder = 
@@ -3914,7 +3917,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap InnerContext::execute_index_space(const IndexLauncher &launcher)
+    FutureMap InnerContext::execute_index_space(
+                                              const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -3979,7 +3983,7 @@ namespace Legion {
                           "false.  Please set either the "
                           "'predicate_false_result' or "
                           "'predicate_false_future' fields of the "
-                          "IndexLauncher struct.", impl->get_name(), 
+                          "IndexTaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
             assert(false);
@@ -4023,7 +4027,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::execute_index_space(const IndexLauncher &launcher,
+    Future InnerContext::execute_index_space(const IndexTaskLauncher &launcher,
                                              ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
@@ -4057,7 +4061,7 @@ namespace Legion {
                           "false.  Please set either the "
                           "'predicate_false_result' or "
                           "'predicate_false_future' fields of the "
-                          "IndexLauncher struct.", impl->get_name(), 
+                          "IndexTaskLauncher struct.", impl->get_name(), 
                           get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
             assert(false);
@@ -4211,6 +4215,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::fill_fields(const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (launcher.domain.get_volume() == 0)
+      {
+        log_run.warning("Ignoring empty index space fill in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return;
+      }
+      IndexFillOp *fill_op = runtime->get_available_index_fill_op(true);
+#ifdef DEBUG_LEGION
+      fill_op->initialize(this, launcher, Runtime::check_privileges);
+      log_run.debug("Registering an index fill operation in task %s (ID %lld)",
+                     get_task_name(), get_unique_id());
+#else
+      fill_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_fields call in task %s (UID %lld).",
+              get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::issue_copy(const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -4219,6 +4264,47 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       copy_op->initialize(this, launcher, Runtime::check_privileges);
       log_run.debug("Registering a copy operation in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#else
+      copy_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(copy_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_copy_operation call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, copy_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::issue_copy(const IndexCopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (launcher.domain.get_volume() == 0)
+      {
+        log_run.warning("Ignoring empty index space copy in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return;
+      }
+      IndexCopyOp *copy_op = runtime->get_available_index_copy_op(true);
+#ifdef DEBUG_LEGION
+      copy_op->initialize(this, launcher, Runtime::check_privileges);
+      log_run.debug("Registering an index copy operation in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #else
       copy_op->initialize(this, launcher, false/*check privileges*/);
@@ -4644,6 +4730,7 @@ namespace Legion {
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
+        outstanding_children[op->get_ctx_index()] = op;
 #endif       
         executing_children.insert(op);
       }
@@ -4757,6 +4844,7 @@ namespace Legion {
         assert(finder != complete_children.end());
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
+        outstanding_children.erase(op->get_ctx_index());
 #endif
         complete_children.erase(finder);
         // See if we need to trigger the all children commited call
@@ -4784,6 +4872,9 @@ namespace Legion {
         executing_children.erase(op);
         executed_children.erase(op);
         complete_children.erase(op);
+#ifdef DEBUG_LEGION
+        outstanding_children.erase(op->get_ctx_index());
+#endif
         int outstanding_count = 
           __sync_add_and_fetch(&outstanding_children_count,-1);
 #ifdef DEBUG_LEGION
@@ -7504,7 +7595,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap LeafContext::execute_index_space(const IndexLauncher &launcher)
+    FutureMap LeafContext::execute_index_space(
+                                              const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal execute index space call performed in leaf "
@@ -7517,7 +7609,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future LeafContext::execute_index_space(const IndexLauncher &launcher,
+    Future LeafContext::execute_index_space(const IndexTaskLauncher &launcher,
                                             ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
@@ -7580,11 +7672,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::fill_fields(const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index fill operation call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::issue_copy(const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal copy operation call performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::issue_copy(const IndexCopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index copy operation call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
 #endif
@@ -8725,14 +8841,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap InlineContext::execute_index_space(const IndexLauncher &launcher)
+    FutureMap InlineContext::execute_index_space(
+                                              const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       return enclosing->execute_index_space(launcher);
     }
 
     //--------------------------------------------------------------------------
-    Future InlineContext::execute_index_space(const IndexLauncher &launcher,
+    Future InlineContext::execute_index_space(const IndexTaskLauncher &launcher,
                                               ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
@@ -8768,7 +8885,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InlineContext::fill_fields(const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->fill_fields(launcher);
+    }
+
+    //--------------------------------------------------------------------------
     void InlineContext::issue_copy(const CopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->issue_copy(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::issue_copy(const IndexCopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       enclosing->issue_copy(launcher);

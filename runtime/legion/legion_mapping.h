@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,10 @@
 
 namespace Legion {
   namespace Mapping { 
+
+    // for compatibility, many applications that customize mappers expect
+    // to have LegionRuntime::Arrays::{Point,Rect}<DIM> available automatically
+    using namespace LegionRuntime::Arrays;
 
     /**
      * \class PhysicalInstance
@@ -609,10 +613,15 @@ namespace Legion {
        * using the 'speculate' field. If it does choose to speculate
        * then the mapper can control the guessed value for the
        * predicate by setting the 'speculative_value' field.
+       * Finally the mapper can control whether the speculation
+       * is solely for the mapping of the operation or whether it
+       * should extend to the execution of the operation with 
+       * the 'speculate_mapping_only' field.
        */
       struct SpeculativeOutput {
         bool                                    speculate;
         bool                                    speculative_value;
+        bool                                    speculate_mapping_only;
       };
       //------------------------------------------------------------------------
       virtual void speculate(const MapperContext      ctx,

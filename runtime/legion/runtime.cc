@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1114,17 +1114,20 @@ namespace Legion {
           context->end_task_wait();
       }
       // Now wait for the reference to be ready
-      
       std::set<ApEvent> wait_on;
       references.update_wait_on_events(wait_on);
       ApEvent ref_ready = Runtime::merge_events(wait_on);
-      if (!ref_ready.has_triggered())
+      bool poisoned;
+      if (!ref_ready.has_triggered_faultaware(poisoned))
       {
-        if (context != NULL)
-          context->begin_task_wait(false/*from runtime*/);
-        ref_ready.wait();
-        if (context != NULL)
-          context->end_task_wait();
+        if (!poisoned)
+        {
+          if (context != NULL)
+            context->begin_task_wait(false/*from runtime*/);
+          ref_ready.wait_faultaware(poisoned);
+          if (context != NULL)
+            context->end_task_wait();
+        }
       }
       valid = true;
     }
@@ -1350,13 +1353,18 @@ namespace Legion {
       // before we return, this usually occurs because we had restricted
       // coherence on the region and we have to issue copies back to 
       // the restricted instances before we are officially unmapped
-      if (wait_for_unmap.exists() && !wait_for_unmap.has_triggered())
+      bool poisoned;
+      if (wait_for_unmap.exists() && 
+          !wait_for_unmap.has_triggered_faultaware(poisoned))
       {
-        if (context != NULL)
-          context->begin_task_wait(false/*from runtime*/);
-        wait_for_unmap.wait();
-        if (context != NULL)
-          context->end_task_wait();
+        if (!poisoned)
+        {
+          if (context != NULL)
+            context->begin_task_wait(false/*from runtime*/);
+          wait_for_unmap.wait();
+          if (context != NULL)
+            context->end_task_wait();
+        }
       }
     }
 
@@ -5455,6 +5463,11 @@ namespace Legion {
               runtime->handle_send_fill_view(derez, remote_address_space);
               break;
             }
+          case SEND_PHI_VIEW:
+            {
+              runtime->handle_send_phi_view(derez, remote_address_space);
+              break;
+            }
           case SEND_REDUCTION_VIEW:
             {
               runtime->handle_send_reduction_view(derez, remote_address_space);
@@ -7679,32 +7692,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion IdentityProjectionFunctor::project(Context ctx, Task *task,
+    LogicalRegion IdentityProjectionFunctor::project(const Mappable *mappable,
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      if (point.get_dim() > 3)
-      {
-        log_task.error("Projection ID 0 is invalid for tasks whose "
-                       "points are larger than three dimensional "
-                       "unsigned integers.  Points for task %s "
-                       "have elements of %d dimensions",
-                        task->get_task_name(), point.get_dim());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_IDENTITY_PROJECTION_USE);
-      }
       return upper_bound;
     }
-
+    
     //--------------------------------------------------------------------------
-    LogicalRegion IdentityProjectionFunctor::project(Context ctx, Task *task, 
+    LogicalRegion IdentityProjectionFunctor::project(const Mappable *mappable,
          unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      return runtime->get_logical_subregion_by_color(
-                            task->regions[index].partition, point);
+      return runtime->get_logical_subregion_by_color(upper_bound, point);
     }
 
     //--------------------------------------------------------------------------
@@ -7764,15 +7764,14 @@ namespace Legion {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
         {
-          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx, 
+          LogicalRegion result = functor->project(task, idx, 
                                                   req.partition, point); 
           check_projection_partition_result(req, task, idx, result, runtime);
           return result;
         }
         else
         {
-          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                                  req.region, point);
+          LogicalRegion result = functor->project(task, idx, req.region, point);
           check_projection_region_result(req, task, idx, result, runtime);
           return result;
         }
@@ -7781,15 +7780,14 @@ namespace Legion {
       {
         if (req.handle_type == PART_PROJECTION)
         {
-          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx, 
+          LogicalRegion result = functor->project(task, idx, 
                                                   req.partition, point);
           check_projection_partition_result(req, task, idx, result, runtime);
           return result;
         }
         else
         {
-          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                                  req.region, point);
+          LogicalRegion result = functor->project(task, idx, req.region, point);
           check_projection_region_result(req, task, idx, result, runtime);
           return result;
         }
@@ -7813,8 +7811,8 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                      req.partition, it->get_domain_point());
+            LogicalRegion result = functor->project(task, idx, req.partition, 
+                                                    it->get_domain_point());
             check_projection_partition_result(req, task, idx, result, runtime);
             it->add_projection_region(idx, result);
           }
@@ -7824,8 +7822,8 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                         req.region, it->get_domain_point());
+            LogicalRegion result = functor->project(task, idx, req.region, 
+                                                    it->get_domain_point());
             check_projection_region_result(req, task, idx, result, runtime);
             it->add_projection_region(idx, result);
           }
@@ -7838,8 +7836,8 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                      req.partition, it->get_domain_point());
+            LogicalRegion result = functor->project(task, idx, req.partition, 
+                                                    it->get_domain_point());
             check_projection_partition_result(req, task, idx, result, runtime);
             it->add_projection_region(idx, result);
           }
@@ -7849,10 +7847,74 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                         req.region, it->get_domain_point());
+            LogicalRegion result = functor->project(task, idx, req.region, 
+                                                    it->get_domain_point());
             check_projection_region_result(req, task, idx, result, runtime);
             it->add_projection_region(idx, result);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::project_points(Operation *op, unsigned idx,
+                         const RegionRequirement &req, Runtime *runtime, 
+                         const std::vector<ProjectionPoint*> &points)
+    //--------------------------------------------------------------------------
+    {
+      Mappable *mappable = op->get_mappable();
+#ifdef DEBUG_LEGION
+      assert(req.handle_type != SINGULAR);
+      assert(mappable != NULL);
+#endif
+      if (projection_reservation.exists())
+      {
+        AutoLock p_lock(projection_reservation);
+        if (req.handle_type == PART_PROJECTION)
+        {
+          for (std::vector<ProjectionPoint*>::const_iterator it = 
+                points.begin(); it != points.end(); it++)
+          {
+            LogicalRegion result = functor->project(mappable, idx, 
+                req.partition, (*it)->get_domain_point());
+            check_projection_partition_result(req, op, idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
+          }
+        }
+        else
+        {
+          for (std::vector<ProjectionPoint*>::const_iterator it = 
+                points.begin(); it != points.end(); it++)
+          {
+            LogicalRegion result = functor->project(mappable, idx, req.region,
+                                                    (*it)->get_domain_point());
+            check_projection_region_result(req, op, idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
+          }
+        }
+      }
+      else
+      {
+        if (req.handle_type == PART_PROJECTION)
+        {
+          for (std::vector<ProjectionPoint*>::const_iterator it = 
+                points.begin(); it != points.end(); it++)
+          {
+            LogicalRegion result = functor->project(mappable, idx,
+                req.partition, (*it)->get_domain_point());
+            check_projection_partition_result(req, op, idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
+          }
+        }
+        else
+        {
+          for (std::vector<ProjectionPoint*>::const_iterator it = 
+                points.begin(); it != points.end(); it++)
+          {
+            LogicalRegion result = functor->project(mappable, idx, req.region,
+                                                    (*it)->get_domain_point());
+            check_projection_region_result(req, op, idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
           }
         }
       }
@@ -7947,6 +8009,100 @@ namespace Legion {
             "which is %d for region requirement %d of task %s (ID %lld)",
             projection_id, projection_depth, functor->get_depth(),
             idx, task->get_task_name(), task->get_unique_id());
+        assert(false);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_projection_region_result(
+        const RegionRequirement &req, Operation *op, unsigned idx,
+        LogicalRegion result, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // NO_REGION is always an acceptable answer
+      if (result == LogicalRegion::NO_REGION)
+        return;
+      if (result.get_tree_id() != req.region.get_tree_id())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion of tree ID %d for region requirement %d "
+            "of operation %s (UID %lld) which is different from the upper "
+            "bound node of tree ID %d", projection_id, 
+            result.get_tree_id(), idx, op->get_logging_name(), 
+            op->get_unique_op_id(), req.region.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PROJECTION_RESULT);
+      }
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->is_subregion(result, req.region))
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which is not a subregion of the "
+            "upper bound region for region requirement %d of "
+            "operation %s (UID %lld)", projection_id, idx,
+            op->get_logging_name(), op->get_unique_op_id());
+        assert(false);
+      }
+      const unsigned projection_depth = 
+        runtime->forest->get_projection_depth(result, req.region);
+      if (projection_depth != functor->get_depth())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which has projection depth %d which "
+            "is different from stated projection depth of the functor "
+            "which is %d for region requirement %d of operation %s (ID %lld)",
+            projection_id, projection_depth, functor->get_depth(),
+            idx, op->get_logging_name(), op->get_unique_op_id());
+        assert(false);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::check_projection_partition_result(
+        const RegionRequirement &req, Operation *op, unsigned idx,
+        LogicalRegion result, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // NO_REGION is always an acceptable answer
+      if (result == LogicalRegion::NO_REGION)
+        return;
+      if (result.get_tree_id() != req.partition.get_tree_id())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion of tree ID %d for region requirement %d "
+            "of operation %s (UID %lld) which is different from the upper "
+            "bound node of tree ID %d", projection_id, 
+            result.get_tree_id(), idx, op->get_logging_name(), 
+            op->get_unique_op_id(), req.partition.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PROJECTION_RESULT);
+      }
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->is_subregion(result, req.partition))
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which is not a subregion of the "
+            "upper bound region for region requirement %d of "
+            "operation %s (UID %lld)", projection_id, idx,
+            op->get_logging_name(), op->get_unique_op_id());
+        assert(false);
+      }
+      const unsigned projection_depth = 
+        runtime->forest->get_projection_depth(result, req.partition);
+      if (projection_depth != functor->get_depth())
+      {
+        log_run.error("Projection functor %d produced an invalid "
+            "logical subregion which has projection depth %d which "
+            "is different from stated projection depth of the functor "
+            "which is %d for region requirement %d of operation %s (ID %lld)",
+            projection_id, projection_depth, functor->get_depth(),
+            idx, op->get_logging_name(), op->get_unique_op_id());
         assert(false);
       }
 #endif
@@ -9115,8 +9271,8 @@ namespace Legion {
           {
             case 1:
               {
-                Rect<1> d1 = it1->second.get_rect<1>();
-                Rect<1> d2 = it2->second.get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> d1 = it1->second.get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> d2 = it2->second.get_rect<1>();
                 if (d1.overlaps(d2))
                 {
                   log_run.error("ERROR: colors %d and %d of "
@@ -9130,8 +9286,8 @@ namespace Legion {
               }
             case 2:
               {
-                Rect<2> d1 = it1->second.get_rect<2>();
-                Rect<2> d2 = it2->second.get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> d1 = it1->second.get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> d2 = it2->second.get_rect<2>();
                 if (d1.overlaps(d2))
                 {
                   log_run.error("ERROR: colors (%d,%d) and "
@@ -9147,8 +9303,8 @@ namespace Legion {
               }
             case 3:
               {
-                Rect<3> d1 = it1->second.get_rect<3>();
-                Rect<3> d2 = it2->second.get_rect<3>();
+                LegionRuntime::Arrays::Rect<3> d1 = it1->second.get_rect<3>();
+                LegionRuntime::Arrays::Rect<3> d2 = it2->second.get_rect<3>();
                 if (d1.overlaps(d2))
                 {
                   log_run.error("ERROR: colors (%d,%d,%d) and "
@@ -9199,8 +9355,8 @@ namespace Legion {
               {
                 case 1:
                   {
-                    Rect<1> d1 = it3->get_rect<1>();
-                    Rect<1> d2 = it4->get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1> d1 = it3->get_rect<1>();
+                    LegionRuntime::Arrays::Rect<1> d2 = it4->get_rect<1>();
                     if (d1.overlaps(d2))
                     {
                       log_run.error("ERROR: colors %d and %d of "
@@ -9216,8 +9372,8 @@ namespace Legion {
                   }
                 case 2:
                   {
-                    Rect<2> d1 = it3->get_rect<2>();
-                    Rect<2> d2 = it4->get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2> d1 = it3->get_rect<2>();
+                    LegionRuntime::Arrays::Rect<2> d2 = it4->get_rect<2>();
                     if (d1.overlaps(d2))
                     {
                       log_run.error("ERROR: colors (%d,%d) and (%d,%d) "
@@ -9235,8 +9391,8 @@ namespace Legion {
                   }
                 case 3:
                   {
-                    Rect<3> d1 = it3->get_rect<3>();
-                    Rect<3> d2 = it4->get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3> d1 = it3->get_rect<3>();
+                    LegionRuntime::Arrays::Rect<3> d2 = it4->get_rect<3>();
                     if (d1.overlaps(d2))
                     {
                       log_run.error("ERROR: colors (%d,%d,%d) and "
@@ -9272,14 +9428,14 @@ namespace Legion {
       {
         case 1:
           {
-            Rect<1> base = hull.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> base = hull.get_rect<1>();
             for (std::set<Domain>::const_iterator dom_it =
                   domains.begin(); dom_it != domains.end(); dom_it++)
             {
 #ifdef DEBUG_LEGION
               assert(dom_it->get_dim() == 1);
 #endif
-              Rect<1> next = dom_it->get_rect<1>();
+              LegionRuntime::Arrays::Rect<1> next = dom_it->get_rect<1>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<1>(base);
@@ -9287,14 +9443,14 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> base = hull.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> base = hull.get_rect<2>();
             for (std::set<Domain>::const_iterator dom_it =
                   domains.begin(); dom_it != domains.end(); dom_it++)
             {
 #ifdef DEBUG_LEGION
               assert(dom_it->get_dim() == 2);
 #endif
-              Rect<2> next = dom_it->get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> next = dom_it->get_rect<2>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<2>(base);
@@ -9302,14 +9458,14 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> base = hull.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> base = hull.get_rect<3>();
             for (std::set<Domain>::const_iterator dom_it =
                   domains.begin(); dom_it != domains.end(); dom_it++)
             {
 #ifdef DEBUG_LEGION
               assert(dom_it->get_dim() == 3);
 #endif
-              Rect<3> next = dom_it->get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> next = dom_it->get_rect<3>();
               base = base.convex_hull(next);
             }
             hull = Domain::from_rect<3>(base);
@@ -10812,7 +10968,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::execute_index_space(Context ctx, 
-                                                  const IndexLauncher &launcher)
+                                           const IndexTaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -10828,7 +10984,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                            const IndexLauncher &launcher, ReductionOpID redop)
+                         const IndexTaskLauncher &launcher, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -10935,6 +11091,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::fill_fields(Context ctx, const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context fill operation!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->fill_fields(launcher);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_external_resource(Context ctx, 
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -10978,6 +11149,22 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       ctx->issue_copy(launcher); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::issue_copy_operation(Context ctx,
+                                       const IndexCopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context issue copy operation!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->issue_copy(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -13049,6 +13236,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_phi_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_PHI_VIEW,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_reduction_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -13993,6 +14188,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FillView::handle_send_fill_view(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_phi_view(Deserializer &derez,
+                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhiView::handle_send_phi_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15119,7 +15322,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T, MessageKind MK, VirtualChannelKind VC>
     DistributedCollectable* Runtime::find_or_request_distributed_collectable(
-                                              DistributedID did, RtEvent &ready) 
+                                              DistributedID did, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -15355,6 +15558,7 @@ namespace Legion {
       {
         shutdown_manager->record_outstanding_tasks();
 #ifdef DEBUG_LEGION
+        LG_TASK_DESCRIPTIONS(meta_task_names);
         AutoLock out_lock(outstanding_task_lock,1,false/*exclusive*/);
         for (std::map<std::pair<unsigned,bool>,unsigned>::const_iterator it =
               outstanding_task_counts.begin(); it != 
@@ -15362,9 +15566,13 @@ namespace Legion {
         {
           if (it->second == 0)
             continue;
-          log_shutdown.info("RT %d: %d outstanding %s task(s) %d",
-                          address_space, it->second, it->first.second ? 
-                           "meta" : "application", it->first.first);
+          if (it->first.second)
+            log_shutdown.info("RT %d: %d outstanding meta task(s) %s",
+                              address_space, it->second, 
+                              meta_task_names[it->first.first]);
+          else                
+            log_shutdown.info("RT %d: %d outstanding application task(s) %d",
+                              address_space, it->second, it->first.first);
         }
 #endif
       }
@@ -15628,6 +15836,42 @@ namespace Legion {
         return continuation.get_result();
       }
       return get_available(copy_op_lock, available_copy_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCopyOp* Runtime::get_available_index_copy_op(bool need_cont, 
+                                                      bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<IndexCopyOp*,
+                     &Runtime::get_available_index_copy_op> 
+                       continuation(this, copy_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(copy_op_lock, available_index_copy_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    PointCopyOp* Runtime::get_available_point_copy_op(bool need_cont, 
+                                                      bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<PointCopyOp*,
+                     &Runtime::get_available_point_copy_op> 
+                       continuation(this, copy_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(copy_op_lock, available_point_copy_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
@@ -16034,6 +16278,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexFillOp* Runtime::get_available_index_fill_op(bool need_cont, 
+                                                      bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<IndexFillOp*,
+                     &Runtime::get_available_index_fill_op> 
+                       continuation(this, fill_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(fill_op_lock, available_index_fill_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    PointFillOp* Runtime::get_available_point_fill_op(bool need_cont, 
+                                                      bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<PointFillOp*,
+                     &Runtime::get_available_point_fill_op> 
+                       continuation(this, fill_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(fill_op_lock, available_point_fill_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     AttachOp* Runtime::get_available_attach_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -16156,6 +16436,22 @@ namespace Legion {
     {
       AutoLock c_lock(copy_op_lock);
       available_copy_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_index_copy_op(IndexCopyOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(copy_op_lock);
+      available_index_copy_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_copy_op(PointCopyOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(copy_op_lock);
+      available_point_copy_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -16332,6 +16628,22 @@ namespace Legion {
     {
       AutoLock f_lock(fill_op_lock);
       available_fill_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_index_fill_op(IndexFillOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(fill_op_lock);
+      available_index_fill_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_fill_op(PointFillOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(fill_op_lock);
+      available_point_fill_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -18947,12 +19259,10 @@ namespace Legion {
               future_args->target->set_result(
                   future_args->result->get_untyped_result(),
                   result_size, false/*own*/);
-            future_args->target->complete_future();
             if (future_args->target->remove_base_gc_ref(DEFERRED_TASK_REF))
               legion_delete(future_args->target);
             if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF)) 
               legion_delete(future_args->result);
-            future_args->task_op->complete_execution();
             break;
           }
         case LG_DEFERRED_FUTURE_MAP_SET_ID:
@@ -19299,6 +19609,23 @@ namespace Legion {
           {
             MaterializedView::handle_deferred_materialized_view(
                                   Runtime::get_runtime(p), args);
+            break;
+          }
+        case LG_MISSPECULATE_TASK_ID:
+          {
+            const SingleTask::MisspeculationTaskArgs *targs = 
+              (const SingleTask::MisspeculationTaskArgs*)args;
+            targs->task->handle_misspeculation();
+            break;
+          }
+        case LG_DEFER_PHI_VIEW_REF_TASK_ID:
+          {
+            PhiView::handle_deferred_view_ref(args);
+            break;
+          }
+        case LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID:
+          {
+            PhiView::handle_deferred_view_registration(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:
