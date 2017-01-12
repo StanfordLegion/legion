@@ -3296,6 +3296,10 @@ namespace Legion {
     {
       Realm::UserEvent copy = to_poison;
       copy.cancel();
+#ifdef LEGION_SPY
+      // This counts as triggering
+      LegionSpy::log_ap_user_event_trigger(to_poison);
+#endif
     }
 
     //--------------------------------------------------------------------------
