@@ -4672,6 +4672,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future InnerContext::get_predicate_future(const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      if (p == Predicate::TRUE_PRED)
+      {
+        Future result = runtime->help_create_future();
+        const bool value = true;
+        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->complete_future();
+        return result;
+      }
+      else if (p == Predicate::FALSE_PRED)
+      {
+        Future result = runtime->help_create_future();
+        const bool value = false;
+        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->complete_future();
+        return result;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(p.impl != NULL);
+#endif
+        return p.impl->get_future_result(); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
     unsigned InnerContext::register_new_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -7899,6 +7929,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future LeafContext::get_predicate_future(const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal get predicate future performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
     unsigned LeafContext::register_new_child_operation(Operation *op)
     //--------------------------------------------------------------------------
     {
@@ -9017,6 +9060,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->create_predicate(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InlineContext::get_predicate_future(const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_predicate_future(p);
     }
 
     //--------------------------------------------------------------------------

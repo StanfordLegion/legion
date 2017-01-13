@@ -1494,6 +1494,7 @@ namespace Legion {
       predicate_references = 0;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
+      result_future_complete = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1505,6 +1506,7 @@ namespace Legion {
       assert(predicate_references == 0);
 #endif
       waiters.clear();
+      result_future = Future();
     }
 
     //--------------------------------------------------------------------------
@@ -1553,6 +1555,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtEvent precondition;
+      // Also check to see if we need to complete our future
+      bool complete_future = false;
       {
         AutoLock o_lock(op_lock);
         // See if we have any outstanding references, if so make a precondition
@@ -1561,6 +1565,17 @@ namespace Legion {
           collect_predicate = Runtime::create_rt_user_event();
           precondition = collect_predicate;
         }
+        if ((result_future.impl != NULL) && !result_future_complete)
+        {
+          complete_future = true;
+          result_future_complete = true;
+        }
+      }
+      if (complete_future)
+      {
+        result_future.impl->set_result(&predicate_value, 
+                                       sizeof(predicate_value), false/*own*/);
+        result_future.impl->complete_future();
       }
       commit_operation(true/*deactivate*/, precondition);
     }
@@ -1675,6 +1690,31 @@ namespace Legion {
         Runtime::poison_event(true_result);
         Runtime::trigger_event(false_result);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    Future PredicateImpl::get_future_result(void)
+    //--------------------------------------------------------------------------
+    {
+      bool complete_future = false;
+      Future result;
+      {
+        AutoLock o_lock(op_lock);
+        if (result_future.impl == NULL)
+        {
+          result_future = runtime->help_create_future();
+          // if the predicate is complete we can complete the future
+          complete_future = completed && !result_future_complete;
+        }
+        result = result_future;
+      }
+      if (complete_future)
+      {
+        result.impl->set_result(&predicate_value, 
+                                sizeof(predicate_value), false/*owned*/);
+        result.impl->complete_future();
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

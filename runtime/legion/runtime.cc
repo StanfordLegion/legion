@@ -11228,6 +11228,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future Runtime::get_predicate_future(Context ctx, const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context get predicate future!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      return ctx->get_predicate_future(p);
+    }
+
+    //--------------------------------------------------------------------------
     Lock Runtime::create_lock(Context ctx)
     //--------------------------------------------------------------------------
     {

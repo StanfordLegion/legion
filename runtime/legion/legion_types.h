@@ -1323,6 +1323,7 @@ namespace Legion {
     friend class Internal::VirtualCloseOp;                  \
     friend class Internal::AcquireOp;                       \
     friend class Internal::ReleaseOp;                       \
+    friend class Internal::PredicateImpl;                   \
     friend class Internal::NotPredOp;                       \
     friend class Internal::AndPredOp;                       \
     friend class Internal::OrPredOp;                        \

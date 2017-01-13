@@ -4155,6 +4155,14 @@ namespace Legion {
        * #return predicate value of combining other predicates
        */
       Predicate create_predicate(Context ctx,const PredicateLauncher &launcher);
+
+      /**
+       * Get a future value that will be completed when the predicate triggers
+       * @param ctx enclosing task context
+       * @param pred the predicate for which to get a future
+       * @return a boolean future with the result of the predicate
+       */
+      Future get_predicate_future(Context ctx, const Predicate &p);
     public:
       //------------------------------------------------------------------------
       // Lock Operations

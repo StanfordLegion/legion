@@ -306,6 +306,7 @@ namespace Legion {
       virtual Predicate create_predicate(const Future &f) = 0;
       virtual Predicate predicate_not(const Predicate &p) = 0;
       virtual Predicate create_predicate(const PredicateLauncher &launcher) = 0;
+      virtual Future get_predicate_future(const Predicate &p) = 0;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -856,6 +857,7 @@ namespace Legion {
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
+      virtual Future get_predicate_future(const Predicate &p);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -1330,6 +1332,7 @@ namespace Legion {
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
+      virtual Future get_predicate_future(const Predicate &p);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -1622,6 +1625,7 @@ namespace Legion {
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
+      virtual Future get_predicate_future(const Predicate &p);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and

@@ -1770,6 +1770,7 @@ namespace Legion {
       Predicate create_predicate(Context ctx, const Future &f);
       Predicate predicate_not(Context ctx, const Predicate &p);
       Predicate create_predicate(Context ctx,const PredicateLauncher &launcher);
+      Future get_predicate_future(Context ctx, const Predicate &p);
     public:
       Lock create_lock(Context ctx);
       void destroy_lock(Context ctx, Lock l);
