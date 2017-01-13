@@ -1525,7 +1525,19 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // AttachLauncher
+    // PredicateLauncher
+    /////////////////////////////////////////////////////////////
+
+
+    //--------------------------------------------------------------------------
+    PredicateLauncher::PredicateLauncher(bool and_)
+      : and_op(and_)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
+    // TimingLauncher
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -3695,7 +3707,10 @@ namespace Legion {
                                        const Predicate &p1, const Predicate &p2)
     //--------------------------------------------------------------------------
     {
-      return runtime->predicate_and(ctx, p1, p2);
+      PredicateLauncher launcher(true/*and*/);
+      launcher.add_predicate(p1);
+      launcher.add_predicate(p2);
+      return runtime->create_predicate(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -3703,7 +3718,18 @@ namespace Legion {
                                        const Predicate &p1, const Predicate &p2)  
     //--------------------------------------------------------------------------
     {
-      return runtime->predicate_or(ctx, p1, p2);
+      PredicateLauncher launcher(false/*and*/);
+      launcher.add_predicate(p1);
+      launcher.add_predicate(p2);
+      return runtime->create_predicate(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate Runtime::create_predicate(Context ctx, 
+                                        const PredicateLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_predicate(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------

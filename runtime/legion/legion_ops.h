@@ -1695,7 +1695,7 @@ namespace Legion {
       AndPredOp& operator=(const AndPredOp &rhs);
     public:
       void initialize(TaskContext *task, 
-                      const Predicate &p1, const Predicate &p2);
+                      const std::vector<Predicate> &predicates);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1706,13 +1706,9 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void notify_predicate_value(GenerationID pred_gen, bool value);
     protected:
-      PredicateOp *left;
-      PredicateOp *right;
-    protected:
-      bool left_value;
-      bool left_valid;
-      bool right_value;
-      bool right_valid;
+      std::vector<PredicateOp*> previous;
+      unsigned                  true_count;
+      bool                      false_short;
     };
 
     /**
@@ -1729,8 +1725,8 @@ namespace Legion {
     public:
       OrPredOp& operator=(const OrPredOp &rhs);
     public:
-      void initialize(TaskContext *task,
-                      const Predicate &p1, const Predicate &p2);
+      void initialize(TaskContext *task, 
+                      const std::vector<Predicate> &predicates);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1741,13 +1737,9 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void notify_predicate_value(GenerationID pred_gen, bool value);
     protected:
-      PredicateOp *left;
-      PredicateOp *right;
-    protected:
-      bool left_value;
-      bool left_valid;
-      bool right_value;
-      bool right_valid;
+      std::vector<PredicateOp*> previous;
+      unsigned                  false_count;
+      bool                      true_short;
     };
 
     /**

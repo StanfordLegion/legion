@@ -1504,6 +1504,22 @@ namespace Legion {
     };
 
     /**
+     * \struct PredicateLauncher
+     * Predicate launchers are used for merging several predicates
+     * into a new predicate either by an 'AND' or an 'OR' operation.
+     * @see Runtime
+     */
+    struct PredicateLauncher {
+    public:
+      PredicateLauncher(bool and_op = true);
+    public:
+      inline void add_predicate(const Predicate &pred); 
+    public:
+      bool                            and_op; // if not 'and' then 'or'
+      std::vector<Predicate>          predicates;
+    };
+
+    /**
      * \struct TimingLauncher
      * Timing launchers are used for issuing a timing measurement.
      * @see Runtime
@@ -4095,6 +4111,7 @@ namespace Legion {
       /**
        * Create a new predicate value from a future.  The future passed
        * must be a boolean future.
+       * @param ctx enclosing task context
        * @param f future value to convert to a predicate
        * @return predicate value wrapping the future
        */
@@ -4103,6 +4120,7 @@ namespace Legion {
       /**
        * Create a new predicate value that is the logical 
        * negation of another predicate value.
+       * @param ctx enclosing task context
        * @param p predicate value to logically negate
        * @return predicate value logically negating previous predicate
        */
@@ -4111,6 +4129,7 @@ namespace Legion {
       /**
        * Create a new predicate value that is the logical
        * conjunction of two other predicate values.
+       * @param ctx enclosing task context
        * @param p1 first predicate to logically and 
        * @param p2 second predicate to logically and
        * @return predicate value logically and-ing two predicates
@@ -4121,12 +4140,21 @@ namespace Legion {
       /**
        * Create a new predicate value that is the logical
        * disjunction of two other predicate values.
+       * @param ctx enclosing task context
        * @param p1 first predicate to logically or
        * @param p2 second predicate to logically or
        * @return predicate value logically or-ing two predicates
        */
       Predicate predicate_or(Context ctx, const Predicate &p1, 
                                           const Predicate &p2);
+
+      /**
+       * Generic predicate constructor for an arbitrary number of predicates
+       * @param ctx enclosing task context
+       * @param launcher the predicate launcher
+       * #return predicate value of combining other predicates
+       */
+      Predicate create_predicate(Context ctx,const PredicateLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // Lock Operations

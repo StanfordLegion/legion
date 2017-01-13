@@ -1769,10 +1769,7 @@ namespace Legion {
     public:
       Predicate create_predicate(Context ctx, const Future &f);
       Predicate predicate_not(Context ctx, const Predicate &p);
-      Predicate predicate_and(Context ctx, const Predicate &p1, 
-                                           const Predicate &p2);
-      Predicate predicate_or(Context ctx, const Predicate &p1,
-                                          const Predicate &p2);  
+      Predicate create_predicate(Context ctx,const PredicateLauncher &launcher);
     public:
       Lock create_lock(Context ctx);
       void destroy_lock(Context ctx, Lock l);

@@ -305,10 +305,7 @@ namespace Legion {
       virtual void complete_frame(void) = 0;
       virtual Predicate create_predicate(const Future &f) = 0;
       virtual Predicate predicate_not(const Predicate &p) = 0;
-      virtual Predicate predicate_and(const Predicate &p1, 
-                                      const Predicate &p2) = 0;
-      virtual Predicate predicate_or(const Predicate &p1,
-                                     const Predicate &p2) = 0;
+      virtual Predicate create_predicate(const PredicateLauncher &launcher) = 0;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -858,8 +855,7 @@ namespace Legion {
       virtual void complete_frame(void);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
-      virtual Predicate predicate_and(const Predicate &p1, const Predicate &p2);
-      virtual Predicate predicate_or(const Predicate &p1, const Predicate &p2);
+      virtual Predicate create_predicate(const PredicateLauncher &launcher);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -1333,8 +1329,7 @@ namespace Legion {
       virtual void complete_frame(void);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
-      virtual Predicate predicate_and(const Predicate &p1, const Predicate &p2);
-      virtual Predicate predicate_or(const Predicate &p1, const Predicate &p2);
+      virtual Predicate create_predicate(const PredicateLauncher &launcher);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -1626,8 +1621,7 @@ namespace Legion {
       virtual void complete_frame(void);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
-      virtual Predicate predicate_and(const Predicate &p1, const Predicate &p2);
-      virtual Predicate predicate_or(const Predicate &p1, const Predicate &p2);
+      virtual Predicate create_predicate(const PredicateLauncher &launcher);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and

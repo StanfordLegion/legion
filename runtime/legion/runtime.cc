@@ -11212,35 +11212,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_and(Context ctx, 
-                                     const Predicate &p1, const Predicate &p2)
+    Predicate Runtime::create_predicate(Context ctx, 
+                                        const PredicateLauncher &launcher) 
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run.error("Illegal dummy context create predicate and!");
+        log_run.error("Illegal dummy context create predicate!");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->predicate_and(p1, p2); 
-    }
-
-    //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_or(Context ctx, 
-                                    const Predicate &p1, const Predicate &p2)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-      {
-        log_run.error("Illegal dummy context create predicate or!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DUMMY_CONTEXT_OPERATION);
-      }
-      return ctx->predicate_or(p1, p2); 
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------

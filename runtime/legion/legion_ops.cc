@@ -1692,19 +1692,19 @@ namespace Legion {
           predicate_resolved = true;
           predicate_value = value;
           copy_waiters = waiters;
+          if (predicate_value)
+          {
+            to_trigger = true_guard;
+            to_poison = false_guard;
+          }
+          else
+          {
+            to_poison = true_guard;
+            to_trigger = false_guard;
+          }
         }
         else
-          need_trigger= false;
-        if (predicate_value)
-        {
-          to_trigger = true_guard;
-          to_poison = false_guard;
-        }
-        else
-        {
-          to_poison = true_guard;
-          to_trigger = false_guard;
-        }
+          need_trigger = false;
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
@@ -9413,9 +9413,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AndPredOp::initialize(TaskContext *ctx,
-                               const Predicate &p1, 
-                               const Predicate &p2)
+    void AndPredOp::initialize(TaskContext *ctx, 
+                               const std::vector<Predicate> &predicates)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9425,50 +9424,23 @@ namespace Legion {
       // predicates can't complete until all their references from
       // the parent task have been removed.
       initialize_operation(ctx, false/*track*/);
-      // Short circuit case
-      if ((p1 == Predicate::FALSE_PRED) || 
-          (p2 == Predicate::FALSE_PRED))
-      {
-        set_resolved_value(get_generation(), false);
-        return;
-      }
-      if (p1 == Predicate::TRUE_PRED)
-      {
-        left_value = true;
-        left_valid = true;
-      }
-      else
+      // Now do the registration
+      for (std::vector<Predicate>::const_iterator it = predicates.begin();
+            it != predicates.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(p1.impl != NULL);
+        assert(it->impl != NULL);
 #endif
-        left_valid = false;
-        left = p1.impl;
-        left->add_predicate_reference();
-      }
-      if (p2 == Predicate::TRUE_PRED)
-      {
-        right_value = true;
-        right_valid = true;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(p2.impl != NULL);
-#endif
-        right_valid = false;
-        right = p2.impl;
-        right->add_predicate_reference();
+        previous.push_back(it->impl);
+        it->impl->add_predicate_reference();
       }
       if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
-        if ((p1 != Predicate::TRUE_PRED) && (p1 != Predicate::FALSE_PRED))
+        for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+              it != previous.end(); it++)
           LegionSpy::log_predicate_use(unique_op_id, 
-                                       p1.impl->get_unique_op_id());
-        if ((p2 != Predicate::TRUE_PRED) && (p2 != Predicate::FALSE_PRED))
-          LegionSpy::log_predicate_use(unique_op_id, 
-                                       p2.impl->get_unique_op_id());
+                                       (*it)->get_unique_op_id());
       }
     }
 
@@ -9477,10 +9449,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_predicate();
-      left = NULL;
-      right = NULL;
-      left_valid = false;
-      right_valid = false;
+      true_count = 0;
+      false_short = false;
     }
 
     //--------------------------------------------------------------------------
@@ -9488,6 +9458,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_predicate();
+      previous.clear();
       runtime->free_and_predicate_op(this);
     }
 
@@ -9509,10 +9480,9 @@ namespace Legion {
     void AndPredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (left != NULL)
-        register_dependence(left, left->get_generation());
-      if (left != NULL)
-        register_dependence(right, right->get_generation());
+      for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+            it != previous.end(); it++)
+        register_dependence(*it, (*it)->get_generation());
     }
 
     //--------------------------------------------------------------------------
@@ -9522,45 +9492,36 @@ namespace Legion {
       // Hold the lock when doing this to prevent 
       // any triggers from interfering with the analysis
       bool need_resolve = false;
-      bool resolve_value;
       GenerationID local_gen = get_generation();
       {
         AutoLock o_lock(op_lock);
         if (!predicate_resolved)
         {
-          if (left != NULL)
-            left_valid = left->register_waiter(this, get_generation(),
-                                               left_value);
-          if (right != NULL)
-            right_valid = right->register_waiter(this, get_generation(),
-                                                 right_value);
-          // Both valid
-          if (left_valid && right_valid)
+          for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+                it != previous.end(); it++)
           {
-            need_resolve = true;
-            resolve_value = (left_value && right_value);
+            bool value = false;
+            bool valid = (*it)->register_waiter(this, get_generation(), value);
+            if (valid)
+            {
+              if (!value)
+              {
+                false_short = true;
+                break;
+              }
+              else
+                true_count++;
+            }
           }
-          // Left short circuit
-          else if (left_valid && !left_value)
-          {
-            need_resolve = true;
-            resolve_value = false;
-          }
-          // Right short circuit
-          else if (right_valid && !right_value) 
-          {
-            need_resolve = true;
-            resolve_value = false;
-          }
+          need_resolve = false_short || (true_count == previous.size());
         }
       }
       if (need_resolve)
-        set_resolved_value(local_gen, resolve_value);
+        set_resolved_value(local_gen, !false_short);
       // Clean up any references that we have
-      if (left != NULL)
-        left->remove_predicate_reference();
-      if (right != NULL)
-        right->remove_predicate_reference();
+      for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+            it != previous.end(); it++)
+        (*it)->remove_predicate_reference();
       complete_mapping();
     }
 
@@ -9568,7 +9529,7 @@ namespace Legion {
     void AndPredOp::notify_predicate_value(GenerationID pred_gen, bool value)
     //--------------------------------------------------------------------------
     {
-      bool need_resolve = false, resolve_value = false;
+      bool need_resolve = false;
       if (pred_gen == get_generation())
       {
         AutoLock o_lock(op_lock);
@@ -9577,39 +9538,18 @@ namespace Legion {
         {
           if (!value)
           {
+            false_short = true;
             need_resolve = true;
-            resolve_value = false;
           }
           else
           {
-            // Figure out which of the two values to fill in
-#ifdef DEBUG_LEGION
-            assert(!left_valid || !right_valid);
-#endif
-            if (!left_valid)
-            {
-              left_value = value;
-              left_valid = true;
-            }
-            else
-            {
-              right_value = value;
-              right_valid = true;
-            }
-            if (left_valid && right_valid)
-            {
-              need_resolve = true;
-              resolve_value = (left_value && right_value);
-            }
+            true_count++;
+            need_resolve = !false_short && (true_count == previous.size());
           }
         }
-        else
-          need_resolve = false;
       }
-      else
-        need_resolve = false;
       if (need_resolve)
-        set_resolved_value(pred_gen, resolve_value);
+        set_resolved_value(pred_gen, !false_short);
     }
 
     /////////////////////////////////////////////////////////////
@@ -9648,9 +9588,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OrPredOp::initialize(TaskContext *ctx,
-                              const Predicate &p1, 
-                              const Predicate &p2)
+    void OrPredOp::initialize(TaskContext *ctx, 
+                              const std::vector<Predicate> &predicates)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9660,44 +9599,23 @@ namespace Legion {
       // predicates can't complete until all their references from
       // the parent task have been removed.
       initialize_operation(ctx, false/*track*/);
-      // Short circuit case
-      if ((p1 == Predicate::TRUE_PRED) || 
-          (p2 == Predicate::TRUE_PRED))
+      // Now do the registration
+      for (std::vector<Predicate>::const_iterator it = predicates.begin();
+            it != predicates.end(); it++)
       {
-        set_resolved_value(get_generation(), true);
-        return;
-      }
-      if (p1 == Predicate::FALSE_PRED)
-      {
-        left_value = false;
-        left_valid = true;
-      }
-      else
-      {
-        left = p1.impl;
-        left_valid = false;
-        left->add_predicate_reference();
-      }
-      if (p2 == Predicate::FALSE_PRED)
-      {
-        right_value = false;
-        right_valid = true;
-      }
-      else
-      {
-        right = p2.impl;
-        right_valid = false;
-        right->add_predicate_reference();
+#ifdef DEBUG_LEGION
+        assert(it->impl != NULL);
+#endif
+        previous.push_back(it->impl);
+        it->impl->add_predicate_reference();
       }
       if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
-        if ((p1 != Predicate::TRUE_PRED) && (p1 != Predicate::FALSE_PRED))
+        for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+              it != previous.end(); it++)
           LegionSpy::log_predicate_use(unique_op_id, 
-                                       p1.impl->get_unique_op_id());
-        if ((p2 != Predicate::TRUE_PRED) && (p2 != Predicate::FALSE_PRED))
-          LegionSpy::log_predicate_use(unique_op_id, 
-                                       p2.impl->get_unique_op_id());
+                                       (*it)->get_unique_op_id());
       }
     }
 
@@ -9706,10 +9624,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_predicate();
-      left = NULL;
-      right = NULL;
-      left_valid = false;
-      right_valid = false;
+      false_count = 0;
+      true_short = false;
     }
 
     //--------------------------------------------------------------------------
@@ -9717,6 +9633,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_predicate();
+      previous.clear();
       runtime->free_or_predicate_op(this);
     }
 
@@ -9738,10 +9655,9 @@ namespace Legion {
     void OrPredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (left != NULL)
-        register_dependence(left, left->get_generation());
-      if (right != NULL)
-        register_dependence(right, right->get_generation());
+      for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+            it != previous.end(); it++)
+        register_dependence(*it, (*it)->get_generation());
     }
 
     //--------------------------------------------------------------------------
@@ -9751,45 +9667,36 @@ namespace Legion {
       // Hold the lock when doing this to prevent 
       // any triggers from interfering with the analysis
       bool need_resolve = false;
-      bool resolve_value;
       GenerationID local_gen = get_generation();
       {
         AutoLock o_lock(op_lock);
         if (!predicate_resolved)
         {
-          if (left != NULL)
-            left_valid = left->register_waiter(this, get_generation(),
-                                               left_value);
-          if (right != NULL)
-            right_valid = right->register_waiter(this, get_generation(),
-                                                 right_value);
-          // Both valid
-          if (left_valid && right_valid)
+          for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+                it != previous.end(); it++)
           {
-            need_resolve = true;
-            resolve_value = (left_value || right_value);
+            bool value = false;
+            bool valid = (*it)->register_waiter(this, get_generation(), value);
+            if (valid)
+            {
+              if (value)
+              {
+                true_short = true;
+                break;
+              }
+              else
+                false_count++;
+            }
           }
-          // Left short circuit
-          else if (left_valid && left_value)
-          {
-            need_resolve = true;
-            resolve_value = true;
-          }
-          // Right short circuit
-          else if (right_valid && right_value) 
-          {
-            need_resolve = true;
-            resolve_value = true;
-          }
+          need_resolve = true_short || (false_count == previous.size());
         }
       }
       if (need_resolve)
-        set_resolved_value(local_gen, resolve_value);
+        set_resolved_value(local_gen, true_short);
       // Clean up any references that we have
-      if (left != NULL)
-        left->remove_predicate_reference();
-      if (right != NULL)
-        right->remove_predicate_reference();
+      for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+            it != previous.end(); it++)
+        (*it)->remove_predicate_reference();
       complete_mapping();
     }
 
@@ -9797,7 +9704,7 @@ namespace Legion {
     void OrPredOp::notify_predicate_value(GenerationID pred_gen, bool value)
     //--------------------------------------------------------------------------
     {
-      bool need_resolve = false, resolve_value = false;
+      bool need_resolve = false;
       if (pred_gen == get_generation())
       {
         AutoLock o_lock(op_lock);
@@ -9806,39 +9713,18 @@ namespace Legion {
         {
           if (value)
           {
+            true_short = true;
             need_resolve = true;
-            resolve_value = true;
           }
           else
           {
-            // Figure out which of the two values to fill in
-#ifdef DEBUG_LEGION
-            assert(!left_valid || !right_valid);
-#endif
-            if (!left_valid)
-            {
-              left_value = value;
-              left_valid = true;
-            }
-            else
-            {
-              right_value = value;
-              right_valid = true;
-            }
-            if (left_valid && right_valid)
-            {
-              need_resolve = true;
-              resolve_value = (left_value || right_value);
-            }
+            false_count++;
+            need_resolve = !true_short && (false_count == previous.size());
           }
         }
-        else
-          need_resolve = false;
       }
-      else
-        need_resolve = false;
       if (need_resolve)
-        set_resolved_value(pred_gen, resolve_value);
+        set_resolved_value(pred_gen, true_short);
     }
 
 
