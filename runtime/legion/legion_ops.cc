@@ -1494,7 +1494,7 @@ namespace Legion {
       predicate_references = 0;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
-      result_future_complete = false;
+      can_result_future_complete = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1551,12 +1551,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PredicateImpl::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Also check to see if we need to complete our future
+      bool complete_future = false;
+      {
+        AutoLock o_lock(op_lock);
+        if (result_future.impl != NULL)
+          complete_future = true;
+        else
+          can_result_future_complete = true;
+      }
+      if (complete_future)
+      {
+        result_future.impl->set_result(&predicate_value, 
+                                       sizeof(predicate_value), false/*own*/);
+        result_future.impl->complete_future();
+      }
+      complete_operation();
+    }
+
+    //--------------------------------------------------------------------------
     void PredicateImpl::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
       RtEvent precondition;
-      // Also check to see if we need to complete our future
-      bool complete_future = false;
       {
         AutoLock o_lock(op_lock);
         // See if we have any outstanding references, if so make a precondition
@@ -1565,18 +1585,8 @@ namespace Legion {
           collect_predicate = Runtime::create_rt_user_event();
           precondition = collect_predicate;
         }
-        if ((result_future.impl != NULL) && !result_future_complete)
-        {
-          complete_future = true;
-          result_future_complete = true;
-        }
-      }
-      if (complete_future)
-      {
-        result_future.impl->set_result(&predicate_value, 
-                                       sizeof(predicate_value), false/*own*/);
-        result_future.impl->complete_future();
-      }
+        
+      } 
       commit_operation(true/*deactivate*/, precondition);
     }
 
@@ -1697,24 +1707,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool complete_future = false;
-      Future result;
+      if (result_future.impl == NULL)
       {
+        Future temp = Future(
+              legion_new<FutureImpl>(runtime, true/*register*/,
+                runtime->get_available_distributed_id(true),
+                runtime->address_space, runtime->address_space, this));
         AutoLock o_lock(op_lock);
+        // See if we lost the race
         if (result_future.impl == NULL)
         {
-          result_future = runtime->help_create_future();
+          result_future = temp; 
           // if the predicate is complete we can complete the future
-          complete_future = completed && !result_future_complete;
+          complete_future = can_result_future_complete; 
         }
-        result = result_future;
       }
       if (complete_future)
       {
-        result.impl->set_result(&predicate_value, 
+        result_future.impl->set_result(&predicate_value, 
                                 sizeof(predicate_value), false/*owned*/);
-        result.impl->complete_future();
+        result_future.impl->complete_future();
       }
-      return result;
+      return result_future;
     }
 
     //--------------------------------------------------------------------------

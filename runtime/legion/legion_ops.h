@@ -572,6 +572,7 @@ namespace Legion {
     public:
       void add_predicate_reference(void);
       void remove_predicate_reference(void);
+      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
     public:
       bool register_waiter(PredicateWaiter *waiter, 
@@ -592,7 +593,7 @@ namespace Legion {
       PredEvent true_guard, false_guard;
     protected:
       Future result_future;
-      bool result_future_complete;
+      bool can_result_future_complete;
     };
 
     /**
