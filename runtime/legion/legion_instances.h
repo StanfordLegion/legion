@@ -330,8 +330,9 @@ namespace Legion {
       virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
-          bool precise_domain, RegionTreeNode *intersect) = 0;
+          RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
+          bool reduction_fold, bool precise_domain, 
+          RegionTreeNode *intersect) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
       virtual ApEvent get_use_event(void) const = 0;
@@ -399,8 +400,8 @@ namespace Legion {
       virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
-          bool precise_domain, RegionTreeNode *intersect);
+          RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
+          bool reduction_fold, bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
       virtual ApEvent get_use_event(void) const;
@@ -445,8 +446,8 @@ namespace Legion {
       virtual ApEvent issue_reduction(Operation *op,
           const std::vector<Domain::CopySrcDstField> &src_fields,
           const std::vector<Domain::CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, ApEvent precondition, bool reduction_fold,
-          bool precise_domain, RegionTreeNode *intersect);
+          RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
+          bool reduction_fold, bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
     public:
       virtual ApEvent get_use_event(void) const;

@@ -1375,6 +1375,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void PredicateLauncher::add_predicate(const Predicate &pred)
+    //--------------------------------------------------------------------------
+    {
+      predicates.push_back(pred);
+    }
+
+    //--------------------------------------------------------------------------
     inline void TimingLauncher::add_precondition(const Future &f)
     //--------------------------------------------------------------------------
     {
@@ -2540,6 +2547,8 @@ namespace Legion {
 // This is for backwards compatibility with the old namespace scheme
 namespace LegionRuntime {
   namespace HighLevel {
+    using namespace LegionRuntime::Arrays;
+
     typedef Legion::IndexSpace IndexSpace;
     typedef Legion::IndexPartition IndexPartition;
     typedef Legion::FieldSpace FieldSpace;

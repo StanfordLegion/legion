@@ -11,6 +11,10 @@ Version 17.01.0 (January ??, 2017)
     - Updated custom projection function API
     - Added support for speculative mapping of predicated operations
     - Added index space copy and fill operations
+  * Legion Prof
+    - Added ability to collapse/expand each processor/channel/memory in
+        a timeline
+    - Added on-demand loading of each processor in a timeline
 
 Version 16.10.0 (October 7, 2016)
   * Realm

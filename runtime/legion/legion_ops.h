@@ -219,6 +219,7 @@ namespace Legion {
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
+      inline unsigned get_ctx_index(void) const { return context_index; }
     public:
       // Be careful using this call as it is only valid when the operation
       // actually has a parent task.  Right now the only place it is used
@@ -571,10 +572,15 @@ namespace Legion {
     public:
       void add_predicate_reference(void);
       void remove_predicate_reference(void);
+      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
     public:
       bool register_waiter(PredicateWaiter *waiter, 
                            GenerationID gen, bool &value);
+      PredEvent get_true_guard(void);
+      PredEvent get_false_guard(void);
+      void get_predicate_guards(PredEvent &true_guard, PredEvent &false_guard);
+      Future get_future_result(void);
     protected:
       void set_resolved_value(GenerationID pred_gen, bool value);
     protected:
@@ -584,6 +590,10 @@ namespace Legion {
     protected:
       RtUserEvent collect_predicate;
       unsigned predicate_references;
+      PredEvent true_guard, false_guard;
+    protected:
+      Future result_future;
+      bool can_result_future_complete;
     };
 
     /**
@@ -604,13 +614,6 @@ namespace Legion {
         SPECULATE_FALSE_STATE,
         RESOLVE_TRUE_STATE,
         RESOLVE_FALSE_STATE,
-        // intermediate states to get callbacks ordered
-        PENDING_SPECULATE_TRUE_STATE,
-        PENDING_SPECULATE_FALSE_STATE,
-        PENDING_RESOLVE_TRUE_STATE,
-        PENDING_RESOLVE_FALSE_STATE,
-        PENDING_MISSPECULATE_TRUE_STATE,
-        PENDING_MISSPECULATE_FALSE_STATE,
       };
     public:
       SpeculativeOp(Runtime *rt);
@@ -637,20 +640,14 @@ namespace Legion {
       // to determine whether they should speculate 
       virtual bool query_speculate(bool &value, bool &mapping_only) = 0;
     public:
-      // If this operation was asked to speculate do it
-      // These calls will always finish before the
-      // corresponding misspeculate calls below run
-      virtual void speculate_true(bool mapping_only) = 0;
-      virtual void speculate_false(bool mapping_only) = 0;
-    public:
-      // If this operation misspeculated then we report it
-      virtual void misspeculate_true(bool mapping_only) = 0;
-      virtual void misspeculate_false(bool mapping_only) = 0;
-    public:
-      // If the operation didn't speculate then handle the predicate resolution
-      // Will only get a resolve true call if we speculated
-      virtual void resolve_true(void) = 0;
-      virtual void resolve_false(bool speculated) = 0;
+      // Every speculative operation will always get exactly one
+      // call back to one of these methods after the predicate has
+      // resolved. The 'speculated' parameter indicates whether the
+      // operation was speculated by the mapper. The 'launch' parameter
+      // indicates whether the operation has been issued into the 
+      // pipeline for execution yet
+      virtual void resolve_true(bool speculated, bool launched) = 0;
+      virtual void resolve_false(bool speculated, bool launched) = 0;
     public:
       virtual void notify_predicate_value(GenerationID gen, bool value);
     protected:
@@ -791,12 +788,8 @@ namespace Legion {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
-      virtual void speculate_true(bool mapping_only);
-      virtual void speculate_false(bool mapping_only);
-      virtual void misspeculate_true(bool mapping_only);
-      virtual void misspeculate_false(bool mapping_only);
-      virtual void resolve_true(void);
-      virtual void resolve_false(bool speculated);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const InstanceRef &target,
@@ -848,7 +841,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> restrict_postconditions;
     public:
-      ApUserEvent                 predication_guard;
+      PredEvent                   predication_guard;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                     outstanding_profiling_requests;
@@ -1208,6 +1201,7 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
+      virtual Mappable* get_mappable(void);
     public:
       void activate_close(void);
       void deactivate_close(void);
@@ -1479,12 +1473,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
-      virtual void speculate_true(bool mapping_only);
-      virtual void speculate_false(bool mapping_only);
-      virtual void misspeculate_true(bool mapping_only);
-      virtual void misspeculate_false(bool mapping_only);
-      virtual void resolve_true(void);
-      virtual void resolve_false(bool speculated);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -1555,12 +1545,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
-      virtual void speculate_true(bool mapping_only);
-      virtual void speculate_false(bool mapping_only);
-      virtual void misspeculate_true(bool mapping_only);
-      virtual void misspeculate_false(bool mapping_only);
-      virtual void resolve_true(void);
-      virtual void resolve_false(bool speculated);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -1714,7 +1700,7 @@ namespace Legion {
       AndPredOp& operator=(const AndPredOp &rhs);
     public:
       void initialize(TaskContext *task, 
-                      const Predicate &p1, const Predicate &p2);
+                      const std::vector<Predicate> &predicates);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1725,13 +1711,9 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void notify_predicate_value(GenerationID pred_gen, bool value);
     protected:
-      PredicateOp *left;
-      PredicateOp *right;
-    protected:
-      bool left_value;
-      bool left_valid;
-      bool right_value;
-      bool right_valid;
+      std::vector<PredicateOp*> previous;
+      unsigned                  true_count;
+      bool                      false_short;
     };
 
     /**
@@ -1748,8 +1730,8 @@ namespace Legion {
     public:
       OrPredOp& operator=(const OrPredOp &rhs);
     public:
-      void initialize(TaskContext *task,
-                      const Predicate &p1, const Predicate &p2);
+      void initialize(TaskContext *task, 
+                      const std::vector<Predicate> &predicates);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1760,13 +1742,9 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void notify_predicate_value(GenerationID pred_gen, bool value);
     protected:
-      PredicateOp *left;
-      PredicateOp *right;
-    protected:
-      bool left_value;
-      bool left_valid;
-      bool right_value;
-      bool right_valid;
+      std::vector<PredicateOp*> previous;
+      unsigned                  false_count;
+      bool                      true_short;
     };
 
     /**
@@ -2263,7 +2241,7 @@ namespace Legion {
      * Fill operations are used to initialize a field to a
      * specific value for a particular logical region.
      */
-    class FillOp : public SpeculativeOp {
+    class FillOp : public SpeculativeOp, public Fill {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
     public:
@@ -2285,6 +2263,10 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual Mappable* get_mappable(void);
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual int get_depth(void) const;
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
@@ -2294,12 +2276,8 @@ namespace Legion {
       virtual void deferred_execute(void);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
-      virtual void speculate_true(bool mapping_only);
-      virtual void speculate_false(bool mapping_only);
-      virtual void misspeculate_true(bool mapping_only);
-      virtual void misspeculate_false(bool mapping_only);
-      virtual void resolve_true(void);
-      virtual void resolve_false(bool speculated);
+      virtual void resolve_true(bool speculated, bool launched);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
@@ -2309,7 +2287,6 @@ namespace Legion {
       void compute_parent_index(void);
       ApEvent compute_sync_precondition(void) const;
     public:
-      RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
       RestrictInfo restrict_info;
@@ -2318,11 +2295,7 @@ namespace Legion {
       size_t value_size;
       Future future;
       std::set<RtEvent> map_applied_conditions;
-      ApUserEvent true_guard, false_guard;
-    public:
-      std::vector<Grant>        grants;
-      std::vector<PhaseBarrier> wait_barriers;
-      std::vector<PhaseBarrier> arrive_barriers;
+      PredEvent true_guard, false_guard;
     };
     
     /**

@@ -26,6 +26,10 @@
 namespace Legion {
   namespace Mapping { 
 
+    // for compatibility, many applications that customize mappers expect
+    // to have LegionRuntime::Arrays::{Point,Rect}<DIM> available automatically
+    using namespace LegionRuntime::Arrays;
+
     /**
      * \class PhysicalInstance
      * The PhysicalInstance class provides an interface for

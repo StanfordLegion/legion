@@ -379,13 +379,14 @@ namespace Legion {
                           VersionInfo &dst_version_info, 
                           ApEvent term_event, Operation *op,
                           unsigned src_index, unsigned dst_index,
-                          ApEvent precondition,
+                          ApEvent precondition, PredEvent pred_guard,
                           std::set<RtEvent> &map_applied);
       ApEvent reduce_across(const RegionRequirement &src_req,
                             const RegionRequirement &dst_req,
                             const InstanceSet &src_targets,
                             const InstanceSet &dst_targets,
-                            Operation *op, ApEvent precondition);
+                            Operation *op, ApEvent precondition,
+                            PredEvent predication_guard);
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
@@ -425,7 +426,8 @@ namespace Legion {
                           VersionInfo &version_info,
                           RestrictInfo &restrict_info,
                           InstanceSet &instances, ApEvent precondition,
-                          std::set<RtEvent> &map_applied_events);
+                          std::set<RtEvent> &map_applied_events,
+                          PredEvent true_guard, PredEvent false_guard);
       InstanceManager* create_file_instance(AttachOp *attach_op,
                                             const RegionRequirement &req);
       InstanceRef attach_file(AttachOp *attach_op, unsigned index,
@@ -1498,6 +1500,7 @@ namespace Legion {
       // Issue copies for fields with the same event preconditions
       void issue_grouped_copies(const TraversalInfo &info,
                                 MaterializedView *dst, bool restrict_out,
+                                PredEvent predicate_guard,
                       LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                 const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
@@ -1594,12 +1597,14 @@ namespace Legion {
       virtual ApEvent issue_copy(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &src_fields,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL) = 0;
+                  ApEvent precondition, PredEvent predicate_guard,
+                  RegionTreeNode *intersect = NULL) = 0;
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2) = 0;
@@ -1722,12 +1727,14 @@ namespace Legion {
       virtual ApEvent issue_copy(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &src_fields,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL);
+                  ApEvent precondition, PredEvent predicate_guard,
+                  RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2);
@@ -1821,14 +1828,15 @@ namespace Legion {
                        const void *value, size_t value_size, 
                        UniqueID logical_ctx_uid, InnerContext *context, 
                        VersionInfo &version_info,
-                       std::set<RtEvent> &map_applied_events);
+                       std::set<RtEvent> &map_applied_events,
+                       PredEvent true_guard, PredEvent false_guard);
       ApEvent eager_fill_fields(ContextID ctx, Operation *op,
                               const unsigned index, 
                               UniqueID logical_ctx_uid, InnerContext *context,
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceSet &instances,
-                              ApEvent precondition,
+                              ApEvent precondition, PredEvent true_guard,
                               std::set<RtEvent> &map_applied_events);
       InstanceRef attach_file(ContextID ctx, InnerContext *parent_ctx,
                            const FieldMask &attach_mask,
@@ -1907,12 +1915,14 @@ namespace Legion {
       virtual ApEvent issue_copy(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &src_fields,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL);
+                  ApEvent precondition, PredEvent predicate_guard,
+                  RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2);

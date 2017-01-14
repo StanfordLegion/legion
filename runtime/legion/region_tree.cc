@@ -2500,7 +2500,7 @@ namespace Legion {
                                         VersionInfo &dst_version_info, 
                                         ApEvent term_event, Operation *op, 
                                         unsigned src_index, unsigned dst_index,
-                                        ApEvent precondition, 
+                                        ApEvent precondition, PredEvent guard, 
                                         std::set<RtEvent> &map_applied)
     //--------------------------------------------------------------------------
     {
@@ -2625,7 +2625,8 @@ namespace Legion {
               TraversalInfo info(ctx.get_id(), op, src_index, src_req,
                                  dst_version_info, copy_mask, map_applied);
               src_it->first->issue_deferred_copies_across(info, dst_view,
-                  src_it->second, dst_it->second, precondition, result_events);
+                            src_it->second, dst_it->second, precondition, 
+                            guard, result_events);
               src_mask -= copy_mask;
             }
             // If we've handled all the sources, we are done
@@ -2720,7 +2721,7 @@ namespace Legion {
                                                      dst_precondition,
                                                      precondition);
             ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
-                                                     dst_it->second, copy_pre);
+                                       dst_it->second, copy_pre, guard);
             if (copy_post.exists())
               result_events.insert(copy_post);
           }
@@ -2735,7 +2736,8 @@ namespace Legion {
                                             const RegionRequirement &dst_req,
                                             const InstanceSet &src_targets,
                                             const InstanceSet &dst_targets,
-                                            Operation *op, ApEvent precondition)
+                                            Operation *op, ApEvent precondition,
+                                            PredEvent predicate_guard)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REDUCE_ACROSS_CALL);
@@ -2839,7 +2841,8 @@ namespace Legion {
         ApEvent copy_pre = Runtime::merge_events(fold_copy_preconditions);
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_fold, dst_fields_fold, copy_pre, 
-                            NULL/*intersect*/, dst_req.redop, true/*fold*/);
+                            predicate_guard, NULL/*intersect*/, 
+                            dst_req.redop, true/*fold*/);
         if (copy_post.exists())
           result_events.insert(copy_post);
       }
@@ -2849,7 +2852,8 @@ namespace Legion {
         ApEvent copy_pre = Runtime::merge_events(list_copy_preconditions);
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_list, dst_fields_list, copy_pre, 
-                            NULL/*intersect*/, dst_req.redop, false/*fold*/);
+                            predicate_guard, NULL/*intersect*/, 
+                            dst_req.redop, false/*fold*/);
         if (copy_post.exists())
           result_events.insert(copy_post);
       }
@@ -3187,7 +3191,9 @@ namespace Legion {
                                           RestrictInfo &restrict_info,
                                           InstanceSet &instances, 
                                           ApEvent precondition,
-                                          std::set<RtEvent> &map_applied_events)
+                                          std::set<RtEvent> &map_applied_events,
+                                          PredEvent true_guard, 
+                                          PredEvent false_guard)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
@@ -3211,14 +3217,15 @@ namespace Legion {
         FieldMask eager_fields;
         restrict_info.populate_restrict_fields(eager_fields);
         ApEvent done_event = fill_node->eager_fill_fields(ctx.get_id(), 
-           op, index, logical_ctx_uid, context, eager_fields, value, value_size,
-           version_info, instances, precondition, map_applied_events);
+         op, index, logical_ctx_uid, context, eager_fields, value, value_size,
+         version_info, instances, precondition, true_guard, map_applied_events);
         // Remove these fields from the fill set
         fill_mask -= eager_fields;
         // If we still have fields to fill, do that now
         if (!!fill_mask)
           fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-                 logical_ctx_uid, context, version_info, map_applied_events);
+                                 logical_ctx_uid, context, version_info, 
+                                 map_applied_events, true_guard, false_guard);
         // We know the sync precondition is chained off at least
         // one eager fill so we can return the done event
         return done_event;
@@ -3230,7 +3237,8 @@ namespace Legion {
 #endif
         // Fill in these fields on this node
         fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-               logical_ctx_uid, context, version_info, map_applied_events); 
+                               logical_ctx_uid, context, version_info, 
+                               map_applied_events, true_guard, false_guard);
         // We didn't actually use the precondition so just return it
         return precondition;
       }
@@ -13142,7 +13150,7 @@ namespace Legion {
       // Prepare to make the new view
       DistributedID did = context->runtime->get_available_distributed_id(false);
       // Copy the version info that we need
-      CompositeVersionInfo *view_info = new CompositeVersionInfo();
+      DeferredVersionInfo *view_info = new DeferredVersionInfo();
       version_info.copy_to(*view_info);
       // Make the view
       CompositeView *result = legion_new<CompositeView>(context, did, 
@@ -13427,8 +13435,9 @@ namespace Legion {
           }
         }
         LegionMap<ApEvent,FieldMask>::aligned postconditions;
-        issue_grouped_copies(info, dst, restrict_out, preconditions, 
-            update_mask, src_instances, &info.version_info, postconditions);
+        issue_grouped_copies(info, dst, restrict_out, PredEvent::NO_PRED_EVENT,
+                                     preconditions, update_mask, src_instances, 
+                                     &info.version_info, postconditions);
         // Tell the destination about all of the copies that were done
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
               postconditions.begin(); it != postconditions.end(); it++)
@@ -13685,6 +13694,7 @@ namespace Legion {
     void RegionTreeNode::issue_grouped_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
                                               bool restrict_out,
+                                              PredEvent predicate_guard,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
@@ -13733,7 +13743,7 @@ namespace Legion {
         // can now issue the copy to the low-level runtime
         ApEvent copy_pre = Runtime::merge_events(pre_set.preconditions);
         ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
-                                       copy_pre, intersect);
+                                       copy_pre, predicate_guard, intersect);
         // Save the copy post in the post conditions
         if (copy_post.exists())
         {
@@ -13868,7 +13878,8 @@ namespace Legion {
 #endif
           // Then we have a reduction to perform
           it->first->perform_reduction(inst_target, copy_mask, &version_info, 
-                                       op, index, map_applied, restrict_out);
+                                       op, index, map_applied, 
+                                       PredEvent::NO_PRED_EVENT, restrict_out);
         }
       }
     }
@@ -15015,7 +15026,8 @@ namespace Legion {
     ApEvent RegionNode::issue_copy(Operation *op,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
-                        ApEvent precondition,RegionTreeNode *intersect/*=NULL*/,
+                        ApEvent precondition, PredEvent predicate_guard,
+                        RegionTreeNode *intersect/*=NULL*/,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
@@ -15036,12 +15048,24 @@ namespace Legion {
           if (dom_pre.exists() && !dom_pre.has_triggered())
             precondition = Runtime::merge_events(precondition, dom_pre);
           std::set<ApEvent> done_events;
-          for (std::set<Domain>::const_iterator it = doms.begin();
-                it != doms.end(); it++)
+          if (predicate_guard.exists())
           {
-            done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
-                                                requests, precondition,
-                                                redop, reduction_fold)));
+            // Have to protect against misspeculation
+            ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                     ApEvent(predicate_guard));
+            for (std::set<Domain>::const_iterator it = doms.begin();
+                  it != doms.end(); it++)
+              done_events.insert(Runtime::ignorefaults(it->copy(
+                      src_fields, dst_fields, requests, pred_pre, 
+                      redop, reduction_fold)));
+          }
+          else
+          {
+            for (std::set<Domain>::const_iterator it = doms.begin();
+                  it != doms.end(); it++)
+              done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
+                                                  requests, precondition,
+                                                  redop, reduction_fold)));
           }
           result = Runtime::merge_events(done_events);
         }
@@ -15051,8 +15075,17 @@ namespace Legion {
           const Domain &dom = row_source->get_domain(dom_pre);
           if (dom_pre.exists() && !dom_pre.has_triggered())
             precondition = Runtime::merge_events(precondition, dom_pre);
-          result = ApEvent(dom.copy(src_fields, dst_fields, requests, 
-                                    precondition, redop, reduction_fold));
+          // Have to protect against misspeculation
+          if (predicate_guard.exists())
+          {
+            ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                     ApEvent(predicate_guard));
+            result = Runtime::ignorefaults(dom.copy(src_fields, dst_fields,
+                                requests, pred_pre, redop, reduction_fold));
+          }
+          else
+            result = ApEvent(dom.copy(src_fields, dst_fields, requests, 
+                                      precondition, redop, reduction_fold));
         }
       }
       else
@@ -15066,12 +15099,24 @@ namespace Legion {
           intersection_doms = &(row_source->get_intersection_domains(
                 intersect->as_partition_node()->row_source));
         std::set<ApEvent> done_events;
-        for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-              it != intersection_doms->end(); it++)
+        if (predicate_guard.exists())
         {
-          done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
-                                              requests, precondition,
-                                              redop, reduction_fold)));
+          // have to protect against misspeculation
+          ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                   ApEvent(predicate_guard));
+          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+                it != intersection_doms->end(); it++)
+            done_events.insert(Runtime::ignorefaults(it->copy(
+                    src_fields, dst_fields, requests, pred_pre, 
+                    redop, reduction_fold)));
+        }
+        else
+        {
+          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+                it != intersection_doms->end(); it++)
+            done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
+                                                requests, precondition,
+                                                redop, reduction_fold)));
         }
         result = Runtime::merge_events(done_events);
       }
@@ -15113,7 +15158,8 @@ namespace Legion {
     ApEvent RegionNode::issue_fill(Operation *op,
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
-                        ApEvent precondition, RegionTreeNode *intersect)
+                        ApEvent precondition, PredEvent predicate_guard,
+                        RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
@@ -15133,11 +15179,22 @@ namespace Legion {
           if (dom_pre.exists() && !dom_pre.has_triggered())
             precondition = Runtime::merge_events(precondition, dom_pre);
           std::set<ApEvent> done_events;
-          for (std::set<Domain>::const_iterator it = doms.begin();
-                it != doms.end(); it++)
+          if (predicate_guard.exists())
           {
-            done_events.insert(ApEvent(it->fill(dst_fields, requests, 
-                                        fill_value, fill_size, precondition)));
+            ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                     ApEvent(predicate_guard));
+            // Have to protect against misspeculation
+            for (std::set<Domain>::const_iterator it = doms.begin();
+                  it != doms.end(); it++)
+              done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
+                      requests, fill_value, fill_size, pred_pre)));
+          }
+          else
+          {
+            for (std::set<Domain>::const_iterator it = doms.begin();
+                  it != doms.end(); it++)
+              done_events.insert(ApEvent(it->fill(dst_fields, requests, 
+                                         fill_value, fill_size, precondition)));
           }
           result = Runtime::merge_events(done_events);
         }
@@ -15147,8 +15204,17 @@ namespace Legion {
           const Domain &dom = row_source->get_domain(dom_pre);
           if (dom_pre.exists() && !dom_pre.has_triggered())
             precondition = Runtime::merge_events(precondition, dom_pre);
-          result = ApEvent(dom.fill(dst_fields, requests, 
-                                    fill_value, fill_size, precondition)); 
+          // Have to protect against misspeculation
+          if (predicate_guard.exists())
+          {
+            ApEvent pred_pre = Runtime::merge_events(precondition, 
+                                                     ApEvent(predicate_guard));
+            result = ApEvent(Runtime::ignorefaults(dom.fill(dst_fields, 
+                    requests, fill_value, fill_size, pred_pre)));
+          }
+          else
+            result = ApEvent(dom.fill(dst_fields, requests, 
+                                      fill_value, fill_size, precondition));
         }
       }
       else
@@ -15162,11 +15228,22 @@ namespace Legion {
           intersection_doms = &(row_source->get_intersection_domains(
                 intersect->as_partition_node()->row_source));
         std::set<ApEvent> done_events;
-        for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-              it != intersection_doms->end(); it++)
+        if (predicate_guard.exists())
         {
-          done_events.insert(ApEvent(it->fill(dst_fields, requests,
-                                      fill_value, fill_size, precondition)));
+          ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                   ApEvent(predicate_guard));
+          // Have to protect the against misspeculation
+          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+                it != intersection_doms->end(); it++)
+            done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
+                    requests, fill_value, fill_size, pred_pre)));
+        }
+        else
+        {
+          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+                it != intersection_doms->end(); it++)
+            done_events.insert(ApEvent(it->fill(dst_fields, requests,
+                                       fill_value, fill_size, precondition)));
         }
         result = Runtime::merge_events(done_events);
       }
@@ -15954,9 +16031,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
                                  const void *value, size_t value_size,
-                                 UniqueID logical_ctx_uid,InnerContext *context,
+                                 UniqueID logical_ctx_uid,
+                                 InnerContext *inner_context,
                                  VersionInfo &version_info,
-                                 std::set<RtEvent> &map_applied_events)
+                                 std::set<RtEvent> &map_applied_events,
+                                 PredEvent true_guard, PredEvent false_guard)
     //--------------------------------------------------------------------------
     {
       // A fill is a kind of a write, so we have to do the advance
@@ -15965,24 +16044,56 @@ namespace Legion {
       const bool update_parent_state = 
         !version_info.is_upper_bound_node(this);
       const AddressSpaceID local_space = context->runtime->address_space;
-      manager.advance_versions(fill_mask, logical_ctx_uid, context,
+      manager.advance_versions(fill_mask, logical_ctx_uid, inner_context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
-      manager.record_advance_versions(fill_mask, context, 
+      manager.record_advance_versions(fill_mask, inner_context, 
                                       version_info, map_applied_events);
       // Make the fill instance
       DistributedID did = context->runtime->get_available_distributed_id(false);
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
-        legion_new<FillView>(this->context, did, local_space, local_space, 
+        legion_new<FillView>(context, did, local_space, local_space, 
                              this, fill_value, true/*register now*/);
       // Now update the physical state
       PhysicalState *state = get_physical_state(version_info);
-      // Invalidate any reduction views
-      if (!(fill_mask * state->reduction_mask))
-        invalidate_reduction_views(state, fill_mask);
-      update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
+      if (true_guard.exists())
+      {
+        // Special path for handling speculative execution of predicated fills
+#ifdef DEBUG_LEGION
+        assert(false_guard.exists());
+#endif
+        // Build a phi view and register that instead
+        DistributedID did = 
+          context->runtime->get_available_distributed_id(false);
+        // Copy the version info that we need
+        DeferredVersionInfo *view_info = new DeferredVersionInfo();
+        version_info.copy_to(*view_info); 
+        PhiView *phi_view = legion_new<PhiView>(context, did, local_space,
+                                                local_space, view_info,
+                                                this, true_guard, false_guard,
+                                                true/*register now*/);
+        // Record the true and false views
+        phi_view->record_true_view(fill_view, fill_mask);
+        LegionMap<LogicalView*,FieldMask>::aligned current_views;
+        find_valid_instance_views(ctx, state, fill_mask, fill_mask,
+                                  version_info, false/*needs space*/, 
+                                  current_views);
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+              current_views.begin(); it != current_views.end(); it++)
+          phi_view->record_false_view(it->first, it->second);
+        // Update the state with the phi view
+        update_valid_views(state, fill_mask, true/*dirty*/, phi_view);
+      }
+      else
+      {
+        // This is the non-predicated path
+        // Invalidate any reduction views
+        if (!(fill_mask * state->reduction_mask))
+          invalidate_reduction_views(state, fill_mask);
+        update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -15995,6 +16106,7 @@ namespace Legion {
                                           VersionInfo &version_info, 
                                           InstanceSet &instances,
                                           ApEvent sync_precondition,
+                                          PredEvent true_guard,
                                           std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
@@ -16029,14 +16141,15 @@ namespace Legion {
         compute_event_sets(fill_mask, preconditions, event_sets);
         // Iterate over the event sets and issue the fill operations on 
         // the different fields
-        for (LegionList<EventSet>::aligned::const_iterator pit = 
+        for (LegionList<EventSet>::aligned::iterator pit = 
               event_sets.begin(); pit != event_sets.end(); pit++)
         {
+          // If we have a predicate guard we add that to the set now
           ApEvent precondition = Runtime::merge_events(pit->preconditions);
           std::vector<Domain::CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);
-          ApEvent fill_event = issue_fill(op, dst_fields, 
-                                          value, value_size, precondition);
+          ApEvent fill_event = issue_fill(op, dst_fields, value, 
+                                          value_size, precondition, true_guard);
           if (fill_event.exists())
             post_events.insert(fill_event);
         }
@@ -16855,23 +16968,25 @@ namespace Legion {
     ApEvent PartitionNode::issue_copy(Operation *op,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
-                        ApEvent precondition,RegionTreeNode *intersect/*=NULL*/,
+                        ApEvent precondition, PredEvent predicate_guard,
+                        RegionTreeNode *intersect/*=NULL*/,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
       return parent->issue_copy(op, src_fields, dst_fields, precondition,
-                                intersect, redop, reduction_fold);
+                      predicate_guard, intersect, redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
     ApEvent PartitionNode::issue_fill(Operation *op,
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
-                        ApEvent precondition, RegionTreeNode *intersect)
+                        ApEvent precondition, PredEvent predicate_guard,
+                        RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
       return parent->issue_fill(op, dst_fields, fill_value, fill_size, 
-                                precondition, intersect);
+                                precondition, predicate_guard, intersect);
     }
 
     //--------------------------------------------------------------------------

@@ -1164,8 +1164,8 @@ namespace Legion {
         get_layout_constraints(void) const { return layout_constraints; } 
     public:
       ApEvent dispatch_task(Processor target, SingleTask *task, 
-          TaskContext *ctx, ApEvent precondition, int priority,
-                          Realm::ProfilingRequestSet &requests);
+          TaskContext *ctx, ApEvent precondition, PredEvent pred,
+          int priority, Realm::ProfilingRequestSet &requests);
       void dispatch_inline(Processor current, InlineContext *ctx);
     public:
       Processor::Kind get_processor_kind(bool warn) const;
@@ -1286,17 +1286,11 @@ namespace Legion {
       IdentityProjectionFunctor(Legion::Runtime *rt);
       virtual ~IdentityProjectionFunctor(void);
     public:
-      virtual LogicalRegion project(Context ctx, Task *task,
-                                    unsigned index,
+      virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalRegion upper_bound,
                                     const DomainPoint &point);
-      virtual LogicalRegion project(Context ctx, Task *task, 
-                                    unsigned index,
+      virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalPartition upper_bound,
-                                    const DomainPoint &point);
-      virtual LogicalRegion project(LogicalRegion upper_bound,
-                                    const DomainPoint &point);
-      virtual LogicalRegion project(LogicalPartition upper_bound,
                                     const DomainPoint &point);
       virtual unsigned get_depth(void) const;
     };
@@ -1343,11 +1337,11 @@ namespace Legion {
                                              LogicalRegion result, Runtime *rt);
       // Annonymized checking code
       void check_projection_region_result(const RegionRequirement &req,
-                                          const Operation *op, unsigned idx,
+                                          Operation *op, unsigned idx,
                                           LogicalRegion result, Runtime *rt);
       void check_projection_partition_result(const RegionRequirement &req,
-                                             const Operation *op, unsigned idx,
-                                             LogicalRegion result, Runtime *rt);
+                                          Operation *op, unsigned idx,
+                                          LogicalRegion result, Runtime *rt);
     public:
       const int depth; 
       const bool is_exclusive;
@@ -1775,10 +1769,8 @@ namespace Legion {
     public:
       Predicate create_predicate(Context ctx, const Future &f);
       Predicate predicate_not(Context ctx, const Predicate &p);
-      Predicate predicate_and(Context ctx, const Predicate &p1, 
-                                           const Predicate &p2);
-      Predicate predicate_or(Context ctx, const Predicate &p1,
-                                          const Predicate &p2);  
+      Predicate create_predicate(Context ctx,const PredicateLauncher &launcher);
+      Future get_predicate_future(Context ctx, const Predicate &p);
     public:
       Lock create_lock(Context ctx);
       void destroy_lock(Context ctx, Lock l);
@@ -2003,6 +1995,7 @@ namespace Legion {
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
+      void send_phi_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
@@ -2152,6 +2145,7 @@ namespace Legion {
       void handle_send_composite_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
+      void handle_send_phi_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,
@@ -2905,11 +2899,17 @@ namespace Legion {
       static inline void trigger_event(ApUserEvent to_trigger,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline void poison_event(ApUserEvent to_poison);
+    public:
       static inline RtUserEvent create_rt_user_event(void);
       static inline void trigger_event(RtUserEvent to_trigger,
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
       static inline void poison_event(RtUserEvent to_poison);
     public:
+      static inline PredEvent create_pred_event(void);
+      static inline void trigger_event(PredEvent to_trigger);
+      static inline void poison_event(PredEvent to_poison);
+    public:
+      static inline ApEvent ignorefaults(Realm::Event e);
       static inline RtEvent protect_event(ApEvent to_protect);
       static inline RtEvent protect_merge_events(
                                           const std::set<ApEvent> &events);
@@ -3255,6 +3255,10 @@ namespace Legion {
     {
       Realm::UserEvent copy = to_poison;
       copy.cancel();
+#ifdef LEGION_SPY
+      // This counts as triggering
+      LegionSpy::log_ap_user_event_trigger(to_poison);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3288,6 +3292,63 @@ namespace Legion {
     {
       Realm::UserEvent copy = to_poison;
       copy.cancel();
+#ifdef LEGION_SPY
+      // This counts as triggering
+      LegionSpy::log_rt_user_event_trigger(to_poison);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline PredEvent Runtime::create_pred_event(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      PredEvent result(Realm::UserEvent::create_user_event());
+      LegionSpy::log_pred_event(result);
+      return result;
+#else
+      return PredEvent(Realm::UserEvent::create_user_event());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::trigger_event(PredEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_trigger;
+      copy.trigger();
+#ifdef LEGION_SPY
+      LegionSpy::log_pred_event_trigger(to_trigger);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::poison_event(PredEvent to_poison)
+    //--------------------------------------------------------------------------
+    {
+      Realm::UserEvent copy = to_poison;
+      copy.cancel();
+#ifdef LEGION_SPY
+      // This counts as triggering
+      LegionSpy::log_pred_event_trigger(to_poison);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline ApEvent Runtime::ignorefaults(Realm::Event e)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent result(Realm::Event::ignorefaults(e));
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        result = ApEvent(rename);
+      }
+      LegionSpy::log_event_dependence(ApEvent(e), result);
+#endif
+      return ApEvent(result);
     }
 
     //--------------------------------------------------------------------------

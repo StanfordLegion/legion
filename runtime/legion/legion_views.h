@@ -48,6 +48,7 @@ namespace Legion {
       inline bool is_reduction_view(void) const;
       inline bool is_composite_view(void) const;
       inline bool is_fill_view(void) const;
+      inline bool is_phi_view(void) const;
     public:
       inline InstanceView* as_instance_view(void) const;
       inline DeferredView* as_deferred_view(void) const;
@@ -55,6 +56,7 @@ namespace Legion {
       inline ReductionView* as_reduction_view(void) const;
       inline CompositeView* as_composite_view(void) const;
       inline FillView* as_fill_view(void) const;
+      inline PhiView *as_phi_view(void) const;
     public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
@@ -82,10 +84,12 @@ namespace Legion {
       static inline DistributedID encode_reduction_did(DistributedID did);
       static inline DistributedID encode_composite_did(DistributedID did);
       static inline DistributedID encode_fill_did(DistributedID did);
+      static inline DistributedID encode_phi_did(DistributedID did);
       static inline bool is_materialized_did(DistributedID did);
       static inline bool is_reduction_did(DistributedID did);
       static inline bool is_composite_did(DistributedID did);
       static inline bool is_fill_did(DistributedID did);
+      static inline bool is_phi_did(DistributedID did);
       static inline bool is_top_did(DistributedID did);
     public:
       RegionTreeForest *const context;
@@ -746,12 +750,13 @@ namespace Legion {
                              VersionTracker *version_tracker, 
                              Operation *op, unsigned index,
                              std::set<RtEvent> &map_applied_events,
-                             bool restrict_out = false);
+                             PredEvent pred_guard, bool restrict_out = false);
       ApEvent perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         VersionTracker *version_tracker,
                                         const std::set<ApEvent> &preconditions,
                                         Operation *op, unsigned index,
+                                        PredEvent predicate_guard,
                                         CopyAcrossHelper *helper,
                                         RegionTreeNode *intersect,
                                         std::set<RtEvent> &map_applied_events);
@@ -762,6 +767,7 @@ namespace Legion {
                                               VersionTracker *version_tracker,
                                        const std::set<ApEvent> &preconditions,
                                        Operation *op, unsigned index,
+                                       PredEvent predicate_guard,
                                        RegionTreeNode *intersect,
                                        std::set<RtEvent> &map_applied_events);
     public:
@@ -923,7 +929,7 @@ namespace Legion {
                                         MaterializedView *dst,
                                   const std::vector<unsigned> &src_indexes,
                                   const std::vector<unsigned> &dst_indexes,
-                                        ApEvent precondition,
+                                        ApEvent precondition, PredEvent guard,
                                         std::set<ApEvent> &postconditions);
       void find_field_descriptors(ApEvent term_event,
                                   const RegionUsage &usage,
@@ -942,24 +948,25 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                         std::set<ApEvent> &postconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL) = 0; 
     };
 
     /**
-     * \class CompositeVersionInfo
+     * \class DeferredVersionInfo
      * This is a wrapper class for keeping track of the version
      * information for all the composite nodes in a composite instance.
      * TODO: do we need synchronization on computing field versions
      * because these objects can be shared between composite views
      */
-    class CompositeVersionInfo : public VersionInfo, public Collectable {
+    class DeferredVersionInfo : public VersionInfo, public Collectable {
     public:
-      CompositeVersionInfo(void);
-      CompositeVersionInfo(const CompositeVersionInfo &rhs);
-      ~CompositeVersionInfo(void);
+      DeferredVersionInfo(void);
+      DeferredVersionInfo(const DeferredVersionInfo &rhs);
+      ~DeferredVersionInfo(void);
     public:
-      CompositeVersionInfo& operator=(const CompositeVersionInfo &rhs);
+      DeferredVersionInfo& operator=(const DeferredVersionInfo &rhs);
     };
 
     /**
@@ -992,39 +999,40 @@ namespace Legion {
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
       void copy_to_temporary(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  AddressSpaceID local_space, bool restrict_out);
+                  PredEvent pred_guard, AddressSpaceID local_space, 
+                  bool restrict_out);
     protected:
       void issue_nested_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
       void issue_local_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, FieldMask copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
       void issue_child_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
       void issue_reductions(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
     public:
       RegionTreeNode *const logical_node;
       // Only valid at roots of copy trees
@@ -1162,7 +1170,7 @@ namespace Legion {
     public:
       CompositeView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc, RegionTreeNode *node, 
-                    AddressSpaceID local_proc, CompositeVersionInfo *info,
+                    AddressSpaceID local_proc, DeferredVersionInfo *info,
                     ClosedNode *closed_tree, InnerContext *context,
                     bool register_now);
       CompositeView(const CompositeView &rhs);
@@ -1198,7 +1206,8 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                         std::set<ApEvent> &postconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         PredEvent pred_guard,
                                          CopyAcrossHelper *helper = NULL);
     public:
       // From VersionTracker
@@ -1245,7 +1254,7 @@ namespace Legion {
       static void handle_deferred_view_ref(const void *args);
     public:
       // The path version info for this composite instance
-      CompositeVersionInfo *const version_info;
+      DeferredVersionInfo *const version_info;
       // The abstraction of the tree that we closed
       ClosedNode *const closed_tree;
       // The translation context if any
@@ -1405,18 +1414,123 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                         std::set<ApEvent> &postconditions,
-                                         CopyAcrossHelper *helper = NULL);
-      void issue_fill_across(const TraversalInfo &info,
-                             MaterializedView *dst, const FieldMask &copy_mask,
-                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                         CopyAcrossHelper *helper = NULL) const;
+                                         PredEvent pred_guard,
+                                         CopyAcrossHelper *helper = NULL);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
     public:
       FillViewValue *const value;
+    };
+
+    /**
+     * \class PhiView
+     * A phi view is exactly what it sounds like: a view to merge two
+     * different views together from different control flow paths.
+     * Specifically it is able to merge together different paths for
+     * predication so that we can issue copies from both a true and
+     * a false version of a predicate. This allows us to map past lazy
+     * predicated operations such as fills and virtual mappings and
+     * continue to get ahead of actual execution. It's not pretty
+     * but it seems to work.
+     * TODO: Prune these and build copy trees correctly
+     */
+    class PhiView : public DeferredView, public VersionTracker {
+    public:
+      struct DeferPhiViewRefArgs : 
+        public LgTaskArgs<DeferPhiViewRefArgs> {
+      public:
+        static const LgTaskID TASK_ID =
+          LG_DEFER_PHI_VIEW_REF_TASK_ID;
+      public:
+        DistributedCollectable *dc;
+        DistributedID did; 
+      };
+      struct DeferPhiViewRegistrationArgs : 
+        public LgTaskArgs<DeferPhiViewRegistrationArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID;
+      public:
+        PhiView *view;
+      };
+    public:
+      PhiView(RegionTreeForest *ctx, DistributedID did,
+              AddressSpaceID owner_proc, AddressSpaceID local_proc,
+              DeferredVersionInfo *version_info,
+              RegionTreeNode *node, PredEvent true_guard,
+              PredEvent false_guard, bool register_now);
+      PhiView(const PhiView &rhs);
+      virtual ~PhiView(void);
+    public:
+      PhiView& operator=(const PhiView &rhs);
+    public:
+      virtual bool has_parent(void) const { return false; }
+      virtual LogicalView* get_parent(void) const 
+        { assert(false); return NULL; }
+      virtual LogicalView* get_subview(const ColorPoint &c);
+    public:
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+    public:
+      virtual void send_view(AddressSpaceID target);
+    public:
+      virtual bool is_upper_bound_node(RegionTreeNode *node) const;
+      virtual void get_field_versions(RegionTreeNode *node, bool split_prev, 
+                                      const FieldMask &needed_fields,
+                                      FieldVersions &field_versions);
+      virtual void get_advance_versions(RegionTreeNode *node, bool base,
+                                        const FieldMask &needed_fields,
+                                        FieldVersions &field_versions);
+      virtual void get_split_mask(RegionTreeNode *node, 
+                                  const FieldMask &needed_fields,
+                                  FieldMask &split);
+    public:
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
+                                         FieldMask copy_mask,
+                                         const RestrictInfo &restrict_info,
+                                         bool restrict_out);
+      virtual void issue_deferred_copies(const TraversalInfo &info,
+                                         MaterializedView *dst,
+                                         FieldMask copy_mask,
+                    const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                          LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                         PredEvent pred_guard,
+                                         CopyAcrossHelper *helper = NULL);
+    protected:
+      void issue_guarded_update_copies(const TraversalInfo &info,
+                                       MaterializedView *dst,
+                                       FieldMask copy_mask,
+                                       PredEvent predicate_guard,
+                  const LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
+                                       const RestrictInfo &restrict_info,
+                                       bool restrict_out,
+                  const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                        LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                       CopyAcrossHelper *helper = NULL);
+    public:
+      void record_true_view(LogicalView *view, const FieldMask &view_mask);
+      void record_false_view(LogicalView *view, const FieldMask &view_mask);
+    public:
+      void pack_phi_view(Serializer &rez);
+      void unpack_phi_view(Deserializer &derez,std::set<RtEvent> &ready_events);
+      RtEvent defer_add_reference(DistributedCollectable *dc, 
+                                  RtEvent precondition) const;
+      static void handle_send_phi_view(Runtime *runtime, Deserializer &derez,
+                                       AddressSpaceID source);
+      static void handle_deferred_view_ref(const void *args);
+      static void handle_deferred_view_registration(const void *args);
+    public:
+      const PredEvent true_guard;
+      const PredEvent false_guard;
+      DeferredVersionInfo *const version_info;
+    protected:
+      LegionMap<LogicalView*,FieldMask>::aligned true_views;
+      LegionMap<LogicalView*,FieldMask>::aligned false_views;
     };
 
     //--------------------------------------------------------------------------
@@ -1425,7 +1539,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (top)
-        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL | (1ULL << 2));
+        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL | (1ULL << 3));
       else
         return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL);
     }
@@ -1435,7 +1549,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1ULL | (1ULL << 2));
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1ULL | (1ULL << 3));
     }
 
     //--------------------------------------------------------------------------
@@ -1443,7 +1557,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2ULL | (1ULL << 2));
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2ULL | (1ULL << 3));
     }
 
     //--------------------------------------------------------------------------
@@ -1451,35 +1565,50 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x3ULL | (1ULL << 2));
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x3ULL | (1ULL << 3));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID LogicalView::encode_phi_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x4ULL | (1ULL << 3));
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_materialized_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3ULL) == 0x0ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x0ULL);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_reduction_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3ULL) == 0x1ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x1ULL);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_composite_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3ULL) == 0x2ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x2ULL);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_fill_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3ULL) == 0x3ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x3ULL);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_phi_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x4ULL);
     }
 
     //--------------------------------------------------------------------------
@@ -1500,7 +1629,7 @@ namespace Legion {
     inline bool LogicalView::is_deferred_view(void) const
     //--------------------------------------------------------------------------
     {
-      return (is_composite_did(did) || is_fill_did(did));
+      return (is_composite_did(did) || is_fill_did(did) || is_phi_did(did));
     }
 
     //--------------------------------------------------------------------------
@@ -1529,6 +1658,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return is_fill_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_phi_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_phi_did(did);
     }
 
     //--------------------------------------------------------------------------
@@ -1589,6 +1725,16 @@ namespace Legion {
       assert(is_composite_view());
 #endif
       return static_cast<CompositeView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline PhiView* LogicalView::as_phi_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_phi_view());
+#endif
+      return static_cast<PhiView*>(const_cast<LogicalView*>(this));
     }
 
     //--------------------------------------------------------------------------

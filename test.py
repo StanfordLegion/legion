@@ -92,6 +92,22 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
                ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8']]]
     run_cxx(solver, flags, launcher, root_dir, None, env, thread_count)
 
+    # Parallel Research Kernels: Stencil
+    # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
+    prk_dir = os.path.join(tmp_dir, 'prk')
+    cmd(['git', 'clone', 'https://github.com/magnatelee/PRK.git', prk_dir])
+    stencil_dir = os.path.join(prk_dir, 'LEGION', 'Stencil')
+    stencil_env = dict(list(env.items()) + [
+        ('OUTFILE', 'stencil'),
+        ('GEN_SRC', 'stencil.cc'),
+        ('CC_FLAGS', (env['CC_FLAGS'] if 'CC_FLAGS' in env else '') +
+         ' -DRADIUS=2 -DRESTRICT_KEYWORD -DDISABLE_BARRIER_MIGRATION'),
+    ])
+    makefile = os.path.join(root_dir, 'apps/Makefile.template')
+    cmd(['make', '-f', makefile, '-C', stencil_dir, '-j', str(thread_count)], env=stencil_env)
+    stencil = os.path.join(stencil_dir, 'stencil')
+    cmd([stencil, '4', '10', '1000'])
+
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 

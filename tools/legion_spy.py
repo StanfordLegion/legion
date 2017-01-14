@@ -7670,7 +7670,7 @@ class Event(object):
     __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing',
                  'incoming_ops', 'outgoing_ops', 'incoming_fills', 'outgoing_fills',
                  'incoming_copies', 'outgoing_copies', 'generation', 'ap_user_event',
-                 'rt_user_event', 'user_event_triggered', 
+                 'rt_user_event', 'pred_event', 'user_event_triggered', 
                  'barrier_contributors', 'barrier_waiters']
     def __init__(self, state, handle):
         self.state = state
@@ -7686,6 +7686,7 @@ class Event(object):
         self.outgoing_copies = None
         self.ap_user_event = False
         self.rt_user_event = False
+        self.pred_event = False
         self.user_event_triggered = False
         # For traversals
         self.generation = 0
@@ -7704,12 +7705,20 @@ class Event(object):
     def set_ap_user_event(self):
         assert not self.ap_user_event
         assert not self.rt_user_event
+        assert not self.pred_event
         self.ap_user_event = True
 
     def set_rt_user_event(self):
         assert not self.ap_user_event
         assert not self.rt_user_event
+        assert not self.pred_event
         self.rt_user_event = True
+
+    def set_pred_event(self):
+        assert not self.ap_user_event
+        assert not self.rt_user_event
+        assert not self.pred_event
+        self.pred_event = True
 
     def set_triggered(self):
         assert not self.user_event_triggered
@@ -7718,7 +7727,7 @@ class Event(object):
     def check_for_user_event_leak(self):
         if self.user_event_triggered:
             return
-        if not self.ap_user_event and not self.rt_user_event:
+        if not self.ap_user_event and not self.rt_user_event and not self.pred_event:
             return
         # This is an untriggered user event, report it
         if self.ap_user_event:
@@ -7734,8 +7743,12 @@ class Event(object):
                 print("WARNING: "+str(self)+" is an untriggered application user event")
             if self.state.assert_on_warning:
                 assert False
-        else:
+        elif self.rt_user_event:
             print("WARNING: "+str(self)+" is an untriggered runtime user event")
+            if self.state.assert_on_warning:
+                assert False
+        else:
+            print("WARNING: "+str(self)+" is an untriggered predicate event")
             if self.state.assert_on_warning:
                 assert False
         print("  Incoming:")
@@ -8638,10 +8651,14 @@ ap_user_event_pat       = re.compile(
     prefix+"Ap User Event (?P<id>[0-9a-f]+)")
 rt_user_event_pat       = re.compile(
     prefix+"Rt User Event (?P<id>[0-9a-f]+)")
+pred_event_pat          = re.compile(
+    prefix+"Pred Event (?P<id>[0-9a-f]+)")
 ap_user_event_trig_pat  = re.compile(
     prefix+"Ap User Event Trigger (?P<id>[0-9a-f]+)")
 rt_user_event_trig_pat  = re.compile(
     prefix+"Rt User Event Trigger (?P<id>[0-9a-f]+)")
+pred_event_trig_pat     = re.compile(
+    prefix+"Pred Event Trigger (?P<id>[0-9a-f]+)")
 operation_event_pat     = re.compile(
     prefix+"Operation Events (?P<uid>[0-9]+) (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
 realm_copy_pat          = re.compile(
@@ -8694,12 +8711,22 @@ def parse_legion_spy_line(line, state):
         e = state.get_event(int(m.group('id'),16))
         e.set_rt_user_event()
         return True
+    m = pred_event_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('id'),16))
+        e.set_pred_event()
+        return True
     m = ap_user_event_trig_pat.match(line)
     if m is not None:
         e = state.get_event(int(m.group('id'),16))
         e.set_triggered()
         return True
     m = rt_user_event_trig_pat.match(line)
+    if m is not None:
+        e = state.get_event(int(m.group('id'),16))
+        e.set_triggered()
+        return True
+    m = pred_event_trig_pat.match(line)
     if m is not None:
         e = state.get_event(int(m.group('id'),16))
         e.set_triggered()

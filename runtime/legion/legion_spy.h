@@ -749,6 +749,11 @@ namespace Legion {
         log_spy.print("Rt User Event " IDFMT, event.id);
       }
 
+      static inline void log_pred_event(PredEvent event)
+      {
+        log_spy.print("Pred Event " IDFMT, event.id);
+      }
+
       static inline void log_ap_user_event_trigger(ApUserEvent event)
       {
         log_spy.print("Ap User Event Trigger " IDFMT,
@@ -759,6 +764,11 @@ namespace Legion {
       {
         log_spy.print("Rt User Event Trigger " IDFMT,
 		      event.id);
+      }
+
+      static inline void log_pred_event_trigger(PredEvent event)
+      {
+        log_spy.print("Pred Event Trigger " IDFMT, event.id);
       }
 
       static inline void log_operation_events(UniqueID uid,

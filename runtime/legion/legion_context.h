@@ -305,10 +305,8 @@ namespace Legion {
       virtual void complete_frame(void) = 0;
       virtual Predicate create_predicate(const Future &f) = 0;
       virtual Predicate predicate_not(const Predicate &p) = 0;
-      virtual Predicate predicate_and(const Predicate &p1, 
-                                      const Predicate &p2) = 0;
-      virtual Predicate predicate_or(const Predicate &p1,
-                                     const Predicate &p2) = 0;
+      virtual Predicate create_predicate(const PredicateLauncher &launcher) = 0;
+      virtual Future get_predicate_future(const Predicate &p) = 0;
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -858,8 +856,8 @@ namespace Legion {
       virtual void complete_frame(void);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
-      virtual Predicate predicate_and(const Predicate &p1, const Predicate &p2);
-      virtual Predicate predicate_or(const Predicate &p1, const Predicate &p2);
+      virtual Predicate create_predicate(const PredicateLauncher &launcher);
+      virtual Future get_predicate_future(const Predicate &p);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -973,6 +971,12 @@ namespace Legion {
       LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
       LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
       LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children; 
+#ifdef DEBUG_LEGION
+      // In debug mode also keep track of them in context order so
+      // we can see what the longest outstanding operation is which
+      // is often useful when things hang
+      std::map<unsigned,Operation*> outstanding_children;
+#endif
     protected:
       // Traces for this task's execution
       LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;
@@ -1327,8 +1331,8 @@ namespace Legion {
       virtual void complete_frame(void);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
-      virtual Predicate predicate_and(const Predicate &p1, const Predicate &p2);
-      virtual Predicate predicate_or(const Predicate &p1, const Predicate &p2);
+      virtual Predicate create_predicate(const PredicateLauncher &launcher);
+      virtual Future get_predicate_future(const Predicate &p);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -1620,8 +1624,8 @@ namespace Legion {
       virtual void complete_frame(void);
       virtual Predicate create_predicate(const Future &f);
       virtual Predicate predicate_not(const Predicate &p);
-      virtual Predicate predicate_and(const Predicate &p1, const Predicate &p2);
-      virtual Predicate predicate_or(const Predicate &p1, const Predicate &p2);
+      virtual Predicate create_predicate(const PredicateLauncher &launcher);
+      virtual Future get_predicate_future(const Predicate &p);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and

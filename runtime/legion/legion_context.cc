@@ -4603,31 +4603,102 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate InnerContext::predicate_and(const Predicate &p1, 
-                                          const Predicate &p2)
+    Predicate InnerContext::create_predicate(const PredicateLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      AndPredOp *pred_op = runtime->get_available_and_pred_op(true);
-      // Hold a reference before initialization
-      Predicate result(pred_op);
-      pred_op->initialize(this, p1, p2);
-      runtime->add_to_dependence_queue(this, executing_processor, pred_op);
-      return result;
+      if (launcher.predicates.empty())
+      {
+        log_run.error("Illegal predicate creation performed on a "
+                      "set of empty previous predicates in task %s (ID %lld).",
+                      get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_PREDICATE_FUTURE);
+      }
+      else if (launcher.predicates.size() == 1)
+        return launcher.predicates[0];
+      if (launcher.and_op)
+      {
+        // Check for short circuit cases
+        std::vector<Predicate> actual_predicates;
+        for (std::vector<Predicate>::const_iterator it = 
+              launcher.predicates.begin(); it != 
+              launcher.predicates.end(); it++)
+        {
+          if ((*it) == Predicate::FALSE_PRED)
+            return Predicate::FALSE_PRED;
+          else if ((*it) == Predicate::TRUE_PRED)
+            continue;
+          actual_predicates.push_back(*it);
+        }
+        if (actual_predicates.empty()) // they were all true
+          return Predicate::TRUE_PRED;
+        else if (actual_predicates.size() == 1)
+          return actual_predicates[0];
+        AndPredOp *pred_op = runtime->get_available_and_pred_op(true);
+        // Hold a reference before initialization
+        Predicate result(pred_op);
+        pred_op->initialize(this, actual_predicates);
+        runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+        return result;
+      }
+      else
+      {
+        // Check for short circuit cases
+        std::vector<Predicate> actual_predicates;
+        for (std::vector<Predicate>::const_iterator it = 
+              launcher.predicates.begin(); it != 
+              launcher.predicates.end(); it++)
+        {
+          if ((*it) == Predicate::TRUE_PRED)
+            return Predicate::TRUE_PRED;
+          else if ((*it) == Predicate::FALSE_PRED)
+            continue;
+          actual_predicates.push_back(*it);
+        }
+        if (actual_predicates.empty()) // they were all false
+          return Predicate::FALSE_PRED;
+        else if (actual_predicates.size() == 1)
+          return actual_predicates[0];
+        OrPredOp *pred_op = runtime->get_available_or_pred_op(true);
+        // Hold a reference before initialization
+        Predicate result(pred_op);
+        pred_op->initialize(this, actual_predicates);
+        runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+        return result;
+      }
     }
 
     //--------------------------------------------------------------------------
-    Predicate InnerContext::predicate_or(const Predicate &p1,
-                                         const Predicate &p2)
+    Future InnerContext::get_predicate_future(const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      OrPredOp *pred_op = runtime->get_available_or_pred_op(true);
-      // Hold a reference before initialization
-      Predicate result(pred_op);
-      pred_op->initialize(this, p1, p2);
-      runtime->add_to_dependence_queue(this, executing_processor, pred_op);
-      return result;
+      AutoRuntimeCall call(this); 
+      if (p == Predicate::TRUE_PRED)
+      {
+        Future result = runtime->help_create_future();
+        const bool value = true;
+        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->complete_future();
+        return result;
+      }
+      else if (p == Predicate::FALSE_PRED)
+      {
+        Future result = runtime->help_create_future();
+        const bool value = false;
+        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->complete_future();
+        return result;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(p.impl != NULL);
+#endif
+        return p.impl->get_future_result(); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4730,6 +4801,7 @@ namespace Legion {
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
+        outstanding_children[op->get_ctx_index()] = op;
 #endif       
         executing_children.insert(op);
       }
@@ -4843,6 +4915,7 @@ namespace Legion {
         assert(finder != complete_children.end());
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
+        outstanding_children.erase(op->get_ctx_index());
 #endif
         complete_children.erase(finder);
         // See if we need to trigger the all children commited call
@@ -4870,6 +4943,9 @@ namespace Legion {
         executing_children.erase(op);
         executed_children.erase(op);
         complete_children.erase(op);
+#ifdef DEBUG_LEGION
+        outstanding_children.erase(op->get_ctx_index());
+#endif
         int outstanding_count = 
           __sync_add_and_fetch(&outstanding_children_count,-1);
 #ifdef DEBUG_LEGION
@@ -7840,12 +7916,11 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    Predicate LeafContext::predicate_and(const Predicate &p1, 
-                                         const Predicate &p2)
+    Predicate LeafContext::create_predicate(const PredicateLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      log_task.error("Illegal AND predicate creation in leaf task %s (ID %lld)",
-                     get_task_name(), get_unique_id());
+      log_task.error("Illegal predicate creation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
 #endif
@@ -7854,16 +7929,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate LeafContext::predicate_or(const Predicate &p1,const Predicate &p2)
+    Future LeafContext::get_predicate_future(const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      log_task.error("Illegal OR predicate creation in leaf task %s (ID %lld)",
-                     get_task_name(), get_unique_id());
+      log_task.error("Illegal get predicate future performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
 #endif
       exit(ERROR_LEAF_TASK_VIOLATION);
-      return Predicate();
+      return Future();
     }
 
     //--------------------------------------------------------------------------
@@ -8981,19 +9056,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate InlineContext::predicate_and(const Predicate &p1, 
-                                           const Predicate &p2)
+    Predicate InlineContext::create_predicate(const PredicateLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return enclosing->predicate_and(p1, p2);
+      return enclosing->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
-    Predicate InlineContext::predicate_or(const Predicate &p1, 
-                                          const Predicate &p2)
+    Future InlineContext::get_predicate_future(const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      return enclosing->predicate_or(p1, p2);
+      return enclosing->get_predicate_future(p);
     }
 
     //--------------------------------------------------------------------------

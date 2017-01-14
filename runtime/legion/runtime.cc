@@ -1114,17 +1114,20 @@ namespace Legion {
           context->end_task_wait();
       }
       // Now wait for the reference to be ready
-      
       std::set<ApEvent> wait_on;
       references.update_wait_on_events(wait_on);
       ApEvent ref_ready = Runtime::merge_events(wait_on);
-      if (!ref_ready.has_triggered())
+      bool poisoned;
+      if (!ref_ready.has_triggered_faultaware(poisoned))
       {
-        if (context != NULL)
-          context->begin_task_wait(false/*from runtime*/);
-        ref_ready.wait();
-        if (context != NULL)
-          context->end_task_wait();
+        if (!poisoned)
+        {
+          if (context != NULL)
+            context->begin_task_wait(false/*from runtime*/);
+          ref_ready.wait_faultaware(poisoned);
+          if (context != NULL)
+            context->end_task_wait();
+        }
       }
       valid = true;
     }
@@ -1350,13 +1353,18 @@ namespace Legion {
       // before we return, this usually occurs because we had restricted
       // coherence on the region and we have to issue copies back to 
       // the restricted instances before we are officially unmapped
-      if (wait_for_unmap.exists() && !wait_for_unmap.has_triggered())
+      bool poisoned;
+      if (wait_for_unmap.exists() && 
+          !wait_for_unmap.has_triggered_faultaware(poisoned))
       {
-        if (context != NULL)
-          context->begin_task_wait(false/*from runtime*/);
-        wait_for_unmap.wait();
-        if (context != NULL)
-          context->end_task_wait();
+        if (!poisoned)
+        {
+          if (context != NULL)
+            context->begin_task_wait(false/*from runtime*/);
+          wait_for_unmap.wait();
+          if (context != NULL)
+            context->end_task_wait();
+        }
       }
     }
 
@@ -5455,6 +5463,11 @@ namespace Legion {
               runtime->handle_send_fill_view(derez, remote_address_space);
               break;
             }
+          case SEND_PHI_VIEW:
+            {
+              runtime->handle_send_phi_view(derez, remote_address_space);
+              break;
+            }
           case SEND_REDUCTION_VIEW:
             {
               runtime->handle_send_reduction_view(derez, remote_address_space);
@@ -7075,8 +7088,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent VariantImpl::dispatch_task(Processor target, SingleTask *task,
-                             TaskContext *ctx, ApEvent precondition, 
-                             int priority, Realm::ProfilingRequestSet &requests)
+                                       TaskContext *ctx, ApEvent precondition,
+                                       PredEvent predicate_guard, int priority, 
+                                       Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7095,11 +7109,24 @@ namespace Legion {
 #endif
       DETAILED_PROFILER(runtime, REALM_SPAWN_TASK_CALL);
       // If our ready event hasn't triggered, include it in the precondition
-      if (!ready_event.has_triggered())
-        return ApEvent(target.spawn(vid, &ctx, sizeof(ctx), requests,
-                 Runtime::merge_events(precondition, ready_event), priority));
-      return ApEvent(target.spawn(vid, &ctx, sizeof(ctx), requests, 
-                                  precondition, priority));
+      if (predicate_guard.exists())
+      {
+        // Merge in the predicate guard
+        ApEvent pre = Runtime::merge_events(precondition, ready_event, 
+                                            ApEvent(predicate_guard));
+        // Have to protect the result in case it misspeculates
+        return Runtime::ignorefaults(
+              target.spawn(vid, &ctx, sizeof(ctx), requests, pre, priority));
+      }
+      else
+      {
+        // No predicate guard
+        if (!ready_event.has_triggered())
+          return ApEvent(target.spawn(vid, &ctx, sizeof(ctx), requests,
+                   Runtime::merge_events(precondition, ready_event), priority));
+        return ApEvent(target.spawn(vid, &ctx, sizeof(ctx), requests, 
+                                    precondition, priority));
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7679,32 +7706,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion IdentityProjectionFunctor::project(Context ctx, Task *task,
+    LogicalRegion IdentityProjectionFunctor::project(const Mappable *mappable,
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
-    //--------------------------------------------------------------------------
-    {
-      return upper_bound;
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion IdentityProjectionFunctor::project(Context ctx, Task *task, 
-         unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->get_logical_subregion_by_color(upper_bound, point);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion IdentityProjectionFunctor::project(LogicalRegion upper_bound,
-                                                     const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       return upper_bound;
     }
     
     //--------------------------------------------------------------------------
-    LogicalRegion IdentityProjectionFunctor::project(
-                         LogicalPartition upper_bound, const DomainPoint &point)
+    LogicalRegion IdentityProjectionFunctor::project(const Mappable *mappable,
+         unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       return runtime->get_logical_subregion_by_color(upper_bound, point);
@@ -7767,15 +7778,14 @@ namespace Legion {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
         {
-          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx, 
+          LogicalRegion result = functor->project(task, idx, 
                                                   req.partition, point); 
           check_projection_partition_result(req, task, idx, result, runtime);
           return result;
         }
         else
         {
-          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                                  req.region, point);
+          LogicalRegion result = functor->project(task, idx, req.region, point);
           check_projection_region_result(req, task, idx, result, runtime);
           return result;
         }
@@ -7784,15 +7794,14 @@ namespace Legion {
       {
         if (req.handle_type == PART_PROJECTION)
         {
-          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx, 
+          LogicalRegion result = functor->project(task, idx, 
                                                   req.partition, point);
           check_projection_partition_result(req, task, idx, result, runtime);
           return result;
         }
         else
         {
-          LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                                  req.region, point);
+          LogicalRegion result = functor->project(task, idx, req.region, point);
           check_projection_region_result(req, task, idx, result, runtime);
           return result;
         }
@@ -7816,8 +7825,8 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                      req.partition, it->get_domain_point());
+            LogicalRegion result = functor->project(task, idx, req.partition, 
+                                                    it->get_domain_point());
             check_projection_partition_result(req, task, idx, result, runtime);
             it->add_projection_region(idx, result);
           }
@@ -7827,8 +7836,8 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                         req.region, it->get_domain_point());
+            LogicalRegion result = functor->project(task, idx, req.region, 
+                                                    it->get_domain_point());
             check_projection_region_result(req, task, idx, result, runtime);
             it->add_projection_region(idx, result);
           }
@@ -7841,8 +7850,8 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                      req.partition, it->get_domain_point());
+            LogicalRegion result = functor->project(task, idx, req.partition, 
+                                                    it->get_domain_point());
             check_projection_partition_result(req, task, idx, result, runtime);
             it->add_projection_region(idx, result);
           }
@@ -7852,8 +7861,8 @@ namespace Legion {
           for (std::vector<MinimalPoint>::iterator it = 
                 minimal_points.begin(); it != minimal_points.end(); it++)
           {
-            LogicalRegion result = functor->project(DUMMY_CONTEXT, task, idx,
-                                         req.region, it->get_domain_point());
+            LogicalRegion result = functor->project(task, idx, req.region, 
+                                                    it->get_domain_point());
             check_projection_region_result(req, task, idx, result, runtime);
             it->add_projection_region(idx, result);
           }
@@ -7867,8 +7876,10 @@ namespace Legion {
                          const std::vector<ProjectionPoint*> &points)
     //--------------------------------------------------------------------------
     {
+      Mappable *mappable = op->get_mappable();
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
+      assert(mappable != NULL);
 #endif
       if (projection_reservation.exists())
       {
@@ -7878,8 +7889,8 @@ namespace Legion {
           for (std::vector<ProjectionPoint*>::const_iterator it = 
                 points.begin(); it != points.end(); it++)
           {
-            LogicalRegion result = functor->project(req.partition, 
-                                          (*it)->get_domain_point());
+            LogicalRegion result = functor->project(mappable, idx, 
+                req.partition, (*it)->get_domain_point());
             check_projection_partition_result(req, op, idx, result, runtime);
             (*it)->set_projection_result(idx, result);
           }
@@ -7889,8 +7900,8 @@ namespace Legion {
           for (std::vector<ProjectionPoint*>::const_iterator it = 
                 points.begin(); it != points.end(); it++)
           {
-            LogicalRegion result = functor->project(req.region, 
-                                              (*it)->get_domain_point());
+            LogicalRegion result = functor->project(mappable, idx, req.region,
+                                                    (*it)->get_domain_point());
             check_projection_region_result(req, op, idx, result, runtime);
             (*it)->set_projection_result(idx, result);
           }
@@ -7903,8 +7914,8 @@ namespace Legion {
           for (std::vector<ProjectionPoint*>::const_iterator it = 
                 points.begin(); it != points.end(); it++)
           {
-            LogicalRegion result = functor->project(req.partition, 
-                                          (*it)->get_domain_point());
+            LogicalRegion result = functor->project(mappable, idx,
+                req.partition, (*it)->get_domain_point());
             check_projection_partition_result(req, op, idx, result, runtime);
             (*it)->set_projection_result(idx, result);
           }
@@ -7914,8 +7925,8 @@ namespace Legion {
           for (std::vector<ProjectionPoint*>::const_iterator it = 
                 points.begin(); it != points.end(); it++)
           {
-            LogicalRegion result = functor->project(req.region, 
-                                              (*it)->get_domain_point());
+            LogicalRegion result = functor->project(mappable, idx, req.region,
+                                                    (*it)->get_domain_point());
             check_projection_region_result(req, op, idx, result, runtime);
             (*it)->set_projection_result(idx, result);
           }
@@ -8019,7 +8030,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::check_projection_region_result(
-        const RegionRequirement &req, const Operation *op, unsigned idx,
+        const RegionRequirement &req, Operation *op, unsigned idx,
         LogicalRegion result, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -8066,7 +8077,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::check_projection_partition_result(
-        const RegionRequirement &req, const Operation *op, unsigned idx,
+        const RegionRequirement &req, Operation *op, unsigned idx,
         LogicalRegion result, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -11201,35 +11212,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_and(Context ctx, 
-                                     const Predicate &p1, const Predicate &p2)
+    Predicate Runtime::create_predicate(Context ctx, 
+                                        const PredicateLauncher &launcher) 
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run.error("Illegal dummy context create predicate and!");
+        log_run.error("Illegal dummy context create predicate!");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->predicate_and(p1, p2); 
+      return ctx->create_predicate(launcher);
     }
 
     //--------------------------------------------------------------------------
-    Predicate Runtime::predicate_or(Context ctx, 
-                                    const Predicate &p1, const Predicate &p2)
+    Future Runtime::get_predicate_future(Context ctx, const Predicate &p)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run.error("Illegal dummy context create predicate or!");
+        log_run.error("Illegal dummy context get predicate future!");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->predicate_or(p1, p2); 
+      return ctx->get_predicate_future(p);
     }
 
     //--------------------------------------------------------------------------
@@ -13239,6 +13249,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_phi_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_PHI_VIEW,
+                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_reduction_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14183,6 +14201,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FillView::handle_send_fill_view(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_phi_view(Deserializer &derez,
+                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhiView::handle_send_phi_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15545,6 +15571,7 @@ namespace Legion {
       {
         shutdown_manager->record_outstanding_tasks();
 #ifdef DEBUG_LEGION
+        LG_TASK_DESCRIPTIONS(meta_task_names);
         AutoLock out_lock(outstanding_task_lock,1,false/*exclusive*/);
         for (std::map<std::pair<unsigned,bool>,unsigned>::const_iterator it =
               outstanding_task_counts.begin(); it != 
@@ -15552,9 +15579,13 @@ namespace Legion {
         {
           if (it->second == 0)
             continue;
-          log_shutdown.info("RT %d: %d outstanding %s task(s) %d",
-                          address_space, it->second, it->first.second ? 
-                           "meta" : "application", it->first.first);
+          if (it->first.second)
+            log_shutdown.info("RT %d: %d outstanding meta task(s) %s",
+                              address_space, it->second, 
+                              meta_task_names[it->first.first]);
+          else                
+            log_shutdown.info("RT %d: %d outstanding application task(s) %d",
+                              address_space, it->second, it->first.first);
         }
 #endif
       }
@@ -19598,6 +19629,16 @@ namespace Legion {
             const SingleTask::MisspeculationTaskArgs *targs = 
               (const SingleTask::MisspeculationTaskArgs*)args;
             targs->task->handle_misspeculation();
+            break;
+          }
+        case LG_DEFER_PHI_VIEW_REF_TASK_ID:
+          {
+            PhiView::handle_deferred_view_ref(args);
+            break;
+          }
+        case LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID:
+          {
+            PhiView::handle_deferred_view_registration(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

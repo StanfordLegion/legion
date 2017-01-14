@@ -109,6 +109,7 @@ namespace Legion {
   class Acquire;
   class Release;
   class Close;
+  class Fill;
   class Runtime;
   class MPILegionHandshake;
   // For backwards compatibility
@@ -182,7 +183,6 @@ namespace Legion {
   class TaskLayoutConstraintSet;
 
   namespace Mapping {
-    class Mappable; 
     class PhysicalInstance;
     class MapperEvent;
     class ProfilingRequestSet;
@@ -309,6 +309,8 @@ namespace Legion {
       LG_DISJOINT_CLOSE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
+      LG_DEFER_PHI_VIEW_REF_TASK_ID,
+      LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -403,6 +405,8 @@ namespace Legion {
         "Disjoint Close",                                         \
         "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
+        "Defer Phi View Reference",                               \
+        "Defer Phi View Registration",                            \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -592,6 +596,7 @@ namespace Legion {
       SEND_MATERIALIZED_VIEW,
       SEND_COMPOSITE_VIEW,
       SEND_FILL_VIEW,
+      SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
@@ -712,6 +717,7 @@ namespace Legion {
         "Send Materialized View",                                     \
         "Send Composite View",                                        \
         "Send Fill View",                                             \
+        "Send Phi View",                                              \
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
@@ -1249,6 +1255,7 @@ namespace Legion {
     class CompositeVersionInfo;
     class CompositeNode;
     class FillView;
+    class PhiView;
     class MappingRef;
     class InstanceRef;
     class InstanceSet;
@@ -1316,6 +1323,7 @@ namespace Legion {
     friend class Internal::VirtualCloseOp;                  \
     friend class Internal::AcquireOp;                       \
     friend class Internal::ReleaseOp;                       \
+    friend class Internal::PredicateImpl;                   \
     friend class Internal::NotPredOp;                       \
     friend class Internal::AndPredOp;                       \
     friend class Internal::OrPredOp;                        \
@@ -1632,6 +1640,20 @@ namespace Legion {
       { id = rhs.id; return *this; }
   };
 
+  class PredEvent : public LgEvent {
+  public:
+    static const PredEvent NO_PRED_EVENT;
+  public:
+    PredEvent(void) : LgEvent() { } 
+    PredEvent(const PredEvent &rhs) { id = rhs.id; }
+    explicit PredEvent(const Realm::UserEvent &e) : LgEvent(e) { }
+  public:
+    inline PredEvent& operator=(const PredEvent &rhs)
+      { id = rhs.id; return *this; }
+    inline operator Realm::UserEvent() const
+      { Realm::UserEvent e; e.id = id; return e; }
+  };
+
   class ApEvent : public LgEvent {
   public:
     static const ApEvent NO_AP_EVENT;
@@ -1639,9 +1661,12 @@ namespace Legion {
     ApEvent(void) : LgEvent() { }
     ApEvent(const ApEvent &rhs) { id = rhs.id; }
     explicit ApEvent(const Realm::Event &e) : LgEvent(e) { }
+    explicit ApEvent(const PredEvent &e) { id = e.id; }
   public:
     inline ApEvent& operator=(const ApEvent &rhs)
       { id = rhs.id; return *this; }
+    inline bool has_triggered_faultignorant(void) const
+      { bool poisoned; return has_triggered_faultaware(poisoned); }
   };
 
   class ApUserEvent : public ApEvent {
@@ -1684,6 +1709,7 @@ namespace Legion {
     RtEvent(void) : LgEvent() { }
     RtEvent(const RtEvent &rhs) { id = rhs.id; }
     explicit RtEvent(const Realm::Event &e) : LgEvent(e) { }
+    explicit RtEvent(const PredEvent &e) { id = e.id; }
   public:
     inline RtEvent& operator=(const RtEvent &rhs)
       { id = rhs.id; return *this; }
@@ -1720,7 +1746,7 @@ namespace Legion {
         b.timestamp = timestamp; return b; } 
   public:
     Realm::Barrier::timestamp_t timestamp;
-  };
+  }; 
 
 }; // Legion namespace
 

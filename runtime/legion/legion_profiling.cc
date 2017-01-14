@@ -827,10 +827,14 @@ namespace Legion {
             Realm::ProfilingMeasurements::OperationEventWaits *waits = 
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationEventWaits>();
-            thread_local_profiling_instance->process_task(info->id, info->op_id,
-                                                timeline, usage, waits);
-            delete timeline;
-            delete usage;
+            // Ignore anything that was predicated false for now
+            if (usage != NULL)
+              thread_local_profiling_instance->process_task(info->id, 
+                  info->op_id, timeline, usage, waits);
+            if (timeline != NULL)
+              delete timeline;
+            if (timeline != NULL)
+              delete usage;
             decrement_total_outstanding_requests();
             break;
           }
@@ -851,10 +855,14 @@ namespace Legion {
             Realm::ProfilingMeasurements::OperationEventWaits *waits = 
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationEventWaits>();
-            thread_local_profiling_instance->process_meta(info->id, info->op_id,
-                                                 timeline, usage, waits);
-            delete timeline;
-            delete usage;
+            // Ignore anything that was predicated false for now
+            if (usage != NULL)
+              thread_local_profiling_instance->process_meta(info->id, 
+                  info->op_id, timeline, usage, waits);
+            if (timeline != NULL)
+              delete timeline;
+            if (usage != NULL)
+              delete usage;
             decrement_total_outstanding_requests();
             break;
           }
@@ -872,10 +880,14 @@ namespace Legion {
             Realm::ProfilingMeasurements::OperationMemoryUsage *usage = 
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationMemoryUsage>();
-            thread_local_profiling_instance->process_copy(info->op_id,
-                                                          timeline, usage);
-            delete timeline;
-            delete usage;
+            // Ignore anything that was predicated false for now
+            if (usage != NULL)
+              thread_local_profiling_instance->process_copy(info->op_id,
+                                                            timeline, usage);
+            if (timeline != NULL)
+              delete timeline;
+            if (usage != NULL)
+              delete usage;
             break;
           }
         case LEGION_PROF_FILL:
@@ -892,10 +904,14 @@ namespace Legion {
             Realm::ProfilingMeasurements::OperationMemoryUsage *usage = 
               response.get_measurement<
                     Realm::ProfilingMeasurements::OperationMemoryUsage>();
-            thread_local_profiling_instance->process_fill(info->op_id,
-                                                          timeline, usage);
-            delete timeline;
-            delete usage;
+            // Ignore anything that was predicated false for now
+            if (usage != NULL)
+              thread_local_profiling_instance->process_fill(info->op_id,
+                                                            timeline, usage);
+            if (timeline != NULL)
+              delete timeline;
+            if (usage != NULL)
+              delete usage;
             // wonchan: don't track fill operations for the moment
             // as their requests and responses do not exactly match
             //decrement_total_outstanding_requests();
