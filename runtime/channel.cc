@@ -1282,10 +1282,11 @@ namespace LegionRuntime {
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        gpu_reqs = (GPURequest*) calloc(max_nr, sizeof(GPURequest));
+        //gpu_reqs = (GPURequest*) calloc(max_nr, sizeof(GPURequest));
         for (int i = 0; i < max_nr; i++) {
-          gpu_reqs[i].xd = this;
-          enqueue_request(&gpu_reqs[i]);
+          GPURequest* gpu_req = new GPURequest;
+          gpu_req->xd = this;
+          enqueue_request(gpu_req);
         }
  
         switch (kind) {
@@ -2341,7 +2342,6 @@ namespace LegionRuntime {
               default:
                 assert(0);
             }
- 
           }
           pending_copies.push_back(req);
         }

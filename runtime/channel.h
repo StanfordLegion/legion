@@ -168,7 +168,7 @@ namespace LegionRuntime{
       // a pointer to the owning xfer descriptor
       // this should set at Request creation
       XferDes* xd;
-     // src/dst offset in the src/dst instance
+      // src/dst offset in the src/dst instance
       off_t src_off, dst_off;
       // src/dst strides
       off_t src_str, dst_str;
@@ -448,7 +448,7 @@ namespace LegionRuntime{
       bool any_left() {return cur_idx < rect_size;}
       coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx,
                                coord_t &src_str, coord_t &dst_str,
-                               size_t &nitems, size_t nlines)
+                               size_t &nitems, size_t &nlines)
       {
         Point<3> p;
         coord_t idx = cur_idx;
@@ -818,7 +818,11 @@ namespace LegionRuntime{
                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
       ~GPUXferDes()
       {
-        free(gpu_reqs);
+        while (!available_reqs.empty()) {
+          GPURequest* gpu_req = (GPURequest*) available_reqs.front();
+          available_reqs.pop();
+          delete gpu_req;
+        }
       }
 
       long get_requests(Request** requests, long nr);
@@ -827,7 +831,7 @@ namespace LegionRuntime{
       void flush();
 
     private:
-      Request* gpu_reqs;
+      //GPURequest* gpu_reqs;
       char *src_buf_base;
       char *dst_buf_base;
       GPU *dst_gpu, *src_gpu;
