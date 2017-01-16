@@ -231,48 +231,6 @@ namespace LegionRuntime{
       GPU* dst_gpu;
       GPUCompletionEvent event;
     };
-
-#ifdef TO_BE_DELETE
-    class GPUtoFBRequest : public Request {
-    public:
-      const char* src;
-      off_t dst_offset;
-      off_t src_stride, dst_stride;
-      off_t src_height, dst_height;
-      size_t nbytes_per_line, height, depth;
-      GPUCompletionEvent event;
-    };
-
-    class GPUfromFBRequest : public Request {
-    public:
-      off_t src_offset;
-      char* dst;
-      off_t src_stride, dst_stride;
-      off_t src_height, dst_height;
-      size_t nbytes_per_line, height, depth;
-      GPUCompletionEvent event;
-    };
-
-    class GPUinFBRequest : public Request {
-    public:
-      off_t src_offset, dst_offset;
-      off_t src_stride, dst_stride;
-      off_t src_height, dst_height;
-      size_t nbytes_per_line, height, depth;
-      GPUCompletionEvent event;
-    };
-
-    class GPUpeerFBRequest : public Request {
-    public:
-      off_t src_offset, dst_offset;
-      off_t src_stride, dst_stride;
-      off_t src_height, dst_height;
-      size_t nbytes_per_line, height, depth;
-      GPU* dst_gpu;
-      GPUCompletionEvent event;
-    };
-#endif
-
 #endif
 
 #ifdef USE_HDF
@@ -625,6 +583,12 @@ namespace LegionRuntime{
 
       virtual long get_requests(Request** requests, long nr) = 0;
 
+      virtual void notify_request_read_done(Request* req) = 0;
+
+      virtual void notify_request_write_done(Request* req) = 0;
+
+      virtual void flush() = 0;
+ 
       template<unsigned DIM>
       long default_get_requests(Request** requests, long nr);
       void default_notify_request_read_done(Request* req);
@@ -696,12 +660,6 @@ namespace LegionRuntime{
         // For now, we think the node that contains the src_buf is the execution node
         return ID(src_buf.memory).memory.owner_node;
       }
-
-      virtual void notify_request_read_done(Request* req) = 0;
-
-      virtual void notify_request_write_done(Request* req) = 0;
-
-      virtual void flush() = 0;
     };
 
     template<unsigned DIM>

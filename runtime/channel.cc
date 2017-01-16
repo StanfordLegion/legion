@@ -54,7 +54,7 @@ namespace LegionRuntime {
       // we use a single manager to organize all channels
       static ChannelManager *channel_manager = 0;
 
-      static inline int max(int a, int b) { return (a < b) ? b : a; }
+      static inline off_t max(off_t a, off_t b) { return (a < b) ? b : a; }
       static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
 
       static inline bool cross_ib(off_t start, size_t nbytes, size_t buf_size)
@@ -821,112 +821,18 @@ namespace LegionRuntime {
             assert(0);
         }
         return new_nr;
-#ifdef TO_BE_DELETE
-        long idx = 0;
-        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
-          off_t src_start, dst_start;
-          size_t nbytes;
-          if (DIM == 0) {
-            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
-          } else {
-            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
-          }
-          //printf("done = %d, offset_idx = %d\n", done, offset_idx);
-          if (nbytes == 0)
-            break;
-          while (nbytes > 0) {
-            size_t req_size = nbytes;
-            if (src_buf.is_ib) {
-              src_start = src_start % src_buf.buf_size;
-              req_size = umin(req_size, src_buf.buf_size - src_start);
-            }
-            if (dst_buf.is_ib) {
-              dst_start = dst_start % dst_buf.buf_size;
-              req_size = umin(req_size, dst_buf.buf_size - dst_start);
-            }
-            requests[idx] = available_reqs.front();
-            available_reqs.pop();
-            requests[idx]->is_read_done = false;
-            requests[idx]->is_write_done = false;
-            switch (kind) {
-              case XferDes::XFER_GASNET_READ:
-              {
-                //printf("[GASNetReadXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                GASNetReadRequest* gasnet_read_req = (GASNetReadRequest*) requests[idx];
-                gasnet_read_req->src_offset = src_buf.alloc_offset + src_start;
-                gasnet_read_req->dst_buf = (char*)(buf_base + dst_start);
-                gasnet_read_req->nbytes = req_size;
-                break;
-              }
-              case XferDes::XFER_GASNET_WRITE:
-              {
-                //printf("[GASNetWriteXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                GASNetWriteRequest* gasnet_write_req = (GASNetWriteRequest*) requests[idx];
-                gasnet_write_req->src_buf = (char*)(buf_base + src_start);
-                gasnet_write_req->dst_offset = dst_buf.alloc_offset + dst_start;
-                gasnet_write_req->nbytes = req_size;
-                break;
-              }
-              default:
-                assert(0);
-            }
-            src_start += req_size;
-            dst_start += req_size;
-            nbytes -= req_size;
-            idx ++;
-          }
-        }
-        return idx;
-#endif
       }
 
       template<unsigned DIM>
       void GASNetXferDes<DIM>::notify_request_read_done(Request* req)
       {
         default_notify_request_read_done(req);
-#ifdef TO_BE_DELETE
-        req->is_read_done = true;
-        int64_t offset;
-        uint64_t size;
-        switch(kind) {
-          case XferDes::XFER_GASNET_READ:
-            offset = ((GASNetReadRequest*)req)->src_offset - src_buf.alloc_offset;
-            size = ((GASNetReadRequest*)req)->nbytes;
-            break;
-          case XferDes::XFER_GASNET_WRITE:
-            offset = ((GASNetWriteRequest*)req)->src_buf - buf_base;
-            size = ((GASNetWriteRequest*)req)->nbytes;
-            break;
-          default:
-            assert(0);
-        }
-        simple_update_bytes_read(offset, size);
-#endif
       }
 
       template<unsigned DIM>
       void GASNetXferDes<DIM>::notify_request_write_done(Request* req)
       {
         default_notify_request_write_done(req);
-#ifdef TO_BE_DELETE
-        req->is_write_done = true;
-        int64_t offset;
-        uint64_t size;
-        switch(kind) {
-          case XferDes::XFER_GASNET_READ:
-            offset = ((GASNetReadRequest*)req)->dst_buf - buf_base;
-            size = ((GASNetReadRequest*)req)->nbytes;
-            break;
-          case XferDes::XFER_GASNET_WRITE:
-            offset = ((GASNetWriteRequest*)req)->dst_offset - dst_buf.alloc_offset;
-            size = ((GASNetWriteRequest*)req)->nbytes;
-            break;
-          default:
-            assert(0);
-        }
-        simple_update_bytes_write(offset, size);
-        available_reqs.push(req);
-#endif
       }
 
       template<unsigned DIM>
@@ -984,47 +890,6 @@ namespace LegionRuntime {
         }
         pthread_mutex_unlock(&xd_lock);
         return new_nr;
-#ifdef TO_BE_DELETE
-       long idx = 0;
-        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
-          off_t src_start, dst_start;
-          size_t nbytes;
-          if (DIM == 0) {
-            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
-          } else {
-            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
-          }
-          if (nbytes == 0)
-            break;
-          while (nbytes > 0) {
-            size_t req_size = nbytes;
-            if (src_buf.is_ib) {
-              src_start = src_start % src_buf.buf_size;
-              req_size = umin(req_size, src_buf.buf_size - src_start);
-            }
-            if (dst_buf.is_ib) {
-              dst_start = dst_start % dst_buf.buf_size;
-              req_size = umin(req_size, dst_buf.buf_size - dst_start);
-            }
-            assert(!available_reqs.empty());
-            requests[idx] = available_reqs.front();
-            available_reqs.pop();
-            requests[idx]->is_read_done = false;
-            requests[idx]->is_write_done = false;
-            RemoteWriteRequest* req = (RemoteWriteRequest*) requests[idx];
-            req->src_buf = (char*)(src_buf_base + src_start);
-            // dst_offset count from the beginning of registered memory
-            req->dst_buf = (char*)(dst_buf_base + dst_start);
-            req->nbytes = req_size;
-            src_start += req_size; // here we don't have to mod src_buf.buf_size since it will be performed in next loop
-            dst_start += req_size; //
-            nbytes -= req_size;
-            idx ++;
-          }
-        }
-        pthread_mutex_unlock(&xd_lock);
-        return idx;
-#endif
       }
 
       template<unsigned DIM>
@@ -1032,12 +897,6 @@ namespace LegionRuntime {
       {
         pthread_mutex_lock(&xd_lock);
         default_notify_request_read_done(req);
-#ifdef TO_BE_DELETE
-        req->is_read_done = true;
-        int64_t offset = ((RemoteWriteRequest*)req)->src_buf - src_buf_base;
-        uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
-        simple_update_bytes_read(offset, size);
-#endif
         pthread_mutex_unlock(&xd_lock);
       }
 
@@ -1046,13 +905,6 @@ namespace LegionRuntime {
       {
         pthread_mutex_lock(&xd_lock);
         default_notify_request_write_done(req);
-#ifdef TO_BE_DELETE
-        req->is_write_done = true;
-        int64_t offset = ((RemoteWriteRequest*)req)->dst_buf - dst_buf_base;
-        uint64_t size = ((RemoteWriteRequest*)req)->nbytes;
-        simple_update_bytes_write(offset, size);
-        available_reqs.push(req);
-#endif
         pthread_mutex_unlock(&xd_lock);
       }
 
@@ -1088,11 +940,6 @@ namespace LegionRuntime {
       {
         MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
         MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        disk_reqs = (DiskRequest*) calloc(max_nr, sizeof(DiskRequest));
-        for (int i = 0; i < max_nr; i++) {
-          disk_reqs[i].xd = this;
-          available_reqs.push(&disk_reqs[i]);
-        }
         switch (kind) {
           case XferDes::XFER_DISK_READ:
           {
@@ -1112,6 +959,12 @@ namespace LegionRuntime {
           }
           default:
             assert(0);
+        }
+        disk_reqs = (DiskRequest*) calloc(max_nr, sizeof(DiskRequest));
+        for (int i = 0; i < max_nr; i++) {
+          disk_reqs[i].xd = this;
+          disk_reqs[i].fd = fd;
+          available_reqs.push(&disk_reqs[i]);
         }
       }
 
@@ -1141,114 +994,18 @@ namespace LegionRuntime {
             assert(0);
         }
         return new_nr;
-#ifdef TO_BE_DELETE
-        long idx = 0;
-        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
-          off_t src_start, dst_start;
-          size_t nbytes;
-          if (DIM == 0) {
-            simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
-          } else {
-            simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
-          }
-          //printf("done = %d, offset_idx = %d\n", done, offset_idx);
-          if (nbytes == 0)
-            break;
-          while (nbytes > 0) {
-            size_t req_size = nbytes;
-            if (src_buf.is_ib) {
-              src_start = src_start % src_buf.buf_size;
-              req_size = umin(req_size, src_buf.buf_size - src_start);
-            }
-            if (dst_buf.is_ib) {
-              dst_start = dst_start % dst_buf.buf_size;
-              req_size = umin(req_size, dst_buf.buf_size - dst_start);
-            }
-            requests[idx] = available_reqs.front();
-            available_reqs.pop();
-            requests[idx]->is_read_done = false;
-            requests[idx]->is_write_done = false;
-            switch (kind) {
-              case XferDes::XFER_DISK_READ:
-              {
-                //printf("[DiskReadXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                DiskReadRequest* disk_read_req = (DiskReadRequest*) requests[idx];
-                disk_read_req->fd = fd;
-                disk_read_req->src_offset = src_buf.alloc_offset + src_start;
-                disk_read_req->dst_buf = (uint64_t)(buf_base + dst_start);
-                disk_read_req->nbytes = req_size;
-                break;
-              }
-              case XferDes::XFER_DISK_WRITE:
-              {
-                //printf("[DiskWriteXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                DiskWriteRequest* disk_write_req = (DiskWriteRequest*) requests[idx];
-                disk_write_req->fd = fd;
-                disk_write_req->src_buf = (uint64_t)(buf_base + src_start);
-                disk_write_req->dst_offset = dst_buf.alloc_offset + dst_start;
-                disk_write_req->nbytes = req_size;
-                break;
-              }
-              default:
-                assert(0);
-            }
-            src_start += req_size; // here we don't have to mod src_buf.buf_size since it will be performed in next loop
-            dst_start += req_size; //
-            nbytes -= req_size;
-            idx ++;
-          }
-        }
-        return idx;
-#endif
       }
 
       template<unsigned DIM>
       void DiskXferDes<DIM>::notify_request_read_done(Request* req)
       {
         default_notify_request_read_done(req);
-#ifdef TO_BE_DELETE
-        req->is_read_done = true;
-        int64_t offset;
-        uint64_t size;
-        switch(kind) {
-          case XferDes::XFER_DISK_READ:
-            offset = ((DiskReadRequest*)req)->src_offset - src_buf.alloc_offset;
-            size = ((DiskReadRequest*)req)->nbytes;
-            break;
-          case XferDes::XFER_DISK_WRITE:
-            offset = ((DiskWriteRequest*)req)->src_buf - (uint64_t) buf_base;
-            size = ((DiskWriteRequest*)req)->nbytes;
-            break;
-          default:
-            assert(0);
-        }
-        simple_update_bytes_read(offset, size);
-#endif
       }
 
       template<unsigned DIM>
       void DiskXferDes<DIM>::notify_request_write_done(Request* req)
       {
         default_notify_request_write_done(req);
-#ifdef TO_BE_DELETE
-        req->is_write_done = true;
-        int64_t offset;
-        uint64_t size;
-        switch(kind) {
-          case XferDes::XFER_DISK_READ:
-            offset = ((DiskReadRequest*)req)->dst_buf - (uint64_t) buf_base;
-            size = ((DiskReadRequest*)req)->nbytes;
-            break;
-          case XferDes::XFER_DISK_WRITE:
-            offset = ((DiskWriteRequest*)req)->dst_offset - dst_buf.alloc_offset;
-            size = ((DiskWriteRequest*)req)->nbytes;
-            break;
-          default:
-            assert(0);
-        }
-        simple_update_bytes_write(offset, size);
-        available_reqs.push(req);
-#endif
       }
 
       template<unsigned DIM>
@@ -1298,15 +1055,6 @@ namespace LegionRuntime {
             src_buf_base = (char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
             dst_buf_base = NULL;
             assert(dst_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
-            //GPURequest* gpu_to_fb_reqs = (GPUtoFBRequest*) calloc(max_nr, sizeof(GPUtoFBRequest));
-#ifdef TO_BE_DELETE
-            for (int i = 0; i < max_nr; i++) {
-              //GPUtoFBRequest* gpu_to_fb_req = new GPUtoFBRequest;
-              gpu_to_fb_req->xd = this;
-              available_reqs.push(gpu_to_fb_req);
-            }
-            //requests = gpu_to_fb_reqs;
-#endif
             break;
           }
           case XferDes::XFER_GPU_FROM_FB:
@@ -1317,15 +1065,6 @@ namespace LegionRuntime {
             src_buf_base = NULL;
             dst_buf_base = (char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
-            //GPUfromFBRequest* gpu_from_fb_reqs = (GPUfromFBRequest*) calloc(max_nr, sizeof(GPUfromFBRequest));
-#ifdef TO_BE_DELETE
-            for (int i = 0; i < max_nr; i++) {
-              GPUfromFBRequest* gpu_from_fb_req = new GPUfromFBRequest;
-              gpu_from_fb_req->xd = this;
-              available_reqs.push(gpu_from_fb_req);
-            }
-            //requests = gpu_from_fb_reqs;
-#endif
             break;
           }
           case XferDes::XFER_GPU_IN_FB:
@@ -1337,15 +1076,6 @@ namespace LegionRuntime {
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
             assert(src_gpu == dst_gpu);
-            //GPUinFBRequest* gpu_in_fb_reqs = (GPUinFBRequest*) calloc(max_nr, sizeof(GPUinFBRequest));
-#ifdef TO_BE_DELETE
-            for (int i = 0; i < max_nr; i++) {
-              GPUinFBRequest* gpu_in_fb_req = new GPUinFBRequest;
-              gpu_in_fb_req->xd = this;
-              available_reqs.push(gpu_in_fb_req);
-            }
-            //requests = gpu_in_fb_reqs;
-#endif
             break;
           }
           case XferDes::XFER_GPU_PEER_FB:
@@ -1357,15 +1087,6 @@ namespace LegionRuntime {
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
             assert(src_mem_impl->kind == MemoryImpl::MKIND_GPUFB);
             assert(src_gpu != dst_gpu);
-            //GPUpeerFBRequest* gpu_peer_fb_reqs = (GPUpeerFBRequest*) calloc(max_nr, sizeof(GPUpeerFBRequest));
-#ifdef TO_BE_DELETE
-            for (int i = 0; i < max_nr; i++) {
-              GPUpeerFBRequest* gpu_peer_fb_req = new GPUpeerFBRequest;
-              gpu_peer_fb_req->xd = this;
-              available_reqs.push(gpu_peer_fb_req);
-            }
-            //requests = gpu_peer_fb_reqs;
-#endif
             break;
           }
           default:
@@ -1403,6 +1124,8 @@ namespace LegionRuntime {
             {
               reqs[i]->src_gpu_off = src_buf.alloc_offset + reqs[i]->src_off;
               reqs[i]->dst_gpu_off = dst_buf.alloc_offset + reqs[i]->dst_off;
+              // also need to set dst_gpu for peer xfer
+              reqs[i]->dst_gpu = dst_gpu;
               break;
             }
             default:
@@ -1410,240 +1133,18 @@ namespace LegionRuntime {
           }
         }
         return new_nr;
-#ifdef TO_BE_DELETE
-        long idx = 0;
-        while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
-          off_t src_start, dst_start;
-          off_t src_stride, dst_stride;
-          off_t src_height, dst_height;
-          size_t nbytes, bytes_per_line = 0, height = 1, depth = 1;
-          if (DIM == 0) {
-            simple_get_mask_request(src_start, dst_start,
-                                    bytes_per_line, me,
-                                    offset_idx,
-                                    min(available_reqs.size(), nr - idx));
-            nbytes = bytes_per_line;
-            src_stride = nbytes;
-            dst_stride = nbytes;
-            src_height = height;
-            dst_height = height;
-          } else if (DIM >= 3) {
-            simple_get_request_3d<DIM>(src_start, dst_start,
-                                       src_stride, dst_stride,
-                                       src_height, dst_height,
-                                       bytes_per_line, height, depth,
-                                       li, offset_idx, 
-                                       min(available_reqs.size(), nr - idx));
-            nbytes = bytes_per_line * height * depth;
-          } else {
-            simple_get_request_2d<DIM>(src_start, dst_start,
-                                       src_stride, dst_stride,
-                                       bytes_per_line, height,
-                                       li, offset_idx,
-                                       min(available_reqs.size(), nr - idx));
-            nbytes = bytes_per_line * height;
-            src_height = height;
-            dst_height = height;
-          }
-          log_request.info(
-              "GPUXD_get_request: guid(%llx) src_str(%ld) dst_str(%ld)"
-              " src_hei(%ld) dst_hei(%ld) bytes(%lu) hei(%lu) dep(%lu)",
-              guid, src_stride, dst_stride, src_height, dst_height,
-              bytes_per_line, height, depth);
-          if (nbytes == 0)
-            break;
-          while (nbytes > 0) {
-            size_t req_size = umin(nbytes, max_req_size);
-            if (src_buf.is_ib) {
-              src_start = src_start % src_buf.buf_size;
-              req_size = umin(req_size, src_buf.buf_size - src_start);
-            }
-            if (dst_buf.is_ib) {
-              dst_start = dst_start % dst_buf.buf_size;
-              req_size = umin(req_size, dst_buf.buf_size - dst_start);
-            }
-            requests[idx] = available_reqs.front();
-            available_reqs.pop();
-            requests[idx]->is_read_done = false;
-            requests[idx]->is_write_done = false;
-            switch (kind) {
-              case XferDes::XFER_GPU_TO_FB:
-              {
-                //printf("[GPUtoFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                assert(req_size == nbytes || (height * depth == 1));
-                GPUtoFBRequest* gpu_to_fb_req = (GPUtoFBRequest*) requests[idx];
-                gpu_to_fb_req->src = src_buf_base + src_start;
-                gpu_to_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
-                gpu_to_fb_req->src_stride = src_stride;
-                gpu_to_fb_req->dst_stride = dst_stride;
-                gpu_to_fb_req->src_height = src_height;
-                gpu_to_fb_req->dst_height = dst_height;
-                gpu_to_fb_req->nbytes_per_line = bytes_per_line;
-                gpu_to_fb_req->height = height;
-                gpu_to_fb_req->depth = depth;
-                gpu_to_fb_req->event.reset();
-                break;
-              }
-              case XferDes::XFER_GPU_FROM_FB:
-              {
-                //printf("[GPUfromFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                assert(req_size == nbytes || (height * depth == 1)); 
-                GPUfromFBRequest* gpu_from_fb_req = (GPUfromFBRequest*) requests[idx];
-                gpu_from_fb_req->src_offset = src_buf.alloc_offset + src_start;
-                gpu_from_fb_req->dst = dst_buf_base + dst_start;
-                gpu_from_fb_req->src_stride = src_stride;
-                gpu_from_fb_req->dst_stride = dst_stride;
-                gpu_from_fb_req->src_height = src_height;
-                gpu_from_fb_req->dst_height = dst_height;
-                gpu_from_fb_req->nbytes_per_line = bytes_per_line;
-                gpu_from_fb_req->height = height;
-                gpu_from_fb_req->depth = depth;
-                gpu_from_fb_req->event.reset();
-                break;
-              }
-              case XferDes::XFER_GPU_IN_FB:
-              {
-                //printf("[GPUinFBXferDes] src_start = %ld, dst_start = %ld, nbytes = %lu\n", src_start, dst_start, req_size);
-                assert(req_size == nbytes || (height * depth == 1)); 
-                GPUinFBRequest* gpu_in_fb_req = (GPUinFBRequest*) requests[idx];
-                gpu_in_fb_req->src_offset = src_buf.alloc_offset + src_start;
-                gpu_in_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
-                gpu_in_fb_req->src_stride = src_stride;
-                gpu_in_fb_req->dst_stride = dst_stride;
-                gpu_in_fb_req->src_height = src_height;
-                gpu_in_fb_req->dst_height = dst_height;
-                gpu_in_fb_req->nbytes_per_line = bytes_per_line;
-                gpu_in_fb_req->height = height;
-                gpu_in_fb_req->depth = depth;
-                gpu_in_fb_req->event.reset();
-                break;
-              }
-              case XferDes::XFER_GPU_PEER_FB:
-              {
-                assert(req_size == nbytes || (height * depth == 1));
-                GPUpeerFBRequest* gpu_peer_fb_req = (GPUpeerFBRequest*) requests[idx];
-                gpu_peer_fb_req->src_offset = src_buf.alloc_offset + src_start;
-                gpu_peer_fb_req->dst_offset = dst_buf.alloc_offset + dst_start;
-                gpu_peer_fb_req->src_stride = src_stride;
-                gpu_peer_fb_req->dst_stride = dst_stride;
-                gpu_peer_fb_req->src_height = src_height;
-                gpu_peer_fb_req->dst_height = dst_height;
-                gpu_peer_fb_req->nbytes_per_line = bytes_per_line;
-                gpu_peer_fb_req->height = height;
-                gpu_peer_fb_req->depth = depth;
-                gpu_peer_fb_req->dst_gpu = dst_gpu;
-                gpu_peer_fb_req->event.reset();
-                break;
-              }
-              default:
-                assert(0);
-            }
-            src_start += req_size;
-            dst_start += req_size;
-            nbytes -= req_size;
-            idx ++;
-          }
-        }
-        return idx;
-#endif
       }
 
       template<unsigned DIM>
       void GPUXferDes<DIM>::notify_request_read_done(Request* req)
       {
         default_notify_request_read_done(req);
-#ifdef TO_BE_DELETE
-        req->is_read_done = true;
-        int64_t offset;
-        uint64_t size;
-        switch (kind) {
-          case XferDes::XFER_GPU_TO_FB:
-          {
-            GPUtoFBRequest* gpu_req = (GPUtoFBRequest*) req;
-            offset = gpu_req->src - src_buf_base;
-            size = gpu_req->nbytes_per_line
-                   * gpu_req->height * gpu_req->depth;
-            break;
-          }
-          case XferDes::XFER_GPU_FROM_FB:
-          {
-            GPUfromFBRequest* gpu_req = (GPUfromFBRequest*) req;
-            offset = gpu_req->src_offset - src_buf.alloc_offset;
-            size = gpu_req->nbytes_per_line
-                   * gpu_req->height * gpu_req->depth;
-            break;
-          }
-          case XferDes::XFER_GPU_IN_FB:
-          {
-            GPUinFBRequest* gpu_req = (GPUinFBRequest*) req;
-            offset = gpu_req->src_offset - src_buf.alloc_offset;
-            size = gpu_req->nbytes_per_line
-                   * gpu_req->height * gpu_req->depth;
-            break;
-          }
-          case XferDes::XFER_GPU_PEER_FB:
-          {
-            GPUpeerFBRequest* gpu_req = (GPUpeerFBRequest*) req;
-            offset = gpu_req->src_offset - src_buf.alloc_offset;
-            size = gpu_req->nbytes_per_line
-                   * gpu_req->height * gpu_req->depth;
-            break;
-          }
-          default:
-            assert(0);
-        }
-        simple_update_bytes_read(offset, size);
-#endif
       }
 
       template<unsigned DIM>
       void GPUXferDes<DIM>::notify_request_write_done(Request* req)
       {
         default_notify_request_write_done(req);
-#ifdef TO_BE_DELETE
-        req->is_write_done = true;
-        int64_t offset;
-        uint64_t size;
-        switch (kind) {
-          case XferDes::XFER_GPU_TO_FB:
-          {
-            GPUtoFBRequest* gpu_req = (GPUtoFBRequest*) req;
-            offset = gpu_req->dst_offset - dst_buf.alloc_offset;
-            size = gpu_req->nbytes_per_line
-                   * gpu_req->height * gpu_req->depth;
-            break;
-          }
-          case XferDes::XFER_GPU_FROM_FB:
-          {
-            GPUfromFBRequest* gpu_req = (GPUfromFBRequest*) req;
-            offset = gpu_req->dst - dst_buf_base;
-            size = gpu_req->nbytes_per_line
-                   * gpu_req->height * gpu_req->depth;
-            break;
-          }
-          case XferDes::XFER_GPU_IN_FB:
-          {
-            GPUinFBRequest* gpu_req = (GPUinFBRequest*) req;
-            offset = gpu_req->dst_offset - dst_buf.alloc_offset;
-            size = gpu_req->nbytes_per_line
-                   * gpu_req->height * gpu_req->depth;
-            break;
-          }
-          case XferDes::XFER_GPU_PEER_FB:
-          {
-            GPUpeerFBRequest* gpu_req = (GPUpeerFBRequest*) req;
-            offset = gpu_req->dst_offset - dst_buf.alloc_offset;
-            size = gpu_req->nbytes_per_line
-                   * gpu_req->height * gpu_req->depth;
-            break;
-          }
-          default:
-            assert(0);
-        }
-        //printf("[GPU_Request_Done] dst_offset = %ld, nbytes = %lu\n", offset, size);
-        simple_update_bytes_write(offset, size);
-        available_reqs.push(req);
-#endif
       }
 
       template<unsigned DIM>
@@ -2465,14 +1966,18 @@ namespace LegionRuntime {
         return NULL;
       }
 #endif
-      /*static*/ void XferDesRemoteWriteMessage::handle_request(RequestArgs args, const void *data, size_t datalen)
+      /*static*/
+      void XferDesRemoteWriteMessage::handle_request(RequestArgs args,
+                                                     const void *data,
+                                                     size_t datalen)
       {
         // assert data copy is in right position
         assert(data == args.dst_buf);
         XferDesRemoteWriteAckMessage::send_request(args.sender, args.req);
       }
 
-      /*static*/ void XferDesRemoteWriteAckMessage::handle_request(RequestArgs args)
+      /*static*/
+      void XferDesRemoteWriteAckMessage::handle_request(RequestArgs args)
       {
         RemoteWriteRequest* req = args.req;
         req->xd->notify_request_read_done(req);
@@ -2480,7 +1985,10 @@ namespace LegionRuntime {
         channel_manager->get_remote_write_channel()->notify_completion();
       }
 
-      /*static*/ void XferDesCreateMessage::handle_request(RequestArgs args, const void *msgdata, size_t msglen)
+      /*static*/
+      void XferDesCreateMessage::handle_request(RequestArgs args,
+                                                const void *msgdata,
+                                                size_t msglen)
       {
         const Payload *payload = (const Payload *)msgdata;
         std::vector<OffsetsAndSize> oas_vec(payload->oas_vec_size);
