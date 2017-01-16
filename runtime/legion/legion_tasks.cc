@@ -3115,6 +3115,9 @@ namespace Legion {
             layout_constraints.layouts.begin(); it != 
             layout_constraints.layouts.end(); it++)
       {
+        // Might have constraints for extra region requirements
+        if (it->first >= physical_instances.size())
+          continue;
         LayoutConstraints *constraints = 
           runtime->find_layout_constraints(it->second);
         const InstanceSet &instances = physical_instances[it->first]; 
