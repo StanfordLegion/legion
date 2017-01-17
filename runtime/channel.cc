@@ -597,7 +597,7 @@ namespace LegionRuntime {
       inline void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size)
       {
         log_request.info(
-            "update_write: guid(%llx) off(%ld) size(%lu) pre(%llx) next(%llx)",
+            "update_write: guid(%llx) off(%"PRId64") size(%"PRIu64") pre(%llx) next(%llx)",
             guid, offset, size, pre_xd_guid, next_xd_guid);
         if (next_xd_guid != XFERDES_NO_GUID) {
           bool update = false;
