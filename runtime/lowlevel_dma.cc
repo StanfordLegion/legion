@@ -3898,6 +3898,22 @@ namespace LegionRuntime {
       Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
 
       // <NEWDMA>
+      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        const InstPair &pair = oas_by_inst->begin()->first;
+        size_t total_field_size = 0;
+        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          for (size_t i = 0; i < it->second.size(); i++) {
+            total_field_size += it->second[i].size;
+          }
+        }
+
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = pair.first.get_location();
+        usage.target = pair.second.get_location();
+        usage.size = total_field_size * domain.get_volume();
+        measurements.add_measurement(usage);
+      }
+
       switch (domain.get_dim()) {
       case 0:
         perform_new_dma<0>(src_mem, dst_mem);
@@ -3917,24 +3933,7 @@ namespace LegionRuntime {
 
       log_dma.info() << "dma request " << (void *)this << " finished - is="
                      << domain << " before=" << before_copy << " after=" << get_finish_event();
-
-      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
-        const InstPair &pair = oas_by_inst->begin()->first;
-        size_t total_field_size = 0;
-        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
-          for (size_t i = 0; i < it->second.size(); i++) {
-            total_field_size += it->second[i].size;
-          }
-        }
-
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
-        usage.source = pair.first.get_location();
-        usage.target = pair.second.get_location();
-        usage.size = total_field_size * domain.get_volume();
-        measurements.add_measurement(usage);
-      }
-
-     return;
+      return;
       // </NEWDMA>
 
       // MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem);
