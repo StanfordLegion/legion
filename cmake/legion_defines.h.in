@@ -14,3 +14,5 @@
 #cmakedefine USE_CUDA
 #cmakedefine GASNETI_BUG1389_WORKAROUND @GASNETI_BUG1389_WORKAROUND@
 
+#include "legion.h"
+

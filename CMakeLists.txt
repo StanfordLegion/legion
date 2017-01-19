@@ -44,6 +44,8 @@ set(SOVERSION 1)
 set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build" FORCE)
 set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLEGION_CMAKE")
+
 #https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
@@ -152,7 +154,7 @@ FOREACH(FLAG ${FLAGS_LIST})
   string (FIND ${FLAG} "-D" START_STR)
   if (${START_STR} EQUAL "0")
   string(REPLACE "-D" "" NEW_DEFINE ${FLAG})
-  set (NEW_DEFINE ON)
+  set (${NEW_DEFINE} ON)
   endif()
 endforeach()
 
@@ -236,9 +238,11 @@ endif()
 # configure header
 #------------------------------------------------------------------------------#
 
-configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in ${CMAKE_BINARY_DIR}/legion_defines.h @ONLY)
-include_directories(${CMAKE_BINARY_DIR})
-install(FILES ${CMAKE_BINARY_DIR}/legion_defines.h DESTINATION include)
+configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in ${PROJECT_SOURCE_DIR}/legion_defines.h @ONLY)
+
+install(FILES ${PROJECT_SOURCE_DIR}/legion_defines.h DESTINATION include)
+#include_directories(${CMAKE_BINARY_DIR})
+#install(FILES ${CMAKE_BINARY_DIR}/legion_defines.h DESTINATION include)
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :
