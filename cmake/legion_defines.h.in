@@ -1,0 +1,16 @@
+// -----------------------------------------------------------------------//
+// save all Legion defines in the legion_defines.h file
+// -----------------------------------------------------------------------//
+
+#cmakedefine DEBUG_REALM 
+#cmakedefine DEBUG_LEGION
+#cmakedefine PRIVILEGE_CHECKS
+#cmakedefine BOUNDS_CHECKS
+#cmakedefine GASNET_CONDUIT_MPI
+#cmakedefine GASNET_CONDUIT_IBV
+#cmakedefine GASNET_CONDUIT_UDP
+#cmakedefine GASNET_CONDUIT_ARIES
+#cmakedefine GASNET_CONDUIT_GEMINI
+#cmakedefine USE_CUDA
+#cmakedefine GASNETI_BUG1389_WORKAROUND @GASNETI_BUG1389_WORKAROUND@
+

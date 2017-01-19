@@ -51,6 +51,12 @@ if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
 endif()
 
+if (${CMAKE_BUILD_TYPE} EQUAL "Debug")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DDEBUG_REALM -DDEBUG_LEGION")
+  set(DEBUG_REALM ON)
+  set(DEBUG_LEGION ON)
+endif()
+
 #------------------------------------------------------------------------------#
 # Minimum log level
 #------------------------------------------------------------------------------#
@@ -82,6 +88,11 @@ if(Legion_USE_GASNet)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindGASNet.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
+
+  set (GASNETI_BUG1389_WORKAROUND "1")
+  string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
+  set (GASNET_CONDUIT_${CONDUIT} ON)
+
 endif()
 
 #------------------------------------------------------------------------------#
@@ -113,6 +124,9 @@ if(Legion_USE_CUDA)
   install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
+ 
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_CUDA")
+
 endif()
 
 #------------------------------------------------------------------------------#
@@ -128,6 +142,20 @@ mark_as_advanced(Legion_MAX_FIELDS)
 # Runtime library targets
 #------------------------------------------------------------------------------#
 add_subdirectory(runtime)
+
+#------------------------------------------------------------------------------#
+# configure header
+#------------------------------------------------------------------------------#
+# Checking for all defines in the CXX Flags
+string(REPLACE " " ";" FLAGS_LIST ${CMAKE_CXX_FLAGS})
+FOREACH(FLAG ${FLAGS_LIST})
+  string (FIND ${FLAG} "-D" START_STR)
+  if (${START_STR} EQUAL "0")
+  string(REPLACE "-D" "" NEW_DEFINE ${FLAG})
+  set (NEW_DEFINE ON)
+  endif()
+endforeach()
+
 
 #------------------------------------------------------------------------------#
 # Build-tree package generation
@@ -203,6 +231,14 @@ if(Legion_BUILD_EXAMPLES OR Legion_BUILD_EXAMPLE_APPS)
     add_subdirectory(apps)
   endif()
 endif()
+
+#------------------------------------------------------------------------------#
+# configure header
+#------------------------------------------------------------------------------#
+
+configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in ${CMAKE_BINARY_DIR}/legion_defines.h @ONLY)
+include_directories(${CMAKE_BINARY_DIR})
+install(FILES ${CMAKE_BINARY_DIR}/legion_defines.h DESTINATION include)
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :
