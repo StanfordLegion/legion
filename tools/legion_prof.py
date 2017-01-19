@@ -2100,8 +2100,9 @@ class State(object):
         # add to the count. if it's second, decrement the count. Store the
         # (time, count) pair.
 
-        times = list()
-        counts = list()
+        # times = list()
+        # counts = list()
+        statistics = list()
         count = 0
         last_time = 0
         increment = 1.0 / float(max_count)
@@ -2111,22 +2112,26 @@ class State(object):
             else:
                 count -= increment
             if point.time != last_time:
-                times.append(point.time)
-                counts.append(count)
+                statistics.append((point.time, count))
             last_time = point.time
-        # we want to limit to num_points points in the statistics, so only get
-        # every nth element
-        n = max(1, int(len(times) / num_points))
-        statistics = []
-        # FIXME: get correct count average
-        for i in range(0, len(times),n):
-            sub_times = times[i:i+n]
-            sub_counts = counts[i:i+n]
-            num_elems = float(len(sub_times))
-            avg_time = float(sum(sub_times)) / num_elems
-            avg_count = float(sum(sub_counts)) / num_elems
-            statistics.append((avg_time, avg_count))
         return statistics
+
+        # CODE BELOW USES A BASIC FILTER IN CASE THE SIZE OF THE STATISTICS
+        # IS TOO LARGE
+
+        # # we want to limit to num_points points in the statistics, so only get
+        # # every nth element
+        # n = max(1, int(len(times) / num_points))
+        # statistics = []
+        # # FIXME: get correct count average
+        # for i in range(0, len(times),n):
+        #     sub_times = times[i:i+n]
+        #     sub_counts = counts[i:i+n]
+        #     num_elems = float(len(sub_times))
+        #     avg_time = float(sum(sub_times)) / num_elems
+        #     avg_count = float(sum(sub_counts)) / num_elems
+        #     statistics.append((avg_time, avg_count))
+        # return statistics
 
     # utilization is 1 for a processor when some event is on the
     # processor

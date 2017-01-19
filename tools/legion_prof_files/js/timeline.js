@@ -159,7 +159,7 @@ function mouseDownHandler() {
   $(document).off("keydown");
 }
 
-function adjustStatsZoom() {
+function drawStats() {
   // TODO: Add to state
   var windowStart = $("#timeline").scrollLeft();
   var windowEnd = windowStart + $("#timeline").width();
@@ -168,12 +168,10 @@ function adjustStatsZoom() {
   var filteredStatsData = [];
   for (var i = 0; i < state.newLayoutData.length; i++) {
     var elem = state.newLayoutData[i];
-    if (elem.type == "stats" && elem.enabled) {
+    if (elem.type == "stats" && elem.enabled &&elem.loaded) {
       filteredStatsData.push(filterStatsData(elem));
     }
   }
-
-  console.log(filteredStatsData);
 
   state.x = d3.scale.linear().range([0, convertToPos(state, end_time)]);
   state.x.domain([0, end_time]);
@@ -193,7 +191,6 @@ function adjustStatsZoom() {
     })
     .attr("stroke",
       function(d) {
-        console.log("d", d);
         if (d.text == "all nodes") {
           return "steelblue";
         } else {
@@ -272,11 +269,13 @@ function drawLoaderIcon() {
   loaderGroup.append("path")
     .attr({
       opacity: 0.2,
+      stroke: "steelblue",
       fill: "#000",
       d: "M20.201,5.169c-8.254,0-14.946,6.692-14.946,14.946c0,8.255,6.692,14.946,14.946,14.946s14.946-6.691,14.946-14.946C35.146,11.861,28.455,5.169,20.201,5.169z M20.201,31.749c-6.425,0-11.634-5.208-11.634-11.634c0-6.425,5.209-11.634,11.634-11.634c6.425,0,11.633,5.209,11.633,11.634C31.834,26.541,26.626,31.749,20.201,31.749z"
     });
   var path = loaderGroup.append("path")
     .attr({
+      stroke: "steelblue",
       fill: "#000",
       d: "M26.013,10.047l1.654-2.866c-2.198-1.272-4.743-2.012-7.466-2.012h0v3.312h0C22.32,8.481,24.301,9.057,26.013,10.047z"
     });
@@ -293,11 +292,15 @@ function drawLoaderIcon() {
 }
 
 function showLoaderIcon() {
+  state.numLoading++;
   state.loaderSvg.select("g").attr("visibility", "visible");
 }
 
 function hideLoaderIcon() {
-  state.loaderSvg.select("g").attr("visibility", "hidden");
+  state.numLoading--;
+  if (state.numLoading == 0) {
+    state.loaderSvg.select("g").attr("visibility", "hidden");
+  }
 }
 
 function getMouseOver() {
@@ -319,11 +322,10 @@ function getMouseOver() {
     } 
     var title = d.title + initiation + ", total=" + total + "us, start=" + 
                 d.start + "us, end=" + d.end+ "us";
-    var total_stats_height = stats_files.length * constants.stats_height;
 
     var text = descView.append("text")
       .attr("x", x)
-      .attr("y", total_stats_height + d.level * state.thickness - 5)
+      .attr("y", d.level * state.thickness - 5)
       .attr("text-anchor", anchor)
       .attr("class", "desc")
       .text(unescape(escape(title)));
@@ -348,11 +350,12 @@ var searchRegex = null;
 function calculateLayout() {
   var base = 0;
 
-  function getElement(text, type, num_levels, tsv) {
+  function getElement(text, type, num_levels, loader, tsv) {
     var element = {
       enabled: false,
       loaded: false,
       base: base,
+      loader: loader,
       num_levels: num_levels,
       text: text,
       type: type,
@@ -365,6 +368,7 @@ function calculateLayout() {
   // First element in the layout will be the all_stats
   state.newLayoutData.push(getElement("all nodes", "stats", 
                                       constants.stats_levels,
+                                      load_stats,
                                       "tsv/all_stats.tsv"));
   
   var last_node = undefined;
@@ -380,15 +384,16 @@ function calculateLayout() {
           var stats_name = "node " + node_id;
           state.newLayoutData.push(getElement(stats_name, "stats", 
                                               constants.stats_levels,
+                                              load_stats,
                                               "tsv/" + node_id + "_stats.tsv"));
           last_node = node_id;
         }
       }
     }
     state.newLayoutData.push(getElement(proc.processor, "proc", 
-                                        proc.height, proc.tsv));
+                                        proc.height, load_proc_timeline,
+                                        proc.tsv));
   });
-  console.log("layout", state.newLayoutData);
 }
 
 function drawTimeline() {
@@ -428,7 +433,7 @@ function drawTimeline() {
       state.timelineSvg.selectAll("#desc").remove();
     });
 
-  adjustStatsZoom();
+  drawStats();
   timeline.on("mouseover", mouseOver);
   timeline.exit().remove();
   hideLoaderIcon();
@@ -476,8 +481,8 @@ function collapseHandler(d, index) {
   d.enabled = !d.enabled;
   if (!d.loaded) {
     showLoaderIcon();
-    load_proc_timeline(state.newLayoutData[index]); // will redraw the timeline
-    d.loaded = true;
+    var elem = state.newLayoutData[index];
+    elem.loader(elem); // will redraw the timeline once loaded
   } else {
     // redraw the timeline
     redraw();
@@ -947,7 +952,6 @@ function defaultKeyUp(e) {
 
 function load_proc_timeline(proc) {
   var proc_name = proc.text;
-  console.log("proc", proc);
   state.processorData[proc_name] = {};
   d3.tsv(proc.tsv,
     function(d, i) {
@@ -978,6 +982,8 @@ function load_proc_timeline(proc) {
           state.processorData[proc_name][d.level] = [d];
         }
       }
+      proc.loaded = true;
+      hideLoaderIcon();
       redraw();
     }
   );
@@ -1011,7 +1017,8 @@ function initTimelineElements() {
     var cpu = /CPU Processor/;
     for (var i = 0; i < state.newLayoutData.length; i++) {
       var timelineElement = state.newLayoutData[i];
-      if (timelineElement.type == "proc" && cpu.test(timelineElement.text)) {
+      if (timelineElement.type == "proc" && cpu.test(timelineElement.text) ||
+          timelineElement.type == "stats" && timelineElement.text == "all nodes") {
         collapseHandler(timelineElement, i);
       }
     }
@@ -1064,11 +1071,14 @@ function load_procs(callback) {
       });
       //console.log(data);
       state.processors = data;
+      calculateLayout();
+      drawLayout();
+      callback();
 
-      stats_counter = stats_files.length; // TODO: use ES6 Promises
-      stats_files.forEach(function(stats_filename) {
-        load_stats(stats_filename, callback);
-      });
+      //stats_counter = stats_files.length; // TODO: use ES6 Promises
+      //stats_files.forEach(function(stats_filename) {
+      //  load_stats(stats_filename, callback);
+      //});
     }
   );
 }
@@ -1180,7 +1190,7 @@ function mousemove(timelineElem) {
   var cy = state.y(d.count) + base_y;
   focus.attr("transform", "translate(" + cx + "," + cy + ")");
   var text = focus.select("text");
-  text.text((d.count * 100) + "% utilization" )
+  text.text((d.count * 100).toFixed(2) + "% utilization" )
 
   var bbox = text.node().getBBox();
   var padding = 2;
@@ -1195,7 +1205,8 @@ function mousemove(timelineElem) {
 var maxVal;
 
 // Get the data
-function load_stats(stats_file, callback) {
+function load_stats(elem) {
+  var stats_file = elem.tsv;
   d3.tsv(stats_file,
     function(d) {
         return {
@@ -1209,7 +1220,7 @@ function load_stats(stats_file, callback) {
       // state.statsData = filterStatsData(data);
       // Scale the range of the data
       //state.x.domain(d3.extent(data, function(d) { return d.time; }));
-      state.y.domain([0, 1]);
+      //state.y.domain([0, 1]);
       //state.y.domain([0, d3.max(data, function(d) { return d.count; })]);
 
       // Loop through each symbol / key
@@ -1225,12 +1236,9 @@ function load_stats(stats_file, callback) {
       //  .on("mouseout", function() { focus.style("display", "none"); })
       //  .on("mousemove", mousemove);
 
-      stats_counter -= 1;
-      if (stats_counter == 0) {
-        calculateLayout();
-        drawLayout();
-        callback();
-      }
+      elem.loaded = true;
+      hideLoaderIcon();
+      redraw();
     }
   );
 }
@@ -1246,6 +1254,7 @@ function initializeState() {
   state.scale = state.width / (constants.end - constants.start);
   state.zoom = 1.0;
   state.zoomHistory = Array();
+  state.numLoading = 0;
 
   state.layoutData = [];
   state.newLayoutData = [];
@@ -1266,6 +1275,7 @@ function initializeState() {
   // TODO: change this
   state.x = d3.scale.linear().range([0, state.width]);
   state.y = d3.scale.linear().range([constants.stats_height, 0]);
+  state.y.domain([0, 1]);
 
   setKeyHandler(defaultKeydown);
   $(document).on("keyup", defaultKeyUp);
