@@ -54,7 +54,6 @@ if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
 endif()
 
 if (${CMAKE_BUILD_TYPE} EQUAL "Debug")
-  add_definitions(-DDEBUG_REALM -DDEBUG_LEGION)
   set(DEBUG_REALM ON)
   set(DEBUG_LEGION ON)
 endif()
@@ -127,7 +126,7 @@ if(Legion_USE_CUDA)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
 
-  add_definitions(-DUSE_CUDA) 
+  set (USE_CUDA ON)
 
 endif()
 
