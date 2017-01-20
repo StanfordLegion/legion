@@ -44,7 +44,7 @@ set(SOVERSION 1)
 set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build" FORCE)
 set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLEGION_CMAKE")
+add_definitions(-DLEGION_CMAKE)
 
 #https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
 include(CheckCXXCompilerFlag)
@@ -54,7 +54,7 @@ if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
 endif()
 
 if (${CMAKE_BUILD_TYPE} EQUAL "Debug")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DDEBUG_REALM -DDEBUG_LEGION")
+  add_definitions(-DDEBUG_REALM -DDEBUG_LEGION)
   set(DEBUG_REALM ON)
   set(DEBUG_LEGION ON)
 endif()
@@ -126,8 +126,8 @@ if(Legion_USE_CUDA)
   install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
- 
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_CUDA")
+
+  add_definitions(-DUSE_CUDA) 
 
 endif()
 
@@ -238,11 +238,10 @@ endif()
 # configure header
 #------------------------------------------------------------------------------#
 
-configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in ${PROJECT_SOURCE_DIR}/legion_defines.h @ONLY)
+configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h @ONLY)
+include_directories(${PROJECT_SOURCE_DIR}/runtime)
+install(FILES ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h DESTINATION include)
 
-install(FILES ${PROJECT_SOURCE_DIR}/legion_defines.h DESTINATION include)
-#include_directories(${CMAKE_BINARY_DIR})
-#install(FILES ${CMAKE_BINARY_DIR}/legion_defines.h DESTINATION include)
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :
