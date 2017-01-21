@@ -44,11 +44,18 @@ set(SOVERSION 1)
 set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build" FORCE)
 set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
+add_definitions(-DLEGION_CMAKE)
+
 #https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
 if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
+endif()
+
+if (${CMAKE_BUILD_TYPE} EQUAL "Debug")
+  set(DEBUG_REALM ON)
+  set(DEBUG_LEGION ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -82,6 +89,11 @@ if(Legion_USE_GASNet)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindGASNet.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
+
+  set (GASNETI_BUG1389_WORKAROUND "1")
+  string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
+  set (GASNET_CONDUIT_${CONDUIT} ON)
+
 endif()
 
 #------------------------------------------------------------------------------#
@@ -113,6 +125,9 @@ if(Legion_USE_CUDA)
   install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
+
+  set (USE_CUDA ON)
+
 endif()
 
 #------------------------------------------------------------------------------#
@@ -128,6 +143,20 @@ mark_as_advanced(Legion_MAX_FIELDS)
 # Runtime library targets
 #------------------------------------------------------------------------------#
 add_subdirectory(runtime)
+
+#------------------------------------------------------------------------------#
+# configure header
+#------------------------------------------------------------------------------#
+# Checking for all defines in the CXX Flags
+string(REPLACE " " ";" FLAGS_LIST ${CMAKE_CXX_FLAGS})
+FOREACH(FLAG ${FLAGS_LIST})
+  string (FIND ${FLAG} "-D" START_STR)
+  if (${START_STR} EQUAL "0")
+  string(REPLACE "-D" "" NEW_DEFINE ${FLAG})
+  set (${NEW_DEFINE} ON)
+  endif()
+endforeach()
+
 
 #------------------------------------------------------------------------------#
 # Build-tree package generation
@@ -203,6 +232,15 @@ if(Legion_BUILD_EXAMPLES OR Legion_BUILD_EXAMPLE_APPS)
     add_subdirectory(apps)
   endif()
 endif()
+
+#------------------------------------------------------------------------------#
+# configure header
+#------------------------------------------------------------------------------#
+
+configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h @ONLY)
+include_directories(${PROJECT_SOURCE_DIR}/runtime)
+install(FILES ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h DESTINATION include)
+
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :
