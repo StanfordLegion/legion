@@ -4110,7 +4110,7 @@ namespace Legion {
                                                          output.slices.size());
         slices.push_back(new_slice);
       }
-#if DEBUG_LEGION
+#ifdef DEBUG_LEGION
       // If the volumes don't match, then something bad happend in the mapper
       if (total_points != internal_domain.get_volume())
       {
