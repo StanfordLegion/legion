@@ -3225,7 +3225,11 @@ namespace Legion {
         if (!!fill_mask)
           fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
                                  logical_ctx_uid, context, version_info, 
-                                 map_applied_events, true_guard, false_guard);
+                                 map_applied_events, true_guard, false_guard
+#ifdef LEGION_SPY
+                                 , op->get_unique_op_id()
+#endif
+                                 );
         // We know the sync precondition is chained off at least
         // one eager fill so we can return the done event
         return done_event;
@@ -3238,7 +3242,11 @@ namespace Legion {
         // Fill in these fields on this node
         fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
                                logical_ctx_uid, context, version_info, 
-                               map_applied_events, true_guard, false_guard);
+                               map_applied_events, true_guard, false_guard
+#ifdef LEGION_SPY
+                               , op->get_unique_op_id()
+#endif
+                               );
         // We didn't actually use the precondition so just return it
         return precondition;
       }
@@ -15159,6 +15167,9 @@ namespace Legion {
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
                         ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                        UniqueID fill_uid,
+#endif
                         RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
@@ -15255,7 +15266,7 @@ namespace Legion {
         result = new_result;
       }
       LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
-                                 precondition, result);
+                                 precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
                                   dst_fields[idx].inst.id);
@@ -16035,7 +16046,11 @@ namespace Legion {
                                  InnerContext *inner_context,
                                  VersionInfo &version_info,
                                  std::set<RtEvent> &map_applied_events,
-                                 PredEvent true_guard, PredEvent false_guard)
+                                 PredEvent true_guard, PredEvent false_guard
+#ifdef LEGION_SPY
+                                 , UniqueID fill_op_uid
+#endif
+                                 )
     //--------------------------------------------------------------------------
     {
       // A fill is a kind of a write, so we have to do the advance
@@ -16055,7 +16070,11 @@ namespace Legion {
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
         legion_new<FillView>(context, did, local_space, local_space, 
-                             this, fill_value, true/*register now*/);
+                             this, fill_value, true/*register now*/
+#ifdef LEGION_SPY
+                             , fill_op_uid
+#endif
+                             );
       // Now update the physical state
       PhysicalState *state = get_physical_state(version_info);
       if (true_guard.exists())
@@ -16149,7 +16168,11 @@ namespace Legion {
           std::vector<Domain::CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);
           ApEvent fill_event = issue_fill(op, dst_fields, value, 
-                                          value_size, precondition, true_guard);
+                                          value_size, precondition, true_guard
+#ifdef LEGION_SPY
+                                          , op->get_unique_op_id() 
+#endif
+                                          );
           if (fill_event.exists())
             post_events.insert(fill_event);
         }
@@ -16982,11 +17005,18 @@ namespace Legion {
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
                         ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                        UniqueID fill_uid,
+#endif
                         RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
       return parent->issue_fill(op, dst_fields, fill_value, fill_size, 
-                                precondition, predicate_guard, intersect);
+                                precondition, predicate_guard, 
+#ifdef LEGION_SPY
+                                fill_uid,
+#endif
+                                intersect);
     }
 
     //--------------------------------------------------------------------------
