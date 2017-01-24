@@ -126,7 +126,8 @@ local function check_annotations_node(cx)
       node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary) or
-      node:is(ast.typed.expr.Deref)
+      node:is(ast.typed.expr.Deref) or
+      node:is(ast.typed.expr.ParallelizerConstraint)
     then
       check(cx, node, data.set({}))
 

@@ -2817,6 +2817,31 @@ function type_check.expr_deref(cx, node)
   }
 end
 
+function type_check.expr_parallelizer_constraint(cx, node)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.as_read(lhs.expr_type)
+  local rhs = type_check.expr(cx, node.rhs)
+  local rhs_type = std.as_read(rhs.expr_type)
+  if not std.is_partition(lhs_type) then
+    report.error(lhs,
+      "type mismatch in __parallelize_with: expected a partition or constraint on partitions but got " ..
+      tostring(lhs_type))
+  end
+  if not std.is_partition(rhs_type) then
+    report.error(rhs,
+      "type mismatch in __parallelize_with: expected a partition or constraint on partitions but got " ..
+      tostring(rhs_type))
+  end
+  return ast.typed.expr.ParallelizerConstraint {
+    op = node.op,
+    lhs = lhs,
+    rhs = rhs,
+    annotations = node.annotations,
+    span = node.span,
+    expr_type = bool, -- type doesn't really matter
+  }
+end
+
 function type_check.expr(cx, node)
   if node:is(ast.specialized.expr.ID) then
     return type_check.expr_id(cx, node)
@@ -3429,7 +3454,22 @@ function type_check.stat_raw_delete(cx, node)
 end
 
 function type_check.stat_parallelize_with(cx, node)
-  local exprs = node.exprs:map(function(expr) return type_check.expr(cx, expr) end)
+  local exprs = node.exprs:map(function(expr)
+    if expr:is(ast.specialized.expr.ID) then
+      local value = type_check.expr_id(cx, expr)
+      local value_type = std.check_read(cx, value)
+      if not std.is_partition(value_type) then
+        report.error(node,
+          "type mismatch in __parallelize_with: expected a partition or constraint on partitions but got " ..
+          tostring(value_type))
+      end
+      return value
+    elseif expr:is(ast.specialized.expr.Binary) then
+      return type_check.expr_parallelizer_constraint(cx, expr)
+    else
+      assert(false, "unexpected node type " .. tostring(node:type()))
+    end
+  end)
 
   return ast.typed.stat.ParallelizeWith {
     exprs = exprs,

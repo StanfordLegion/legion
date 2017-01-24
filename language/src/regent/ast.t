@@ -441,6 +441,7 @@ ast.typed.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.typed.expr:leaf("Deref", {"value"})
 ast.typed.expr:leaf("Future", {"value"})
 ast.typed.expr:leaf("FutureGetResult", {"value"})
+ast.typed.expr:leaf("ParallelizerConstraint", {"lhs", "op", "rhs"})
 
 ast.typed:leaf("Block", {"stats"})
 
