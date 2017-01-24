@@ -757,8 +757,9 @@ namespace Legion {
       FieldMask closed_projections;
       FieldMask disjoint_close_mask;
     protected:
-      // At most we will ever generate three close operations at a node
+      // At most we will ever generate four close operations at a node
       InterCloseOp *normal_close_op;
+      IndexCloseOp *index_close_op;
       ReadCloseOp *read_only_close_op;
       InterCloseOp *flush_only_close_op;
     }; 
@@ -813,11 +814,10 @@ namespace Legion {
         { return (!advance_states.empty()); } 
       void apply_state(std::set<RtEvent> &applied_conditions) const; 
     public:
+      void filter_composite_mask(FieldMask &composite_mask);
       void capture_composite_root(CompositeView *composite_view,
                                   const FieldMask &closed_mask,
         const LegionMap<LogicalView*,FieldMask>::aligned &valid_above);
-      void perform_disjoint_close(InterCloseOp *op, unsigned index,
-                   InnerContext *context, const FieldMask &closing_mask);
     public:
       PhysicalState* clone(void) const;
       void clone_to(const FieldMask &mask, VersionInfo &target_info) const;
@@ -937,11 +937,6 @@ namespace Legion {
                                      const RegionUsage &usage,
                                      VersionInfo &version_info,
                                      std::set<RtEvent> &ready_events);
-      void record_disjoint_close_versions(const FieldMask &version_mask,
-                                          InnerContext *context,
-                                          Operation *op, unsigned index,
-                                          VersionInfo &version_info,
-                                          std::set<RtEvent> &ready_events);
       void advance_versions(FieldMask version_mask, 
                             UniqueID logical_context_uid,
                             InnerContext *physical_context,
@@ -1153,8 +1148,6 @@ namespace Legion {
                                   const FieldMask &update_mask) const;
       void update_physical_state(PhysicalState *state, 
                                  const FieldMask &update_mask) const; 
-      void perform_disjoint_close(InterCloseOp *op, unsigned index,
-            InnerContext *context, const FieldMask &close_mask) const;
     public: // methods for applying state information
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
@@ -1240,6 +1233,7 @@ namespace Legion {
       static void process_version_state_update_response(Runtime *rt,
                                                  Deserializer &derez); 
     public:
+      void find_close_fields(FieldMask &test_mask, FieldMask &result_mask);
       void capture_root(CompositeView *target, 
                         const FieldMask &capture_mask) const;
       void capture(CompositeNode *target, const FieldMask &capture_mask) const;

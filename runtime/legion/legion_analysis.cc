@@ -3465,7 +3465,8 @@ namespace Legion {
     LogicalCloser::LogicalCloser(ContextID c, const LogicalUser &u, 
                                  RegionTreeNode *r, bool val, bool capture)
       : ctx(c), user(u), root_node(r), validates(val), capture_users(capture),
-        normal_close_op(NULL),read_only_close_op(NULL),flush_only_close_op(NULL)
+        normal_close_op(NULL), index_close_op(NULL),
+        read_only_close_op(NULL), flush_only_close_op(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -3503,15 +3504,23 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!mask);
 #endif
-      normal_close_mask |= mask;
-      if (projection)
-        closed_projections |= mask;
       if (disjoint_close)
       {
 #ifdef DEBUG_LEGION
         assert(projection); // should only happen with projections
+        assert(mask * normal_close_mask); // shouldn't overlap
 #endif
         disjoint_close_mask |= mask;
+        closed_projections |= mask;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(mask * disjoint_close_mask); // shouldn't overlap
+#endif
+        normal_close_mask |= mask;
+        if (projection)
+          closed_projections |= mask;
       }
     }
 
@@ -3611,6 +3620,7 @@ namespace Legion {
       else
         req = RegionRequirement(root_node->as_partition_node()->handle, 0,
                                 READ_WRITE, EXCLUSIVE, trace_info.req.parent);
+      
       if (!!normal_close_mask)
       {
         normal_close_op = creator->runtime->get_available_inter_close_op(false);
@@ -3629,23 +3639,28 @@ namespace Legion {
                                     ver_info, normal_close_mask, creator);
         // We can clear this now
         closed_nodes.clear();
-        // See if we are doing a disjoint close for any of these fields
-        if (!!disjoint_close_mask)
-        {
-          // Record the disjoint close, advance the projection epochs
-          // and then record the new projection epoch that the close
-          // will be a part of
-          ProjectionInfo &proj_info = 
-            normal_close_op->initialize_disjoint_close(disjoint_close_mask,
-                  root_node->as_partition_node()->row_source->color_space);
-          // Advance these epochs and then mark that we no longer need
-          // to advance them during update_state
-          state.advance_projection_epochs(disjoint_close_mask);
-          closed_projections -= disjoint_close_mask;
-          state.capture_projection_epochs(disjoint_close_mask, proj_info);
-          // No need to record ourselves in the epoch since we know
-          // that we are disjoint shallow
-        }
+      }
+      if (!!disjoint_close_mask)
+      {
+        index_close_op = creator->runtime->get_available_index_close_op(false);
+        // Compute the set of fields that we need
+        req.privilege_fields.clear();
+        root_node->column_source->get_field_set(disjoint_close_mask,
+                                               trace_info.req.privilege_fields,
+                                               req.privilege_fields);
+        std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
+          closed_nodes.find(root_node);
+#ifdef DEBUG_LEGION
+        assert(finder != closed_nodes.end()); // better have a closed tree
+        assert(!root_node->is_region());
+#endif
+        const Domain &color_space = 
+          root_node->as_partition_node()->row_source->color_space;
+        // Perform the close over the whole domain
+        index_close_op->initialize(creator->get_context(), req, finder->second, 
+                                   trace_info, trace_info.req_idx, 
+                                   ver_info, disjoint_close_mask, creator,
+                                   color_space);
       }
       if (!!read_only_close_mask)
       {
@@ -3698,6 +3713,13 @@ namespace Legion {
         register_dependences(normal_close_op, normal_close_user, current, 
             open_below, normal_closed_users, above_users, cusers, pusers);
       }
+      if (index_close_op != NULL)
+      {
+        LogicalUser index_close_user(index_close_op, 0/*idx*/,
+           RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), disjoint_close_mask);
+        register_dependences(index_close_op, index_close_user, current,
+            open_below, normal_closed_users, above_users, cusers, pusers);
+      }
       if (read_only_close_op != NULL)
       {
         LogicalUser read_only_close_user(read_only_close_op, 0/*idx*/, 
@@ -3729,7 +3751,7 @@ namespace Legion {
     }
 
     // If you are looking for LogicalCloser::register_dependences it can 
-    // be found in region_tree.cc to make sure that templates are instantiated
+    // be found in region_tree.cc to make sure the templates are instantiated
 
     //--------------------------------------------------------------------------
     void LogicalCloser::update_state(LogicalState &state)
@@ -3738,15 +3760,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(state.owner == root_node);
 #endif
-      // Advance any closed projection epochs, note that disjoint
-      // closes already did this when we made the disjoint close op
+      // Advance any closed projection epochs
       if (!!closed_projections)
         state.advance_projection_epochs(closed_projections);
       // If we had any overwriting close operations remove dirty below bits
       if (!!overwriting_close_mask)
         state.dirty_below -= overwriting_close_mask;
       // If we only have read-only closes then we are done
-      FieldMask closed_mask = normal_close_mask | flush_only_close_mask;
+      FieldMask closed_mask = 
+        normal_close_mask | disjoint_close_mask | flush_only_close_mask;
       if (!closed_mask)
         return;
       root_node->filter_prev_epoch_users(state, closed_mask);
@@ -3775,6 +3797,12 @@ namespace Legion {
       {
         LogicalUser close_user(normal_close_op, 0/*idx*/, 
             RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), normal_close_mask);
+        users.push_back(close_user);
+      }
+      if (index_close_op != NULL)
+      {
+        LogicalUser close_user(index_close_op, 0/*idx*/,
+           RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), disjoint_close_mask);
         users.push_back(close_user);
       }
       if (read_only_close_op != NULL)
@@ -3985,6 +4013,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalState::filter_composite_mask(FieldMask &composite_mask)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask need_close;
+      for (PhysicalVersions::iterator it = version_states.begin();
+            it != version_states.end(); it++)
+      {
+        FieldMask overlap = it->second & composite_mask;
+        if (!overlap)
+          continue;
+        it->first->find_close_fields(overlap, need_close);
+        if (need_close == composite_mask)
+          return;
+      }
+      composite_mask &= need_close;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalState::capture_composite_root(CompositeView *composite_view,
                                                const FieldMask &close_mask,
                   const LegionMap<LogicalView*,FieldMask>::aligned &valid_above)
@@ -4005,22 +4051,6 @@ namespace Legion {
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_above.begin(); it != valid_above.end(); it++)
         composite_view->record_valid_view(it->first, it->second);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalState::perform_disjoint_close(InterCloseOp *op, unsigned index,
-                           InnerContext *context, const FieldMask &closing_mask)
-    //--------------------------------------------------------------------------
-    {
-      // Iterate over the current states
-      for (PhysicalVersions::iterator it = version_states.begin();
-            it != version_states.end(); it++)
-      {
-        FieldMask overlap = it->second & closing_mask;
-        if (!overlap)
-          continue;
-        it->first->perform_disjoint_close(op, index, context, overlap);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4784,70 +4814,6 @@ namespace Legion {
             unversioned_mask &= unversioned;
           else
             unversioned_mask.clear();
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::record_disjoint_close_versions(
-                                                const FieldMask &version_mask,
-                                                InnerContext *context,
-                                                Operation *op, unsigned index,
-                                                VersionInfo &version_info,
-                                                std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      // See if we have been assigned
-      if (context != current_context)
-      {
-        const AddressSpaceID local_space = 
-          node->context->runtime->address_space;
-        owner_space = context->get_version_owner(node, local_space);
-        is_owner = (owner_space == local_space);
-        current_context = context;
-      }
-      // See if we are the owner
-      if (!is_owner)
-      {
-        FieldMask request_mask = version_mask - remote_valid_fields;
-        if (!!request_mask)
-        {
-          RtEvent wait_on = send_remote_version_request(request_mask,
-                                                        ready_events); 
-          wait_on.wait();
-#ifdef DEBUG_LEGION
-          // When we wake up everything should be good
-          assert(!(version_mask - remote_valid_fields));
-#endif
-        }
-      }
-      // We aren't mutating our data structures, so we just need 
-      // the manager lock in read only mode
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-#ifdef DEBUG_LEGION
-      sanity_check();
-#endif
-      // We need all the current versions at this level with 
-      // their open children information up to date because
-      // it is the current version state objects that are 
-      // tracking which children are dirty below 
-      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit =
-            current_version_infos.begin(); vit != 
-            current_version_infos.end(); vit++)
-      {
-        FieldMask local_overlap = vit->second.get_valid_mask() & version_mask;
-        if (!local_overlap)
-          continue;
-        for (ManagerVersions::iterator it = vit->second.begin();
-              it != vit->second.end(); it++)
-        {
-          FieldMask overlap = it->second & local_overlap;
-          if (!overlap)
-            continue;
-          version_info.add_current_version(it->first, overlap,
-                                           true/*path only*/); 
-          it->first->request_children_version_state(context, overlap,
-                                                    ready_events);
         }
       }
     }
@@ -6259,43 +6225,6 @@ namespace Legion {
             state->reduction_views[it->first] = overlap;
           else
             finder->second |= overlap;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::perform_disjoint_close(InterCloseOp *op, unsigned index,
-                     InnerContext *context, const FieldMask &closing_mask) const
-    //--------------------------------------------------------------------------
-    {
-      // Need the lock in read only mode to access these data structures
-      AutoLock s_lock(state_lock,1,false/*exclusive*/);
-      for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit = 
-            open_children.begin(); cit != open_children.end(); cit++)
-      {
-        FieldMask child_overlap = closing_mask & cit->second.get_valid_mask();
-        if (!child_overlap)
-          continue;
-        RegionTreeNode *child_node = logical_node->get_tree_child(cit->first);
-        InterCloseOp::DisjointCloseInfo *info = 
-          op->find_disjoint_close_child(index, child_node);
-        // If we don't care about this child because of control
-        // replication then we can keep going
-        if (info == NULL)
-          continue;
-        // Find the version state infos that we need
-        for (StateVersions::iterator it = cit->second.begin();
-              it != cit->second.end(); it++)
-        {
-          FieldMask overlap = it->second & child_overlap;
-          if (!overlap)
-            continue;
-          info->close_mask |= overlap;
-          // Request the final version of the state
-          it->first->request_final_version_state(context, overlap,
-                                                 info->ready_events);
-          info->version_info.add_current_version(it->first, overlap,
-                                                 false/*path only*/);
         }
       }
     }
@@ -7787,6 +7716,35 @@ namespace Legion {
       vs->handle_version_state_update_response(context, to_trigger, derez, 
                                                update_mask, request_kind);
     } 
+
+    //--------------------------------------------------------------------------
+    void VersionState::find_close_fields(FieldMask &test_mask, 
+                                         FieldMask &result_mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(state_lock,1,false/*exclusive*/);
+      // Any reductions we have at this level mandate a close
+      FieldMask reduc_mask = test_mask & reduction_mask;
+      if (!reduc_mask)
+      {
+        result_mask |= reduc_mask;
+        test_mask -= reduc_mask;
+        if (!test_mask)
+          return;
+      }
+      // Any dirty children also require a close
+      for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
+      {
+        FieldMask overlap = it->second.get_valid_mask() & test_mask;
+        if (!overlap)
+          continue;
+        result_mask |= overlap;
+        test_mask -= overlap;
+        if (!test_mask)
+          return;
+      }
+    }
 
     //--------------------------------------------------------------------------
     void VersionState::capture_root(CompositeView *target, 

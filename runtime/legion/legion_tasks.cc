@@ -5721,9 +5721,9 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
                                       one_below_path, version_infos[idx], 
                                       ready_events, false/*partial*/, 
-                                      false/*disjoint close*/, NULL/*filter*/,
-                                      one_below, logical_context_uid, 
-                                      &proj_epochs, true/*skip parent check*/);
+                                      NULL/*filter*/, one_below, 
+                                      logical_context_uid, &proj_epochs, 
+                                      true/*skip parent check*/);
       }
     }
 

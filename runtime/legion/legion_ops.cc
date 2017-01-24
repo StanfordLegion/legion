@@ -1408,11 +1408,11 @@ namespace Legion {
       // We can skip the check for virtual version information because
       // our owner slice already did it
       runtime->forest->perform_versioning_analysis(this, idx, local_req,
-                                    one_below_path, version_info, 
-                                    ready_events, false/*partial*/, 
-                                    false/*disjoint close*/, NULL/*filter*/,
-                                    one_below, logical_context_uid, 
-                                    &proj_epochs, true/*skip parent check*/);
+                                              one_below_path, version_info, 
+                                              ready_events, false/*partial*/, 
+                                              NULL/*filter*/, one_below, 
+                                              logical_context_uid, &proj_epochs,
+                                              true/*skip parent check*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6657,95 +6657,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    ProjectionInfo& InterCloseOp::initialize_disjoint_close(
-                    const FieldMask &disjoint_mask, const Domain &launch_domain)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(requirement.handle_type == PART_PROJECTION);
-      assert(!(disjoint_mask - close_mask)); // better dominate
-#endif
-      // Always the default projection function
-      requirement.projection = 0;
-      projection_info = ProjectionInfo(runtime, requirement, launch_domain);
-      disjoint_close_mask = disjoint_mask;
-#ifdef LEGION_SPY
-      if (Runtime::legion_spy_enabled)
-      {
-        std::set<FieldID> disjoint_close_fields;
-#ifdef DEBUG_LEGION
-        assert(closed_tree != NULL);
-#endif
-        closed_tree->node->column_source->get_field_set(disjoint_close_mask,
-            requirement.privilege_fields, disjoint_close_fields);
-        for (std::set<FieldID>::const_iterator it = 
-              disjoint_close_fields.begin(); it != 
-              disjoint_close_fields.end(); it++)
-          LegionSpy::log_disjoint_close_field(unique_op_id, *it);
-      }
-#endif
-      return projection_info;
-    }
-
-    //--------------------------------------------------------------------------
-    InterCloseOp::DisjointCloseInfo* InterCloseOp::find_disjoint_close_child(
-                                          unsigned index, RegionTreeNode *child)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(index == 0); // should always be zero for now
-#endif
-      // See if it exists already, if not we need to clone the version info
-      LegionMap<RegionTreeNode*,DisjointCloseInfo>::aligned::iterator finder = 
-        children_to_close.find(child);
-      if (finder == children_to_close.end())
-      {
-        DisjointCloseInfo &info = children_to_close[child];
-        // Set the depth for the version info now for when we record info
-        const unsigned child_depth = child->get_depth();
-        info.version_info.resize(child_depth);
-        return &info;
-      }
-      else
-        return &(finder->second);
-    }
-
-    //--------------------------------------------------------------------------
-    void InterCloseOp::perform_disjoint_close(RegionTreeNode *child_to_close,
-                                              DisjointCloseInfo &close_info,
-                                              std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      // Clone any version info that we need from the original version info
-      const unsigned child_depth = child_to_close->get_depth();
-#ifdef DEBUG_LEGION
-      assert(child_depth > 0);
-#endif
-      version_info.clone_to_depth(child_depth-1, close_info.close_mask,
-                                  close_info.version_info);
-      const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs =
-        &(projection_info.get_projection_epochs());
-      runtime->forest->physical_perform_close(requirement,
-                                              close_info.version_info,
-                                              this, 0/*idx*/, 
-                                              close_info.close_node,
-                                              child_to_close, 
-                                              close_info.close_mask,
-                                              ready_events,
-                                              restrict_info,
-                                              chosen_instances, 
-                                              projection_epochs
-#ifdef DEBUG_LEGION
-                                              , get_logging_name()
-                                              , unique_op_id
-#endif
-                                              );
-      // It is important that we apply our version info when we are done
-      close_info.version_info.apply_mapping(ready_events); 
-    }
-
-    //--------------------------------------------------------------------------
-    void InterCloseOp::activate(void)
+    void InterCloseOp::activate_inter_close(void)
     //--------------------------------------------------------------------------
     {
       activate_close();  
@@ -6756,7 +6668,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InterCloseOp::deactivate(void)
+    void InterCloseOp::deactivate_inter_close(void)
     //--------------------------------------------------------------------------
     {
       deactivate_close();
@@ -6772,10 +6684,21 @@ namespace Legion {
         closed_tree = NULL;
       }
       chosen_instances.clear();
-      disjoint_close_mask.clear();
-      projection_info.clear();
-      children_to_close.clear();
       profiling_requests.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_inter_close(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void InterCloseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_inter_close(); 
       runtime->free_inter_close_op(this);
     }
 
@@ -6805,33 +6728,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> preconditions;
-      if (!!disjoint_close_mask)
-      {
-        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                     requirement,
-                                                     privilege_path,
-                                                     version_info,
-                                                     preconditions,
-                                                     false/*partial*/,
-                                                     true/*disjoint close*/,
-                                                     &disjoint_close_mask);
-        FieldMask non_disjoint = close_mask - disjoint_close_mask;
-        if (!!non_disjoint) // handle any remaining fields
-          runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                       requirement,
-                                                       privilege_path,
-                                                       version_info,
-                                                       preconditions,
-                                                       false/*partial*/,
-                                                       false/*disjoint close*/,
-                                                       &non_disjoint);
-      }
-      else // the normal path
-        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                     requirement,
-                                                     privilege_path,
-                                                     version_info,
-                                                     preconditions);
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   privilege_path,
+                                                   version_info,
+                                                   preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -6866,68 +6767,21 @@ namespace Legion {
                   runtime->forest->get_node(requirement.partition)) :
               static_cast<RegionTreeNode*>(
                   runtime->forest->get_node(requirement.region));
-      // First see if we have any disjoint close fields
-      if (!!disjoint_close_mask)
-      {
-        // Perform the disjoint close, any disjoint children that come
-        // back to us will be recorded
-        runtime->forest->physical_disjoint_close(this, 0/*idx*/, close_node,
-                                         disjoint_close_mask, version_info);
-        // These fields have been closed by a disjoint close
-        close_mask -= disjoint_close_mask;
-        // See if we have any chlidren to close, either handle them now
-        // or issue tasks to perform the close operations
-        if (!children_to_close.empty())
-        {
-          for (LegionMap<RegionTreeNode*,DisjointCloseInfo>::aligned::iterator 
-                it = children_to_close.begin(); it != 
-                children_to_close.end(); it++)
-          {
-            // Make our copies of the closed tree now
-            it->second.close_node = closed_tree->clone_disjoint_projection(
-                                          it->first, it->second.close_mask);
-            // See if we need to defer it
-            if (!it->second.ready_events.empty())
-            {
-              RtEvent ready_event = 
-                Runtime::merge_events(it->second.ready_events);
-              if (ready_event.exists() && !ready_event.has_triggered())
-              {
-                // Now we have to defer it
-                DisjointCloseArgs args;
-                args.proxy_this = this;
-                args.child_node = it->first;
-                RtEvent done_event = runtime->issue_runtime_meta_task(args,
-                    LG_LATENCY_PRIORITY, this, ready_event);
-                // Add the done event to the map applied events
-                map_applied_conditions.insert(done_event);
-                continue;
-              }
-            }
-            // If we make it here, we can do the close of the child immediately
-            perform_disjoint_close(it->first,it->second,map_applied_conditions);
-          }
-        }
-      }
-      // See if we have any remaining fields for which to do a normal close
-      if (!!close_mask)
-      {
-        // Now we can perform our close operation
-        runtime->forest->physical_perform_close(requirement,
-                                                version_info, this, 0/*idx*/,
-                                                closed_tree, 
-                                                close_node, close_mask,
-                                                map_applied_conditions,
-                                                restrict_info,
-                                                chosen_instances, NULL
+      // Now we can perform our close operation
+      runtime->forest->physical_perform_close(requirement,
+                                              version_info, this, 0/*idx*/,
+                                              closed_tree, 
+                                              close_node, close_mask,
+                                              map_applied_conditions,
+                                              restrict_info,
+                                              chosen_instances
 #ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
+                                              , get_logging_name()
+                                              , unique_op_id
 #endif
-                                                );
-        // The physical perform close call took ownership
-        closed_tree = NULL;
-      }
+                                              );
+      // The physical perform close call took ownership
+      closed_tree = NULL;
       if (Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -7218,24 +7072,325 @@ namespace Legion {
         Runtime::trigger_event(profiling_reported);
     }
 
+    /////////////////////////////////////////////////////////////
+    // Index Close Operation 
+    /////////////////////////////////////////////////////////////
+
     //--------------------------------------------------------------------------
-    /*static*/ void InterCloseOp::handle_disjoint_close(const void *args)
+    IndexCloseOp::IndexCloseOp(Runtime *rt)
+      : InterCloseOp(rt)
     //--------------------------------------------------------------------------
     {
-      const DisjointCloseArgs *close_args = (const DisjointCloseArgs*)args;
-      DisjointCloseInfo *close_info = 
-        close_args->proxy_this->find_disjoint_close_child(0/*index*/, 
-                                                   close_args->child_node);
-      std::set<RtEvent> done_events;
-      close_args->proxy_this->perform_disjoint_close(close_args->child_node,
-                                                     *close_info, done_events);
-      // We actually have to wait for these events to be done
-      // since our completion event was put in the map_applied conditions
-      if (!done_events.empty())
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCloseOp::IndexCloseOp(const IndexCloseOp &rhs)
+      : InterCloseOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCloseOp::~IndexCloseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCloseOp& IndexCloseOp::operator=(const IndexCloseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCloseOp::initialize(TaskContext *ctx,const RegionRequirement &req,
+                           ClosedNode *closed_tree, const TraceInfo &trace_info,
+                           int close_idx, const VersionInfo &version_info,
+                           const FieldMask &close_mask, Operation *create_op,
+                           const Domain &close_domain)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == PART_PROJECTION);
+      assert(req.projection == 0); // should be the default projection funciton
+#endif
+      InterCloseOp::initialize(ctx, req, closed_tree, trace_info, close_idx, 
+                               version_info, close_mask, create_op);
+      point_domain = close_domain;
+      projection_info = ProjectionInfo(runtime, requirement, point_domain);
+#ifdef LEGION_SPY
+      if (Runtime::legion_spy_enabled)
       {
-        RtEvent wait_on = Runtime::merge_events(done_events);
-        wait_on.wait();
+        std::set<FieldID> disjoint_close_fields;
+#ifdef DEBUG_LEGION
+        assert(closed_tree != NULL);
+#endif
+        closed_tree->node->column_source->get_field_set(close_mask,
+            requirement.privilege_fields, disjoint_close_fields);
+        for (std::set<FieldID>::const_iterator it = 
+              disjoint_close_fields.begin(); it != 
+              disjoint_close_fields.end(); it++)
+          LegionSpy::log_disjoint_close_field(unique_op_id, *it);
       }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCloseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_inter_close();
+      point_domain = Domain::NO_DOMAIN;
+      points_committed = 0;
+      commit_request = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCloseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_inter_close();
+      projection_info.clear();
+      // We can deactivate our point operations
+      for (std::vector<PointCloseOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+        (*it)->deactivate();
+      points.clear();
+      // Return the operation to the runtime
+      runtime->free_index_close_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCloseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the upper bound version analysis first
+      std::set<RtEvent> preconditions;
+      if (!version_info.has_physical_states())
+      {
+        const bool partial_traversal = 
+          (projection_info.projection_type == PART_PROJECTION) ||
+          ((projection_info.projection_type != SINGULAR) && 
+           (projection_info.projection->depth > 0));
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/, 
+                                                     requirement,
+                                                     privilege_path,
+                                                     version_info,
+                                                     preconditions,
+                                                     partial_traversal);
+      }
+      // Now enumerate the points
+      size_t num_points = point_domain.get_volume();
+#ifdef DEBUG_LEGION
+      assert(num_points > 0);
+#endif
+      unsigned point_idx = 0;
+      points.resize(num_points);
+      for (Domain::DomainPointIterator itr(point_domain); 
+            itr; itr++, point_idx++)
+      {
+        PointCloseOp *point = runtime->get_available_point_close_op(false);
+        point->initialize(this, itr.p);
+        points[point_idx] = point;
+      }
+      // Now we have to do the projection
+      ProjectionFunction *function = 
+        runtime->find_projection_function(requirement.projection);
+      std::vector<ProjectionPoint*> projection_points(points.begin(),
+                                                      points.end());
+      function->project_points(this, 0/*idx*/, requirement,
+                               runtime, projection_points);
+      // Launch the points
+      std::set<RtEvent> mapped_preconditions;
+      std::set<ApEvent> executed_preconditions;
+      for (std::vector<PointCloseOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+      {
+        mapped_preconditions.insert((*it)->get_mapped_event());
+        executed_preconditions.insert((*it)->get_completion_event());
+        (*it)->launch(preconditions);
+      }
+      // Record that we are mapped when all our points are mapped
+      // and we are executed when all our points are executed
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      complete_execution(Runtime::protect_event(
+                          Runtime::merge_events(executed_preconditions)));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCloseOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called as this operation doesn't
+      // go through the rest of the queue normally
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCloseOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!commit_request);
+#endif
+        commit_request = true;
+        commit_now = (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCloseOp::handle_point_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      RtEvent commit_pre;
+      {
+        AutoLock o_lock(op_lock);
+        points_committed++;
+        commit_now = commit_request && (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Point Close Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointCloseOp::PointCloseOp(Runtime *rt)
+      : InterCloseOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointCloseOp::PointCloseOp(const PointCloseOp &rhs)
+      : InterCloseOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PointCloseOp::~PointCloseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointCloseOp& PointCloseOp::operator=(const PointCloseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCloseOp::initialize(IndexCloseOp *own, const DomainPoint &p)
+    //--------------------------------------------------------------------------
+    {
+      // Initialize the operation
+      initialize_operation(own->get_context(), false/*track*/, 1/*regions*/);
+      point = p;
+      owner = own;
+      // From Close
+      requirement = owner->get_requirement();
+      parent_task = owner->parent_task;
+      map_id      = owner->map_id;
+      tag         = owner->tag;
+      // From InterCloseOp
+      close_mask       = owner->close_mask;
+      parent_req_index = owner->parent_req_index;
+      restrict_info    = owner->restrict_info;
+    } 
+
+    //--------------------------------------------------------------------------
+    void PointCloseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_inter_close();
+      owner = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCloseOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_inter_close();
+      runtime->free_point_close_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCloseOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCloseOp::launch(const std::set<RtEvent> &index_preconditions)
+    //--------------------------------------------------------------------------
+    {
+      version_info = owner->version_info;
+      // Perform the version info
+      std::set<RtEvent> preconditions(index_preconditions);
+      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+      perform_projection_version_analysis(owner->projection_info, 
+          owner->get_requirement(), requirement, 0/*idx*/, 
+          logical_context_uid, version_info, preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+      // We can also mark this as having resolved any predication
+      resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCloseOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.clear();
+      // Tell our owner that we are done
+      owner->handle_point_commit();
+      // Don't commit this operation until we've reported our profiling
+      // Out index owner will deactivate the operation
+      commit_operation(false/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    const DomainPoint& PointCloseOp::get_domain_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return point;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCloseOp::set_projection_result(unsigned idx, LogicalRegion result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx == 0);
+#endif
+      requirement.region = result;
+      requirement.handle_type = SINGULAR;
+      // Now get the close node
+      closed_tree = owner->closed_tree->clone_disjoint_projection(
+          runtime->forest->get_node(result), close_mask);
     }
 
     /////////////////////////////////////////////////////////////
@@ -12626,7 +12781,7 @@ namespace Legion {
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
         enqueue_ready_operation();
-      // We can also mark this as having our resolved any predication
+      // We can also mark this as having resolved any predication
       resolve_speculation();
     }
 

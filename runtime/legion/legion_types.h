@@ -306,7 +306,6 @@ namespace Legion {
       LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
       LG_ADD_VERSIONING_SET_REF_TASK_ID,
       LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
-      LG_DISJOINT_CLOSE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
@@ -402,7 +401,6 @@ namespace Legion {
         "Defer Task Map and Launch",                              \
         "Defer Versioning Set Reference",                         \
         "Version State Capture Dirty",                            \
-        "Disjoint Close",                                         \
         "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
@@ -1146,6 +1144,8 @@ namespace Legion {
     class AdvanceOp;
     class CloseOp;
     class InterCloseOp;
+    class IndexCloseOp;
+    class PointCloseOp;
     class ReadCloseOp;
     class PostCloseOp;
     class VirtualCloseOp;
@@ -1318,6 +1318,8 @@ namespace Legion {
     friend class Internal::AdvanceOp;                       \
     friend class Internal::CloseOp;                         \
     friend class Internal::InterCloseOp;                    \
+    friend class Internal::IndexCloseOp;                    \
+    friend class Internal::PointCloseOp;                    \
     friend class Internal::ReadCloseOp;                     \
     friend class Internal::PostCloseOp;                     \
     friend class Internal::VirtualCloseOp;                  \

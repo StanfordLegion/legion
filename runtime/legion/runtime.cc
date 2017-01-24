@@ -15992,6 +15992,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexCloseOp* Runtime::get_available_index_close_op(bool need_cont,
+                                                        bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<IndexCloseOp*,
+                     &Runtime::get_available_index_close_op> 
+                       continuation(this, inter_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(inter_close_op_lock, 
+                           available_index_close_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    PointCloseOp* Runtime::get_available_point_close_op(bool need_cont,
+                                                        bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<PointCloseOp*,
+                     &Runtime::get_available_point_close_op> 
+                       continuation(this, inter_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(inter_close_op_lock, 
+                           available_point_close_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     ReadCloseOp* Runtime::get_available_read_close_op(bool need_cont,
                                                        bool has_lock)
     //--------------------------------------------------------------------------
@@ -16513,6 +16551,22 @@ namespace Legion {
     {
       AutoLock i_lock(inter_close_op_lock);
       available_inter_close_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_index_close_op(IndexCloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inter_close_op_lock);
+      available_index_close_ops.push_front(op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_close_op(PointCloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inter_close_op_lock);
+      available_point_close_ops.push_front(op);
     }
 
     //--------------------------------------------------------------------------
@@ -19611,11 +19665,6 @@ namespace Legion {
         case LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID:
           {
             VersionManager::process_capture_dirty(args);
-            break;
-          }
-        case LG_DISJOINT_CLOSE_TASK_ID:
-          {
-            InterCloseOp::handle_disjoint_close(args);
             break;
           }
         case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:

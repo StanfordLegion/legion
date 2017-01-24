@@ -1627,7 +1627,7 @@ namespace Legion {
                         unsigned idx, const RegionRequirement &req,
                         const RegionTreePath &path, VersionInfo &version_info,
                         std::set<RtEvent> &ready_events, bool partial_traversal,
-                        bool disjoint_close, FieldMask *filter_mask,
+                        FieldMask *filter_mask,
                         RegionTreeNode *parent_node, UniqueID logical_ctx_uid,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs,
                         bool skip_parent_check)
@@ -1667,8 +1667,7 @@ namespace Legion {
                                            user_mask, unversioned_mask,
                                            op, idx, context, version_info, 
                                            ready_events, partial_traversal,
-                                           disjoint_close, logical_ctx_uid,
-                                           advance_epochs);
+                                           logical_ctx_uid, advance_epochs);
     }
 
     //--------------------------------------------------------------------------
@@ -2362,8 +2361,7 @@ namespace Legion {
                 VersionInfo &version_info, Operation *op, unsigned index, 
                 ClosedNode *closed_tree, RegionTreeNode *close_node,
                 const FieldMask &closing_mask, std::set<RtEvent> &map_applied, 
-                const RestrictInfo &restrict_info, const InstanceSet &targets,
-      const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs
+                const RestrictInfo &restrict_info, const InstanceSet &targets
 #ifdef DEBUG_LEGION
                 , const char *log_name
                 , UniqueID uid
@@ -2382,26 +2380,30 @@ namespace Legion {
       const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
       // Always build the composite instance, and then optionally issue
       // update copies to the target instances from the composite instance
+      FieldMask composite_mask = closing_mask;
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
-                          closing_mask, version_info, logical_ctx_uid, 
-                          context, closed_tree, map_applied, projection_epochs);
+                          composite_mask, version_info, logical_ctx_uid, 
+                          context, closed_tree, map_applied);
       if (targets.empty())
         return;
-      PhysicalState *physical_state = NULL;
+      PhysicalState *physical_state = 
+        close_node->get_physical_state(version_info);
       LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
-      bool need_valid = true;
+      if (result != NULL)
+        valid_instances[result] = composite_mask;
+      if (composite_mask != closing_mask)
+      {
+        FieldMask remaining = closing_mask - composite_mask;
+        close_node->find_valid_instance_views(ctx.get_id(), physical_state,
+                                        remaining, remaining, version_info, 
+                                        false/*needs space*/, valid_instances);
+      }
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
         const InstanceRef &target_ref = targets[idx];
         if (!target_ref.has_ref() || target_ref.is_virtual_ref())
           continue;
         // Issue the update copies to this instance
-        if (need_valid)
-        {
-          valid_instances[result] = closing_mask;
-          physical_state = close_node->get_physical_state(version_info);
-          need_valid = false;
-        }
 #ifdef DEBUG_LEGION
         assert(target_ref.has_ref());
 #endif
@@ -2421,20 +2423,6 @@ namespace Legion {
         close_node->update_valid_views(physical_state, target_mask,
                                        false/*dirty*/, target_view);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::physical_disjoint_close(InterCloseOp *op, 
-                       unsigned index, RegionTreeNode *close_node, 
-                       const FieldMask &closing_mask, VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-      InnerContext *context = op->find_physical_context(index);
-#ifdef DEBUG_LEGION
-      assert(!close_node->is_region());
-#endif
-      close_node->as_partition_node()->perform_disjoint_close(op, index, 
-                                    context, closing_mask, version_info);
     }
 
     //--------------------------------------------------------------------------
@@ -11439,8 +11427,6 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   closer.record_read_only_close(overlap, true/*projection*/);
-                  // Advance the projection epochs
-                  state.advance_projection_epochs(overlap);
                 }
                 it->valid_fields -= current_mask;
                 if (!it->valid_fields)
@@ -11470,8 +11456,6 @@ namespace Legion {
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
                 }
-                // Advance the projection epochs
-                state.advance_projection_epochs(overlap);
               }
               it->valid_fields -= current_mask;
               if (!it->valid_fields)
@@ -11502,8 +11486,6 @@ namespace Legion {
                     state.capture_close_epochs(overlap,
                                                closer.find_closed_node(this));
                   }
-                  // Advance the projection epochs
-                  state.advance_projection_epochs(overlap);
                 }
                 it->valid_fields -= current_mask;
                 if (!it->valid_fields)
@@ -11690,8 +11672,6 @@ namespace Legion {
                                                 disjoint_close);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
-                  // Advance the projection epochs
-                  state.advance_projection_epochs(overlap);
                   // If we are doing a disjoint close, update the open
                   // states with the appropriate new state
                   if (disjoint_close)
@@ -11771,8 +11751,6 @@ namespace Legion {
                   closer.record_close_operation(overlap, true/*projection*/);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
-                  // Advance the projection epochs
-                  state.advance_projection_epochs(overlap);
                 }
                 it->valid_fields -= current_mask;
                 if (!it->valid_fields)
@@ -11800,8 +11778,6 @@ namespace Legion {
                                                 disjoint_close);
                   state.capture_close_epochs(overlap,
                                              closer.find_closed_node(this));
-                  // Advance the projection epochs
-                  state.advance_projection_epochs(overlap);
                   // If we're doing a disjoint close update the open
                   // states accordingly 
                   if (disjoint_close)
@@ -11896,7 +11872,6 @@ namespace Legion {
             if (!!state.dirty_fields)
               closed_node->record_closed_fields(overlap & state.dirty_fields);
             state.capture_close_epochs(overlap, closed_node);
-            state.advance_projection_epochs(overlap);
             it->valid_fields -= overlap;
             flushed_fields |= overlap;
           }
@@ -12744,8 +12719,6 @@ namespace Legion {
             {
               // Do a read only close here 
               closer.record_read_only_close(overlap, true/*projection*/);
-              // Advance the projection epochs
-              state.advance_projection_epochs(overlap);
               it->valid_fields -= current_mask;
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
@@ -12761,8 +12734,6 @@ namespace Legion {
               closer.record_close_operation(overlap, true/*projection*/);
               state.capture_close_epochs(overlap,
                                          closer.find_closed_node(this));
-              // Advance the projection epochs
-              state.advance_projection_epochs(overlap);
               it->valid_fields -= current_mask;
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
@@ -12983,7 +12954,6 @@ namespace Legion {
                                                VersionInfo &version_info,
                                                std::set<RtEvent> &ready_events,
                                                bool partial_traversal,
-                                               bool disjoint_close,
                                                UniqueID logical_context_uid,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
     //--------------------------------------------------------------------------
@@ -13004,11 +12974,6 @@ namespace Legion {
           manager.record_path_only_versions(version_mask, split_mask,
                                unversioned_mask, parent_ctx, op, idx, 
                                usage, version_info, ready_events);
-        }
-        else if (disjoint_close)
-        {
-          manager.record_disjoint_close_versions(version_mask, 
-                    parent_ctx, op, idx, version_info, ready_events);
         }
         else
         {
@@ -13040,7 +13005,7 @@ namespace Legion {
         child->compute_version_numbers(ctx, path, usage, version_mask,
                           unversioned_mask, op, idx, parent_ctx, 
                           version_info, ready_events, partial_traversal,
-                          disjoint_close, logical_context_uid, advance_epochs);
+                          logical_context_uid, advance_epochs);
       }
     }
 
@@ -13107,18 +13072,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView* RegionTreeNode::create_composite_instance(ContextID ctx_id,
-                                                const FieldMask &closing_mask,
+                                                FieldMask &composite_mask,
                                                 VersionInfo &version_info, 
                                                 UniqueID logical_context_uid,
                                                 InnerContext *owner_ctx,
                                                 ClosedNode *closed_tree,
-                                                std::set<RtEvent> &ready_events,
-                  const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs)
+                                                std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(version_info.is_upper_bound_set());
 #endif
+      // Capture the state of the top of the composite view
+      PhysicalState *state = get_physical_state(version_info);
+      // Before even doing the close operation see if we can skip 
+      // building the composite instance because there is no dirty
+      // data below and there are no reductions, this can happen
+      // because the logical analysis over-approximates the closes
+      // that need to be done in some cases (e.g. projections)
+      state->filter_composite_mask(composite_mask);
+      // If there is no need to do the close then we are done
+      if (!composite_mask)
+        return NULL;
       const AddressSpace local_space = context->runtime->address_space;
       // First we need to record the rest of our closed versions
       VersionManager &manager = get_current_version_manager(ctx_id);
@@ -13130,28 +13105,10 @@ namespace Legion {
       // is necessary to maintain the monotonicity of the 
       // version state objects.
       const bool update_parent_state = !version_info.is_upper_bound_node(this);
-      if (epochs != NULL)
-      {
-        // This is the uncommon case that occurs when we are doing a 
-        // disjoint partition close and we're actually closing each 
-        // of the children individually. We we do this we need to advance
-        // with an open of the new projection epoch
-        for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
-              it = epochs->begin(); it != epochs->end(); it++)
-        {
-          FieldMask overlap = it->second & closing_mask;
-          if (!overlap)
-            continue;
-          manager.advance_versions(overlap, logical_context_uid, owner_ctx, 
-                                   true/*update parent*/, local_space, 
-                                   ready_events, true/*dedup opens*/,it->first);
-        }
-      }
-      else // The common case
-        manager.advance_versions(closing_mask, logical_context_uid, owner_ctx,
-                                 update_parent_state, local_space,ready_events);
+      manager.advance_versions(composite_mask, logical_context_uid, owner_ctx,
+                               update_parent_state, local_space,ready_events);
       // Now we can record our advance versions
-      manager.record_advance_versions(closing_mask, owner_ctx, 
+      manager.record_advance_versions(composite_mask, owner_ctx, 
                                       version_info, ready_events);
       // Fix the closed tree
       closed_tree->fix_closed_tree();
@@ -13164,8 +13121,7 @@ namespace Legion {
       CompositeView *result = legion_new<CompositeView>(context, did, 
                            local_space, this, local_space, view_info, 
                            closed_tree, owner_ctx, true/*register now*/);
-      // Capture the state of the top of the composite view
-      PhysicalState *state = get_physical_state(version_info);
+      
       LegionMap<LogicalView*,FieldMask>::aligned valid_above;
       // See if we have any valid views above we need to capture
       if (!version_info.is_upper_bound_node(this))
@@ -13173,7 +13129,7 @@ namespace Legion {
         RegionTreeNode *parent = get_parent();
         if (parent != NULL)
         {
-          FieldMask up_mask = closing_mask - state->dirty_mask;
+          FieldMask up_mask = composite_mask - state->dirty_mask;
           if (!!up_mask)
           {
             PhysicalState *parent_state = 
@@ -13191,12 +13147,12 @@ namespace Legion {
           }
         }
       }
-      state->capture_composite_root(result, closing_mask, valid_above);
+      state->capture_composite_root(result, composite_mask, valid_above);
       result->finalize_capture(true/*prune*/);
       // Clear out any reductions
-      invalidate_reduction_views(state, closing_mask);
+      invalidate_reduction_views(state, composite_mask);
       // Update the valid views to reflect the new valid instance
-      update_valid_views(state, closing_mask, true/*dirty*/, result);  
+      update_valid_views(state, composite_mask, true/*dirty*/, result);  
       return result;
     }
 
@@ -14649,7 +14605,7 @@ namespace Legion {
         return dominator_mask;
     }
 
-    // This function is a little out of place to make sure we get the 
+    // This function is a little out of place to make sure we get the
     // templates instantiated properly
     //--------------------------------------------------------------------------
     void LogicalCloser::register_dependences(CloseOp *close_op,
@@ -17320,19 +17276,6 @@ namespace Legion {
           results[index] = parent_view->get_instance_subview(row_source->color);
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::perform_disjoint_close(InterCloseOp *op, unsigned index,
-                           InnerContext *context, const FieldMask &closing_mask,
-                           VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(row_source->is_disjoint());
-#endif
-      PhysicalState *state = get_physical_state(version_info);
-      state->perform_disjoint_close(op, index, context, closing_mask);
     }
 
     //--------------------------------------------------------------------------

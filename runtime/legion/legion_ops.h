@@ -1224,6 +1224,7 @@ namespace Legion {
     public:
       virtual void trigger_commit(void);
     protected:
+      friend class PointCloseOp;
       RegionTreePath privilege_path;
       VersionInfo    version_info;
       RestrictInfo   restrict_info;
@@ -1237,21 +1238,6 @@ namespace Legion {
      */
     class InterCloseOp : public CloseOp {
     public:
-      struct DisjointCloseInfo {
-      public:
-        FieldMask close_mask;
-        VersionInfo version_info;
-        ClosedNode *close_node;
-        std::set<RtEvent> ready_events;
-      };
-      struct DisjointCloseArgs : public LgTaskArgs<DisjointCloseArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DISJOINT_CLOSE_TASK_ID;
-      public:
-        InterCloseOp *proxy_this;
-        RegionTreeNode *child_node;
-      };
-    public:
       InterCloseOp(Runtime *runtime);
       InterCloseOp(const InterCloseOp &rhs);
       virtual ~InterCloseOp(void);
@@ -1264,13 +1250,10 @@ namespace Legion {
                       ClosedNode *closed_tree, const TraceInfo &trace_info,
                       int close_idx, const VersionInfo &version_info,
                       const FieldMask &close_mask, Operation *create_op);
-      ProjectionInfo& initialize_disjoint_close(const FieldMask &disjoint_mask,
-                                                const Domain &launch_domain);
-      DisjointCloseInfo* find_disjoint_close_child(unsigned index,
-                                                   RegionTreeNode *child);
-      void perform_disjoint_close(RegionTreeNode *child_to_close, 
-                                  DisjointCloseInfo &close_info,
-                                  std::set<RtEvent> &ready_events);
+      void activate_inter_close(void);
+      void deactivate_inter_close(void);
+      inline const RegionRequirement& get_requirement(void) const 
+        { return requirement; }
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1296,17 +1279,11 @@ namespace Legion {
                                           Realm::ProfilingRequestSet &reqeusts);
       virtual void report_profiling_response(
                                     const Realm::ProfilingResponse &response);
-    public:
-      static void handle_disjoint_close(const void *args);
     protected:
+      friend class PointCloseOp;
       FieldMask close_mask;
       ClosedNode *closed_tree;
       InstanceSet chosen_instances;
-    protected:
-      // For disjoint partition closes with projections
-      FieldMask disjoint_close_mask;
-      ProjectionInfo projection_info;
-      LegionMap<RegionTreeNode*,DisjointCloseInfo>::aligned children_to_close;
     protected:
       unsigned parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
@@ -1317,6 +1294,73 @@ namespace Legion {
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                     outstanding_profiling_requests;
       RtUserEvent                         profiling_reported;
+    };
+
+    /**
+     * \class IndexCloseOp
+     * An index space close operation is the same as normal close
+     * operation but it performs a set of closes for multiple points
+     * based on a projection function
+     */
+    class IndexCloseOp : public InterCloseOp {
+    public:
+      IndexCloseOp(Runtime *rt);
+      IndexCloseOp(const IndexCloseOp &rhs);
+      virtual ~IndexCloseOp(void);
+    public:
+      IndexCloseOp& operator=(const IndexCloseOp &rhs);
+    public:
+      void initialize(TaskContext *ctx, const RegionRequirement &req,
+                      ClosedNode *closed_tree, const TraceInfo &trace_info,
+                      int close_idx, const VersionInfo &version_info,
+                      const FieldMask &close_mask, Operation *create_op,
+                      const Domain &close_domain);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+      virtual void trigger_commit(void);
+    public:
+      void handle_point_commit(void);
+    public:
+      ProjectionInfo                projection_info;
+    protected:
+      Domain                        point_domain;
+      std::vector<PointCloseOp*>    points;
+      unsigned                      points_committed;
+      bool                          commit_request;
+    };
+
+    /**
+     * \class PointCloseOp
+     * A point close operation is used for executing the physical part
+     * fo the analysis for an index close operation
+     */
+    class PointCloseOp : public InterCloseOp, public ProjectionPoint {
+    public:
+      PointCloseOp(Runtime *rt);
+      PointCloseOp(const PointCloseOp &rhs);
+      virtual ~PointCloseOp(void);
+    public:
+      PointCloseOp& operator=(const PointCloseOp &rhs);
+    public:
+      void initialize(IndexCloseOp *owner, const DomainPoint &point);
+      void launch(const std::set<RtEvent> &preconditions);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void trigger_ready(void);
+      // trigger_mapping same as base class
+      virtual void trigger_commit(void);
+    public:
+      // From ProjectionPoint
+      virtual const DomainPoint& get_domain_point(void) const;
+      virtual void set_projection_result(unsigned idx, LogicalRegion result);
+    protected:
+      DomainPoint               point;
+      IndexCloseOp*             owner;
     };
     
     /**
@@ -2365,7 +2409,7 @@ namespace Legion {
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
-      virtual void set_projection_result(unsigned idx,LogicalRegion result);
+      virtual void set_projection_result(unsigned idx, LogicalRegion result);
     protected:
       DomainPoint               point;
       IndexFillOp*              owner;

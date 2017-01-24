@@ -2389,6 +2389,10 @@ namespace Legion {
                                                   bool has_lock = false);
       InterCloseOp*         get_available_inter_close_op(bool need_cont,
                                                   bool has_lock = false);
+      IndexCloseOp*         get_available_index_close_op(bool need_cont,
+                                                  bool has_lock = false);
+      PointCloseOp*         get_available_point_close_op(bool need_cont,
+                                                  bool has_lock = false);
       ReadCloseOp*          get_available_read_close_op(bool need_cont,
                                                   bool has_lock = false);
       PostCloseOp*          get_available_post_close_op(bool need_cont,
@@ -2446,6 +2450,8 @@ namespace Legion {
       void free_open_op(OpenOp *op);
       void free_advance_op(AdvanceOp *op);
       void free_inter_close_op(InterCloseOp *op); 
+      void free_index_close_op(IndexCloseOp *op);
+      void free_point_close_op(PointCloseOp *op);
       void free_read_close_op(ReadCloseOp *op);
       void free_post_close_op(PostCloseOp *op);
       void free_virtual_close_op(VirtualCloseOp *op);
@@ -2738,6 +2744,8 @@ namespace Legion {
       std::deque<OpenOp*>               available_open_ops;
       std::deque<AdvanceOp*>            available_advance_ops;
       std::deque<InterCloseOp*>         available_inter_close_ops;
+      std::deque<IndexCloseOp*>         available_index_close_ops;
+      std::deque<PointCloseOp*>         available_point_close_ops;
       std::deque<ReadCloseOp*>          available_read_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
       std::deque<VirtualCloseOp*>       available_virtual_close_ops;

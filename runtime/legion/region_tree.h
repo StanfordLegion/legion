@@ -262,7 +262,6 @@ namespace Legion {
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
                                        bool partial_traversal = false,
-                                       bool disjoint_close = false,
                                        FieldMask *filter_mask = NULL,
                                        RegionTreeNode *parent_node = NULL,
               // For computing split masks for projection epochs only
@@ -348,18 +347,12 @@ namespace Legion {
                                   const FieldMask &closing_mask,
                                   std::set<RtEvent> &map_applied,
                                   const RestrictInfo &restrict_info,
-                                  const InstanceSet &targets,
-                                  // projection_epochs can be NULL
-        const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs
+                                  const InstanceSet &targets
 #ifdef DEBUG_LEGION
                                   , const char *log_name
                                   , UniqueID uid
 #endif
                                   );
-      void physical_disjoint_close(InterCloseOp *op, unsigned index, 
-                                   RegionTreeNode *close_node,
-                                   const FieldMask &closing_mask,
-                                   VersionInfo &version_info);
       ApEvent physical_close_context(RegionTreeContext ctx,
                                      const RegionRequirement &req,
                                      VersionInfo &version_info,
@@ -1427,7 +1420,6 @@ namespace Legion {
                                    VersionInfo &version_info,
                                    std::set<RtEvent> &ready_events,
                                    bool partial_traversal,
-                                   bool disjoint_close,
                                    UniqueID logical_context_uid,
         const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs);
       void advance_version_numbers(ContextID ctx,
@@ -1453,13 +1445,12 @@ namespace Legion {
     public:
       // Physical traversal operations
       CompositeView* create_composite_instance(ContextID ctx_id,
-                                     const FieldMask &closing_mask,
+                                     FieldMask &closing_mask,
                                      VersionInfo &version_info,
                                      UniqueID logical_context_uid,
                                      InnerContext *owner_context,
                                      ClosedNode *closed_tree,
-                                     std::set<RtEvent> &ready_events,
-        const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs); 
+                                     std::set<RtEvent> &ready_events);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
@@ -1969,10 +1960,6 @@ namespace Legion {
                                   std::vector<bool> &up_mask, 
                                   InnerContext *context,
                                   std::vector<InstanceView*> &results);
-    public:
-      void perform_disjoint_close(InterCloseOp *op, unsigned idx,
-              InnerContext *context, const FieldMask &closing_mask, 
-              VersionInfo &version_info);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
