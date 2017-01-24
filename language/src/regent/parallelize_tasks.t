@@ -1581,6 +1581,9 @@ local function collect_calls(cx, parallelizable)
           end
         end
         continuation(node, true)
+      elseif node:is(ast.typed.stat.ParallelizeWith) then
+        node.hints:map(function(hint) print(render(hint)) end)
+        continuation(node, true)
       else
         continuation(node, true)
       end
@@ -1877,6 +1880,13 @@ local function transform_task_launches(parallelizable, caller_cx, call_stats)
       end
 
       return stats
+    elseif node:is(ast.typed.stat.ParallelizeWith) then
+      node = continuation(node, true)
+      return ast.typed.stat.Block {
+        block = node.block,
+        span = node.span,
+        annotations = node.annotations,
+      }
     else
       return continuation(node, true)
     end
