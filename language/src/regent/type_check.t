@@ -3454,7 +3454,7 @@ function type_check.stat_raw_delete(cx, node)
 end
 
 function type_check.stat_parallelize_with(cx, node)
-  local exprs = node.exprs:map(function(expr)
+  local hints = node.hints:map(function(expr)
     if expr:is(ast.specialized.expr.ID) then
       local value = type_check.expr_id(cx, expr)
       local value_type = std.check_read(cx, value)
@@ -3472,7 +3472,7 @@ function type_check.stat_parallelize_with(cx, node)
   end)
 
   return ast.typed.stat.ParallelizeWith {
-    exprs = exprs,
+    hints = hints,
     block = type_check.block(cx, node.block),
     annotations = node.annotations,
     span = node.span,

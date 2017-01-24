@@ -1608,30 +1608,30 @@ function specialize.stat_raw_delete(cx, node)
 end
 
 function specialize.stat_parallelize_with(cx, node)
-  local exprs = node.exprs:map(function(expr)
-    local value = specialize.expr(cx, expr)
-    if not (value:is(ast.specialized.expr.ID) or value:is(ast.specialized.expr.Binary)) then
-      report.error(node, "parallelizer hint should be a partition or constraint on two partitions")
-    elseif value:is(ast.specialized.expr.Binary) then
-      if not (value.op == "<=" or value.op == ">=") then
-        report.error(node, "operator '" .. value.op .."' is not supported in parallelizer hints")
+  local hints = node.hints:map(function(expr)
+    local hint = specialize.expr(cx, expr)
+    if not (hint:is(ast.specialized.expr.ID) or hint:is(ast.specialized.expr.Binary)) then
+      report.error(hint, "parallelizer hint should be a partition or constraint on two partitions")
+    elseif hint:is(ast.specialized.expr.Binary) then
+      if not (hint.op == "<=" or hint.op == ">=") then
+        report.error(hint, "operator '" .. hint.op .."' is not supported in parallelizer hints")
       end
-      if value.op == ">=" then
-        value = value {
-          lhs = value.rhs,
-          rhs = value.lhs,
+      if hint.op == ">=" then
+        hint = hint {
+          lhs = hint.rhs,
+          rhs = hint.lhs,
           op = "<="
         }
       end
-      if not ((value.lhs:is(ast.specialized.expr.Image) and value.rhs:is(ast.specialized.expr.ID)) or
-              (value.lhs:is(ast.specialized.expr.ID) and value.rhs:is(ast.specialized.expr.Preimage))) then
+      if not ((hint.lhs:is(ast.specialized.expr.Image) and hint.rhs:is(ast.specialized.expr.ID)) or
+              (hint.lhs:is(ast.specialized.expr.ID) and hint.rhs:is(ast.specialized.expr.Preimage))) then
         report.error(node, "unsupported constraint for parallelizer hints")
       end
     end
-    return value
+    return hint
   end)
   return ast.specialized.stat.ParallelizeWith {
-    exprs = exprs,
+    hints = hints,
     block = specialize.block(cx, node.block),
     annotations = node.annotations,
     span = node.span,

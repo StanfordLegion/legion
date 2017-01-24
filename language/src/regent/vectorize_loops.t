@@ -1091,10 +1091,6 @@ function vectorize_loops.stat_block(node)
   return node { block = vectorize_loops.block(node.block) }
 end
 
-function vectorize_loops.stat_parallelize_with(node)
-  return node { block = vectorize_loops.block(node.block) }
-end
-
 function vectorize_loops.stat(node)
   if node:is(ast.typed.stat.If) then
     return vectorize_loops.stat_if(node)
@@ -1162,9 +1158,6 @@ function vectorize_loops.stat(node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return node
-
-  elseif node:is(ast.typed.stat.ParallelizeWith) then
-    return vectorize_loops.stat_parallelize_with(node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

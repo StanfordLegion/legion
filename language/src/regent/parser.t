@@ -1644,16 +1644,16 @@ end
 function parser.stat_parallelize_with(p, annotations)
   local start = ast.save(p)
   p:expect("__parallelize_with")
-  local exprs = terralib.newlist()
-  exprs:insert(p:expr())
+  local hints = terralib.newlist()
+  hints:insert(p:expr())
   while p:nextif(",") do
-    exprs:insert(p:expr())
+    hints:insert(p:expr())
   end
   p:expect("do")
   local block = p:block()
   p:expect("end")
   return ast.unspecialized.stat.ParallelizeWith {
-    exprs = exprs,
+    hints = hints,
     block = block,
     annotations = annotations,
     span = ast.span(start, p),

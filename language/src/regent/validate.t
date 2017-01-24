@@ -205,8 +205,7 @@ local function validate_vars_node(cx)
       cx:pop_local_scope()
 
     elseif node:is(ast.typed.stat.MustEpoch) or
-      node:is(ast.typed.stat.Block) or
-      node:is(ast.typed.stat.ParallelizeWith)
+      node:is(ast.typed.stat.Block)
     then
       cx:push_local_scope()
       continuation(node.block)
