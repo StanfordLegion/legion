@@ -1,5 +1,5 @@
-var constants = {
-  margin_left: 300,
+const constants = {
+  margin_left: 310,
   margin_right: 50,
   margin_bottom: 50,
   margin_top: 50,
@@ -7,11 +7,13 @@ var constants = {
   min_gap_width: 1,
   stats_height: 100,
   stats_levels: 4,
-  line_colors: ["green", "red", "purple", "orange", "grey"]
+  elem_separation: 2,
+  line_colors: ["limegreen", "crimson", "goldenrod", "sienna", "orangered",
+                "palevioletred", "olivedrab", "cornflowerblue"]
 }
 
-var stats_files = [];
-var stats_counter = 0;
+// Contains the children for each stats file
+var stats_files = {};
 
 var state = {};
 var mouseX = 0;
@@ -20,7 +22,22 @@ var statsline = d3.svg.line()
     .x(function(d) { return state.x(+d.time); })
     .y(function(d) { return state.y(+d.count); });
 var timeBisector = d3.bisector(function(d) { return d.time; }).left;
+// const num_colors = 20;
+// var color = d3.scale.linear()
+//   .domain([0, num_colors])
+//   .range(["green", "blue", "red", "yellow"]);
 
+String.prototype.hashCode = function() {
+  var hash = 0;
+  if (this.length == 0) return hash;
+  for (i = 0; i < this.length; i++) {
+    var c = this.charCodeAt(i);
+    var b = this.charCodeAt(c % this.length);
+    hash = ((hash<<5)-hash)^c^b;
+    hash = hash & hash; 
+  }
+  return Math.abs(hash);
+}
 
 function parseURLParameters() {
   var match,
@@ -166,9 +183,9 @@ function drawStats() {
   var start_time = convertToTime(state, windowStart);
   var end_time = convertToTime(state, windowEnd);
   var filteredStatsData = [];
-  for (var i = 0; i < state.newLayoutData.length; i++) {
-    var elem = state.newLayoutData[i];
-    if (elem.type == "stats" && elem.enabled &&elem.loaded) {
+  for (var i = 0; i < state.flattenedLayoutData.length; i++) {
+    var elem = state.flattenedLayoutData[i];
+    if (elem.type == "stats" && elem.enabled && elem.loaded && elem.visible) {
       filteredStatsData.push(filterStatsData(elem));
     }
   }
@@ -194,8 +211,8 @@ function drawStats() {
         if (d.text == "all nodes") {
           return "steelblue";
         } else {
-          var i = +(d.text.split(" ")[1])
-          return constants.line_colors[i % constants.line_colors.length];
+          var num_colors = constants.line_colors.length;
+          return constants.line_colors[d.text.hashCode() % num_colors];
         }
     })
     .on("mouseover", function() { 
@@ -330,15 +347,15 @@ function getMouseOver() {
       .attr("class", "desc")
       .text(unescape(escape(title)));
 
-		var bbox = text.node().getBBox();
-		var padding = 2;
-		var rect = descView.insert("rect", "text")
-				.attr("x", bbox.x - padding)
-				.attr("y", bbox.y - padding)
-				.attr("width", bbox.width + (padding*2))
-				.attr("height", bbox.height + (padding*2))
-				.style("fill", "#222")
-				.style("opacity", "0.7");
+    var bbox = text.node().getBBox();
+    var padding = 2;
+    var rect = descView.insert("rect", "text")
+        .attr("x", bbox.x - padding)
+        .attr("y", bbox.y - padding)
+        .attr("width", bbox.width + (padding*2))
+        .attr("height", bbox.height + (padding*2))
+        .style("fill", "#222")
+        .style("opacity", "0.7");
   };
 }
 
@@ -347,52 +364,126 @@ var currentPos;
 var nextPos;
 var searchRegex = null;
 
-function calculateLayout() {
-  var base = 0;
+function flattenLayout() {
+  state.flattenedLayoutData = [];
 
-  function getElement(text, type, num_levels, loader, tsv) {
-    var element = {
-      enabled: false,
-      loaded: false,
-      base: base,
-      loader: loader,
-      num_levels: num_levels,
-      text: text,
-      type: type,
-      tsv: tsv
-    };
-    base += 2;
-    return element;
+  function appendElem(elem) {
+    state.flattenedLayoutData.push(elem);
+    elem.children.forEach(appendElem);
   }
+  state.layoutData.forEach(appendElem);
+}
 
-  // First element in the layout will be the all_stats
-  state.newLayoutData.push(getElement("all nodes", "stats", 
-                                      constants.stats_levels,
-                                      load_stats,
-                                      "tsv/all_stats.tsv"));
-  
-  var last_node = undefined;
-  state.processors.forEach(function(proc) {
-    // if there's only one node, then inner node views are redundant
-    if (stats_files.length > 1) {
-      // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
-      var proc_regex = /Processor 0x1d([a-fA-f0-9]{4})/;
+function getProcessors(stats_name) {
+  var stats_regex = /(node )?(\d+) \((\w+)\)/;
+  var stats_match = stats_regex.exec(stats_name);
+  var matched_procs = [];
+
+  if (stats_match) {
+    var stats_node_id = parseInt(stats_match[2], 10);
+    var stats_proc_type = stats_match[3];
+    state.processors.forEach(function(proc) {
+      var proc_regex = /(\w+) Processor 0x1d([a-fA-f0-9]{4})/;
       var proc_match = proc_regex.exec(proc.processor);
       if (proc_match) {
+        var proc_type = proc_match[1];
+        var proc_node_id = parseInt(proc_match[2], 16);
+        if ((proc_node_id == stats_node_id)   &&
+            (proc_type    == stats_proc_type)) {
+          matched_procs.push(proc);
+        }
+      }
+    });
+  }
+  return matched_procs;
+}
+
+
+// This function gets a particular timelineElement. It will also handle
+// creating the children for expand commands
+function getElement(depth, text, type, num_levels, loader, 
+                    tsv, children, enabled, visible) {
+  // Create child elements. Child elements will be enabled, but they will be
+  // invisible and unloaded. They will be loaded in when expanded
+  var child_elements = [];
+  if (children != undefined) {
+    children.forEach(function(child) {
+      var stats_name = "node " + child;
+      var child_element = getElement(depth + 1, stats_name, "stats", 
+                                     num_levels, loader,
+                                     "tsv/" + child + "_stats.tsv",
+                                     stats_files[child], true, false);
+      child_elements.push(child_element);
+    });
+  }
+
+  // Stats graphs will have processors as their children as well.
+  if (type == "stats") {
+    // get the children for the stats view 
+    var proc_children = getProcessors(text); 
+    proc_children.forEach(function(proc_child) {
+      var child_element = getElement(depth + 1, proc_child.processor, "proc", 
+                                     proc_child.height, load_proc_timeline,
+                                     proc_child.tsv, undefined, true, false);
+      child_elements.push(child_element);
+    });
+  }
+
+  // Now that we've gotten the parts, let's build the element and return it
+  var element = {
+    depth: depth,
+    enabled: enabled,
+    expanded: false,
+    loaded: false,
+    loader: loader,
+    num_levels: num_levels,
+    children: child_elements,
+    text: text,
+    type: type,
+    tsv: tsv,
+    visible: visible
+  };
+  return element;
+}
+
+
+function calculateLayout() {
+
+  // First element in the layout will be the all_stats. All first-level
+  // elements will start off not enabled, and will be uncollapsed later
+  // programmatically
+  state.layoutData.push(getElement(0, "all nodes", "stats", 
+                                   constants.stats_levels,
+                                   load_stats,
+                                   "tsv/all_stats.tsv",
+                                   stats_files["all"], false, true));
+  
+  var num_files = Object.keys(stats_files).length;
+  var seen_nodes = {};
+  state.processors.forEach(function(proc) {
+    // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
+    var proc_regex = /Processor 0x1d([a-fA-f0-9]{4})/;
+    var proc_match = proc_regex.exec(proc.processor);
+    // if there's only one node, then per-node graphs are redundant
+    if (num_files > 1) {
+      if (proc_match) {
         var node_id = parseInt(proc_match[1], 16);
-        if (node_id != last_node) {
+        if (!(node_id in seen_nodes)) {
+          seen_nodes[node_id] = 1;
           var stats_name = "node " + node_id;
-          state.newLayoutData.push(getElement(stats_name, "stats", 
-                                              constants.stats_levels,
-                                              load_stats,
-                                              "tsv/" + node_id + "_stats.tsv"));
-          last_node = node_id;
+          state.layoutData.push(getElement(0, stats_name, "stats", 
+                                           constants.stats_levels,
+                                           load_stats,
+                                           "tsv/" + node_id + "_stats.tsv",
+                                           stats_files[node_id], false, true));
         }
       }
     }
-    state.newLayoutData.push(getElement(proc.processor, "proc", 
-                                        proc.height, load_proc_timeline,
-                                        proc.tsv));
+    if (!proc_match) {
+      state.layoutData.push(getElement(0, proc.processor, "proc", 
+                                       proc.height, load_proc_timeline,
+                                       proc.tsv, undefined, false, true));
+    }
   });
 }
 
@@ -440,52 +531,74 @@ function drawTimeline() {
 }
 
 function redraw() {
-  filterAndMergeBlocks(state);
-  drawTimeline();
-
-  // TODO: put these in state
-  var processorSvg = d3.select("#processors").select("svg");
-  var names = processorSvg.selectAll("text");
-
-  names
-    .attr("y", lineLevelCalculator)
-    .style("opacity", function(proc) {
-      return (proc.enabled) ? 1 : 0.5;
-    });
-
-  var timelineGroup = state.timelineSvg.select("g#timeline");
-  var lines = state.timelineSvg.select("g#lines").selectAll("line");
-
-  var thickness = state.thickness;
-  lines
-    .attr("y1", lineLevelCalculator)
-    .attr("y2", lineLevelCalculator)
-    .style("opacity", function(proc) {
-      return (proc.enabled) ? 1 : 0.5;
-    });
+  if (state.numLoading == 0) {
+    calculateBases();
+    filterAndMergeBlocks(state);
+    drawTimeline();
+    drawLayout();
+  }
 }
+
+function calculateBases() {
+  var base = 0;
+  state.flattenedLayoutData.forEach(function(elem) {
+    elem.base = base;
+    if (elem.visible) {
+      if (elem.enabled) {
+        base += elem.num_levels;
+      }
+      base += constants.elem_separation;
+    }
+  });
+}
+
+function expandHandler(elem, index) {
+  elem.expanded = !elem.expanded;
+
+  if (elem.expanded) {
+    function expandChild(child) {
+      child.visible = true;
+      //child.enabled = true;
+      if(!child.loaded) {
+        showLoaderIcon();
+        child.loader(child); // will redraw the timeline once loaded
+      } else if (child.expanded) {
+        child.children.forEach(expandChild);
+      }
+    }
+    elem.children.forEach(expandChild);
+  } else {
+    function collapseChildren(child) {
+      child.visible = false;
+      // child.expanded = false;
+      // child.enabled = false;
+      child.children.forEach(collapseChildren);
+    }
+    elem.children.forEach(collapseChildren);
+  }
+  redraw();
+}
+
+
 
 // This handler is called when you collapse/uncollapse a row in the
 // timeline
 function collapseHandler(d, index) {
-  if (d.enabled) {
-    for (var i = index + 1; i < state.newLayoutData.length; i++) {
-      state.newLayoutData[i].base -= d.num_levels;
-    }
-  } else {
-    for (var i = index + 1; i < state.newLayoutData.length; i++) {
-      state.newLayoutData[i].base += d.num_levels;
-    }
-  }
-
   d.enabled = !d.enabled;
+
   if (!d.loaded) {
+    // should always be expanding here
     showLoaderIcon();
-    var elem = state.newLayoutData[index];
+    var elem = state.flattenedLayoutData[index];
     elem.loader(elem); // will redraw the timeline once loaded
   } else {
-    // redraw the timeline
-    redraw();
+    // if collapsing, unexpand
+    // if (!d.enabled && d.expanded) {
+    //   expandHandler(d, index);
+    // } else {
+      // redraw the timeline
+      redraw();
+    //}
   }
 }
 
@@ -511,35 +624,44 @@ function timelineLevelCalculator(timelineEvent) {
 };
 
 function drawLayout() {
+  d3.select("#processors").select("svg").remove();
+  state.timelineSvg.select("g#lines").remove();
 
-  var data = state.newLayoutData;
+  var data = state.flattenedLayoutData;
   var svg = d3.select("#processors").append("svg")
     .attr("width", constants.margin_left)
     .attr("height", state.height);
 
-  var names = svg.selectAll(".processors")
+  var namesGroup = svg.selectAll(".processors")
     .data(data)
-    .enter().append("text");
+    .enter().append("g");
+
+  var names = namesGroup.append("text");
 
   var thickness = state.thickness;
   names.attr("text-anchor", "start")
     .attr("class", "processor")
-    .attr("x", 0)
+    .attr("x", function(d) { return (d.depth + 1) * 15; })
     .attr("y", lineLevelCalculator)
+    .attr("visibility", function(elem) {
+      return (elem.visible) ? "visible" : "hidden"  
+    })
     .style("fill", "#000000")
-    .style("opacity", 0.5);
+    .style("opacity", function(proc) {
+      return (proc.enabled) ? 1 : 0.5;
+    });
 
   names.each(function(d) {
     var text = d3.select(this);
     var tokens = d.text.split(" to ");
     if (tokens.length == 1)
-      text.append("tspan").text(d.text);
+      text.text(d.text);
     else {
       var source = tokens[0];
       var target = tokens[1].replace(" Channel", "");
-      text.append("tspan").text(source)
+      text.text(source)
         .attr({x : 0, dy : -10});
-      text.append("tspan").text("==> " + target)
+      text.text("==> " + target)
         .attr({x : 0, dy : 10});
     }
   });
@@ -553,6 +675,55 @@ function drawLayout() {
     "click": collapseHandler
   });
 
+  var expandableNodes = namesGroup.filter(function(elem) {
+    return elem.children.length > 0;
+  });
+  var expand_icons = expandableNodes.append("path");
+  var arc = d3.svg.symbol().type('triangle-down')
+            .size(6);
+
+
+    //.attr("transform", function(elem) {
+    //  var x = constants.margin_left - 10;
+    //  var y = lineLevelCalculator(elem);
+    //  return "translate(" + x + ","  + y + ")";
+    //})
+  expand_icons.attr("class", "processor")
+    .attr("d", arc)
+    .attr("visibility", function(elem) {
+      return (elem.visible) ? "visible" : "hidden"  
+    })
+    .style("fill", "#000000")
+    .style("stroke", "#000000")
+    .style("opacity", function(proc) {
+      return (proc.enabled) ? 1 : 0.5;
+    });
+
+  expand_icons.each(function(elem) {
+    var path = d3.select(this);
+    var x = elem.depth * 15 + 5;
+    var y = lineLevelCalculator(elem) - 2;
+
+    if (elem.expanded) {
+      path.attr("transform", "translate(" + x + ", " + y + ") rotate(0)");
+    } else {
+      path.attr("transform", "translate(" + x + ", " + y + ") rotate(30)");
+    }
+ 
+  });
+
+
+  expand_icons.on({
+    "mouseover": function(d) {
+      d3.select(this).style("cursor", "pointer")
+    },
+    "mouseout": function(d) {
+      d3.select(this).style("cursor", "default")
+    },
+    "click": expandHandler
+  });
+
+
   var lines = state.timelineSvg
     .append("g")
     .attr("id", "lines");
@@ -565,9 +736,14 @@ function drawLayout() {
     .attr("y1", lineLevelCalculator)
     .attr("x2", state.zoom * state.width)
     .attr("y2", lineLevelCalculator)
+    .attr("visibility", function(elem) {
+      return (elem.visible) ? "visible" : "hidden"  
+    })
     .style("stroke", "#000000")
-    .style("stroke-width", "1px")
-    .style("opacity", 0.5);
+    .style("stroke-width", "2px")
+    .style("opacity", function(proc) {
+      return (proc.enabled) ? 1 : 0.5;
+    });
 }
 
 function drawHelpBox() {
@@ -1013,12 +1189,13 @@ function initTimelineElements() {
       }, 100);
   });
   if (!state.collapseAll) {
-    // initially load in all the cpu processors
-    var cpu = /CPU Processor/;
-    for (var i = 0; i < state.newLayoutData.length; i++) {
-      var timelineElement = state.newLayoutData[i];
-      if (timelineElement.type == "proc" && cpu.test(timelineElement.text) ||
-          timelineElement.type == "stats" && timelineElement.text == "all nodes") {
+    // initially load in all the cpu processors and the "all stats"
+    var stats_regex = /node/;
+    for (var i = 0; i < state.flattenedLayoutData.length; i++) {
+      var timelineElement = state.flattenedLayoutData[i];
+      if (timelineElement.type == "stats" && 
+          stats_regex.exec(timelineElement.text) &&
+          timelineElement.depth == 0) {
         collapseHandler(timelineElement, i);
       }
     }
@@ -1059,19 +1236,13 @@ function load_procs(callback) {
         proc.loaded = false;
         proc.base = base;
 
-        state.layoutData.push({
-          enabled: false,
-          loaded: false,
-          base: base,
-          num_levels: proc.height,
-          text: proc.processor
-        });
-
         base += 2;
       });
       //console.log(data);
       state.processors = data;
       calculateLayout();
+      flattenLayout();
+      calculateBases();
       drawLayout();
       callback();
 
@@ -1084,28 +1255,28 @@ function load_procs(callback) {
 }
 
 function getMinElement(arr, mapF) {
-		if (arr.length === undefined || arr.length == 0) {
-				throw "invalid array: " + arr;
-		}
-		var minElement = arr[0];
-		if (mapF === undefined) {
-				for (var i = 0; i < arr.length; i++) {
-						if (arr[i] < minElement) {
-								minElement = arr[i];
-						}
-				}
-		} else {
-				minValue = mapF(minElement);
-				for (var i = 1; i < arr.length; i++) {
-						var elem = arr[i];
-						var value = mapF(elem);
-						if (value < minValue) {
-								minElement = elem;
-								minValue = value;
-						}
-				}
-		}
-		return minElement;
+    if (arr.length === undefined || arr.length == 0) {
+        throw "invalid array: " + arr;
+    }
+    var minElement = arr[0];
+    if (mapF === undefined) {
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] < minElement) {
+                minElement = arr[i];
+            }
+        }
+    } else {
+        minValue = mapF(minElement);
+        for (var i = 1; i < arr.length; i++) {
+            var elem = arr[i];
+            var value = mapF(elem);
+            if (value < minValue) {
+                minElement = elem;
+                minValue = value;
+            }
+        }
+    }
+    return minElement;
 }
 
 function filterStatsData(timelineElem) {
@@ -1183,6 +1354,13 @@ function mousemove(timelineElem) {
       return dx*dx + dy*dy;
   });
 
+  var dist = Math.abs(px-state.x(d.time));;
+
+  // if the distance is too far away, just pick the current mouse position
+  if (dist > 6) {
+    d = {time: state.x.invert(px), count: state.y.invert(py)};
+  }
+
   // offset for this particular line grapgh
   var base_y = +this.getAttribute("base_y");
 
@@ -1207,6 +1385,15 @@ var maxVal;
 // Get the data
 function load_stats(elem) {
   var stats_file = elem.tsv;
+
+  // exit early if we already loaded it
+  if(state.statsData[stats_file]) {
+    elem.loaded = true;
+    hideLoaderIcon();
+    redraw();
+    return;
+  }
+
   d3.tsv(stats_file,
     function(d) {
         return {
@@ -1235,6 +1422,7 @@ function load_stats(elem) {
       //  .on("mouseover", function() { focus.style("display", null); })
       //  .on("mouseout", function() { focus.style("display", "none"); })
       //  .on("mousemove", mousemove);
+      //console.log("loaded", stats_file);
 
       elem.loaded = true;
       hideLoaderIcon();
@@ -1257,7 +1445,7 @@ function initializeState() {
   state.numLoading = 0;
 
   state.layoutData = [];
-  state.newLayoutData = [];
+  state.flattenedLayoutData = [];
 
   state.profilingData = {};
   state.processorData = {};
@@ -1294,12 +1482,7 @@ function initializeState() {
 
 function load_stats_json(callback) {
   $.getJSON("json/stats.json", function(json) {
-    json.forEach(function(stats_filename) {
-      stats_files.push("tsv/" + stats_filename + "_stats.tsv");
-    });
-    if (stats_files.length <= 2) {
-      stats_files = ["tsv/all_stats.tsv"];
-    }
+    stats_files = json;
     callback();
   });
 }

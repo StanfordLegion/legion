@@ -183,9 +183,9 @@ function filterAndMergeBlocks(state) {
   var endTime = convertToTime(state, windowEnd);
   var min_feature_time = convertToTime(state, constants.min_feature_width);
   var min_gap_time = convertToTime(state, constants.min_gap_width);
-  for (var index in state.newLayoutData) {
-    var timelineElement = state.newLayoutData[index];
-    if (timelineElement.type == "proc" && timelineElement.enabled) {
+  for (var index in state.flattenedLayoutData) {
+    var timelineElement = state.flattenedLayoutData[index];
+    if (timelineElement.type == "proc" && timelineElement.enabled && timelineElement.visible) {
       var items = state.processorData[timelineElement.text];
       for (var level in items) {
         // gap merging below assumes intervals are sorted - do that first
