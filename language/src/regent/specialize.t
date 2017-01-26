@@ -1623,8 +1623,7 @@ function specialize.stat_parallelize_with(cx, node)
           op = "<="
         }
       end
-      if not ((hint.lhs:is(ast.specialized.expr.Image) and hint.rhs:is(ast.specialized.expr.ID)) or
-              (hint.lhs:is(ast.specialized.expr.ID) and hint.rhs:is(ast.specialized.expr.Preimage))) then
+      if not ((hint.lhs:is(ast.specialized.expr.Image) and hint.rhs:is(ast.specialized.expr.ID))) then
         report.error(node, "unsupported constraint for parallelizer hints")
       end
     end
