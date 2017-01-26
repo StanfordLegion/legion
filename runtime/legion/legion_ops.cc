@@ -1760,10 +1760,6 @@ namespace Legion {
         else
           need_trigger = false;
       }
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
-      if (to_poison.exists())
-        Runtime::poison_event(to_poison);
       // Notify any waiters, no need to hold the lock since waiters can't
       // be added after we set the state to resolved
       for (std::map<PredicateWaiter*,GenerationID>::const_iterator it = 
@@ -1774,6 +1770,10 @@ namespace Legion {
       // Now see if we need to indicate we are done executing
       if (need_trigger)
         complete_execution();
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+      if (to_poison.exists())
+        Runtime::poison_event(to_poison);
     }
 
     /////////////////////////////////////////////////////////////

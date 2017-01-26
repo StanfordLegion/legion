@@ -832,35 +832,90 @@ end
 
 parallel_param.__index = parallel_param
 
-function parallel_param.new(dop)
-  local params = {
-    __dop = dop,
+function parallel_param.new(params)
+  local tbl = {
+    __dop = false,
+    __primary_partitions = false,
+    __constraints = false,
+    __hash = false,
   }
-  return setmetatable(params, parallel_param)
+  if params.dop ~= nil then tbl.__dop = params.dop end
+  if params.primary_partitions ~= nil then
+    tbl.__primary_partitions = params.primary_partitions
+  end
+  if params.constraints ~= nil then
+    tbl.__constraints = params.constraints
+  end
+  return setmetatable(tbl, parallel_param)
 end
 
 function parallel_param:hash()
-  return "dop" .. tostring(self.__dop)
+  if not self.__hash then
+    local str = ""
+    if self.__dop then str = str .. "dop" .. tostring(self.__dop) end
+    if self.__primary_partitions then
+      for idx = 1, #self.__primary_partitions do
+        --FIXME: need to distinguish between different partitions for the same region
+        str = str .. "#" .. tostring(self.__primary_partitions[idx])
+      end
+    end
+    if self.__constraints then
+      for idx = 1, #self.__constraints do
+        str = str .. "#" .. render(self.__constraints[idx])
+      end
+    end
+    self.__hash = str
+  end
+  return self.__hash
+end
+
+function parallel_param:find_primary_partition_for(region_type)
+  if not self.__primary_partitions then return false end
+  for idx = 1, #self.__primary_partitions do
+    if std.type_eq(self.__primary_partitions[idx]:parent_region(),
+                   region_type) then
+      return self.__primary_partitions[idx]
+    end
+  end
+  return false
+end
+
+function parallel_param:find_ghost_partition_for(region_type)
+  if not self.__constraints then return false end
+  for idx = 1, #self.__constraints do
+    -- XXX: This assumes that the hint is only on an image partition
+    assert(self.__constraints[idx].lhs:is(ast.typed.expr.Image))
+    assert(self.__constraints[idx].rhs:is(ast.typed.expr.ID))
+    local ghost_partition_type = std.as_read(self.__constraints[idx].rhs.expr_type)
+    if std.type_eq(ghost_partition_type:parent_region(), region_type) then
+      return ghost_partition_type
+    end
+  end
+  return false
 end
 
 function parallel_param:dop()
+  assert(self.__dop ~= false)
   return self.__dop
 end
 
 caller_context.__index = caller_context
 
 function caller_context.new(constraints)
-  local param = parallel_param.new(std.config["parallelize-dop"])
+  local param = parallel_param.new({ dop = std.config["parallelize-dop"] })
   local cx = {
     __param_stack = terralib.newlist { param },
     -- No need to track scopes for declarations
     -- since symbols are already disambiguated
     __region_decls = {},
+    __partition_decls = {},
     -- region type -> region symbol
     __region_symbols = data.newmap(),
-    -- Map from region declaration to sets of call expressions
+    -- partition type -> partition symbol
+    __partition_symbols = data.newmap(),
+    -- Map from region or partition declaration to sets of call expressions
     -- grouped by parallelization parameters
-    __call_exprs_by_region_decl = {},
+    __call_exprs_by_decl = {},
     -- call expr -> parallelization parameter
     __parallel_params = {},
     -- region symbol x param -> partition symbol
@@ -881,9 +936,10 @@ function caller_context.new(constraints)
   return setmetatable(cx, caller_context)
 end
 
-function caller_context:push_scope()
+function caller_context:push_scope(p)
   -- TODO: this should come from bishop
-  local param = parallel_param.new(std.config["parallelize-dop"])
+  local param = p or self.__param_stack[#self.__param_stack] or
+                parallel_param.new({ dop = std.config["parallelize-dop"] })
   self.__param_stack:insert(param)
 end
 
@@ -906,6 +962,23 @@ end
 
 function caller_context:has_region_symbol(region_type)
   return self.__region_symbols[region_type] ~= nil
+end
+
+function caller_context:add_partition_decl(partition_type, stat)
+  self.__partition_decls[partition_type] = stat
+end
+
+function caller_context:add_partition_symbol(partition_type, partition_symbol)
+  self.__partition_symbols[partition_type] = partition_symbol
+end
+
+function caller_context:find_partition_symbol(partition_type)
+  assert(self.__partition_symbols[partition_type] ~= nil)
+  return self.__partition_symbols[partition_type]
+end
+
+function caller_context:has_partition_symbol(partition_type)
+  return self.__partition_symbols[partition_type] ~= nil
 end
 
 function caller_context:add_bounds_symbol(region_symbol, bounds_symbol)
@@ -940,14 +1013,20 @@ function caller_context:add_call(expr)
     local expr_type = std.as_read(expr.args[idx].expr_type)
     if std.is_region(expr_type) then
       local decl = self.__region_decls[std.as_read(expr.args[idx].expr_type)]
+      local primary_partition_type_from_hint =
+        param:find_primary_partition_for(expr_type)
+      if primary_partition_type_from_hint then
+        decl = self.__partition_decls[primary_partition_type_from_hint]
+      end
+
       assert(decl ~= nil)
-      if self.__call_exprs_by_region_decl[decl] == nil then
-        self.__call_exprs_by_region_decl[decl] = data.newmap()
+      if self.__call_exprs_by_decl[decl] == nil then
+        self.__call_exprs_by_decl[decl] = data.newmap()
       end
-      if self.__call_exprs_by_region_decl[decl][param] == nil then
-        self.__call_exprs_by_region_decl[decl][param] = {}
+      if self.__call_exprs_by_decl[decl][param] == nil then
+        self.__call_exprs_by_decl[decl][param] = {}
       end
-      self.__call_exprs_by_region_decl[decl][param][expr] = true
+      self.__call_exprs_by_decl[decl][param][expr] = true
       -- TODO: We don't support multiple structured regions with different dimensions
       assert(self:find_max_dim(param) == 0 or
              expr_type:ispace().dim == 0 or
@@ -961,35 +1040,35 @@ function caller_context:add_call(expr)
 end
 
 function caller_context:get_call_exprs(decl)
-  return self.__call_exprs_by_region_decl[decl]
+  return self.__call_exprs_by_decl[decl]
 end
 
-function caller_context:add_primary_partition(region, param, partition)
-  if self.__primary_partitions[region] == nil then
-    self.__primary_partitions[region] = data.newmap()
+function caller_context:add_primary_partition(region_symbol, param, partition_symbol)
+  if self.__primary_partitions[region_symbol] == nil then
+    self.__primary_partitions[region_symbol] = data.newmap()
   end
-  self.__primary_partitions[region][param] = partition
+  self.__primary_partitions[region_symbol][param] = partition_symbol
 end
 
-function caller_context:add_ghost_partition(call, stencil, partition)
+function caller_context:add_ghost_partition(call, stencil, partition_symbol)
   if self.__ghost_partitions[call] == nil then
     self.__ghost_partitions[call] = {}
   end
   assert(self.__ghost_partitions[call][stencil] == nil)
-  self.__ghost_partitions[call][stencil] = partition
+  self.__ghost_partitions[call][stencil] = partition_symbol
 end
 
-function caller_context:add_parent_region(region, parent_region)
-  self.__parent_region[region] = parent_region
+function caller_context:add_parent_region(region_symbol, parent_region_symbol)
+  self.__parent_region[region_symbol] = parent_region_symbol
 end
 
-function caller_context:has_parent_region(region)
-  return self.__parent_region[region] ~= nil
+function caller_context:has_parent_region(region_symbol)
+  return self.__parent_region[region_symbol] ~= nil
 end
 
-function caller_context:get_parent_region(region)
-  assert(self.__parent_region[region] ~= nil)
-  return self.__parent_region[region]
+function caller_context:get_parent_region(region_symbol)
+  assert(self.__parent_region[region_symbol] ~= nil)
+  return self.__parent_region[region_symbol]
 end
 
 function caller_context:add_color_space(param, color)
@@ -1002,21 +1081,26 @@ function caller_context:find_parallel_parameters(call)
   return self.__parallel_params[call]
 end
 
-function caller_context:find_primary_partition(param, region)
-  assert(self.__primary_partitions[region][param])
-  return self.__primary_partitions[region][param]
+function caller_context:has_primary_partition(param, region_symbol)
+  return self.__primary_partitions[region_symbol] ~= nil and
+         self.__primary_partitions[region_symbol][param] ~= nil
 end
 
-function caller_context:find_primary_partition_by_call(call, region)
-  local param = self:find_parallel_parameters(call)
-  assert(self.__primary_partitions[region][param])
-  return self.__primary_partitions[region][param]
+function caller_context:find_primary_partition(param, region_symbol)
+  assert(self.__primary_partitions[region_symbol][param])
+  return self.__primary_partitions[region_symbol][param]
 end
 
-function caller_context:has_primary_partition_by_call(call, region)
+function caller_context:find_primary_partition_by_call(call, region_symbol)
   local param = self:find_parallel_parameters(call)
-  return self.__primary_partitions[region] ~= nil and
-         self.__primary_partitions[region][param] ~= nil
+  assert(self.__primary_partitions[region_symbol][param])
+  return self.__primary_partitions[region_symbol][param]
+end
+
+function caller_context:has_primary_partition_by_call(call, region_symbol)
+  local param = self:find_parallel_parameters(call)
+  return self.__primary_partitions[region_symbol] ~= nil and
+         self.__primary_partitions[region_symbol][param] ~= nil
 end
 
 function caller_context:find_ghost_partition(call, stencil)
@@ -1029,8 +1113,8 @@ function caller_context:has_ghost_partition(call, stencil)
          self.__ghost_partitions[call][stencil] ~= nil
 end
 
-function caller_context:find_parent_region(region)
-  return self.__parent_region[region]
+function caller_context:find_parent_region(region_symbol)
+  return self.__parent_region[region_symbol]
 end
 
 function caller_context:find_color_space(param)
@@ -1200,6 +1284,7 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
 
   local color_space_symbol = caller_cx:find_color_space(pparam)
   if color_space_symbol == nil then
+    local base_name = (partition_symbol:hasname() and partition_symbol:getname()) or ""
     color_space_symbol = get_new_tmp_var(partition_type:colors(), base_name .. "__colors")
     local colors_expr = mk_expr_colors_access(partition_symbol)
     stats:insert(mk_stat_var(color_space_symbol, nil, colors_expr))
@@ -1560,14 +1645,26 @@ local function collect_calls(cx, parallelizable)
       elseif node:is(ast.typed.stat.Var) then
         for idx = 1, #node.symbols do
           local symbol_type = node.symbols[idx]:gettype()
-          if std.is_region(symbol_type) then
-            cx:add_region_decl(symbol_type, node)
-            cx:add_region_symbol(symbol_type, node.symbols[idx])
-            if not symbol_type:is_opaque() then
+          if std.is_region(symbol_type) or std.is_partition(symbol_type) then
+            local region_type
+            if std.is_region(symbol_type) then
+              cx:add_region_decl(symbol_type, node)
+              cx:add_region_symbol(symbol_type, node.symbols[idx])
+              region_type = symbol_type
+            elseif std.is_partition(symbol_type) then
+              cx:add_partition_decl(symbol_type, node)
+              cx:add_partition_symbol(symbol_type, node.symbols[idx])
+              region_type = symbol_type:parent_region()
+            else
+              assert(false, "unreachable")
+            end
+            assert(region_type ~= nil)
+
+            if not region_type:is_opaque() then
               -- Reserve symbols for metadata
               local base_name = (node.symbols[idx]:hasname() and node.symbols[idx]:getname()) or ""
               local bounds_symbol = get_new_tmp_var(
-                std.rect_type(symbol_type:ispace().index_type),
+                std.rect_type(region_type:ispace().index_type),
                 base_name .. "__bounds")
               cx:add_bounds_symbol(node.symbols[idx], bounds_symbol)
             end
@@ -1581,6 +1678,25 @@ local function collect_calls(cx, parallelizable)
           end
         end
         continuation(node, true)
+      elseif node:is(ast.typed.stat.ParallelizeWith) then
+        local hints_primary = data.filter(function(hint)
+          return hint:is(ast.typed.expr.ID) end, node.hints):map(function(hint)
+          return std.as_read(hint.expr_type) end)
+        local hints_constraint = data.filter(function(hint)
+          return hint:is(ast.typed.expr.ParallelizerConstraint) end, node.hints)
+        local param = parallel_param.new({
+          primary_partitions = hints_primary,
+          constraints = hints_constraint,
+        })
+        cx:push_scope(param)
+        for idx = 1, #hints_primary do
+          local partition_type = hints_primary[idx]
+          assert(std.is_partition(partition_type))
+          cx:add_primary_partition(cx:find_region_symbol(partition_type:parent_region()),
+                                   param, cx:find_partition_symbol(partition_type))
+        end
+        continuation(node, true)
+        cx:pop_scope()
       else
         continuation(node, true)
       end
@@ -1588,24 +1704,25 @@ local function collect_calls(cx, parallelizable)
   end
 end
 
-local function create_primary_partition(caller_cx, pparam, region)
+local function create_primary_partition(caller_cx, pparam, region_symbol)
   local stats = terralib.newlist()
 
-  local parent_partition = nil
-  local parent_region = caller_cx:find_parent_region(region)
-  while parent_region do
-    parent_partition =
-      caller_cx:find_primary_partition(pparam, parent_region)
-    if parent_partition then break end
-    parent_region = caller_cx:find_parent_region(region)
+  local parent_partition_symbol = nil
+  local parent_region_symbol = caller_cx:find_parent_region(region_symbol)
+  while parent_region_symbol do
+    parent_partition_symbol =
+      caller_cx:find_primary_partition(pparam, parent_region_symbol)
+    if parent_partition_symbol then break end
+    parent_region_symbol = caller_cx:find_parent_region(region_symbol)
   end
-  if parent_partition then
+  if parent_partition_symbol then
     local partition_symbol, partition_stats =
-      create_subset_partition(caller_cx, region, parent_partition, pparam)
+      create_subset_partition(caller_cx, region_symbol, parent_partition_symbol,
+                              pparam)
     stats:insertall(partition_stats)
   else
     local partition_symbol, partition_stats =
-      create_equal_partition(caller_cx, region, pparam)
+      create_equal_partition(caller_cx, region_symbol, pparam)
     stats:insertall(partition_stats)
   end
 
@@ -1652,23 +1769,52 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
     if caller_cx:get_call_exprs(node) then
       assert(node:is(ast.typed.stat.Var))
       assert(#node.symbols == 1)
-      assert(std.is_region(node.symbols[1]:gettype()))
 
       local call_exprs_map = caller_cx:get_call_exprs(node)
-      local region_symbol = node.symbols[1]
-      if region_symbol:gettype():is_opaque() then return node end
       local stats = terralib.newlist {node}
+      local symbol_type = node.symbols[1]:gettype()
+      local region_symbol
 
-      local bounds_symbol = caller_cx:find_bounds_symbol(region_symbol)
-      if bounds_symbol then
-        stats:insert(mk_stat_var(bounds_symbol, nil,
-          mk_expr_bounds_access(region_symbol)))
-      end
+      if std.is_region(symbol_type) then
+        if symbol_type:is_opaque() then return node end
 
-      -- First, create necessary primary partitions
-      for pparam, _ in call_exprs_map:items() do
-        stats:insertall(create_primary_partition(caller_cx, pparam, region_symbol))
+        region_symbol = node.symbols[1]
+        local bounds_symbol = caller_cx:find_bounds_symbol(region_symbol)
+        if bounds_symbol then
+          stats:insert(mk_stat_var(bounds_symbol, nil,
+            mk_expr_bounds_access(region_symbol)))
+        end
+
+        -- First, create necessary primary partitions
+        for pparam, _ in call_exprs_map:items() do
+          if not caller_cx:has_primary_partition(pparam, region_symbol) then
+            stats:insertall(create_primary_partition(caller_cx, pparam, region_symbol))
+          end
+        end
+      elseif std.is_partition(symbol_type) then
+        local partition_symbol = node.symbols[1]
+        region_symbol = symbol_type.parent_region_symbol
+
+        local bounds_symbol = caller_cx:find_bounds_symbol(region_symbol)
+        if bounds_symbol then
+          stats:insert(mk_stat_var(bounds_symbol, nil,
+            mk_expr_bounds_access(region_symbol)))
+        end
+
+        for pparam, _ in call_exprs_map:items() do
+          local color_space_symbol = caller_cx:find_color_space(pparam)
+          if color_space_symbol == nil then
+            local base_name = (partition_symbol:hasname() and partition_symbol:getname()) or ""
+            color_space_symbol = get_new_tmp_var(symbol_type:colors(), base_name .. "__colors")
+            local colors_expr = mk_expr_colors_access(partition_symbol)
+            stats:insert(mk_stat_var(color_space_symbol, nil, colors_expr))
+            caller_cx:add_color_space(pparam, color_space_symbol)
+          end
+        end
+      else
+        assert(false, "unreachable")
       end
+      assert(region_symbol ~= nil)
 
       -- Second, create ghost partitions
       for pparam, call_exprs in call_exprs_map:items() do
@@ -1767,68 +1913,74 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
         for idx = 1, #stencils_with_no_ghost_partition do
           local orig_stencil = stencils_with_no_ghost_partition[idx]
           local stencil = orig_stencil:subst(param_arg_mapping)
-          if not stencil:is_static() then
-            local region = stencil:region()
-            local range = stencil:range()
-            -- TODO: Support nested stencils for image partition
-            assert(not Stencil.is_stencil(range))
-            local index = stencil:index()
-            local field_path = index:body().expr_type.field_path
+          local gp_type_from_hint = pparam:find_ghost_partition_for(stencil:region())
+          if gp_type_from_hint then
+            local gp_symbol = caller_cx:find_partition_symbol(gp_type_from_hint)
+            caller_cx:add_ghost_partition(call, orig_stencil, gp_symbol)
+          else
+            if not stencil:is_static() then
+              local region = stencil:region()
+              local range = stencil:range()
+              -- TODO: Support nested stencils for image partition
+              assert(not Stencil.is_stencil(range))
+              local index = stencil:index()
+              local field_path = index:body().expr_type.field_path
 
-            local pp = caller_cx:find_primary_partition_by_call(call, range)
+              local pp = caller_cx:find_primary_partition_by_call(call, range)
 
-            local base_name = (region:getname()) or ""
-            local gp_type = std.partition(std.aliased, region, pp:gettype():colors())
-            local gp_symbol = get_new_tmp_var(
-              gp_type,
-              base_name .. "__gp" .. "__image_" .. tostring(field_path))
-            stats:insert(mk_stat_var(gp_symbol, nil,
-              ast.typed.expr.Image {
-                expr_type = gp_type,
-                parent = mk_expr_id(region, std.rawref(&region:gettype())),
-                partition = mk_expr_id(pp, std.rawref(&pp:gettype())),
-                region = ast.typed.expr.RegionRoot {
-                  expr_type = std.as_read(range:gettype()),
-                  region = mk_expr_id(range, std.rawref(&range:gettype())),
-                  fields = terralib.newlist {field_path},
+              local base_name = (region:getname()) or ""
+              local gp_type = std.partition(std.aliased, region, pp:gettype():colors())
+              local gp_symbol = get_new_tmp_var(
+                gp_type,
+                base_name .. "__gp" .. "__image_" .. tostring(field_path))
+              stats:insert(mk_stat_var(gp_symbol, nil,
+                ast.typed.expr.Image {
+                  expr_type = gp_type,
+                  parent = mk_expr_id(region, std.rawref(&region:gettype())),
+                  partition = mk_expr_id(pp, std.rawref(&pp:gettype())),
+                  region = ast.typed.expr.RegionRoot {
+                    expr_type = std.as_read(range:gettype()),
+                    region = mk_expr_id(range, std.rawref(&range:gettype())),
+                    fields = terralib.newlist {field_path},
+                    span = ast.trivial_span(),
+                    annotations = ast.default_annotations(),
+                  },
                   span = ast.trivial_span(),
                   annotations = ast.default_annotations(),
-                },
+                }))
+              caller_cx:add_ghost_partition(call, orig_stencil, gp_symbol)
+              cleanup:insert(ast.typed.stat.RawDelete {
+                value = mk_expr_id(gp_symbol, std.rawref(&gp_type)),
                 span = ast.trivial_span(),
                 annotations = ast.default_annotations(),
-              }))
-            caller_cx:add_ghost_partition(call, orig_stencil, gp_symbol)
-            cleanup:insert(ast.typed.stat.RawDelete {
-              value = mk_expr_id(gp_symbol, std.rawref(&gp_type)),
-              span = ast.trivial_span(),
-              annotations = ast.default_annotations(),
-            })
-          else
-            local range_symbol
-            local partition_symbol
-            if Stencil.is_stencil(orig_stencil:range()) then
-              partition_symbol =
-                caller_cx:find_ghost_partition(call, orig_stencil:range())
-              range_symbol = stencil:range():region()
+              })
             else
-              partition_symbol = caller_cx:find_primary_partition(pparam, range)
-              range_symbol = range
+              local range_symbol
+              local partition_symbol
+              if Stencil.is_stencil(orig_stencil:range()) then
+                partition_symbol =
+                  caller_cx:find_ghost_partition(call, orig_stencil:range())
+                range_symbol = stencil:range():region()
+              else
+                partition_symbol = caller_cx:find_primary_partition(pparam, range)
+                range_symbol = range
+              end
+              assert(partition_symbol)
+              while caller_cx:has_parent_region(range_symbol) do
+                range_symbol = caller_cx:get_parent_region(range_symbol)
+              end
+              local partition_symbol, partition_stats =
+                create_image_partition(caller_cx, range_symbol, partition_symbol,
+                                       stencil, pparam)
+              stats:insertall(partition_stats)
+              caller_cx:add_ghost_partition(call, orig_stencil, partition_symbol)
+              cleanup:insert(ast.typed.stat.RawDelete {
+                value = mk_expr_id(partition_symbol,
+                                   std.rawref(&partition_symbol:gettype())),
+                span = ast.trivial_span(),
+                annotations = ast.default_annotations(),
+              })
             end
-            assert(partition_symbol)
-            while caller_cx:has_parent_region(range_symbol) do
-              range_symbol = caller_cx:get_parent_region(range_symbol)
-            end
-            local partition_symbol, partition_stats =
-              create_image_partition(caller_cx, range_symbol, partition_symbol,
-                                     stencil, pparam)
-            stats:insertall(partition_stats)
-            caller_cx:add_ghost_partition(call, orig_stencil, partition_symbol)
-            cleanup:insert(ast.typed.stat.RawDelete {
-              value = mk_expr_id(partition_symbol,
-                                 std.rawref(&partition_symbol:gettype())),
-              span = ast.trivial_span(),
-              annotations = ast.default_annotations(),
-            })
           end
         end
       end
@@ -1877,6 +2029,13 @@ local function transform_task_launches(parallelizable, caller_cx, call_stats)
       end
 
       return stats
+    elseif node:is(ast.typed.stat.ParallelizeWith) then
+      node = continuation(node, true)
+      return ast.typed.stat.Block {
+        block = node.block,
+        span = node.span,
+        annotations = node.annotations,
+      }
     else
       return continuation(node, true)
     end

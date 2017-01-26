@@ -1387,7 +1387,11 @@ namespace Legion {
       FillView(RegionTreeForest *ctx, DistributedID did,
                AddressSpaceID owner_proc, AddressSpaceID local_proc,
                RegionTreeNode *node, FillViewValue *value,
-               bool register_now);
+               bool register_now
+#ifdef LEGION_SPY
+               , UniqueID fill_op_uid
+#endif
+               );
       FillView(const FillView &rhs);
       virtual ~FillView(void);
     public:
@@ -1422,6 +1426,9 @@ namespace Legion {
                                         AddressSpaceID source);
     public:
       FillViewValue *const value;
+#ifdef LEGION_SPY
+      const UniqueID fill_op_uid;
+#endif
     };
 
     /**

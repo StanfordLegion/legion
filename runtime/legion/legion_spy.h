@@ -809,12 +809,13 @@ namespace Legion {
 
       static inline void log_fill_events(UniqueID op_unique_id,
                                          LogicalRegion handle,
-                                         LgEvent pre, LgEvent post)
+                                         LgEvent pre, LgEvent post,
+                                         UniqueID fill_unique_id)
       {
-        log_spy.print("Fill Events %llu %d %d %d " IDFMT " " IDFMT,
+        log_spy.print("Fill Events %llu %d %d %d " IDFMT " " IDFMT " %llu",
 		      op_unique_id, handle.get_index_space().get_id(),
 		      handle.get_field_space().get_id(), handle.get_tree_id(),
-		      pre.id, post.id);
+		      pre.id, post.id, fill_unique_id);
       }
 
       static inline void log_fill_field(LgEvent post, FieldID fid, IDType dst)

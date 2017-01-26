@@ -755,6 +755,9 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.FutureGetResult) then
     return pretty.expr_future_get_result(cx, node)
 
+  elseif node:is(ast.typed.expr.ParallelizerConstraint) then
+    return pretty.expr_binary(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end

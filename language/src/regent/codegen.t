@@ -7742,6 +7742,10 @@ function codegen.stat_raw_delete(cx, node)
   end
 end
 
+function codegen.stat_parallelize_with(cx, node)
+  return quote [codegen.block(cx, node.block)] end
+end
+
 function codegen.stat(cx, node)
   if node:is(ast.typed.stat.Internal) then
     return codegen.stat_internal(cx, node)
@@ -7811,6 +7815,9 @@ function codegen.stat(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return codegen.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.typed.stat.ParallelizeWith) then
+    return codegen.stat_parallelize_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

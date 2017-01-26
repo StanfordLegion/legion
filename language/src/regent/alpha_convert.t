@@ -270,7 +270,8 @@ local function alpha_convert_node(cx)
       }
 
     elseif node:is(ast.specialized.stat.MustEpoch) or
-      node:is(ast.specialized.stat.Block)
+      node:is(ast.specialized.stat.Block) or
+      node:is(ast.specialized.stat.ParallelizeWith)
     then
       cx:push_local_scope()
       local block = continuation(node.block)

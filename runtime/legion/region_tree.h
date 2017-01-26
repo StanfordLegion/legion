@@ -1604,6 +1604,9 @@ namespace Legion {
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                  UniqueID fill_uid,
+#endif
                   RegionTreeNode *intersect = NULL) = 0;
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
@@ -1734,6 +1737,9 @@ namespace Legion {
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                  UniqueID fill_uid,
+#endif
                   RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
@@ -1829,7 +1835,11 @@ namespace Legion {
                        UniqueID logical_ctx_uid, InnerContext *context, 
                        VersionInfo &version_info,
                        std::set<RtEvent> &map_applied_events,
-                       PredEvent true_guard, PredEvent false_guard);
+                       PredEvent true_guard, PredEvent false_guard
+#ifdef LEGION_SPY
+                       , UniqueID fill_op_uid
+#endif
+                       );
       ApEvent eager_fill_fields(ContextID ctx, Operation *op,
                               const unsigned index, 
                               UniqueID logical_ctx_uid, InnerContext *context,
@@ -1922,6 +1932,9 @@ namespace Legion {
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                  UniqueID fill_uid,
+#endif
                   RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 

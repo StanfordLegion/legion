@@ -6346,9 +6346,16 @@ namespace Legion {
     FillView::FillView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, AddressSpaceID local_proc,
                        RegionTreeNode *node, FillViewValue *val, 
-                       bool register_now)
+                       bool register_now
+#ifdef LEGION_SPY
+                       , UniqueID op_uid
+#endif
+                       )
       : DeferredView(ctx, encode_fill_did(did), owner_proc, local_proc, 
                      node, register_now), value(val)
+#ifdef LEGION_SPY
+        , fill_op_uid(op_uid)
+#endif
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6364,6 +6371,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FillView::FillView(const FillView &rhs)
       : DeferredView(NULL, 0, 0, 0, NULL, false), value(NULL)
+#ifdef LEGION_SPY
+        , fill_op_uid(0)
+#endif
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6445,6 +6455,9 @@ namespace Legion {
         rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(value->value_size);
         rez.serialize(value->value, value->value_size);
+#ifdef LEGION_SPY
+        rez.serialize(fill_op_uid);
+#endif
       }
       runtime->send_fill_view(target, rez);
       // We've now done the send so record it
@@ -6534,6 +6547,9 @@ namespace Legion {
         // is different than our logical node
         ApEvent fill_post = dst->logical_node->issue_fill(info.op, dst_fields,
                         value->value, value->value_size, fill_pre, pred_guard, 
+#ifdef LEGION_SPY
+                        fill_op_uid,
+#endif
                   (logical_node == dst->logical_node) ? NULL : logical_node);
         if (fill_post.exists())
           postconditions[fill_post] = pre_set.set_mask;
@@ -6556,6 +6572,10 @@ namespace Legion {
       derez.deserialize(value_size);
       void *value = malloc(value_size);
       derez.deserialize(value, value_size);
+#ifdef LEGION_SPY
+      UniqueID op_uid;
+      derez.deserialize(op_uid);
+#endif
       
       RegionNode *target_node = runtime->forest->get_node(handle);
       FillView::FillViewValue *fill_value = 
@@ -6566,11 +6586,19 @@ namespace Legion {
         view = legion_new_in_place<FillView>(location, runtime->forest, did,
                                       owner_space, runtime->address_space,
                                       target_node, fill_value,
-                                      false/*register now*/);
+                                      false/*register now*/
+#ifdef LEGION_SPY
+                                      , op_uid
+#endif
+                                      );
       else
         view = legion_new<FillView>(runtime->forest, did, owner_space,
                                     runtime->address_space, target_node, 
-                                    fill_value, false/*register now*/);
+                                    fill_value, false/*register now*/
+#ifdef LEGION_SPY
+                                    , op_uid
+#endif
+                                    );
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
 

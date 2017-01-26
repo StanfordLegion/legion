@@ -63,6 +63,7 @@ local language = {
     "__trace",
     "__unroll",
     "__vectorize",
+    "__parallelize_with",
     "acquire",
     "aliased",
     "allocate_scratch_fields",

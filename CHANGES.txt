@@ -12,9 +12,15 @@ Version 17.01.0 (January ??, 2017)
     - Added support for speculative mapping of predicated operations
     - Added index space copy and fill operations
   * Legion Prof
+    - Added a stats view of processors grouped by node and processor type
     - Added ability to collapse/expand each processor/channel/memory in
-        a timeline
-    - Added on-demand loading of each processor in a timeline
+        a timeline. To collapse/expand a row, click the name. To 
+        collapse/expand the children of a row, click on the triangle 
+        next to the name.
+    - Grouped the processor timelines to be child elements under the stats
+        views
+    - Added on-demand loading of each processor/stats in a timeline.
+        Elements are only loaded when you expand them, saving bandwidth
 
 Version 16.10.0 (October 7, 2016)
   * Realm

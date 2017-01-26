@@ -29,6 +29,9 @@
  * \file legion.h
  * Legion C++ API
  */
+#ifdef LEGION_CMAKE
+#include "legion_defines.h"
+#endif
 
 #include "legion_types.h"
 #include "legion_constraint.h"
