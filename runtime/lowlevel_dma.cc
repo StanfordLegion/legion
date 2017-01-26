@@ -3233,7 +3233,18 @@ namespace LegionRuntime {
       std::map<Memory, std::vector<Memory> > dist;
       std::set<Memory> all_mem;
       std::queue<Memory> active_nodes;
-      Machine::get_machine().get_all_memories(all_mem);
+      all_mem.insert(src_mem);
+      all_mem.insert(dst_mem);
+      Node* node = &(get_runtime()->nodes[ID(src_mem).memory.owner_node]);
+      for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
+           it != node->ib_memories.end(); it++) {
+        all_mem.insert((*it)->me);
+      }
+      node = &(get_runtime()->nodes[ID(dst_mem).memory.owner_node]);
+      for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
+           it != node->ib_memories.end(); it++) {
+        all_mem.insert((*it)->me);
+      }
       for (std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
         if (get_xfer_des(src_mem, *it) != XferDes::XFER_NONE) {
           dist[*it] = std::vector<Memory>();

@@ -201,6 +201,7 @@ protected:
 extern void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int gasnet_mem_size_in_mb,
 			   int registered_mem_size_in_mb,
+			   int registered_ib_mem_size_in_mb,
 			   Realm::CoreReservationSet& crs,
 			   int argc, const char *argv[]);
 extern void start_polling_threads(int count);
@@ -887,6 +888,7 @@ template <class T> struct HandlerReplyFuture {
 inline void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int gasnet_mem_size_in_mb,
 			   int registered_mem_size_in_mb,
+			   int registered_ib_mem_size_in_mb,
 			   Realm::CoreReservationSet& crs,
                            int argc, const char *argv[])
 {

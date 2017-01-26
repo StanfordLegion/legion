@@ -35,6 +35,7 @@ namespace Realm {
       // BARRIER:     tag:4 = 0x7,  creator_node:16, barrier_idx: 24, generation: 20
       // RESERVATION: tag:8 = 0x1f, creator_node:16, (unused):8, rsrv_idx: 32
       // MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
+      // IB_MEMORY:   tag:8 = 0x1a, owner_node:16,   (unused):28, mem_idx: 12
       // INSTANCE:    tag:4 = 0x6,  owner_node:16,   creator_node:16, mem_idx: 12, inst_idx : 16
       // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
       // PROCGROUP:   tag:8 = 0x1c, owner_node:16,   creator_node:16, pgroup_idx: 24
@@ -74,6 +75,14 @@ namespace Realm {
 	IDType owner_node : 16;
 	IDType type_tag : 8;
 	static const IDType TAG_VALUE = 0x1e;
+      };
+
+      struct FMT_IB_Memory {
+        IDType mem_idx : 12;
+        IDType unused : 28;
+        IDType owner_node : 16;
+        IDType type_tag : 8;
+        static const IDType TAG_VALUE = 0x1a;
       };
 
       struct FMT_Instance {
@@ -121,6 +130,7 @@ namespace Realm {
       static ID make_barrier(unsigned creator_node, unsigned barrier_idx, unsigned generation);
       static ID make_reservation(unsigned creator_node, unsigned rsrv_idx);
       static ID make_memory(unsigned owner_node, unsigned mem_idx);
+      static ID make_ib_memory(unsigned owner_node, unsigned mem_idx);
       static ID make_instance(unsigned owner_node, unsigned creator_node, unsigned mem_idx, unsigned inst_idx);
       static ID make_processor(unsigned owner_node, unsigned proc_idx);
       static ID make_procgroup(unsigned owner_node, unsigned creator_node, unsigned pgroup_idx);
@@ -132,6 +142,7 @@ namespace Realm {
       bool is_barrier(void) const;
       bool is_reservation(void) const;
       bool is_memory(void) const;
+      bool is_ib_memory(void) const;
       bool is_instance(void) const;
       bool is_processor(void) const;
       bool is_procgroup(void) const;
@@ -146,7 +157,7 @@ namespace Realm {
 	ID_LOCK,
 	ID_UNUSED_5,
 	ID_MEMORY,
-	ID_UNUSED_7,
+	ID_IB_MEMORY,
 	ID_PROCESSOR,
 	ID_PROCGROUP,
 	ID_INDEXSPACE,
@@ -179,6 +190,7 @@ namespace Realm {
 	FMT_Barrier barrier;
 	FMT_Reservation rsrv;
 	FMT_Memory memory;
+	FMT_IB_Memory ib_memory;
 	FMT_Instance instance;
 	FMT_Processor proc;
 	FMT_ProcGroup pgroup;

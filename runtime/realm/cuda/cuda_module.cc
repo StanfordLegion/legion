@@ -2278,6 +2278,7 @@ namespace Realm {
     CudaModule::CudaModule(void)
       : Module("cuda")
       , cfg_zc_mem_size_in_mb(64)
+      , cfg_zc_ib_size_in_mb(256)
       , cfg_fb_mem_size_in_mb(256)
       , cfg_num_gpus(0)
       , cfg_gpu_streams(12)
@@ -2286,7 +2287,7 @@ namespace Realm {
       , cfg_pin_sysmem(true)
       , cfg_fences_use_callbacks(false)
       , cfg_suppress_hijack_warning(false)
-      , shared_worker(0), zcmem_cpu_base(0), zcmem(0)
+      , shared_worker(0), zcmem_cpu_base(0), zcib_cpu_base(0), zcmem(0)
     {}
       
     CudaModule::~CudaModule(void)
@@ -2364,6 +2365,7 @@ namespace Realm {
 
 	cp.add_option_int("-ll:fsize", m->cfg_fb_mem_size_in_mb)
 	  .add_option_int("-ll:zsize", m->cfg_zc_mem_size_in_mb)
+	  .add_option_int("-ll:ib_zsize", m->cfg_zc_ib_size_in_mb)
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
 	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
 	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
@@ -2485,6 +2487,42 @@ namespace Realm {
 	  }
 	}
       }
+
+      // allocate intermediate buffers in ZC memory for DMA engine
+      if ((cfg_zc_ib_size_in_mb > 0) && !gpus.empty()) {
+        CUdeviceptr zcib_gpu_base;
+        {
+          AutoGPUContext agc(gpus[0]);
+          CHECK_CU( cuMemHostAlloc(&zcib_cpu_base,
+                                   cfg_zc_ib_size_in_mb << 20,
+                                   CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
+          CHECK_CU( cuMemHostGetDevicePointer(&zcib_gpu_base,
+                                              zcib_cpu_base, 0) );
+          // right now there are asssumptions in several places that unified addressing keeps
+          //  the CPU and GPU addresses the same
+          assert(zcib_cpu_base == (void *)zcib_gpu_base); 
+        }
+        Memory m = runtime->next_local_ib_memory_id();
+        GPUZCMemory* ib_mem;
+        ib_mem = new GPUZCMemory(m, zcib_gpu_base, zcib_cpu_base,
+                                 cfg_zc_ib_size_in_mb << 20);
+        runtime->add_ib_memory(ib_mem);
+        // add the ZC memory as a pinned memory to all GPUs
+        for (unsigned i = 0; i < gpus.size(); i++) {
+          CUdeviceptr gpuptr;
+          CUresult ret;
+          {
+            AutoGPUContext agc(gpus[i]);
+            ret = cuMemHostGetDevicePointer(&gpuptr, zcib_cpu_base, 0);
+          }
+          if ((ret == CUDA_SUCCESS) && (gpuptr == zcib_gpu_base)) {
+            gpus[i]->pinned_sysmems.insert(ib_mem->me);
+          } else {
+            log_gpu.warning() << "GPU #" << i << "has an unexpected mapping for"
+            << " intermediate buffers in ZC memory!";
+          }
+        }
+      }
     }
 
     // create any processors provided by the module (default == do nothing)
@@ -2509,8 +2547,14 @@ namespace Realm {
       //  we can register with CUDA
       if(cfg_pin_sysmem && !gpus.empty()) {
 	std::vector<MemoryImpl *>& local_mems = runtime->nodes[gasnet_mynode()].memories;
-	for(std::vector<MemoryImpl *>::iterator it = local_mems.begin();
-	    it != local_mems.end();
+	// <NEW_DMA> also add intermediate buffers into local_mems
+	std::vector<MemoryImpl *>& local_ib_mems = runtime->nodes[gasnet_mynode()].ib_memories;
+	std::vector<MemoryImpl *> all_local_mems;
+	all_local_mems.insert(all_local_mems.end(), local_mems.begin(), local_mems.end());
+	all_local_mems.insert(all_local_mems.end(), local_ib_mems.begin(), local_ib_mems.end());
+	// </NEW_DMA>
+	for(std::vector<MemoryImpl *>::iterator it = all_local_mems.begin();
+	    it != all_local_mems.end();
 	    it++) {
 	  // ignore FB/ZC memories or anything that doesn't have a "direct" pointer
 	  if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||

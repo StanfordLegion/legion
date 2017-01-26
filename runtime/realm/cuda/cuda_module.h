@@ -105,7 +105,8 @@ namespace Realm {
       virtual void cleanup(void);
 
     public:
-      size_t cfg_zc_mem_size_in_mb, cfg_fb_mem_size_in_mb;
+      size_t cfg_zc_mem_size_in_mb, cfg_zc_ib_size_in_mb;
+      size_t cfg_fb_mem_size_in_mb;
       unsigned cfg_num_gpus, cfg_gpu_streams;
       bool cfg_use_background_workers, cfg_use_shared_worker, cfg_pin_sysmem;
       bool cfg_fences_use_callbacks;
@@ -116,7 +117,7 @@ namespace Realm {
       std::map<GPU *, GPUWorker *> dedicated_workers;
       std::vector<GPUInfo *> gpu_info;
       std::vector<GPU *> gpus;
-      void *zcmem_cpu_base;
+      void *zcmem_cpu_base, *zcib_cpu_base;
       GPUZCMemory *zcmem;
     };
 

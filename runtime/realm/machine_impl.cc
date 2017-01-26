@@ -179,8 +179,8 @@ namespace Realm {
   }
 #endif
 
-    void MachineImpl::parse_node_announce_data(int node_id,
-					       unsigned num_procs, unsigned num_memories,
+    void MachineImpl::parse_node_announce_data(int node_id, unsigned num_procs,
+					       unsigned num_memories, unsigned num_ib_memories,
 					       const void *args, size_t arglen,
 					       bool remote)
     {
@@ -278,6 +278,22 @@ namespace Realm {
 	  }
 	  break;
 
+	case NODE_ANNOUNCE_IB_MEM:
+	  {
+	    ID id((ID::IDType)*cur++);
+	    Memory m = id.convert<Memory>();
+	    assert(id.memory.mem_idx < num_ib_memories);
+	    Memory::Kind kind = (Memory::Kind)(*cur++);
+	    size_t size = *cur++;
+	    void *regbase = (void *)(*cur++);
+	    log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
+			     << ", size = " << size << ", regbase = " << regbase << ")";
+	    if(remote) {
+	      RemoteMemory *mem = new RemoteMemory(m, size, kind, regbase);
+              get_runtime()->nodes[id.memory.owner_node].ib_memories[id.memory.mem_idx] = mem;
+	    }
+	  }
+	  break;
 	case NODE_ANNOUNCE_PMA:
 	  {
 	    Machine::ProcessorMemoryAffinity pma;
@@ -1354,12 +1370,13 @@ namespace Realm {
     Node *n = &(get_runtime()->nodes[args.node_id]);
     n->processors.resize(args.num_procs);
     n->memories.resize(args.num_memories);
+    n->ib_memories.resize(args.num_ib_memories);
 
     // do the parsing of this data inside a mutex because it touches common
     //  data structures
     {
-      get_machine()->parse_node_announce_data(args.node_id,
-					      args.num_procs, args.num_memories,
+      get_machine()->parse_node_announce_data(args.node_id, args.num_procs,
+					      args.num_memories, args.num_ib_memories,
 					      data, datalen, true);
 
       __sync_fetch_and_add(&announcements_received, 1);
@@ -1369,6 +1386,7 @@ namespace Realm {
   /*static*/ void NodeAnnounceMessage::send_request(gasnet_node_t target,
 						    unsigned num_procs,
 						    unsigned num_memories,
+						    unsigned num_ib_memories,
 						    const void *data,
 						    size_t datalen,
 						    int payload_mode)
@@ -1378,6 +1396,7 @@ namespace Realm {
     args.node_id = gasnet_mynode();
     args.num_procs = num_procs;
     args.num_memories = num_memories;
+    args.num_ib_memories = num_ib_memories;
     Message::request(target, args, data, datalen, payload_mode);
   }
 
