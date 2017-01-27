@@ -1608,8 +1608,9 @@ function specialize.stat_raw_delete(cx, node)
 end
 
 function specialize.stat_parallelize_with(cx, node)
-  local hints = node.hints:map(function(expr)
-    local hint = specialize.expr(cx, expr)
+  local hints = data.flatmap(function(expr)
+    return specialize.expr(cx, expr, true) end, node.hints)
+  hints = hints:map(function(hint)
     if not (hint:is(ast.specialized.expr.ID) or hint:is(ast.specialized.expr.Binary)) then
       report.error(hint, "parallelizer hint should be a partition or constraint on two partitions")
     elseif hint:is(ast.specialized.expr.Binary) then
