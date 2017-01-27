@@ -36,6 +36,8 @@ ifdef GASNET_ROOT
 GASNET ?= $(GASNET_ROOT)
 endif
 
+# For backwards compatibility
+SHARED_LOWLEVEL ?= 0
 # generate libraries for Legion and Realm
 SLIB_LEGION     := liblegion.a
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
