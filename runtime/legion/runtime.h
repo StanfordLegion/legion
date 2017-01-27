@@ -1804,6 +1804,9 @@ namespace Legion {
       void issue_execution_fence(Context ctx);
       void begin_trace(Context ctx, TraceID tid);
       void end_trace(Context ctx, TraceID tid);
+      void begin_static_trace(Context ctx, 
+                              const std::set<RegionTreeID> *managed);
+      void end_static_trace(Context ctx);
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);

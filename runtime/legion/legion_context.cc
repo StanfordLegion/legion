@@ -2029,7 +2029,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::execute_task_launch(TaskOp *task, bool index,
-                                          bool silence_warnings)
+                              LegionTrace *current_trace, bool silence_warnings)
     //--------------------------------------------------------------------------
     {
       // First ask the mapper to set the options for the task
@@ -2070,18 +2070,29 @@ namespace Legion {
         runtime->add_to_dependence_queue(this, executing_processor, task);
         // Remap any unmapped regions
         if (!unmapped_regions.empty())
-          remap_unmapped_regions(unmapped_regions);
+          remap_unmapped_regions(current_trace, unmapped_regions);
       }
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::remap_unmapped_regions(
+    void TaskContext::remap_unmapped_regions(LegionTrace *trace,
                             const std::vector<PhysicalRegion> &unmapped_regions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!unmapped_regions.empty());
 #endif
+      if ((trace != NULL) && trace->is_static_trace())
+      {
+        log_run.error("Illegal runtime remapping in static trace inside of "
+                      "task %s (UID %lld). Static traces must perfectly "
+                      "manage their physical mappings with no runtime help.",
+                      get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_REMAP_IN_STATIC_TRACE);
+      }
       if (unmapped_regions.size() == 1)
       {
         MapOp *op = runtime->get_available_map_op(true);
@@ -2195,9 +2206,12 @@ namespace Legion {
     {
       if (!remote_instances.empty())
         invalidate_remote_contexts();
-      for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
+      for (std::map<TraceID,DynamicTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
-        legion_delete(it->second);
+      {
+        if (it->second->remove_reference())
+          legion_delete(it->second);
+      }
       traces.clear();
       // Clean up any locks and barriers that the user
       // asked us to destroy
@@ -3386,7 +3400,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
       return pid;
     }
 
@@ -3440,7 +3454,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
       return pid;
     }
 
@@ -3494,7 +3508,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
       return pid;
     }
 
@@ -3912,7 +3926,8 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher,
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(task, false/*index*/, launcher.silence_warnings);
+      execute_task_launch(task, false/*index*/, 
+                          current_trace, launcher.silence_warnings);
       return result;
     }
 
@@ -4022,7 +4037,8 @@ namespace Legion {
       FutureMap result = task->initialize_task(this, launcher,
                                                false/*check privileges*/);
 #endif
-      execute_task_launch(task, true/*index*/, launcher.silence_warnings);
+      execute_task_launch(task, true/*index*/, 
+                          current_trace, launcher.silence_warnings);
       return result;
     }
 
@@ -4086,7 +4102,8 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher, redop, 
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(task, true/*index*/, launcher.silence_warnings);
+      execute_task_launch(task, true/*index*/, 
+                          current_trace, launcher.silence_warnings);
       return result;
     }
 
@@ -4211,7 +4228,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
     }
 
     //--------------------------------------------------------------------------
@@ -4252,7 +4269,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, fill_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
     }
 
     //--------------------------------------------------------------------------
@@ -4287,7 +4304,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
     }
 
     //--------------------------------------------------------------------------
@@ -4328,7 +4345,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, copy_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
     }
 
     //--------------------------------------------------------------------------
@@ -4362,7 +4379,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, acquire_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
     }
 
     //--------------------------------------------------------------------------
@@ -4396,7 +4413,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, release_op);
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
     }
 
     //--------------------------------------------------------------------------
@@ -4505,7 +4522,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, epoch_op);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
-        remap_unmapped_regions(unmapped_regions);
+        remap_unmapped_regions(current_trace, unmapped_regions);
       return result;
     }
 
@@ -4702,12 +4719,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned InnerContext::register_new_child_operation(Operation *op)
+    unsigned InnerContext::register_new_child_operation(Operation *op,
+                      const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
-        op->set_trace(current_trace, !current_trace->is_fixed());
+        op->set_trace(current_trace, !current_trace->is_fixed(), dependences);
       unsigned result = total_children_count++;
       unsigned outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
@@ -5100,12 +5118,14 @@ namespace Legion {
 #endif
         exit(ERROR_ILLEGAL_NESTED_TRACE);
       }
-      std::map<TraceID,LegionTrace*>::const_iterator finder = traces.find(tid);
+      std::map<TraceID,DynamicTrace*>::const_iterator finder = traces.find(tid);
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        current_trace = legion_new<LegionTrace>(tid, this);
-        traces[tid] = current_trace;
+        DynamicTrace *dynamic_trace = legion_new<DynamicTrace>(tid, this);
+        dynamic_trace->add_reference();
+        traces[tid] = dynamic_trace;
+        current_trace = dynamic_trace;
       }
       else
       {
@@ -5135,6 +5155,11 @@ namespace Legion {
 #endif
         exit(ERROR_UNMATCHED_END_TRACE);
       }
+      else if (!current_trace->is_dynamic_trace())
+      {
+        log_task.error("Illegal end trace call on a static trace in "
+                       "task %s (UID %lld)", get_task_name(), get_unique_id());
+      }
       if (current_trace->is_fixed())
       {
         // Already fixed, dump a complete trace op into the stream
@@ -5149,10 +5174,72 @@ namespace Legion {
         capture_op->initialize_capture(this);
         runtime->add_to_dependence_queue(this, executing_processor, capture_op);
         // Mark that the current trace is now fixed
-        current_trace->fix_trace();
+        current_trace->as_dynamic_trace()->fix_trace();
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::begin_static_trace(const std::set<RegionTreeID> *trees)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Beginning a static trace in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      // No need to hold the lock here, this is only ever called
+      // by the one thread that is running the task.
+      if (current_trace != NULL)
+      {
+        log_task.error("Illegal nested static trace attempted in "
+                       "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_NESTED_TRACE);
+      }
+      // Issue the mapping fence into the analysis
+      runtime->issue_mapping_fence(this);
+      // Then we make a static trace
+      current_trace = legion_new<StaticTrace>(this, trees); 
+      current_trace->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::end_static_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Ending a static trace in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      if (current_trace == NULL)
+      {
+        log_task.error("Unmatched end static trace in task %s "
+                       "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_UNMATCHED_END_TRACE);
+      }
+      else if (current_trace->is_dynamic_trace())
+      {
+        log_task.error("Illegal end static trace call on a dynamic trace in "
+                       "task %s (UID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_UNMATCHED_END_TRACE);
+      }
+      // We're done with this trace
+      if (current_trace->remove_reference())
+        legion_delete(current_trace->as_static_trace());
+      current_trace = NULL;
+      // Now dump a mapping fence into the analysis
+      runtime->issue_mapping_fence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -7942,7 +8029,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned LeafContext::register_new_child_operation(Operation *op)
+    unsigned LeafContext::register_new_child_operation(Operation *op,
+                    const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -8032,6 +8120,30 @@ namespace Legion {
     {
       log_task.error("Illegal Legion end trace call in leaf task %s (ID %lld)",
                      get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::begin_static_trace(const std::set<RegionTreeID> *managed)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal Legion begin static trace call in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::end_static_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal Legion end static trace call in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
 #endif
@@ -9070,10 +9182,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned InlineContext::register_new_child_operation(Operation *op)
+    unsigned InlineContext::register_new_child_operation(Operation *op,
+                      const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
-      return enclosing->register_new_child_operation(op);
+      return enclosing->register_new_child_operation(op, dependences);
     }
 
     //--------------------------------------------------------------------------
@@ -9152,6 +9265,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->end_trace(tid);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::begin_static_trace(const std::set<RegionTreeID> *trees)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->begin_static_trace(trees);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::end_static_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->end_static_trace();
     }
 
     //--------------------------------------------------------------------------

@@ -11619,6 +11619,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::begin_static_trace(Context ctx, 
+                                     const std::set<RegionTreeID> *managed)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context begin static trace!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->begin_static_trace(managed);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::end_static_trace(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context end static trace!");
+ #ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->end_static_trace(); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
@@ -17215,8 +17246,10 @@ namespace Legion {
           return "Future Map";
         case PHYSICAL_REGION_ALLOC:
           return "Physical Region";
-        case TRACE_ALLOC:
-          return "Trace";
+        case STATIC_TRACE_ALLOC:
+          return "Static Trace";
+        case DYNAMIC_TRACE_ALLOC:
+          return "Dynamic Trace";
         case ALLOC_MANAGER_ALLOC:
           return "Allocation Manager";
         case ALLOC_INTERNAL_ALLOC:
