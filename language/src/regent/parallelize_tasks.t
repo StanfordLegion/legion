@@ -903,6 +903,9 @@ function parallel_param:dop()
   return self.__dop
 end
 
+local PRIMARY = setmetatable({}, { __tostring = function(self) return "PRIMARY" end })
+local SUBSET = setmetatable({}, { __tostring = function(self) return "SUBSET" end })
+
 caller_context.__index = caller_context
 
 function caller_context.new(constraints)
@@ -1033,34 +1036,81 @@ function caller_context:add_call(expr, task_cx)
   for idx = 1, #expr.args do
     local expr_type = std.as_read(expr.args[idx].expr_type)
     if std.is_region(expr_type) then
-      local decl = self.__region_decls[std.as_read(expr.args[idx].expr_type)]
+      local decl
+      local request
 
-      local primary_partition_type_from_hint =
-        param:find_primary_partition_for(expr_type)
-      if primary_partition_type_from_hint then
-        decl = self.__partition_decls[primary_partition_type_from_hint]
+      local region_type = std.as_read(expr.args[idx].expr_type)
+      local region_symbol = self:find_region_symbol(region_type)
 
-        local stencils_with_no_hints = data.filter(function(stencil)
-          local stencil_region_type = stencil:region(mapping):gettype()
-          return std.type_eq(stencil_region_type, expr_type) and
-                 (stencil:is_static() or
-                  not param:find_ghost_partition_for(stencil_region_type))
-        end, task_cx.stencils)
-        if #stencils_with_no_hints == 0 then decl = nil
-        else
-          local nested = nil
-          local range = nil
-          for idx = 1, #stencils_with_no_hints do
-            assert(range == nil or range == stencils_with_no_hints[idx]:range())
-            assert(nested == nil or nested == stencils_with_no_hints[idx]:is_nested())
-            range = stencils_with_no_hints[idx]:range()
-            nested = stencils_with_no_hints[idx]:is_nested()
+      if self:has_parent_region(region_symbol) then
+        local parent_region_symbol = region_symbol
+        while self:has_parent_region(parent_region_symbol) do
+          parent_region_symbol = self:find_parent_region(parent_region_symbol)
+        end
+        local primary_partition_type_from_hint =
+          param:find_primary_partition_for(parent_region_symbol:gettype())
+        if primary_partition_type_from_hint then
+          local subregion_decl = self.__region_decls[region_type]
+          local partition_decl = self.__partition_decls[primary_partition_type_from_hint]
+          -- FIXME: Hacky syntactic check to find a right place to create partition.
+          --        Need a more sophisticated def-use analysis.
+          --        For example, this can break the code:
+          --        var p_equal, s = partition(equal, ...), p_interior[0]
+          local function appear_earlier(n1, n2)
+            local span1 = n1.span.start
+            local span2 = n2.span.start
+            if span1.line < span2.line then return true
+            elseif span1.line > span2.line then return false
+            else
+              if span1.offset < span2.offset then return true
+              elseif span1.offset > span2.offset then return false
+              end
+            end
+            assert(false, "never be used for this case")
           end
-          if nested then
-            local ghost_partition_type_from_hint =
-              param:find_ghost_partition_for(range:region(mapping))
-            if ghost_partition_type_from_hint then
-              decl = self.__partition_decls[ghost_partition_type_from_hint]
+          if appear_earlier(subregion_decl, partition_decl) then
+            decl = partition_decl
+          else
+            decl = subregion_decl
+          end
+
+          request = { type = SUBSET, region = region_symbol }
+        else
+          decl = self.__region_decls[region_type]
+          request = { type = PRIMARY, region = region_symbol }
+        end
+      else
+        decl = self.__region_decls[region_type]
+        request = { type = PRIMARY, region = region_symbol }
+
+        local primary_partition_type_from_hint =
+          param:find_primary_partition_for(expr_type)
+
+        if primary_partition_type_from_hint then
+          decl = self.__partition_decls[primary_partition_type_from_hint]
+
+          local stencils_with_no_hints = data.filter(function(stencil)
+            local stencil_region_type = stencil:region(mapping):gettype()
+            return std.type_eq(stencil_region_type, expr_type) and
+                   (stencil:is_static() or
+                    not param:find_ghost_partition_for(stencil_region_type))
+          end, task_cx.stencils)
+          if #stencils_with_no_hints == 0 then decl = nil
+          else
+            local nested = nil
+            local range = nil
+            for idx = 1, #stencils_with_no_hints do
+              assert(range == nil or range == stencils_with_no_hints[idx]:range())
+              assert(nested == nil or nested == stencils_with_no_hints[idx]:is_nested())
+              range = stencils_with_no_hints[idx]:range()
+              nested = stencils_with_no_hints[idx]:is_nested()
+            end
+            if nested then
+              local ghost_partition_type_from_hint =
+                param:find_ghost_partition_for(range:region(mapping))
+              if ghost_partition_type_from_hint then
+                decl = self.__partition_decls[ghost_partition_type_from_hint]
+              end
             end
           end
         end
@@ -1073,7 +1123,12 @@ function caller_context:add_call(expr, task_cx)
         if self.__call_exprs_by_decl[decl][param] == nil then
           self.__call_exprs_by_decl[decl][param] = {}
         end
-        self.__call_exprs_by_decl[decl][param][expr] = true
+        -- TODO: This collision case is not yet thoroughly understood
+        if self.__call_exprs_by_decl[decl][param][expr] == nil or
+           (self.__call_exprs_by_decl[decl][param][expr].type == PRIMARY and
+            request.type == SUBSET) then
+          self.__call_exprs_by_decl[decl][param][expr] = request
+        end
         -- TODO: We don't support multiple structured regions with different dimensions
         assert(self:find_max_dim(param) == 0 or
                expr_type:ispace().dim == 0 or
@@ -1864,6 +1919,16 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
             caller_cx:add_color_space(pparam, color_space_symbol)
           end
         end
+        for pparam, map in call_exprs_map:items() do
+          for expr, request in pairs(map) do
+            if request.type == SUBSET then
+              region_symbol = request.region
+              if not caller_cx:has_primary_partition(pparam, region_symbol) then
+                stats:insertall(create_primary_partition(caller_cx, pparam, region_symbol))
+              end
+            end
+          end
+        end
       else
         assert(false, "unreachable")
       end
@@ -2024,8 +2089,7 @@ local function insert_partition_creation(parallelizable, caller_cx, call_stats)
                   caller_cx:find_ghost_partition(call, orig_stencil:range())
                 range_symbol = stencil:range():region()
               else
-                partition_symbol = caller_cx:find_primary_partition(pparam, range)
-                range_symbol = range
+                assert(false, "should be unreachable for now")
               end
               assert(partition_symbol)
               while caller_cx:has_parent_region(range_symbol) do
@@ -2163,11 +2227,30 @@ function parallelize_task_calls.top_task(global_cx, node)
   end
 
   -- Return if there is no parallelizable task call
-  local found = false
+  local found_calls = false
+  local found_hints = false
   ast.traverse_node_continuation(function(node, continuation)
-    if parallelizable(node) then found = true
-    else continuation(node, true) end end, node)
-  if not found then return node end
+    if parallelizable(node) then
+      found_calls = true
+    elseif node:is(ast.typed.stat.ParallelizeWith) then
+      found_hints = true
+    end
+    continuation(node, true)
+  end, node)
+  if not found_calls then
+    if not found_hints then return node
+    else
+      return ast.map_node_continuation(function(node, continuation)
+        if node:is(ast.typed.stat.ParallelizeWith) then
+          return ast.typed.stat.Block {
+            block = node.block,
+            span = node.span,
+            annotations = node.annotations,
+          }
+        else return continuation(node, true) end
+      end, node)
+    end
+  end
 
   -- Add declartions for the variables that contain region metadata (e.g. bounds)
   local caller_cx = caller_context.new(node.prototype:get_constraints())
