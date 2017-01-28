@@ -941,6 +941,8 @@ function caller_context.new(constraints)
     __max_dim = data.newmap(),
     -- list of hints in a `__parallelize_with` block -> parallelization parameter
     __param_by_hints = {},
+    __decl_order = {},
+    __current_order = 0,
   }
   return setmetatable(cx, caller_context)
 end
@@ -958,6 +960,8 @@ end
 
 function caller_context:add_region_decl(region_type, stat)
   self.__region_decls[region_type] = stat
+  self.__decl_order[stat] = self.__current_order
+  self.__current_order = self.__current_order + 1
 end
 
 function caller_context:add_region_symbol(region_type, region_symbol)
@@ -975,6 +979,8 @@ end
 
 function caller_context:add_partition_decl(partition_type, stat)
   self.__partition_decls[partition_type] = stat
+  self.__decl_order[stat] = self.__current_order
+  self.__current_order = self.__current_order + 1
 end
 
 function caller_context:find_partition_decl(partition_type)
@@ -1057,16 +1063,11 @@ function caller_context:add_call(expr, task_cx)
           --        For example, this can break the code:
           --        var p_equal, s = partition(equal, ...), p_interior[0]
           local function appear_earlier(n1, n2)
-            local span1 = n1.span.start
-            local span2 = n2.span.start
-            if span1.line < span2.line then return true
-            elseif span1.line > span2.line then return false
-            else
-              if span1.offset < span2.offset then return true
-              elseif span1.offset > span2.offset then return false
-              end
-            end
-            assert(false, "never be used for this case")
+            local o1 = self.__decl_order[n1]
+            local o2 = self.__decl_order[n2]
+            assert(o1 ~= nil)
+            assert(o2 ~= nil)
+            return o1 < o2
           end
           if appear_earlier(subregion_decl, partition_decl) then
             decl = partition_decl
