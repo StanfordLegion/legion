@@ -13,6 +13,6 @@
 #cmakedefine GASNET_CONDUIT_GEMINI
 #cmakedefine USE_CUDA
 #cmakedefine GASNETI_BUG1389_WORKAROUND @GASNETI_BUG1389_WORKAROUND@
-
+#cmakedefine __STDC_FORMAT_MACROS
 #include "legion.h"
 
