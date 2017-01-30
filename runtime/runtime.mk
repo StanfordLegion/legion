@@ -326,9 +326,6 @@ ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 endif
 
-# fix for some systems that need this for printf formatting macros
-CC_FLAGS	+= -D__STDC_FORMAT_MACROS
-
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
 LOW_RUNTIME_SRC	?=
