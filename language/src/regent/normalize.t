@@ -666,6 +666,13 @@ function normalize.stat(cx)
     elseif node:is(ast.typed.stat.Assignment) or
            node:is(ast.typed.stat.Reduce) then
       return normalize.stat_assignment_or_reduce(cx, node)
+    elseif not std.config["parallelize"] and
+           node:is(ast.typed.stat.ParallelizeWith) then
+      return ast.typed.stat.Block {
+        block = node.block,
+        span = node.span,
+        annotations = node.annotations,
+      }
     elseif node:is(ast.specialized.stat.Var) then
       return normalize.stat_var(node)
     elseif node:is(ast.typed.stat.Var) and #node.values > 0 and
