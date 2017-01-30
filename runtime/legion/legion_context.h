@@ -313,7 +313,8 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual unsigned register_new_child_operation(Operation *op) = 0;
+      virtual unsigned register_new_child_operation(Operation *op,
+               const std::vector<StaticDependence> *dependences) = 0;
       virtual unsigned register_new_close_operation(CloseOp *op) = 0;
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
                                            RtEvent op_precondition) = 0;
@@ -328,6 +329,9 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid) = 0;
       virtual void end_trace(TraceID tid) = 0;
+      virtual void begin_static_trace(
+                                     const std::set<RegionTreeID> *managed) = 0;
+      virtual void end_static_trace(void) = 0;
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination) = 0;
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -533,8 +537,9 @@ namespace Legion {
       inline void end_runtime_call(void);
       inline void begin_task_wait(bool from_runtime);
       inline void end_task_wait(void);
-      void execute_task_launch(TaskOp *task, bool index, bool silence_warnings);
-      void remap_unmapped_regions(
+      void execute_task_launch(TaskOp *task, bool index, 
+                             LegionTrace *current_trace, bool silence_warnings);
+      void remap_unmapped_regions(LegionTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions);
     public:
       // Override by RemoteContext to avoid unnecessary recursion
@@ -864,7 +869,8 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual unsigned register_new_child_operation(Operation *op);
+      virtual unsigned register_new_child_operation(Operation *op,
+                const std::vector<StaticDependence> *dependences);
       virtual unsigned register_new_close_operation(CloseOp *op);
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
                                            RtEvent op_precondition);
@@ -879,6 +885,8 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid);
       virtual void end_trace(TraceID tid);
+      virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
+      virtual void end_static_trace(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -979,7 +987,7 @@ namespace Legion {
 #endif
     protected:
       // Traces for this task's execution
-      LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC>::tracked traces;
+      LegionMap<TraceID,DynamicTrace*,TASK_TRACES_ALLOC>::tracked traces;
       LegionTrace *current_trace;
       // Event for waiting when the number of mapping+executing
       // child operations has grown too large.
@@ -1339,7 +1347,8 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual unsigned register_new_child_operation(Operation *op);
+      virtual unsigned register_new_child_operation(Operation *op,
+                const std::vector<StaticDependence> *dependences);
       virtual unsigned register_new_close_operation(CloseOp *op);
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
                                            RtEvent op_precondition);
@@ -1354,6 +1363,8 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid);
       virtual void end_trace(TraceID tid);
+      virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
+      virtual void end_static_trace(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 
@@ -1632,7 +1643,8 @@ namespace Legion {
       // commit_operations performed by an operation.  Every
       // one of those calls invokes the corresponding one of
       // these calls to notify the parent context.
-      virtual unsigned register_new_child_operation(Operation *op);
+      virtual unsigned register_new_child_operation(Operation *op,
+                const std::vector<StaticDependence> *dependences);
       virtual unsigned register_new_close_operation(CloseOp *op);
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
                                            RtEvent op_precondition);
@@ -1647,6 +1659,8 @@ namespace Legion {
     public:
       virtual void begin_trace(TraceID tid);
       virtual void end_trace(TraceID tid);
+      virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
+      virtual void end_static_trace(void);
     public:
       virtual void issue_frame(FrameOp *frame, ApEvent frame_termination);
       virtual void perform_frame_issue(FrameOp *frame, 

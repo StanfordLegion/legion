@@ -379,7 +379,10 @@ namespace Realm {
     }
 
     template <typename T, unsigned DIM>
-    static void copy_rect(Rect<DIM> r, T *mpc, RegionInstanceImpl *local_impl, HDF5Memory::HDFMetadata *md,
+    static void copy_rect(LegionRuntime::Arrays::Rect<DIM> r,
+			  T *mpc,
+			  RegionInstanceImpl *local_impl,
+			  HDF5Memory::HDFMetadata *md,
 			  OASVec& oas_vec)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(local_impl->memory);

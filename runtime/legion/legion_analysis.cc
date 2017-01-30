@@ -19,6 +19,7 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
+#include "legion_trace.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -1933,6 +1934,26 @@ namespace Legion {
           restrictions.erase(*it);
           delete (*it);
         }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // TraceInfo 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TraceInfo::TraceInfo(bool already_tr, LegionTrace *tr, unsigned idx,
+                         const RegionRequirement &r)
+      : already_traced(already_tr), trace(tr), req_idx(idx), req(r)
+    //--------------------------------------------------------------------------
+    {
+      // If we have a trace but it doesn't handle the region tree then
+      // we should mark that this is not part of a trace
+      if ((trace != NULL) && 
+          !trace->handles_region_tree(req.parent.get_tree_id()))
+      {
+        already_traced = false;
+        trace = NULL;
       }
     }
 

@@ -385,9 +385,7 @@ namespace Legion {
       TraceInfo(bool already_tr,
                 LegionTrace *tr,
                 unsigned idx,
-                const RegionRequirement &r)
-        : already_traced(already_tr), trace(tr),
-          req_idx(idx), req(r) { }
+                const RegionRequirement &r);
     public:
       bool already_traced;
       LegionTrace *trace;

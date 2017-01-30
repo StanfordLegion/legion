@@ -887,11 +887,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::initialize_base_task(TaskContext *ctx, bool track, 
-                                      const Predicate &p,
-                                      Processor::TaskFuncID tid)
+                  const std::vector<StaticDependence> *dependences,
+                  const Predicate &p, Processor::TaskFuncID tid)
     //--------------------------------------------------------------------------
     {
-      initialize_speculation(ctx, track, regions.size(), p);
+      initialize_speculation(ctx, track, regions.size(), dependences, p);
       parent_task = ctx->get_task(); // initialize the parent task
       // Fill in default values for all of the Task fields
       orig_proc = ctx->get_executing_processor();
@@ -4514,7 +4514,8 @@ namespace Legion {
       tag = launcher.tag;
       index_point = launcher.point;
       is_index_space = false;
-      initialize_base_task(ctx, track, launcher.predicate, task_id);
+      initialize_base_task(ctx, track, launcher.static_dependences,
+                           launcher.predicate, task_id);
       remote_owner_uid = ctx->get_unique_id();
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       if (launcher.predicate != Predicate::TRUE_PRED)
@@ -6260,7 +6261,8 @@ namespace Legion {
       index_domain = launcher.launch_domain;
       internal_domain = launcher.launch_domain;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
-      initialize_base_task(ctx, track, launcher.predicate, task_id);
+      initialize_base_task(ctx, track, launcher.static_dependences,
+                           launcher.predicate, task_id);
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
@@ -6269,6 +6271,7 @@ namespace Legion {
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements(); 
+
       if (check_privileges)
         perform_privilege_checks();
       if (Runtime::legion_spy_enabled)
@@ -6336,7 +6339,8 @@ namespace Legion {
       }
       else
         initialize_reduction_state();
-      initialize_base_task(ctx, track, launcher.predicate, task_id);
+      initialize_base_task(ctx, track, launcher.static_dependences,
+                           launcher.predicate, task_id);
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
@@ -6997,9 +7001,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(false); 
-      result->initialize_base_task(parent_ctx, 
-                                   false/*track*/, Predicate::TRUE_PRED,
-                                   this->task_id);
+      result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
+                                   Predicate::TRUE_PRED, this->task_id);
       result->clone_multi_from(this, d, p, recurse, stealable);
       result->index_complete = this->completion_event;
       result->denominator = scale_denominator;
@@ -7939,9 +7942,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_SLICE_CALL);
       SliceTask *result = runtime->get_available_slice_task(false); 
-      result->initialize_base_task(parent_ctx, 
-                                   false/*track*/, Predicate::TRUE_PRED,
-                                   this->task_id);
+      result->initialize_base_task(parent_ctx,  false/*track*/, NULL/*deps*/,
+                                   Predicate::TRUE_PRED, this->task_id);
       result->clone_multi_from(this, d, p, recurse, stealable);
       result->index_complete = this->index_complete;
       result->denominator = this->denominator * scale_denominator;
@@ -8019,9 +8021,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_POINT_CALL);
       PointTask *result = runtime->get_available_point_task(false);
-      result->initialize_base_task(parent_ctx,
-                                   false/*track*/, Predicate::TRUE_PRED,
-                                   this->task_id);
+      result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
+                                   Predicate::TRUE_PRED, this->task_id);
       result->clone_task_op_from(this, this->target_proc, 
                                  false/*stealable*/, true/*duplicate*/);
       result->is_index_space = true;

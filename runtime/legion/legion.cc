@@ -1287,13 +1287,34 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // StaticDependence 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    StaticDependence::StaticDependence(void)
+      : previous_offset(0), previous_req_index(0), current_req_index(0),
+        dependence_type(NO_DEPENDENCE), validates(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    StaticDependence::StaticDependence(unsigned prev, unsigned prev_req,
+                           unsigned current_req, DependenceType dtype, bool val)
+      : previous_offset(prev), previous_req_index(prev_req),
+        current_req_index(current_req), dependence_type(dtype), validates(val)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // TaskLauncher 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     TaskLauncher::TaskLauncher(void)
       : task_id(0), argument(TaskArgument()), predicate(Predicate::TRUE_PRED),
-        map_id(0), tag(0), point(DomainPoint()), 
+        map_id(0), tag(0), point(DomainPoint()), static_dependences(NULL),
         independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
@@ -1304,8 +1325,8 @@ namespace Legion {
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
-        point(DomainPoint()), independent_requirements(false), 
-        silence_warnings(false)
+        point(DomainPoint()), static_dependences(NULL),
+        independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1319,8 +1340,8 @@ namespace Legion {
       : task_id(0), launch_domain(Domain::NO_DOMAIN), 
         global_arg(TaskArgument()), argument_map(ArgumentMap()), 
         predicate(Predicate::TRUE_PRED), must_parallelism(false), 
-        map_id(0), tag(0), independent_requirements(false), 
-        silence_warnings(false)
+        map_id(0), tag(0), static_dependences(NULL), 
+        independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1334,8 +1355,8 @@ namespace Legion {
                                      MappingTagID t /*=0*/)
       : task_id(tid), launch_domain(dom), global_arg(global), 
         argument_map(map), predicate(pred), must_parallelism(must),
-        map_id(mid), tag(t), independent_requirements(false), 
-        silence_warnings(false)
+        map_id(mid), tag(t), static_dependences(NULL),
+        independent_requirements(false), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1346,7 +1367,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineLauncher::InlineLauncher(void)
-      : map_id(0), tag(0), layout_constraint_id(0)
+      : map_id(0), tag(0), layout_constraint_id(0), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1355,7 +1376,8 @@ namespace Legion {
     InlineLauncher::InlineLauncher(const RegionRequirement &req,
                                    MapperID mid /*=0*/, MappingTagID t /*=0*/,
                                    LayoutConstraintID lay_id /*=0*/)
-      : requirement(req), map_id(mid), tag(t), layout_constraint_id(lay_id)
+      : requirement(req), map_id(mid), tag(t), layout_constraint_id(lay_id),
+        static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1367,7 +1389,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyLauncher::CopyLauncher(Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
-      : predicate(pred), map_id(mid), tag(t), silence_warnings(false)
+      : predicate(pred), map_id(mid), tag(t), static_dependences(NULL),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1380,7 +1403,8 @@ namespace Legion {
     IndexCopyLauncher::IndexCopyLauncher(Domain dom, 
                                     Predicate pred /*= Predicate::TRUE_PRED*/,
                                     MapperID mid /*=0*/, MappingTagID t /*=0*/) 
-      : domain(dom), predicate(pred), map_id(mid),tag(t),silence_warnings(false)
+      : domain(dom), predicate(pred), map_id(mid),tag(t),
+        static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1395,7 +1419,8 @@ namespace Legion {
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t), silence_warnings(false)
+        predicate(pred), map_id(id), tag(t), static_dependences(NULL),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1410,7 +1435,8 @@ namespace Legion {
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
                                      MapperID id /*=0*/, MappingTagID t /*=0*/)
       : logical_region(reg), parent_region(par), physical_region(phy), 
-        predicate(pred), map_id(id), tag(t), silence_warnings(false)
+        predicate(pred), map_id(id), tag(t), static_dependences(NULL),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1422,7 +1448,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FillLauncher::FillLauncher(void)
       : handle(LogicalRegion::NO_REGION), parent(LogicalRegion::NO_REGION),
-        map_id(0), tag(0), silence_warnings(false)
+        map_id(0), tag(0), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1432,8 +1458,8 @@ namespace Legion {
                                TaskArgument arg, 
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/)
-      : handle(h), parent(p), argument(arg), 
-        predicate(pred), map_id(id), tag(t), silence_warnings(false)
+      : handle(h), parent(p), argument(arg), predicate(pred), map_id(id), 
+        tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1442,8 +1468,8 @@ namespace Legion {
     FillLauncher::FillLauncher(LogicalRegion h, LogicalRegion p, Future f,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID id /*=0*/, MappingTagID t /*=0*/)
-      : handle(h), parent(p), future(f), 
-        predicate(pred), map_id(id), tag(t), silence_warnings(false) 
+      : handle(h), parent(p), future(f), predicate(pred), map_id(id), tag(t), 
+        static_dependences(NULL), silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
@@ -1456,7 +1482,7 @@ namespace Legion {
     IndexFillLauncher::IndexFillLauncher(void)
       : domain(Domain::NO_DOMAIN), region(LogicalRegion::NO_REGION),
         partition(LogicalPartition::NO_PART), projection(0), 
-        map_id(0), tag(0), silence_warnings(false) 
+        map_id(0), tag(0), static_dependences(NULL), silence_warnings(false) 
     //--------------------------------------------------------------------------
     {
     }
@@ -1468,7 +1494,7 @@ namespace Legion {
                                MapperID id /*=0*/, MappingTagID t /*=0*/)
       : domain(dom), region(h), partition(LogicalPartition::NO_PART),
         parent(p), projection(proj), argument(arg), predicate(pred),
-        map_id(id), tag(t), silence_warnings(false)
+        map_id(id), tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1480,7 +1506,7 @@ namespace Legion {
                                 MapperID id /*=0*/, MappingTagID t /*=0*/)
       : domain(dom), region(h), partition(LogicalPartition::NO_PART),
         parent(p), projection(proj), future(f), predicate(pred),
-        map_id(id), tag(t), silence_warnings(false)
+        map_id(id), tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1493,7 +1519,7 @@ namespace Legion {
                                          MappingTagID t /*=0*/)
       : domain(dom), region(LogicalRegion::NO_REGION), partition(h),
         parent(p), projection(proj), argument(arg), predicate(pred),
-        map_id(id), tag(t), silence_warnings(false)
+        map_id(id), tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1506,7 +1532,7 @@ namespace Legion {
                                          MappingTagID t /*=0*/)
       : domain(dom), region(LogicalRegion::NO_REGION), partition(h),
         parent(p), projection(proj), future(f), predicate(pred),
-        map_id(id), tag(t), silence_warnings(false)
+        map_id(id), tag(t), static_dependences(NULL), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1519,7 +1545,7 @@ namespace Legion {
     AttachLauncher::AttachLauncher(ExternalResource r, 
                                    LogicalRegion h, LogicalRegion p)
       : resource(r), handle(h), parent(p), 
-        file_name(NULL), mode(LEGION_FILE_READ_ONLY)
+        file_name(NULL), mode(LEGION_FILE_READ_ONLY), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -3893,6 +3919,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::begin_static_trace(Context ctx,
+                                     const std::set<RegionTreeID> *managed)
+    //--------------------------------------------------------------------------
+    {
+      runtime->begin_static_trace(ctx, managed);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::end_static_trace(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      runtime->end_static_trace(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
@@ -4459,11 +4500,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::add_registration_callback(
+                                            RegistrationCallbackFnptr callback)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::add_registration_callback(callback);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::set_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback);
     }
 
     //--------------------------------------------------------------------------

@@ -1115,6 +1115,41 @@ namespace Legion {
     //==========================================================================
 
     /**
+     * \struct StaticDependence
+     * This is a helper class for specifying static dependences 
+     * between operations launched by an application. Operations
+     * can optionally specify these dependences to aid in reducing
+     * runtime overhead. These static dependences need only
+     * be specified for dependences based on region requirements.
+     */
+    struct StaticDependence {
+    public:
+      StaticDependence(void);
+      StaticDependence(unsigned previous_offset,
+                       unsigned previous_req_index,
+                       unsigned current_req_index,
+                       DependenceType dtype,
+                       bool validates = false);
+    public:
+      inline void add_field(FieldID fid);
+    public:
+      // The relative offset from this operation to 
+      // previous operation in the stream of operations
+      // (e.g. 1 is the operation launched immediately before)
+      unsigned                      previous_offset;
+      // Region requirement of the previous operation for the dependence
+      unsigned                      previous_req_index;
+      // Region requirement of the current operation for the dependence
+      unsigned                      current_req_index;
+      // The type of the dependence
+      DependenceType                dependence_type;
+      // Whether this requirement validates the previous writer
+      bool                          validates;
+      // Fields that have the dependence
+      std::set<FieldID>             dependent_fields;
+    };
+
+    /**
      * \struct TaskLauncher
      * Task launchers are objects that describe a launch
      * configuration to the runtime.  They can be re-used
@@ -1168,6 +1203,10 @@ namespace Legion {
       // can be used if the task's return type is void.
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>      *static_dependences;
     public:
       // Users can inform the runtime that all region requirements
       // are independent of each other in this task. Independent
@@ -1239,6 +1278,10 @@ namespace Legion {
       Future                             predicate_false_future;
       TaskArgument                       predicate_false_result;
     public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>      *static_dependences;
+    public:
       // Users can inform the runtime that all region requirements
       // are independent of each other in this task. Independent
       // means that either field sets are independent or region
@@ -1271,6 +1314,10 @@ namespace Legion {
       MappingTagID                    tag;
     public:
       LayoutConstraintID              layout_constraint_id;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>   *static_dependences;
     };
 
     /**
@@ -1322,6 +1369,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
     public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>   *static_dependences;
+    public:
       bool                            silence_warnings;
     };
 
@@ -1360,6 +1411,10 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>   *static_dependences;
     public:
       bool                            silence_warnings;
     };
@@ -1400,6 +1455,10 @@ namespace Legion {
       std::vector<PhaseBarrier>       arrive_barriers;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>   *static_dependences;
     public:
       bool                            silence_warnings;
     };
@@ -1463,6 +1522,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
     public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>   *static_dependences;
+    public:
       bool                            silence_warnings;
     };
 
@@ -1504,6 +1567,10 @@ namespace Legion {
       // Data for arrays
       std::map<FieldID,/*pointers*/void*>           field_pointers;
       std::vector<size_t/*bytes*/>                  pitches;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>                 *static_dependences;
     };
 
     /**
@@ -1870,6 +1937,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
     public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>   *static_dependences;
+    public:
       bool                            silence_warnings;
     };
 
@@ -1907,6 +1978,10 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      std::vector<StaticDependence>   *static_dependences;
     public:
       bool                            silence_warnings;
     };
@@ -4395,6 +4470,27 @@ namespace Legion {
        * Mark the end of trace that was being performed.
        */
       void end_trace(Context ctx, TraceID tid);
+      /**
+       * Start a new static trace of operations. Inside of this trace
+       * it is the application's responsibility to specify any dependences
+       * that would normally have existed between each operation being
+       * launched and any prior operations in the trace (there is no need
+       * to specify dependences on anything outside of the trace). The
+       * application can optionally specify a set of region trees for 
+       * which it will be supplying dependences, with all other region
+       * trees being left to the runtime to handle. If no such set is
+       * specified then the runtime will operate under the assumption
+       * that the application is specifying dependences for all region trees.
+       * @param ctx the enclosing task context
+       * @param managed optional list of region trees managed by the application
+       */
+      void begin_static_trace(Context ctx, 
+                              const std::set<RegionTreeID> *managed = NULL);
+      /**
+       * Finish a static trace of operations
+       * @param ctx the enclosing task context
+       */
+      void end_static_trace(Context ctx);
     public:
       //------------------------------------------------------------------------
       // Frame Operations 
@@ -5211,6 +5307,18 @@ namespace Legion {
       static ProjectionID register_partition_function(ProjectionID handle);
     public:
       /**
+       * This call allows the application to add a callback function
+       * that will be run prior to beginning any task execution on every
+       * runtime in the system.  It can be used to register or update the
+       * mapping between mapper IDs and mappers, register reductions,
+       * register projection function, register coloring functions, or
+       * configure any other static runtime variables prior to beginning
+       * the application.
+       * @param callback function pointer to the callback function to be run
+       */
+      static void add_registration_callback(RegistrationCallbackFnptr callback);
+      /**
+       * @deprecated
        * This call allows the application to register a callback function
        * that will be run prior to beginning any task execution on every
        * runtime in the system.  It can be used to register or update the
