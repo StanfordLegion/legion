@@ -181,6 +181,12 @@ local function analyze_usage_node(cx)
     elseif node:is(ast.typed.expr.Release) then
       local region_type = std.as_read(node.region.expr_type)
       return uses(cx, region_type, remote)
+    elseif node:is(ast.typed.expr.AttachHDF5) then
+      local region_type = std.as_read(node.region.expr_type)
+      return uses(cx, region_type, remote)
+    elseif node:is(ast.typed.expr.DetachHDF5) then
+      local region_type = std.as_read(node.region.expr_type)
+      return uses(cx, region_type, remote)
     elseif node:is(ast.typed.expr.Region) then
       return uses(cx, node.expr_type, inline)
     elseif node:is(ast.typed.expr.PartitionByField) then
