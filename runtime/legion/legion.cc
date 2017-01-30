@@ -4500,11 +4500,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::add_registration_callback(
+                                            RegistrationCallbackFnptr callback)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::add_registration_callback(callback);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::set_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::set_registration_callback(callback);
+      Internal::Runtime::add_registration_callback(callback);
     }
 
     //--------------------------------------------------------------------------

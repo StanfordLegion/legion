@@ -8835,11 +8835,14 @@ namespace Legion {
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
           // Now ask the application what it wants to do
-          if (Runtime::registration_callback != NULL)
+          if (!Runtime::registration_callbacks.empty())
           {
-            log_run.info("Invoking mapper registration callback function...");
-            (*Runtime::registration_callback)(machine, external, local_procs);
-            log_run.info("Completed execution of mapper registration callback");
+            log_run.info("Invoking mapper registration callback functions...");
+            for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
+                  Runtime::registration_callbacks.begin(); it !=
+                  Runtime::registration_callbacks.end(); it++)
+              (**it)(machine, external, local_procs);
+            log_run.info("Finished execution of mapper registration callbacks");
           }
         }
       }
@@ -17899,8 +17902,8 @@ namespace Legion {
 
     /*static*/ Runtime* Runtime::the_runtime = NULL;
     /*static*/ std::map<Processor,Runtime*>* Runtime::runtime_map = NULL;
-    /*static*/ volatile RegistrationCallbackFnptr Runtime::
-                                              registration_callback = NULL;
+    /*static*/ std::vector<RegistrationCallbackFnptr> 
+                                             Runtime::registration_callbacks;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
     /*static*/ int Runtime::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
@@ -18550,11 +18553,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_registration_callback(
+    /*static*/ void Runtime::add_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      registration_callback = callback;
+      registration_callbacks.push_back(callback);
     }
 
     //--------------------------------------------------------------------------

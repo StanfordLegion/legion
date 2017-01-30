@@ -5307,6 +5307,18 @@ namespace Legion {
       static ProjectionID register_partition_function(ProjectionID handle);
     public:
       /**
+       * This call allows the application to add a callback function
+       * that will be run prior to beginning any task execution on every
+       * runtime in the system.  It can be used to register or update the
+       * mapping between mapper IDs and mappers, register reductions,
+       * register projection function, register coloring functions, or
+       * configure any other static runtime variables prior to beginning
+       * the application.
+       * @param callback function pointer to the callback function to be run
+       */
+      static void add_registration_callback(RegistrationCallbackFnptr callback);
+      /**
+       * @deprecated
        * This call allows the application to register a callback function
        * that will be run prior to beginning any task execution on every
        * runtime in the system.  It can be used to register or update the
