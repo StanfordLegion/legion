@@ -96,6 +96,7 @@ task main()
   -- test 1: attach and directly read/write the file (i.e. no acquire/release)
   -- TODO: disabled until we can get regent to use generic accessor
   if false then
+    regentlib.c.printf("test 1\n")
     fill_region(r1, 1)
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
     fill_region(r2, 1)
@@ -106,6 +107,7 @@ task main()
   -- test 2: attach and directly read/write the file but use acquire/release
   --  (should make a local copy)
   if true then
+    regentlib.c.printf("test 2\n")
     fill_region(r1, 2)
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
     acquire(r2)
@@ -118,6 +120,7 @@ task main()
   -- test 3: write different data and then re-attach - should see old data
   --  (from test 2) use acquire/release this time to allow an implicit copy
   if false then
+    regentlib.c.printf("test 3\n")
     fill_region(r1, 2)
     fill_region(r2, 3)
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
@@ -129,6 +132,7 @@ task main()
 
   -- test 4: use explicit copies (no acquire/release needed)
   if true then
+    regentlib.c.printf("test 4\n")
     fill_region(r1, 4)
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
     copy(r1.{a,b,c}, r2.{a,b,c})

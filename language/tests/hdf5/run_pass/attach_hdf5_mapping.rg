@@ -95,6 +95,7 @@ task main()
 
   -- test 1: use an inline mapping before attach
   if true then
+    regentlib.c.printf("test 1\n")
     fill_region(r1, 1)
     for x in r2 do x.{a, b, c} = 1 end
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
