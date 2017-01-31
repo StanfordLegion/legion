@@ -50,6 +50,8 @@ variables:
   LD_FLAGS: "-m32"
   MARCH: "i686"
 
+.hdf5: &hdf5
+  USE_HDF: "1"
 .gasnet: &gasnet
   USE_GASNET: "1"
 .cmake: &cmake
@@ -166,6 +168,10 @@ linux_gcc49_terra35_cxx11_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra35, *release, *cxx11_normal]
+linux_gcc49_terra35_cxx98_debug_checks_hdf5:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *hdf5]
 linux_gcc49_terra35_cxx98_debug_checks_gasnet:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -200,6 +206,10 @@ linux_clang35_terra35_cxx11_release:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang35, *terra35, *release, *cxx11_normal]
+linux_clang35_terra35_cxx98_debug_checks_hdf5:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang35, *terra35, *debug, *cxx98_checks, *hdf5]
 # # FIXME: Clang with GASNet freezes
 # linux_clang35_terra35_cxx98_debug_checks_gasnet:
 #   <<: [*linux_compute, *image, *tests]
