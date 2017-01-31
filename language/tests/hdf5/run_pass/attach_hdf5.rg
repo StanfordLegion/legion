@@ -12,9 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- []
-
 import "regent"
 
 local c = terralib.includec("assert.h")
@@ -80,7 +77,7 @@ task compare_regions(is : ispace(int3d), r1 : region(is, t), r2 : region(is, t))
 where reads(r1.{a,b,c}), reads(r2.{a,b,c}) do
   var errors = 0
   for p in is do
-    if(r1[p].a ~= r2[p].a) then
+    if r1[p].a ~= r2[p].a then
       errors += 1
       regentlib.c.printf("[%d,%d,%d]: a mismatch - %d %d\n", p.x, p.y, p.z, r1[p].a, r2[p].a)
     end
@@ -120,7 +117,7 @@ task main()
 
   -- test 3: write different data and then re-attach - should see old data
   --  (from test 2) use acquire/release this time to allow an implicit copy
-  if true then
+  if false then
     fill_region(r1, 2)
     fill_region(r2, 3)
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
