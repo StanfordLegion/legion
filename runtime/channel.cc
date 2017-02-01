@@ -963,7 +963,7 @@ namespace LegionRuntime {
         for (int i = 0; i < max_nr; i++) {
           disk_reqs[i].xd = this;
           disk_reqs[i].fd = fd;
-          available_reqs.push(&disk_reqs[i]);
+          enqueue_request(&disk_reqs[i]);
         }
       }
 
@@ -1182,45 +1182,31 @@ namespace LegionRuntime {
         // since ib may involve a different address space model
         assert(!src_buf.is_ib);
         assert(!dst_buf.is_ib);
-        size_t total_field_size = 0;
-        for (unsigned i = 0; i < oas_vec.size(); i++) {
-          total_field_size += oas_vec[i].size;
-        }
-        bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
         Rect<DIM> subrect_check;
+        HDF5Memory* hdf_mem;
         switch (kind) {
           case XferDes::XFER_HDF_READ:
           {
-            ID src_id(inst);
-            unsigned src_index = src_id.index_l();
-            pthread_rwlock_rdlock(&((HDFMemory*)get_runtime()->get_memory_impl(src_buf.memory))->rwlock);
-            hdf_metadata = ((HDFMemory*) get_runtime()->get_memory_impl(src_buf.memory))->hdf_metadata_vec[src_index];
-            pthread_rwlock_unlock(&((HDFMemory*)get_runtime()->get_memory_impl(src_buf.memory))->rwlock);
+            hdf_mem = (HDF5Memory*) get_runtime()->get_memory_impl(src_buf.memory);
+            //pthread_rwlock_rdlock(&hdf_mem->rwlock);
+            std::map<RegionInstance, HDFMetadata*>::iterator it;
+            it = hdf_mem->hdf_metadata.find(inst);
+            assert(it != hdf_mem->hdf_metadata.end());
+            hdf_metadata = it->second;
+            //pthread_rwlock_unlock(&hdf_mem->rwlock);
             channel = channel_manager->get_hdf_read_channel();
             buf_base = (char*) dst_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
             assert(src_impl->kind == MemoryImpl::MKIND_HDF);
-            //assert(dst_impl->kind == MemoryImpl::MKIND_SYSMEM || dst_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
-            HDFReadRequest* hdf_read_reqs = (HDFReadRequest*) calloc(max_nr, sizeof(HDFReadRequest));
-            for (int i = 0; i < max_nr; i++) {
-              hdf_read_reqs[i].xd = this;
-              hdf_read_reqs[i].hdf_memory = hdf_metadata->hdf_memory;
-              available_reqs.push(&hdf_read_reqs[i]);
-            }
-            requests = hdf_read_reqs;
             hli = new Layouts::HDFLayoutIterator<DIM>(domain.get_rect<DIM>(), dst_buf.linearization.get_mapping<DIM>(), dst_buf.block_size);
-            //lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(dst_buf.linearization.get_mapping<DIM>()));
-            // Make sure instance involves FortranArrayLinearization
-            // assert(lsi->strides[0][0] == 1);
             // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
             // we change the src/dst offset to hdf dataset idx
             for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
               off_t offset = 0;
               int idx = 0;
               while (offset < (*fit).src_offset) {
-                pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
+                //pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
                 offset += H5Tget_size(hdf_metadata->datatype_ids[idx]);
-                pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+                //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
                 idx++;
               }
               assert(offset == (*fit).src_offset);
@@ -1231,35 +1217,26 @@ namespace LegionRuntime {
           }
           case XferDes::XFER_HDF_WRITE:
           {
-            ID dst_id(inst);
-            unsigned index = dst_id.index_l();
-            pthread_rwlock_rdlock(&((HDFMemory*)get_runtime()->get_memory_impl(dst_buf.memory))->rwlock);
-            hdf_metadata = ((HDFMemory*)get_runtime()->get_memory_impl(dst_buf.memory))->hdf_metadata_vec[index];
-            pthread_rwlock_unlock(&((HDFMemory*)get_runtime()->get_memory_impl(dst_buf.memory))->rwlock);
+            hdf_mem = (HDF5Memory*) get_runtime()->get_memory_impl(dst_buf.memory);
+            //pthread_rwlock_rdlock(&hdf_mem->rwlock);
+            std::map<RegionInstance, HDFMetadata*>::iterator it;
+            it = hdf_mem->hdf_metadata.find(inst);
+            assert(it != hdf_mem->hdf_metadata.end());
+            hdf_metadata = it->second;
+            //pthread_rwlock_unlock(&hdf_mem->rwlock);
             channel = channel_manager->get_hdf_write_channel();
             buf_base = (char*) src_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-            //assert(src_impl->kind == MemoryImpl::MKIND_SYSMEM || src_impl->kind == MemoryImpl::MKIND_ZEROCOPY);
             assert(dst_impl->kind == MemoryImpl::MKIND_HDF);
-            HDFWriteRequest* hdf_write_reqs = (HDFWriteRequest*) calloc(max_nr, sizeof(HDFWriteRequest));
-            for (int i = 0; i < max_nr; i++) {
-              hdf_write_reqs[i].xd = this;
-              hdf_write_reqs[i].hdf_memory = hdf_metadata->hdf_memory;
-              available_reqs.push(&hdf_write_reqs[i]);
-            }
-            requests = hdf_write_reqs;
             hli = new Layouts::HDFLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(), src_buf.block_size);
-            // lsi = new GenericLinearSubrectIterator<Mapping<DIM, 1> >(domain.get_rect<DIM>(), *(src_buf.linearization.get_mapping<DIM>()));
-            // Make sure instance involves FortranArrayLinearization
-            // assert(lsi->strides[0][0] == 1);
             // This is kind of tricky, but to avoid recomputing hdf dataset idx for every oas entry,
             // we change the src/dst offset to hdf dataset idx
             for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
               off_t offset = 0;
               int idx = 0;
               while (offset < (*fit).dst_offset) {
-                pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
+                //pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
                 offset += H5Tget_size(hdf_metadata->datatype_ids[idx]);
-                pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+                //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
                 idx++;
               }
               assert(offset == (*fit).dst_offset);
@@ -1271,35 +1248,36 @@ namespace LegionRuntime {
           default:
             assert(0);
         }
-      }
+        hdf_reqs = (HDFRequest*) calloc(max_nr, sizeof(HDFRequest));
+        for (int i = 0; i < max_nr; i++) {
+          hdf_reqs[i].xd = this;
+          hdf_reqs[i].hdf_memory = hdf_mem;
+          enqueue_request(&hdf_reqs[i]);
+        }
+     }
 
       template<unsigned DIM>
       long HDFXferDes<DIM>::get_requests(Request** requests, long nr)
       {
         long ns = 0;
         while (ns < nr && !available_reqs.empty() && fit != oas_vec.end()) {
-          requests[ns] = available_reqs.front();
-          available_reqs.pop();
-          requests[ns]->is_read_done = false;
-          requests[ns]->is_write_done = false;
+          requests[ns] = dequeue_request();
           switch (kind) {
             case XferDes::XFER_HDF_READ:
             {
               // Recall that src_offset means the index of the involving dataset in hdf file
               off_t hdf_idx = fit->src_offset;
-              pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
+              //pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
               size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_idx]);
-              //int todo = min(pir->r.hi[0] - pir->p[0] + 1, dst_buf.block_size - lsi->mapping.image(pir->p) % dst_buf.block_size);
-              HDFReadRequest* hdf_read_req = (HDFReadRequest*) requests[ns];
+              HDFRequest* hdf_read_req = (HDFRequest*) requests[ns];
               hdf_read_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
-              hdf_read_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
+              //hdf_read_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
               hdf_read_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
               hsize_t count[DIM], offset[DIM];
               size_t todo = 1;
               for (unsigned i = 0; i < DIM; i++) {
                 count[i] = hli->sub_rect.hi[i] - hli->sub_rect.lo[i] + 1;
                 todo *= count[i];
-                //offset[i] = pir->pa[i] - hdf_metadata->lo[i];
                 offset[i] = hli->sub_rect.lo[i] - hdf_metadata->lo[i];
               }
               hdf_read_req->file_space_id = H5Dget_space(hdf_metadata->dataset_ids[hdf_idx]);
@@ -1307,13 +1285,13 @@ namespace LegionRuntime {
               // We need to deal with the offset between them here
               herr_t ret = H5Sselect_hyperslab(hdf_read_req->file_space_id, H5S_SELECT_SET, offset, NULL, count, NULL);
               assert(ret >= 0);
-              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
+              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+              //pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
               hdf_read_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
-              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
               off_t dst_offset = calc_mem_loc(0, fit->dst_offset, fit->size,
                                               dst_buf.elmt_size, dst_buf.block_size, hli->cur_idx);
-              hdf_read_req->dst = buf_base + dst_offset;
+              hdf_read_req->mem_base = buf_base + dst_offset;
               hdf_read_req->nbytes = todo * elemnt_size;
               break;
             }
@@ -1321,12 +1299,11 @@ namespace LegionRuntime {
             {
               // Recall that src_offset means the index of the involving dataset in hdf file
               off_t hdf_idx = fit->dst_offset;
-              pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
+              //pthread_rwlock_rdlock(&hdf_metadata->hdf_memory->rwlock);
               size_t elemnt_size = H5Tget_size(hdf_metadata->datatype_ids[hdf_idx]);
-              //int todo = min(pir->r.hi[0] - pir->p[0] + 1, src_buf.block_size - lsi->mapping.image(pir->p) % src_buf.block_size);
-              HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) requests[ns];
+              HDFRequest* hdf_write_req = (HDFRequest*) requests[ns];
               hdf_write_req->dataset_id = hdf_metadata->dataset_ids[hdf_idx];
-              hdf_write_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
+              //hdf_write_req->rwlock = &hdf_metadata->dataset_rwlocks[hdf_idx];
               hdf_write_req->mem_type_id = hdf_metadata->datatype_ids[hdf_idx];
               hsize_t count[DIM], offset[DIM];
               size_t todo = 1;
@@ -1340,13 +1317,13 @@ namespace LegionRuntime {
               // We need to deal with the offset between them here
               herr_t ret = H5Sselect_hyperslab(hdf_write_req->file_space_id, H5S_SELECT_SET, offset, NULL, count, NULL);
               assert(ret >= 0);
-              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
+              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+              //pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
               hdf_write_req->mem_space_id = H5Screate_simple(DIM, count, NULL);
-              pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+              //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
               off_t src_offset = calc_mem_loc(0, fit->src_offset, fit->size,
                                               src_buf.elmt_size, src_buf.block_size, hli->cur_idx);
-              hdf_write_req->src = buf_base + src_offset;
+              hdf_write_req->mem_base = buf_base + src_offset;
               hdf_write_req->nbytes = todo * elemnt_size;
               break;
             }
@@ -1372,22 +1349,8 @@ namespace LegionRuntime {
         // close and release HDF resources
         // currently we don't support ib case
         assert(pre_xd_guid == XFERDES_NO_GUID);
-        switch (kind) {
-          case XferDes::XFER_HDF_READ:
-          {
-            HDFReadRequest* hdf_read_req = (HDFReadRequest*) req;
-            bytes_read += hdf_read_req->nbytes;
-            break;
-          }
-          case XferDes::XFER_HDF_WRITE:
-          {
-            HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) req;
-            bytes_read += hdf_write_req->nbytes;
-            break;
-          }
-          default:
-            assert(0);
-        }
+        HDFRequest* hdf_req = (HDFRequest*) req;
+        bytes_read += hdf_req->nbytes;
       }
 
       template<unsigned DIM>
@@ -1396,31 +1359,13 @@ namespace LegionRuntime {
         req->is_write_done = true;
         // currently we don't support ib case
         assert(next_xd_guid == XFERDES_NO_GUID);
-        switch (kind) {
-          case XferDes::XFER_HDF_READ:
-          {
-            HDFReadRequest* hdf_read_req = (HDFReadRequest*) req;
-            bytes_write += hdf_read_req->nbytes;
-            pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
-            H5Sclose(hdf_read_req->mem_space_id);
-            H5Sclose(hdf_read_req->file_space_id);
-            pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-            break;
-          }
-          case XferDes::XFER_HDF_WRITE:
-          {
-            HDFWriteRequest* hdf_write_req = (HDFWriteRequest*) req;
-            bytes_write += hdf_write_req->nbytes;
-            pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
-            H5Sclose(hdf_write_req->mem_space_id);
-            H5Sclose(hdf_write_req->file_space_id);
-            pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-            break;
-          }
-          default:
-            assert(0);
-        }
-        available_reqs.push(req);
+        HDFRequest* hdf_req = (HDFRequest*) req;
+        bytes_write += hdf_req->nbytes;
+        //pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
+        H5Sclose(hdf_req->mem_space_id);
+        H5Sclose(hdf_req->file_space_id);
+        //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
+        enqueue_request(req);
       }
 
       template<unsigned DIM>
@@ -1888,37 +1833,21 @@ namespace LegionRuntime {
 
       long HDFChannel::submit(Request** requests, long nr)
       {
-        switch (kind) {
-          case XferDes::XFER_HDF_READ:
-          {
-            HDFReadRequest** hdf_read_reqs = (HDFReadRequest**) requests;
-            for (long i = 0; i < nr; i++) {
-              HDFReadRequest* request = hdf_read_reqs[i];
-              pthread_rwlock_rdlock(request->rwlock);
-//              std::cout << "in HDFChannel::submit reading dataset_id: " << request->dataset_id << std::endl;
-              H5Dread(request->dataset_id, request->mem_type_id, request->mem_space_id, request->file_space_id, H5P_DEFAULT, request->dst);
-              pthread_rwlock_unlock(request->rwlock);
-              request->xd->notify_request_read_done(request);
-              request->xd->notify_request_write_done(request);
-            }
-            break;
-          }
-          case XferDes::XFER_HDF_WRITE:
-          {
-            HDFWriteRequest** hdf_read_reqs = (HDFWriteRequest**) requests;
-            for (long i = 0; i < nr; i++) {
-              HDFWriteRequest* request = hdf_read_reqs[i];
-              pthread_rwlock_wrlock(request->rwlock);
-//              std::cout << "in HDFChannel::submit writing dataset_id: " << request->dataset_id << std::endl;
-              H5Dwrite(request->dataset_id, request->mem_type_id, request->mem_space_id, request->file_space_id, H5P_DEFAULT, request->src);
-              pthread_rwlock_unlock(request->rwlock);
-              request->xd->notify_request_read_done(request);
-              request->xd->notify_request_write_done(request);
-            }
-            break;
-          }
-          default:
-            assert(false);
+        HDFRequest** hdf_reqs = (HDFRequest**) requests;
+        for (long i = 0; i < nr; i++) {
+          HDFRequest* req = hdf_reqs[i];
+          //pthread_rwlock_rdlock(req->rwlock);
+          if (kind == XferDes::XFER_HDF_READ)
+            H5Dread(req->dataset_id, req->mem_type_id,
+                    req->mem_space_id, req->file_space_id,
+                    H5P_DEFAULT, req->mem_base);
+          else
+            H5Dwrite(req->dataset_id, req->mem_type_id,
+                     req->mem_space_id, req->file_space_id,
+                     H5P_DEFAULT, req->mem_base);
+          //pthread_rwlock_unlock(req->rwlock);
+          req->xd->notify_request_read_done(req);
+          req->xd->notify_request_write_done(req);
         }
         return nr;
       }

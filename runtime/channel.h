@@ -39,6 +39,9 @@
 #include "realm/cuda/cuda_module.h"
 #endif
 
+#ifdef USE_HDF
+#include "realm/hdf5/hdf5_internal.h"
+#endif
 
 namespace LegionRuntime{
   namespace LowLevel{
@@ -48,6 +51,11 @@ namespace LegionRuntime{
 #ifdef USE_CUDA
     typedef Realm::Cuda::GPU GPU;
     typedef Realm::Cuda::GPUFBMemory GPUFBMemory;
+#endif
+
+#ifdef USE_HDF
+    typedef Realm::HDF5::HDF5Memory HDF5Memory;
+    typedef Realm::HDF5::HDF5Memory::HDFMetadata HDFMetadata;
 #endif
 
     class Buffer {
@@ -234,24 +242,14 @@ namespace LegionRuntime{
 #endif
 
 #ifdef USE_HDF
-    class HDFReadRequest : public Request {
+    class HDFRequest : public Request {
     public:
       hid_t dataset_id, mem_type_id;
-      char* dst;
+      char* mem_base;
       hid_t mem_space_id, file_space_id;
       size_t nbytes;
       pthread_rwlock_t *rwlock;
-      HDFMemory* hdf_memory;
-    };
-
-    class HDFWriteRequest : public Request {
-    public:
-      hid_t dataset_id, mem_type_id;
-      char* src;
-      hid_t mem_space_id, file_space_id;
-      size_t nbytes;
-      pthread_rwlock_t *rwlock;
-      HDFMemory* hdf_memory;
+      HDF5Memory* hdf_memory;
     };
 #endif
 
@@ -809,16 +807,8 @@ namespace LegionRuntime{
                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
       ~HDFXferDes()
       {
-        // clear available_reqs
-        while (!available_reqs.empty()) {
-          available_reqs.pop();
-        }
-        free(requests);
+        free(hdf_reqs);
         delete hli;
-        // trigger complete event
-        //if (complete_event.exists()) {
-          //get_runtime()->get_genevent_impl(complete_event)->trigger(complete_event.gen, gasnet_mynode());
-        //}
       }
 
       long get_requests(Request** requests, long nr);
@@ -827,9 +817,9 @@ namespace LegionRuntime{
       void flush();
 
     private:
-      Request* requests;
+      HDFRequest* hdf_reqs;
       char *buf_base;
-      HDFMemory::HDFMetadata *hdf_metadata;
+      HDF5Memory::HDFMetadata *hdf_metadata;
       std::vector<OffsetsAndSize>::iterator fit;
       //GenericPointInRectIterator<DIM>* pir;
       //GenericLinearSubrectIterator<Mapping<DIM, 1> >* lsi;
