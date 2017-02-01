@@ -6249,6 +6249,10 @@ class Operation(object):
             return False
         if self.kind is DELETION_OP_KIND:
             return False
+        if self.kind is ATTACH_OP_KIND:
+            return False
+        if self.kind is DETACH_OP_KIND:
+            return False
         return True
 
     def print_incoming_event_edges(self, printer):
@@ -6675,7 +6679,7 @@ class Task(object):
             assert field.fid in self.mapping
             inst = self.mapping[field.fid]
             assert not inst.is_virtual()
-            if not self.restrictions:
+            if self.restrictions:
                 # Try to add it to any existing trees
                 success = False
                 for restrict in self.restrictions:
@@ -6684,6 +6688,8 @@ class Task(object):
                         break
                 if success:
                     continue
+            else:
+                self.restrictions = list()
             # If we make it here, add a new restriction
             self.restrictions.append(
                 Restriction(req.logical_node, field, inst))
