@@ -433,10 +433,12 @@ namespace Legion {
       InstanceRef attach_file(AttachOp *attach_op, unsigned index,
                               const RegionRequirement &req,
                               InstanceManager *file_instance,
-                              VersionInfo &version_info);
+                              VersionInfo &version_info,
+                              std::set<RtEvent> &map_applied_events);
       ApEvent detach_file(const RegionRequirement &req, DetachOp *detach_op,
                           unsigned index, VersionInfo &version_info, 
-                          const InstanceRef &ref);
+                          const InstanceRef &ref, 
+                          std::set<RtEvent> &map_applied_events);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -1849,11 +1851,17 @@ namespace Legion {
                               ApEvent precondition, PredEvent true_guard,
                               std::set<RtEvent> &map_applied_events);
       InstanceRef attach_file(ContextID ctx, InnerContext *parent_ctx,
+                           const UniqueID logical_ctx_uid,
                            const FieldMask &attach_mask,
                            const RegionRequirement &req, 
-                           InstanceManager *manager, VersionInfo &version_info);
-      ApEvent detach_file(InnerContext *context, 
-                          VersionInfo &version_info, const InstanceRef &ref);
+                           InstanceManager *manager, 
+                           VersionInfo &version_info,
+                           std::set<RtEvent> &map_applied_events);
+      ApEvent detach_file(ContextID ctx, InnerContext *context, 
+                          const UniqueID logical_ctx_uid,
+                          VersionInfo &version_info, 
+                          const InstanceRef &ref,
+                          std::set<RtEvent> &map_applied_events);
     public:
       virtual InstanceView* find_context_view(PhysicalManager *manager,
                                               InnerContext *context);

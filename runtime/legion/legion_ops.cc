@@ -12919,7 +12919,8 @@ namespace Legion {
       InstanceRef result = runtime->forest->attach_file(this, 0/*idx*/,
                                                         requirement,
                                                         file_instance,
-                                                        version_info);
+                                                        version_info,
+                                                        map_applied_conditions);
 #ifdef DEBUG_LEGION
       assert(result.has_ref());
 #endif
@@ -13349,11 +13350,10 @@ namespace Legion {
 #endif
         exit(ERROR_ILLEGAL_DETACH_OPERATION);
       }
-      
+      std::set<RtEvent> applied_conditions;
       ApEvent detach_event = 
         runtime->forest->detach_file(requirement, this, 0/*idx*/, 
-                                     version_info, reference);
-      std::set<RtEvent> applied_conditions;
+                                     version_info,reference,applied_conditions);
       version_info.apply_mapping(applied_conditions);
       if (!applied_conditions.empty())
         complete_mapping(Runtime::merge_events(applied_conditions));

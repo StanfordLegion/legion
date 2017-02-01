@@ -3270,7 +3270,8 @@ namespace Legion {
                                               unsigned index,
                                               const RegionRequirement &req,
                                               InstanceManager *file_instance,
-                                              VersionInfo &version_info)
+                                              VersionInfo &version_info,
+                                              std::set<RtEvent> &map_applied)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_FILE_CALL);
@@ -3280,10 +3281,12 @@ namespace Legion {
       InnerContext *context = attach_op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
       RegionNode *attach_node = get_node(req.region);
+      UniqueID logical_ctx_uid = attach_op->get_context()->get_context_uid();
       // Perform the attachment
-      return attach_node->attach_file(ctx.get_id(), context, 
+      return attach_node->attach_file(ctx.get_id(), context, logical_ctx_uid,  
                                       file_instance->layout->allocated_fields, 
-                                      req, file_instance, version_info);
+                                      req, file_instance, 
+                                      version_info, map_applied);
     }
 
     //--------------------------------------------------------------------------
@@ -3291,7 +3294,8 @@ namespace Legion {
                                           DetachOp *detach_op,
                                           unsigned index,
                                           VersionInfo &version_info,
-                                          const InstanceRef &ref)
+                                          const InstanceRef &ref,
+                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_FILE_CALL);
@@ -3299,9 +3303,12 @@ namespace Legion {
       assert(req.handle_type == SINGULAR);
 #endif
       InnerContext *context = detach_op->find_physical_context(index);
+      RegionTreeContext ctx = context->get_context();
       RegionNode *detach_node = get_node(req.region);
+      UniqueID logical_ctx_uid = detach_op->get_context()->get_context_uid();
       // Perform the detachment
-      return detach_node->detach_file(context, version_info, ref);
+      return detach_node->detach_file(ctx.get_id(), context, logical_ctx_uid, 
+                                      version_info, ref, map_applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -16195,14 +16202,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceRef RegionNode::attach_file(ContextID ctx, InnerContext *parent_ctx, 
+                                        const UniqueID logical_ctx_uid,
                                         const FieldMask &attach_mask,
                                         const RegionRequirement &req,
-                                        InstanceManager *manager,
-                                        VersionInfo &version_info)
+                                        InstanceManager *instance_manager,
+                                        VersionInfo &version_info,
+                                        std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
+      // We're effectively writing to this region by doing the attach
+      // so we need to bump the version numbers
+      VersionManager &manager = get_current_version_manager(ctx);
+      const bool update_parent_state = !version_info.is_upper_bound_node(this);
+      const AddressSpaceID local_space = context->runtime->address_space;
+      manager.advance_versions(attach_mask, logical_ctx_uid, parent_ctx,
+          update_parent_state, local_space, map_applied_events);
       // Wrap it in a view
-      MaterializedView *view = parent_ctx->create_instance_top_view(manager, 
+      MaterializedView *view = 
+        parent_ctx->create_instance_top_view(instance_manager, 
             context->runtime->address_space)->as_materialized_view();
 #ifdef DEBUG_LEGION
       assert(view != NULL);
@@ -16213,12 +16230,15 @@ namespace Legion {
       // we are now making this the only valid copy of the data
       update_valid_views(state, attach_mask, true/*dirty*/, view);
       // Return the resulting instance
-      return InstanceRef(manager, attach_mask, ApUserEvent::NO_AP_EVENT);
+      return InstanceRef(instance_manager,attach_mask,ApUserEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionNode::detach_file(InnerContext *context, 
-                              VersionInfo &version_info, const InstanceRef &ref)
+    ApEvent RegionNode::detach_file(ContextID ctx, InnerContext *context, 
+                                    const UniqueID logical_ctx_uid,  
+                                    VersionInfo &version_info, 
+                                    const InstanceRef &ref,
+                                    std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       InstanceView *view = convert_reference(ref, context);
@@ -16226,6 +16246,15 @@ namespace Legion {
       assert(view->is_materialized_view());
 #endif
       MaterializedView *detach_view = view->as_materialized_view();
+      const FieldMask &detach_mask = 
+        detach_view->manager->layout->allocated_fields;
+      // A detach is also effectively a bumb of the version numbers because
+      // we are marking that the data in the logical region is no longer valid
+      VersionManager &manager = get_current_version_manager(ctx);
+      const bool update_parent_state = !version_info.is_upper_bound_node(this);
+      const AddressSpaceID local_space = context->runtime->address_space;
+      manager.advance_versions(detach_mask, logical_ctx_uid, context,
+          update_parent_state, local_space, map_applied_events);
       // First remove this view from the set of valid views
       PhysicalState *state = get_physical_state(version_info);
       filter_valid_views(state, detach_view);
