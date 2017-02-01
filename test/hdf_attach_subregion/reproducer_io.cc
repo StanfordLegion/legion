@@ -118,9 +118,9 @@ void top_level_task(const Task *task,
 
       
    int i = 0;
-   for(LegionRuntime::LowLevel::Domain::DomainPointIterator itr(color_domain); itr && i<1; itr++) {
+   for(Legion::Domain::DomainPointIterator itr(color_domain); itr && i<1; itr++) {
        Piece piece; 
-       LegionRuntime::LowLevel::DomainPoint dp = itr.p;
+       DomainPoint dp = itr.p;
        piece.parent_lr = persistent_lr; 
        piece.child_lr = runtime->get_logical_subregion_by_color(ctx, persistent_lp, dp);
        IndexSpace child_is = runtime->get_index_subspace(ctx, persistent_lp.get_index_partition(), dp); 

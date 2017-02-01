@@ -310,7 +310,6 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
     Domain dom, std::map<FieldID, std::string> &field_map)
 {
   hid_t link_file_id, shard_group_id, shard_ds_id, dataspace_id, dtype_id, shard_file_id, attr_ds_id, link_group_id, link_group_2_id;
-  herr_t status;
   link_file_id = H5Fcreate(name, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
   dtype_id  = H5Tcopy (H5T_NATIVE_DOUBLE);
 
@@ -334,9 +333,9 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
   //  }
 
   int i = 0;
-  for (LegionRuntime::LowLevel::Domain::DomainPointIterator itr(dom); itr; itr++) {
+  for (Legion::Domain::DomainPointIterator itr(dom); itr; itr++) {
     pieces.push_back(Piece());
-    LegionRuntime::LowLevel::DomainPoint dp = itr.p;
+    DomainPoint dp = itr.p;
     pieces[i].dp = dp;
     pieces[i].child_lr = runtime->get_logical_subregion_by_color(ctx, lp, dp);
     pieces[i].parent_lr = parent_lr;
@@ -359,7 +358,7 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
       case 2:
         {
           ds_name_stream <<  pieces[i].dp[0] << "-" << pieces[i].dp[1];
-          sprintf(pieces[i].shard_name, "%d-%d-%s",
+          sprintf(pieces[i].shard_name, "%lld-%lld-%s",
               pieces[i].dp[0], pieces[i].dp[1], name); 
 
           x_min = d.get_rect<2>().lo.x[0];
@@ -393,7 +392,7 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
         {
           ds_name_stream <<  pieces[i].dp[0] << "-" <<
             pieces[i].dp[1] << "-" << pieces[i].dp[2];
-          sprintf(pieces[i].shard_name, "%d-%d-%d-%s",
+          sprintf(pieces[i].shard_name, "%lld-%lld-%lld-%s",
               pieces[i].dp[0], pieces[i].dp[1],
               pieces[i].dp[2], name);
 
@@ -437,6 +436,7 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
 
       char* ds;
       char* gp;
+      herr_t status;
       split_path_file(&gp, &ds, iterator->second.c_str());
 
       size_t field_size = runtime->get_field_size(ctx, fs, fid);
