@@ -73,7 +73,7 @@ where writes(r.{a,b,c}) do
   end
 end
 
-task compare_regions(is : ispace(int3d), r1 : region(is, t), r2 : region(ispace(int3d), t))
+task compare_regions(is : ispace(int3d), r1 : region(is, t), r2 : region(ispace(int3d), t)) : int
 where reads(r1.{a,b,c}), reads(r2.{a,b,c}) do
   var errors = 0
   for p in is do
@@ -84,7 +84,7 @@ where reads(r1.{a,b,c}), reads(r2.{a,b,c}) do
       regentlib.c.printf("[%d,%d,%d]: %d\n", p.x, p.y, p.z, r1[p].a)
     end
   end
-  -- regentlib.assert(errors == 0, "test failed")
+  return errors
 end
 
 task main()
@@ -120,15 +120,17 @@ task main()
     -- end
     detach(hdf5, r2.{a, b, c})
 
+    var errors = 0
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
     for c in cs do
       acquire((p2[c]))
       -- copy(r2.a, r1.a)
       -- copy(r2.b, r1.b)
       -- copy(r2.c, r1.c)
-      compare_regions(p1[c].ispace, p1[c], p2[c])
+      errors += compare_regions(p1[c].ispace, p1[c], p2[c])
       release((p2[c]))
     end
+    regentlib.assert(errors == 0, "errors detected")
     detach(hdf5, r2.{a, b, c})
 
   end
