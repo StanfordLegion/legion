@@ -1208,6 +1208,8 @@ namespace Legion {
     
     // legion_trace.h
     class LegionTrace;
+    class StaticTrace;
+    class DynamicTrace;
     class TraceCaptureOp;
     class TraceCompleteOp;
 

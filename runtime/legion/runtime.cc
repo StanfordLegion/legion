@@ -13,6 +13,15 @@
  * limitations under the License.
  */
 
+// SJT: this comes first because some systems require __STDC_FORMAT_MACROS
+//  to be defined before inttypes.h is included anywhere
+#ifdef __MACH__
+#define MASK_FMT "llx"
+#else
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
+#define MASK_FMT PRIx64
+#endif
 
 #include "legion.h"
 #include "runtime.h"
@@ -1743,9 +1752,21 @@ namespace Legion {
       // We already have our contributions for each stage so
       // we can set the inditial participants to 1
       if (participating)
+      {
         stage_notifications.resize(Runtime::legion_collective_stages, 1);
+	// Special case: if we expect a stage -1 message from a non-participating
+	//  space, we'll count that as part of stage 0
+	if ((Runtime::legion_collective_stages > 0) &&
+	    (runtime->address_space <
+	     (runtime->total_address_spaces -
+	      Runtime::legion_collective_participating_spaces)))
+	  stage_notifications[0]--;
+      }
       if (runtime->total_address_spaces > 1)
         done_event = Runtime::create_rt_user_event();
+      // Add ourselves to the set before any exchanges start
+      assert(Runtime::mpi_rank >= 0);
+      forward_mapping[Runtime::mpi_rank] = runtime->address_space;
     }
     
     //--------------------------------------------------------------------------
@@ -1778,15 +1799,6 @@ namespace Legion {
     void MPIRankTable::perform_rank_exchange(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(Runtime::mpi_rank >= 0);
-#endif
-      // Add ourselves to the set first
-      // Have to hold the lock in case we are already receiving
-      {
-        AutoLock r_lock(reservation);
-        forward_mapping[Runtime::mpi_rank] = runtime->address_space;
-      }
       // We can skip this part if there are not multiple nodes
       if (runtime->total_address_spaces > 1)
       {
@@ -1811,9 +1823,7 @@ namespace Legion {
         // Wait for our done event to be ready
         done_event.wait();
       }
-#ifdef DEBUG_LEGION
       assert(forward_mapping.size() == runtime->total_address_spaces);
-#endif
       // Reverse the mapping
       for (std::map<int,AddressSpace>::const_iterator it = 
             forward_mapping.begin(); it != forward_mapping.end(); it++)
@@ -1879,6 +1889,9 @@ namespace Legion {
       DerezCheck z(derez);
       int stage;
       derez.deserialize(stage);
+#ifdef DEBUG_LEGION
+      assert(participating || (stage == -1));
+#endif
       bool send_next = unpack_exchange(stage, derez);
       if (stage == -1)
       {
@@ -1887,29 +1900,25 @@ namespace Legion {
         else
           Runtime::trigger_event(done_event);
       }
-      else
+      // send_next may be true even for stage -1 if it arrives after all the
+      //  stage 0 messages
+      if (send_next)
       {
-#ifdef DEBUG_LEGION
-        assert(participating);
-#endif
-        if (send_next)
+	stage = (stage == -1) ? 1 : stage + 1;
+	if (stage == Runtime::legion_collective_stages)
         {
-          stage += 1;
-          if (stage == Runtime::legion_collective_stages)
-          {
-            // We are done
-            Runtime::trigger_event(done_event);
-            // See if we have to send a message back to a
-            // non-participating node
-            if ((int(runtime->total_address_spaces) > 
-                Runtime::legion_collective_participating_spaces) &&
+	  // We are done
+	  Runtime::trigger_event(done_event);
+	  // See if we have to send a message back to a
+	  // non-participating node
+	  if ((int(runtime->total_address_spaces) > 
+	       Runtime::legion_collective_participating_spaces) &&
               (int(runtime->address_space) < int(runtime->total_address_spaces -
                 Runtime::legion_collective_participating_spaces)))
-              send_stage(-1);
-          }
-          else // Send the next stage
-            send_stage(stage);
-        }
+	    send_stage(-1);
+	}
+	else // Send the next stage
+	  send_stage(stage);
       }
     }
 
@@ -1924,12 +1933,23 @@ namespace Legion {
       {
         int rank;
         derez.deserialize(rank);
-        derez.deserialize(forward_mapping[rank]);
+	unsigned space;
+	derez.deserialize(space);
+	// Duplicates are possible because later messages aren't "held", but
+	// they should be exact matches
+	assert ((forward_mapping.count(rank) == 0) ||
+		(forward_mapping[rank] == space));
+	forward_mapping[rank] = space;
       }
+      // A stage -1 message is counted as part of stage 0 (if it exists
+      //  and we are participating)
+      if ((stage == -1) && participating &&
+	  (Runtime::legion_collective_stages > 0))
+	stage = 0;
       if (stage >= 0)
       {
 #ifdef DEBUG_LEGION
-        assert(stage < int(stage_notifications.size()));
+	assert(stage < int(stage_notifications.size()));
 #endif
         stage_notifications[stage]++;
         if (stage_notifications[stage] == (Runtime::legion_collective_radix))
@@ -8835,11 +8855,14 @@ namespace Legion {
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
           // Now ask the application what it wants to do
-          if (Runtime::registration_callback != NULL)
+          if (!Runtime::registration_callbacks.empty())
           {
-            log_run.info("Invoking mapper registration callback function...");
-            (*Runtime::registration_callback)(machine, external, local_procs);
-            log_run.info("Completed execution of mapper registration callback");
+            log_run.info("Invoking mapper registration callback functions...");
+            for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
+                  Runtime::registration_callbacks.begin(); it !=
+                  Runtime::registration_callbacks.end(); it++)
+              (**it)(machine, external, local_procs);
+            log_run.info("Finished execution of mapper registration callbacks");
           }
         }
       }
@@ -11616,6 +11639,37 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       ctx->end_trace(tid); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::begin_static_trace(Context ctx, 
+                                     const std::set<RegionTreeID> *managed)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context begin static trace!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->begin_static_trace(managed);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::end_static_trace(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context end static trace!");
+ #ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->end_static_trace(); 
     }
 
     //--------------------------------------------------------------------------
@@ -17215,8 +17269,10 @@ namespace Legion {
           return "Future Map";
         case PHYSICAL_REGION_ALLOC:
           return "Physical Region";
-        case TRACE_ALLOC:
-          return "Trace";
+        case STATIC_TRACE_ALLOC:
+          return "Static Trace";
+        case DYNAMIC_TRACE_ALLOC:
+          return "Dynamic Trace";
         case ALLOC_MANAGER_ALLOC:
           return "Allocation Manager";
         case ALLOC_INTERNAL_ALLOC:
@@ -17866,8 +17922,8 @@ namespace Legion {
 
     /*static*/ Runtime* Runtime::the_runtime = NULL;
     /*static*/ std::map<Processor,Runtime*>* Runtime::runtime_map = NULL;
-    /*static*/ volatile RegistrationCallbackFnptr Runtime::
-                                              registration_callback = NULL;
+    /*static*/ std::vector<RegistrationCallbackFnptr> 
+                                             Runtime::registration_callbacks;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
     /*static*/ int Runtime::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
@@ -18517,11 +18573,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_registration_callback(
+    /*static*/ void Runtime::add_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      registration_callback = callback;
+      registration_callbacks.push_back(callback);
     }
 
     //--------------------------------------------------------------------------
@@ -19841,6 +19897,30 @@ namespace Legion {
 #endif
 
   }; // namespace Internal 
+
+  //--------------------------------------------------------------------------
+  /*static*/ char* BitMaskHelper::to_string(const uint64_t *bits, int count)
+  //--------------------------------------------------------------------------
+  {
+    char *result = (char*)malloc((((count + 7) >> 3) + 1)*sizeof(char));
+    assert(result != 0);
+    char *p = result;
+    // special case for non-multiple-of-64
+    if((count & 63) != 0) {
+      // each nibble (4 bits) takes one character
+      int nibbles = ((count & 63) + 3) >> 2;
+      sprintf(p, "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
+      p += nibbles;
+    }
+    // rest are whole words
+    int idx = (count >> 6);
+    while(idx >= 0) {
+      sprintf(p, "%16.16" MASK_FMT, bits[--idx]);
+      p += 16;
+    }
+    return result;
+  }
+
 }; // namespace Legion 
 
 // EOF

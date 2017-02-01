@@ -17,7 +17,7 @@
 
 import os, platform, subprocess
 
-def test(root_dir, debug, spy, env):
+def test(root_dir, debug, spy, hdf5, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     debug_flag = ['--debug'] if debug else []
@@ -36,14 +36,19 @@ def test(root_dir, debug, spy, env):
         ['time', './install.py', '--rdir=%s' % rdir] + threads + terra + debug_flag,
         env = env,
         cwd = root_dir)
-    if not spy:
-        subprocess.check_call(
-            ['time', './test.py', '-q'] + threads + debug_flag + inner_flag,
-            env = env,
-            cwd = root_dir)
     if spy:
         subprocess.check_call(
             ['time', './test.py', '-q', '--spy'] + threads + inner_flag,
+            env = env,
+            cwd = root_dir)
+    elif hdf5:
+        subprocess.check_call(
+            ['time', './test.py', '-q', '--hdf5'] + threads + inner_flag,
+            env = env,
+            cwd = root_dir)
+    else:
+        subprocess.check_call(
+            ['time', './test.py', '-q'] + threads + debug_flag + inner_flag,
             env = env,
             cwd = root_dir)
 
@@ -58,4 +63,7 @@ if __name__ == '__main__':
         'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
     })
 
-    test(root_dir, env['DEBUG'] == '1', 'TEST_SPY' in env and env['TEST_SPY'] == '1', env)
+    debug = env['DEBUG'] == '1'
+    spy = 'TEST_SPY' in env and env['TEST_SPY'] == '1'
+    hdf5 = 'TEST_HDF' in env and env['TEST_HDF'] == '1'
+    test(root_dir, debug, spy, hdf5, env)

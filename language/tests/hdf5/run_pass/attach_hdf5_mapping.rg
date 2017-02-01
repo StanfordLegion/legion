@@ -12,9 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- []
-
 import "regent"
 
 local c = terralib.includec("assert.h")
@@ -95,51 +92,15 @@ task main()
   var r3 = region(is, t)
 
   generate_hdf5_file(filename)
-  
-  -- test 1: attach and directly read/write the file (i.e. no acquire/release)
-  -- TODO: disabled until we can get regent to use generic accessor
-  if false then
+
+  -- test 1: use an inline mapping before attach
+  if true then
+    regentlib.c.printf("test 1\n")
     fill_region(r1, 1)
+    for x in r2 do x.{a, b, c} = 1 end
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
-    fill_region(r2, 1)
-    compare_regions(is, r1, r2)
-    detach(hdf5, r2.{a, b, c})
-  end
-
-  -- test 2: attach and directly read/write the file but use acquire/release
-  --  (should make a local copy)
-  if true then
-    fill_region(r1, 2)
-    attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
-    acquire(r2)
-    fill_region(r2, 2)
-    compare_regions(is, r1, r2)
-    release(r2)
-    detach(hdf5, r2.{a, b, c})
-  end
-
-  -- test 3: write different data and then re-attach - should see old data
-  --  (from test 2) use acquire/release this time to allow an implicit copy
-  if true then
-    fill_region(r1, 2)
-    fill_region(r2, 3)
-    attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
-    acquire(r2)
-    compare_regions(is, r1, r2)
-    release(r2)
-    detach(hdf5, r2.{a, b, c})
-  end
-
-  -- test 4: use explicit copies (no acquire/release needed)
-  if true then
-    fill_region(r1, 4)
-    attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
-    copy(r1.{a,b,c}, r2.{a,b,c})
-    copy(r2.a, r3.a)
-    copy(r2.b, r3.b)
-    copy(r2.c, r3.c)
+    -- compare_regions(is, r1, r2)
     detach(hdf5, r2.{a,b,c})
-    compare_regions(is, r1, r3)
   end
 end
 

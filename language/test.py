@@ -179,7 +179,7 @@ class Counter:
         self.failed = 0
 
 
-def get_test_specs(include_spy, extra_flags):
+def get_test_specs(only_spy, only_hdf5, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
@@ -212,18 +212,26 @@ def get_test_specs(include_spy, extra_flags):
           os.path.join('..', 'tutorial'),
          )),
     ]
-    if include_spy:
+    hdf5 = [
+        ('run_pass', (test_run_pass, ([] + extra_flags, {})),
+         (os.path.join('tests', 'hdf5', 'run_pass'),
+         )),
+    ]
+
+    if only_spy:
         return spy
+    elif only_hdf5:
+        return hdf5
     else:
         return base
 
-def run_all_tests(thread_count, debug, spy, extra_flags, verbose, quiet,
+def run_all_tests(thread_count, debug, spy, hdf5, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
     # Run tests asynchronously.
-    tests = get_test_specs(spy, extra_flags)
+    tests = get_test_specs(spy, hdf5, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -330,8 +338,12 @@ def test_driver(argv):
                         dest='debug')
     parser.add_argument('--spy', '-s',
                         action='store_true',
-                        help='enable Legion Spy mode',
+                        help='run Legion Spy tests',
                         dest='spy')
+    parser.add_argument('--hdf', '--hdf5',
+                        action='store_true',
+                        help='run HDF5 tests',
+                        dest='hdf5')
     parser.add_argument('--extra',
                         action='append',
                         required=False,
@@ -362,6 +374,7 @@ def test_driver(argv):
         args.thread_count,
         args.debug,
         args.spy,
+        args.hdf5,
         args.extra_flags,
         args.verbose,
         args.quiet,

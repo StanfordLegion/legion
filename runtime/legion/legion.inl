@@ -782,6 +782,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void StaticDependence::add_field(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      dependent_fields.insert(fid);
+    }
+
+    //--------------------------------------------------------------------------
     inline IndexSpaceRequirement& TaskLauncher::add_index_requirement(
                                               const IndexSpaceRequirement &req)
     //--------------------------------------------------------------------------

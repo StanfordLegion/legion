@@ -1804,6 +1804,9 @@ namespace Legion {
       void issue_execution_fence(Context ctx);
       void begin_trace(Context ctx, TraceID tid);
       void end_trace(Context ctx, TraceID tid);
+      void begin_static_trace(Context ctx, 
+                              const std::set<RegionTreeID> *managed);
+      void end_static_trace(Context ctx);
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
@@ -2806,7 +2809,7 @@ namespace Legion {
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
       static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
-      static void set_registration_callback(RegistrationCallbackFnptr callback);
+      static void add_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
       static Runtime* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
@@ -2843,7 +2846,7 @@ namespace Legion {
       static Runtime *the_runtime;
       // the runtime map is only valid when running with -hl:separate
       static std::map<Processor,Runtime*> *runtime_map;
-      static volatile RegistrationCallbackFnptr registration_callback;
+      static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static Processor::TaskFuncID legion_main_id;
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;

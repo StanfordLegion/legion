@@ -4287,6 +4287,14 @@ class VerificationTraverser(object):
             self.dataflow_stack.pop()
 
     def visit_outgoing(self, prev, finding_reductions = False):
+        # Special case for fills
+        if isinstance(prev, Operation) and prev.kind == FILL_OP_KIND and prev.realm_fills:
+            for fill in prev.realm_fills:
+                self.visit_op(fill, finding_reductions)
+                if self.failed_analysis or \
+                    (self.found_dataflow_path and not finding_reductions):
+                    break
+            return
         if not prev.dataflow_outgoing or self.key not in prev.dataflow_outgoing: 
             return
         for next_op in prev.dataflow_outgoing[self.key]:
@@ -6241,6 +6249,10 @@ class Operation(object):
             return False
         if self.kind is DELETION_OP_KIND:
             return False
+        if self.kind is ATTACH_OP_KIND:
+            return False
+        if self.kind is DETACH_OP_KIND:
+            return False
         return True
 
     def print_incoming_event_edges(self, printer):
@@ -6667,7 +6679,7 @@ class Task(object):
             assert field.fid in self.mapping
             inst = self.mapping[field.fid]
             assert not inst.is_virtual()
-            if not self.restrictions:
+            if self.restrictions:
                 # Try to add it to any existing trees
                 success = False
                 for restrict in self.restrictions:
@@ -6676,6 +6688,8 @@ class Task(object):
                         break
                 if success:
                     continue
+            else:
+                self.restrictions = list()
             # If we make it here, add a new restriction
             self.restrictions.append(
                 Restriction(req.logical_node, field, inst))
@@ -7927,12 +7941,12 @@ class RealmBase(object):
             self.dataflow_outgoing[key] = set()
         self.dataflow_outgoing[key].add(op)
 
-    def is_dataflow_generation(self, key, gen):
+    def is_dataflow_generation(self, key, start_op):
         if not self.dataflow_generations:
             self.dataflow_generations = dict()
         if key in self.dataflow_generations:
-            return gen == self.dataflow_generations[key]
-        self.dataflow_generations[key] = gen
+            return start_op is self.dataflow_generations[key]
+        self.dataflow_generations[key] = start_op 
         return True
 
     def is_analyzed(self, key):
@@ -8085,28 +8099,6 @@ class RealmFill(RealmBase):
         assert not self.fill_op
         self.fill_op = fill_op
         fill_op.add_realm_fill(self)
-
-    def update_fill_op_physical_reachable(self):
-        assert self.fill_op
-        # This sucks but it can go away once a fill
-        # is only applied to a physical location once
-        # Until then we have to check to see if there 
-        # are any other preconditions which can reach
-        # any earlier fill from the same fill operation
-        all_fills = set(self.fill_op.realm_fills)
-        for prev in self.physical_incoming:
-            prev_reachable = set()
-            prev.get_physical_reachable(prev_reachable, False)
-            if all_fills & prev_reachable:
-                continue
-            prev.physical_outgoing.add(self.fill_op)
-            self.fill_op.physical_incoming.add(prev)
-        next_reachable = set()
-        self.get_physical_reachable(next_reachable, True)
-        if all_fills & next_reachable:
-            return
-        self.physical_incoming.add(self.fill_op)
-        self.fill_op.physical_outgoing.add(self)
 
     def update_creator(self, new_creator):
         assert self.creator
@@ -9671,9 +9663,6 @@ class State(object):
                 copy.compute_physical_reachable()
             for fill in self.fills.itervalues():
                 fill.compute_physical_reachable()
-                # For fills we also add their incoming
-                # reachable to the fill ops
-                fill.update_fill_op_physical_reachable()
             if need_physical and simplify_graphs:
                 self.simplify_physical_graph()
         if self.verbose:
@@ -9869,18 +9858,18 @@ class State(object):
         def post_traverse_node(op, traverser):
             # Check to see if this is a writing operation and has mappings
             # for its write operations to physical instances
-            if isinstance(op, Operation) and op.reqs and \
-                         (op.mappings or op.kind == FILL_OP_KIND):
+            if isinstance(op, Operation) and op.reqs and op.mappings:
                 for req in op.reqs.itervalues():
-                    if req.is_write() and \
-                          (op.kind == FILL_OP_KIND or op.mappings[req.index]):
+                    if req.is_write() and op.mappings[req.index]:
                         traverser.postorder_writers.append(op)
+            elif isinstance(op, RealmFill):
+                traverser.postorder_writers.append(op)
         postorder_traverser = PhysicalTraverser(True, True,
             self.get_next_traversal_generation(), None, post_traverse_node)
         postorder_traverser.postorder_writers = list()
         # Traverse all the possible sources 
         for op in self.ops.itervalues():
-            if not op.is_physical_operation() and not op.kind == FILL_OP_KIND:
+            if not op.is_physical_operation():
                 continue
             if op.is_index_operation():
                 assert op.points
@@ -9890,161 +9879,142 @@ class State(object):
                         postorder_traverser.visit_node(point_op)
             elif not op.physical_incoming:
                 postorder_traverser.visit_node(op)
+        for fill in self.fills.itervalues():
+            if fill.physical_incoming:
+                continue
+            postorder_traverser.visit_node(fill)
+        # Helper function for doing the traversal from a writer 
+        def post_visit_node(op, traverser):
+            if isinstance(op, Operation):
+                return
+            if isinstance(op, RealmCopy):
+                copy = op
+                local_fields = set()
+                for field in traverser.fields:
+                    if field not in copy.src_fields:
+                        continue
+                    index = copy.src_fields.index(field)
+                    src = copy.srcs[index]
+                    if src.region.tree_id != traverser.tree_id:
+                        return
+                    local_fields.add(field)
+                if not local_fields:
+                    return 
+                points = traverser.points & copy.region.get_point_set()
+                if points.empty():
+                    return
+                if copy.intersect:
+                    points &= copy.intersect.get_point_set()
+                    if points.empty():
+                        return
+                add = False
+                for point in points.iterator():
+                    for field in local_fields:
+                        key = (traverser.tree_id, field, point)
+                        if copy.is_dataflow_generation(key, traverser.start_op):
+                            add = True
+                if add:
+                    traverser.postorder.append(copy) 
         # Now that we have a postorder of the writers, walk the 
         # writers in postorder, for each writer we
         # compute the dataflow graph for each memory location
         for op in postorder_traverser.postorder_writers:
-            # We know this is an operation with at least one write
-            # so do the traversal for all the writing region requirements
-            for req in op.reqs.itervalues():
-                if not req.is_write():
-                    continue 
-                if op.kind != FILL_OP_KIND and req.index not in op.mappings:
-                    continue
-                # should have instances or this is a fill operation
-                assert op.kind == FILL_OP_KIND or req.index in op.mappings 
-                # Get a topological sorting of all the copy and
-                # fill operations that can be reached from this node
-                # and haven't been associated with a writer before
-                def post_visit_node(op, traverser):
-                    if isinstance(op, Operation):
-                        return
-                    if isinstance(op, RealmCopy):
-                        copy = op
-                        local_fields = set()
-                        for field in traverser.fields:
-                            if field not in copy.src_fields:
-                                continue
-                            index = copy.src_fields.index(field)
-                            src = copy.srcs[index]
-                            if src.region.tree_id != traverser.tree_id:
-                                return
-                            local_fields.add(field)
-                        if not local_fields:
-                            return 
-                        points = traverser.points & copy.region.get_point_set()
-                        if points.empty():
-                            return
-                        if copy.intersect:
-                            points &= copy.intersect.get_point_set()
-                            if points.empty():
-                                return
-                        add = False
-                        for point in points.iterator():
-                            for field in local_fields:
-                                key = (traverser.tree_id, field, point)
-                                if copy.is_dataflow_generation(key, traverser.generation):
-                                    add = True
-                        if add:
-                            traverser.postorder.append(copy) 
-                    else:
-                        assert isinstance(op, RealmFill)
-                        fill = op
-                        if fill.fill_op.reqs[0].logical_node.tree_id != traverser.tree_id:
-                            return
-                        local_fields = set()
-                        for field in traverser.fields:
-                            if field not in fill.fields:
-                                continue
-                            local_fields.add(field)
-                        if not local_fields:
-                            return
-                        points = traverser.points & fill.region.get_point_set()
-                        if points.empty():
-                            return
-                        if fill.intersect:
-                            points &= fill.intersect.get_point_set()
-                            if points.empty():
-                                return
-                        add = False
-                        for point in points.iterator():
-                            for field in local_fields:
-                                key = (traverser.tree_id, field, point)
-                                if fill.is_dataflow_generation(key, traverser.generation):
-                                    add = True
-                        if add:
-                            traverser.postorder.append(fill)
+            if isinstance(op, Operation):
+                # We know this is an operation with at least one write
+                # so do the traversal for all the writing region requirements
+                for req in op.reqs.itervalues():
+                    if not req.is_write() or req.index not in op.mappings:
+                        continue 
+                    # Get a topological sorting of all the copy 
+                    # operations that can be reached from this node
+                    # and haven't been associated with a writer before
+                    dataflow_traverser = PhysicalTraverser(True, True,
+                        self.get_next_traversal_generation(), None, post_visit_node) 
+                    dataflow_traverser.postorder = list()
+                    dataflow_traverser.tree_id = req.logical_node.tree_id
+                    dataflow_traverser.fields = req.fields
+                    dataflow_traverser.points = req.logical_node.get_point_set()
+                    dataflow_traverser.start_op = op
+                    dataflow_traverser.visit_node(op)
+                    # If there are no operations then there is nothing to do
+                    if not dataflow_traverser.postorder:
+                        continue
+                    # Now we can build the dataflow paths for each memory location
+                    self.construct_dataflow_graphs(req.logical_node, op,
+                        req.logical_node.get_point_set(), req.fields,
+                        op.mappings[req.index], dataflow_traverser.postorder)
+            else:
+                assert isinstance(op, RealmFill)
+                fill = op
+                # Get a topological sorting of all the copy 
+                # operations that can be reached from this node
+                # and haven't been associated with a different writer
                 dataflow_traverser = PhysicalTraverser(True, True,
                     self.get_next_traversal_generation(), None, post_visit_node) 
                 dataflow_traverser.postorder = list()
-                dataflow_traverser.tree_id = req.logical_node.tree_id
-                dataflow_traverser.fields = req.fields
-                dataflow_traverser.points = req.logical_node.get_point_set()
-                # Special case here for fills
-                if op.kind == FILL_OP_KIND:
-                    # Traverse all its constituent fills
-                    if op.realm_fills:
-                        for fill in op.realm_fills:
-                            dataflow_traverser.visit_node(fill)
-                else:
-                    dataflow_traverser.visit_node(op)
-                # If there are no operations then there is nothing to do
+                dataflow_traverser.tree_id = fill.region.tree_id
+                dataflow_traverser.fields = fill.fields
+                dataflow_traverser.points = fill.region.get_point_set()
+                if fill.intersect:
+                    dataflow_traverser.points &= fill.intersect.get_point_set()
+                dataflow_traverser.start_op = fill.fill_op
+                dataflow_traverser.visit_node(fill)
+                # If there are no operations, then there is nothing to do
                 if not dataflow_traverser.postorder:
                     continue
+                mapping = dict()
+                for idx in range(len(fill.fields)):
+                    mapping[fill.fields[idx].fid] = fill.dsts[idx]
                 # Now we can build the dataflow paths for each memory location
-                for point in req.logical_node.get_point_set().iterator():
-                    for field in req.fields:
-                        instances = dict()
-                        if op.kind != FILL_OP_KIND:
-                            assert field.fid in op.mappings[req.index]
-                            instances[op.mappings[req.index][field.fid]] = op
-                        key = (req.logical_node.tree_id, field, point)
-                        req.logical_node.add_verification_root(field, point, op)
-                        # Now walk the copies and fills in topological order
-                        for realm_op in reversed(dataflow_traverser.postorder):
-                            if isinstance(realm_op, RealmCopy):
-                                copy = realm_op
-                                # See if it updates one of the valid instances
-                                if field not in copy.src_fields:
-                                    continue
-                                if not copy.region.get_point_set().has_point(point) or \
-                                    copy.intersect and \
-                                      not copy.intersect.get_point_set().has_point(point):
-                                    continue
-                                index = copy.src_fields.index(field)
-                                if copy.redops[index] == 0 or \
-                                    copy.srcs[index].region.tree_id != \
-                                     copy.dsts[index].region.tree_id or \
-                                      copy.src_fields[index] != copy.dst_fields[index]:
-                                    # Normal copy or across copy
-                                    if copy.srcs[index] not in instances:
-                                        print("ERROR: Dataflow failure for copy "+\
-                                              str(copy)+" created by "+str(copy.creator))
-                                        assert False
-                                    prev = instances[copy.srcs[index]]
-                                    prev.add_dataflow_outgoing(key, copy)
-                                    copy.add_dataflow_incoming(key, prev)
-                                    # Assertion not valid with temporary instances
-                                    #assert copy.dsts[index] not in instances
-                                    instances[copy.dsts[index]] = copy
-                                else:
-                                    # Reduction copy
-                                    if copy.dsts[index] not in instances:
-                                        print("ERROR: Dataflow failure for reduction "+\
-                                              "copy "+str(copy)+" created by "+\
-                                              str(copy.creator))
-                                        assert False
-                                    prev = instances[copy.dsts[index]]
-                                    prev.add_dataflow_outgoing(key, copy)
-                                    copy.add_dataflow_incoming(key, prev)
-                                    # Don't update instances
-                                    # reductions don't make it valid
-                            else:
-                                assert isinstance(realm_op, RealmFill)
-                                fill = realm_op 
-                                # See if it updates the valid instances
-                                if field not in fill.fields:
-                                    continue
-                                if not fill.region.get_point_set().has_point(point) or \
-                                    fill.intersect and \
-                                      not fill.intersect.get_point_set().has_point(point):
-                                    continue
-                                index = fill.fields.index(field)
-                                # Only do this if this is the first fill
-                                if fill.dsts[index] not in instances:
-                                    op.add_dataflow_outgoing(key, fill)
-                                    fill.add_dataflow_incoming(key, op)
-                                    instances[fill.dsts[index]] = fill
+                self.construct_dataflow_graphs(fill.fill_op.reqs[0].logical_node,
+                    fill.fill_op, dataflow_traverser.points, fill.fields,
+                    mapping, dataflow_traverser.postorder)
+
+    def construct_dataflow_graphs(self, node, op, points, fields, mappings, realm_copies):
+        for point in points.iterator():
+            for field in fields:
+                instances = dict()
+                assert field.fid in mappings
+                instances[mappings[field.fid]] = op
+                key = (node.tree_id, field, point)
+                node.add_verification_root(field, point, op)
+                # Now walk the copies in topological order
+                for copy in reversed(realm_copies):
+                    # See if it updates one of the valid instances
+                    if field not in copy.src_fields:
+                        continue
+                    if not copy.region.get_point_set().has_point(point) or \
+                        copy.intersect and \
+                        not copy.intersect.get_point_set().has_point(point):
+                        continue
+                    index = copy.src_fields.index(field)
+                    if copy.redops[index] == 0 or \
+                        copy.srcs[index].region.tree_id != \
+                         copy.dsts[index].region.tree_id or \
+                          copy.src_fields[index] != copy.dst_fields[index]:
+                        # Normal copy or across copy
+                        if copy.srcs[index] not in instances:
+                            print("ERROR: Dataflow failure for copy "+\
+                                str(copy)+" created by "+str(copy.creator))
+                            assert False
+                        prev = instances[copy.srcs[index]]
+                        prev.add_dataflow_outgoing(key, copy)
+                        copy.add_dataflow_incoming(key, prev)
+                        # Assertion not valid with temporary instances
+                        #assert copy.dsts[index] not in instances
+                        instances[copy.dsts[index]] = copy
+                    else:
+                        # Reduction copy
+                        if copy.dsts[index] not in instances:
+                            print("ERROR: Dataflow failure for reduction "+\
+                                  "copy "+str(copy)+" created by "+\
+                                  str(copy.creator))
+                            assert False
+                        prev = instances[copy.dsts[index]]
+                        prev.add_dataflow_outgoing(key, copy)
+                        copy.add_dataflow_incoming(key, prev)
+                        # Don't update instances
+                        # reductions don't make it valid
 
     def perform_cycle_checks(self, print_result=True):
         for op in self.ops.itervalues(): 
