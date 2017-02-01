@@ -1752,9 +1752,21 @@ namespace Legion {
       // We already have our contributions for each stage so
       // we can set the inditial participants to 1
       if (participating)
+      {
         stage_notifications.resize(Runtime::legion_collective_stages, 1);
+	// Special case: if we expect a stage -1 message from a non-participating
+	//  space, we'll count that as part of stage 0
+	if ((Runtime::legion_collective_stages > 0) &&
+	    (runtime->address_space <
+	     (runtime->total_address_spaces -
+	      Runtime::legion_collective_participating_spaces)))
+	  stage_notifications[0]--;
+      }
       if (runtime->total_address_spaces > 1)
         done_event = Runtime::create_rt_user_event();
+      // Add ourselves to the set before any exchanges start
+      assert(Runtime::mpi_rank >= 0);
+      forward_mapping[Runtime::mpi_rank] = runtime->address_space;
     }
     
     //--------------------------------------------------------------------------
@@ -1787,15 +1799,6 @@ namespace Legion {
     void MPIRankTable::perform_rank_exchange(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(Runtime::mpi_rank >= 0);
-#endif
-      // Add ourselves to the set first
-      // Have to hold the lock in case we are already receiving
-      {
-        AutoLock r_lock(reservation);
-        forward_mapping[Runtime::mpi_rank] = runtime->address_space;
-      }
       // We can skip this part if there are not multiple nodes
       if (runtime->total_address_spaces > 1)
       {
@@ -1820,9 +1823,7 @@ namespace Legion {
         // Wait for our done event to be ready
         done_event.wait();
       }
-#ifdef DEBUG_LEGION
       assert(forward_mapping.size() == runtime->total_address_spaces);
-#endif
       // Reverse the mapping
       for (std::map<int,AddressSpace>::const_iterator it = 
             forward_mapping.begin(); it != forward_mapping.end(); it++)
@@ -1888,6 +1889,9 @@ namespace Legion {
       DerezCheck z(derez);
       int stage;
       derez.deserialize(stage);
+#ifdef DEBUG_LEGION
+      assert(participating || (stage == -1));
+#endif
       bool send_next = unpack_exchange(stage, derez);
       if (stage == -1)
       {
@@ -1896,29 +1900,25 @@ namespace Legion {
         else
           Runtime::trigger_event(done_event);
       }
-      else
+      // send_next may be true even for stage -1 if it arrives after all the
+      //  stage 0 messages
+      if (send_next)
       {
-#ifdef DEBUG_LEGION
-        assert(participating);
-#endif
-        if (send_next)
+	stage = (stage == -1) ? 1 : stage + 1;
+	if (stage == Runtime::legion_collective_stages)
         {
-          stage += 1;
-          if (stage == Runtime::legion_collective_stages)
-          {
-            // We are done
-            Runtime::trigger_event(done_event);
-            // See if we have to send a message back to a
-            // non-participating node
-            if ((int(runtime->total_address_spaces) > 
-                Runtime::legion_collective_participating_spaces) &&
+	  // We are done
+	  Runtime::trigger_event(done_event);
+	  // See if we have to send a message back to a
+	  // non-participating node
+	  if ((int(runtime->total_address_spaces) > 
+	       Runtime::legion_collective_participating_spaces) &&
               (int(runtime->address_space) < int(runtime->total_address_spaces -
                 Runtime::legion_collective_participating_spaces)))
-              send_stage(-1);
-          }
-          else // Send the next stage
-            send_stage(stage);
-        }
+	    send_stage(-1);
+	}
+	else // Send the next stage
+	  send_stage(stage);
       }
     }
 
@@ -1933,12 +1933,23 @@ namespace Legion {
       {
         int rank;
         derez.deserialize(rank);
-        derez.deserialize(forward_mapping[rank]);
+	unsigned space;
+	derez.deserialize(space);
+	// Duplicates are possible because later messages aren't "held", but
+	// they should be exact matches
+	assert ((forward_mapping.count(rank) == 0) ||
+		(forward_mapping[rank] == space));
+	forward_mapping[rank] = space;
       }
+      // A stage -1 message is counted as part of stage 0 (if it exists
+      //  and we are participating)
+      if ((stage == -1) && participating &&
+	  (Runtime::legion_collective_stages > 0))
+	stage = 0;
       if (stage >= 0)
       {
 #ifdef DEBUG_LEGION
-        assert(stage < int(stage_notifications.size()));
+	assert(stage < int(stage_notifications.size()));
 #endif
         stage_notifications[stage]++;
         if (stage_notifications[stage] == (Runtime::legion_collective_radix))
