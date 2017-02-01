@@ -18433,6 +18433,14 @@ namespace Legion {
             it->impl->initialize();
           delete pending_handshakes;
           pending_handshakes = NULL;
+	  // Another (dummy) collective task launch to ensure that
+	  // all ranks have initialized their handshakes before
+	  // the top-level task is started
+	  RtEvent mpi_sync_event(realm.collective_spawn_by_kind(
+                Processor::LOC_PROC, LG_MPI_SYNC_ID, NULL, 0,
+                true/*one per node*/, runtime_startup_event));
+	  // The mpi init event then becomes the new runtime startup event
+	  runtime_startup_event = mpi_sync_event;
         }
       } 
       // See if we are supposed to start the top-level task
@@ -18796,6 +18804,7 @@ namespace Legion {
       CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
       CodeDescriptor mpi_interop_task(Runtime::init_mpi_interop);
+      CodeDescriptor mpi_sync_task(Runtime::init_mpi_sync);
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
@@ -18825,6 +18834,9 @@ namespace Legion {
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                           LG_MPI_INTEROP_ID, mpi_interop_task, no_requests)));
+        registered_events.insert(RtEvent(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                          LG_MPI_SYNC_ID, mpi_sync_task, no_requests)));
       }
       if (record_registration)
       {
@@ -19774,6 +19786,16 @@ namespace Legion {
       // Now configure the mappers
       Runtime *rt = Runtime::get_runtime(p);
       rt->initialize_mappers();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::init_mpi_sync(
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
+    //--------------------------------------------------------------------------
+    {
+      log_run.debug() << "MPI sync task";
     }
 
     //--------------------------------------------------------------------------
