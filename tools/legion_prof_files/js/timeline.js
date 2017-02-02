@@ -1,4 +1,4 @@
-const constants = {
+var constants = {
   margin_left: 310,
   margin_right: 50,
   margin_bottom: 50,
@@ -18,7 +18,7 @@ var stats_files = {};
 var state = {};
 var mouseX = 0;
 var statsline = d3.svg.line()
-    .interpolate("step-before")
+    .interpolate("step-after")
     .x(function(d) { return state.x(+d.time); })
     .y(function(d) { return state.y(+d.count); });
 var timeBisector = d3.bisector(function(d) { return d.time; }).left;
@@ -200,10 +200,10 @@ function drawStats() {
   paths.enter().append("path")
     .attr("class", "line")
     .attr("d", function (d) { return statsline(d.data); })
-    .attr("base_y", statsLevelCalculator)
+    .attr("base_y", lineLevelCalculator)
     .attr("transform",
       function(d) {
-        var y = statsLevelCalculator(d);
+        var y = lineLevelCalculator(d);
         return "translate(0," + y + ")"
     })
     .attr("stroke",
@@ -375,6 +375,7 @@ function flattenLayout() {
 }
 
 function getProcessors(stats_name) {
+  // returns processors for a given node
   var stats_regex = /(node )?(\d+) \((\w+)\)/;
   var stats_match = stats_regex.exec(stats_name);
   var matched_procs = [];
@@ -452,34 +453,33 @@ function calculateLayout() {
   // First element in the layout will be the all_stats. All first-level
   // elements will start off not enabled, and will be uncollapsed later
   // programmatically
-  state.layoutData.push(getElement(0, "all nodes", "stats", 
-                                   constants.stats_levels,
-                                   load_stats,
-                                   "tsv/all_stats.tsv",
-                                   stats_files["all"], false, true));
+  var num_nodes = Object.keys(stats_files).length;
+  if (num_nodes > 1) {
+    state.layoutData.push(getElement(0, "all nodes", "stats", 
+                                     constants.stats_levels,
+                                     load_stats,
+                                     "tsv/all_stats.tsv",
+                                     stats_files["all"], false, true));
+  }
   
-  var num_files = Object.keys(stats_files).length;
   var seen_nodes = {};
   state.processors.forEach(function(proc) {
     // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
     var proc_regex = /Processor 0x1d([a-fA-f0-9]{4})/;
     var proc_match = proc_regex.exec(proc.processor);
     // if there's only one node, then per-node graphs are redundant
-    if (num_files > 1) {
-      if (proc_match) {
-        var node_id = parseInt(proc_match[1], 16);
-        if (!(node_id in seen_nodes)) {
-          seen_nodes[node_id] = 1;
-          var stats_name = "node " + node_id;
-          state.layoutData.push(getElement(0, stats_name, "stats", 
-                                           constants.stats_levels,
-                                           load_stats,
-                                           "tsv/" + node_id + "_stats.tsv",
-                                           stats_files[node_id], false, true));
-        }
+    if (proc_match) {
+      var node_id = parseInt(proc_match[1], 16);
+      if (!(node_id in seen_nodes)) {
+        seen_nodes[node_id] = 1;
+        var stats_name = "node " + node_id;
+        state.layoutData.push(getElement(0, stats_name, "stats", 
+                                         constants.stats_levels,
+                                         load_stats,
+                                         "tsv/" + node_id + "_stats.tsv",
+                                         stats_files[node_id], false, true));
       }
-    }
-    if (!proc_match) {
+    } else {
       state.layoutData.push(getElement(0, proc.processor, "proc", 
                                        proc.height, load_proc_timeline,
                                        proc.tsv, undefined, false, true));
@@ -489,6 +489,7 @@ function calculateLayout() {
 
 function drawTimeline() {
   showLoaderIcon()
+
   updateURL(state.zoom, state.scale);
   var timelineGroup = state.timelineSvg.select("g#timeline");
   timelineGroup.selectAll("rect").remove();
@@ -533,10 +534,26 @@ function drawTimeline() {
 function redraw() {
   if (state.numLoading == 0) {
     calculateBases();
+    console.log(state.flattenedLayoutData);
     filterAndMergeBlocks(state);
+    constants.max_level = calculateVisibileLevels();
+    recalculateHeight();
     drawTimeline();
     drawLayout();
   }
+}
+
+function calculateVisibileLevels() {
+  var levels = 0;
+  state.flattenedLayoutData.forEach(function(elem) {
+    if (elem.visible) {
+      if (elem.enabled) {
+        levels += elem.num_levels;
+      }
+      levels += constants.elem_separation;
+    }
+  });
+  return levels;
 }
 
 function calculateBases() {
@@ -624,6 +641,7 @@ function timelineLevelCalculator(timelineEvent) {
 };
 
 function drawLayout() {
+  
   d3.select("#processors").select("svg").remove();
   state.timelineSvg.select("g#lines").remove();
 
@@ -938,21 +956,31 @@ function adjustZoom(newZoom, scroll) {
   }
 }
 
-function adjustThickness(newThickness) {
-  state.thickness = newThickness;
-  state.height = state.thickness * constants.max_level;
+function recalculateHeight() {
+  // adjust the height based on the new thickness and max level
+  state.height = constants.margin_top + constants.margin_bottom +
+                 (state.thickness * constants.max_level);
+  var stats_height = constants.stats_levels * state.thickness;
+  state.y = d3.scale.linear().range([stats_height, 0]);
+  state.y.domain([0, 1]);
+
   d3.select("#processors").select("svg").remove();
   var svg = d3.select("#timeline").select("svg");
+  svg.attr("width", state.zoom * state.width)
+     .attr("height", state.height);
   var lines = state.timelineSvg.select("g#lines");
   lines.remove();
 
-  svg.attr("width", state.zoom * state.width)
-     .attr("height", state.height);
-  //var filteredData = filterAndMergeBlocks(profilingData, zoom, scale);
-  drawTimeline();
-  drawLayout();
   svg.selectAll("#desc").remove();
   svg.selectAll("g.locator").remove();
+
+}
+
+function adjustThickness(newThickness) {
+  state.thickness = newThickness;
+  recalculateHeight();
+  drawTimeline();
+  drawLayout();
 }
 
 function suppressdefault(e) {
@@ -1083,7 +1111,7 @@ function defaultKeydown(e) {
   else if (commandType == Command.zoy)
     adjustThickness(state.thickness / 2);
   else if (commandType == Command.zry) {
-    state.height = $(window).height() - margin_bottom;
+    state.height = $(window).height() - constants.margin_bottom - constants.margin_top;
     state.thickness = state.height / constants.max_level;
     adjustThickness(state.thickness);
   }
@@ -1241,6 +1269,8 @@ function load_procs(callback) {
       //console.log(data);
       state.processors = data;
       calculateLayout();
+
+      // flatten the layout and get the new calculated max num levels
       flattenLayout();
       calculateBases();
       drawLayout();
@@ -1452,7 +1482,7 @@ function initializeState() {
   state.statsData = [];
 
   state.operations = {};
-  state.thickness = Math.max(state.height / constants.max_level, 20);
+  state.thickness = 20; //Math.max(state.height / constants.max_level, 20);
   state.baseThickness = state.height / constants.max_level;
   state.height = constants.max_level * state.thickness;
   state.resolution = 10; // time (in us) of the smallest feature we want to load
@@ -1462,7 +1492,7 @@ function initializeState() {
 
   // TODO: change this
   state.x = d3.scale.linear().range([0, state.width]);
-  state.y = d3.scale.linear().range([constants.stats_height, 0]);
+  state.y = d3.scale.linear().range([constants.stats_levels * state.thickness, 0]);
   state.y.domain([0, 1]);
 
   setKeyHandler(defaultKeydown);
@@ -1487,6 +1517,8 @@ function load_stats_json(callback) {
   });
 }
 
+// Loads constants such as max_level, start/end time, and number of levels
+// of a stats view
 function load_scale_json(callback) {
   $.getJSON("json/scale.json", function(json) {
     $.each(json, function(key, val) {
