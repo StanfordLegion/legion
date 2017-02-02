@@ -2194,7 +2194,7 @@ class State(object):
         if (len(nodes) > 1):
             return ["all"] + sorted(nodes.keys())
         else:
-            return ["all"]
+            return sorted(nodes.keys())
 
 
     def emit_statistics_tsv(self, output_dirname):
@@ -2358,10 +2358,13 @@ class State(object):
                 processor_tsv_file.write("%s\t%s\t%d\n" % 
                                 (repr(memory), tsv, levels))
         processor_tsv_file.close()
+        num_stats = self.emit_statistics_tsv(output_dirname)
+        stats_levels = 4
 
         scale_data = {
             'start': 0,
             'end': last_time * 1.01,
+            'stats_levels': stats_levels,
             'max_level': base_level + 1
         }
 
@@ -2370,7 +2373,6 @@ class State(object):
         with open(scale_json_file_name, "w") as scale_json_file:
             json.dump(scale_data, scale_json_file)
 
-        self.emit_statistics_tsv(output_dirname)
 
 def main():
     class MyParser(argparse.ArgumentParser):

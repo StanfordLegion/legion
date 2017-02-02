@@ -36,6 +36,7 @@
 #include "legion.h"
 
 using namespace Legion;
+using namespace LegionRuntime::Arrays;
 
 enum TaskID
 {
