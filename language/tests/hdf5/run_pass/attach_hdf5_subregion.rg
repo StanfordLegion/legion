@@ -34,15 +34,17 @@ fspace t {
 
 local filename = os.tmpname() .. ".hdf"
 
-terra generate_hdf5_file(filename : rawstring)
+terra generate_hdf5_file(filename : rawstring, dims : int3d)
   var fid = hdf5.H5Fcreate(filename, hdf5.H5F_ACC_TRUNC, hdf5.H5P_DEFAULT, hdf5.H5P_DEFAULT)
   --c.assert(fid > 0)
 
-  var dims : hdf5.hsize_t[3]
-  dims[0] = 4
-  dims[1] = 4
-  dims[2] = 4
-  var did = hdf5.H5Screate_simple(3, dims, [&uint64](0))
+  -- Legion defaults to Fortran-style (column-major) layout, so we have to reverse
+  --  the dimensions when calling directly into the HDF5 C API
+  var h_dims : hdf5.hsize_t[3]
+  h_dims[2] = dims.__ptr.x
+  h_dims[1] = dims.__ptr.y
+  h_dims[0] = dims.__ptr.z
+  var did = hdf5.H5Screate_simple(3, h_dims, [&uint64](0))
   --c.assert(did > 0)
 
   var ds1id = hdf5.H5Dcreate2(fid, "a", hdf5.H5T_STD_I32LE, did,
@@ -81,14 +83,15 @@ where reads(r1.{a,b,c}), reads(r2.{a,b,c}) do
       errors += 1
       regentlib.c.printf("[%d,%d,%d]: a mismatch - %d %d\n", p.x, p.y, p.z, r1[p].a, r2[p].a)
     else
-      regentlib.c.printf("[%d,%d,%d]: %d\n", p.x, p.y, p.z, r1[p].a)
+      -- regentlib.c.printf("[%d,%d,%d]: %d\n", p.x, p.y, p.z, r1[p].a)
     end
   end
   return errors
 end
 
 task main()
-  var is = ispace(int3d, {4, 4, 4})
+  var dims : int3d = { 4, 3, 2 }
+  var is = ispace(int3d, dims)
   var r1 = region(is, t)
   var r2 = region(is, t)
 
@@ -96,7 +99,7 @@ task main()
   var p1 = partition(equal, r1, cs)
   var p2 = partition(equal, r2, cs)
 
-  generate_hdf5_file(filename)
+  generate_hdf5_file(filename, dims)
 
   -- test 1: attach in read-only mode and acquire/release
   --  (should make a local copy)
@@ -108,7 +111,7 @@ task main()
 
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
     acquire(r2)
-    fill_region(r2, 3)
+    fill_region(r2, 2)
     release(r2)
     -- for c in cs do
     --   acquire((p2[c]))
