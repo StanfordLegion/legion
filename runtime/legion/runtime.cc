@@ -18,7 +18,9 @@
 #ifdef __MACH__
 #define MASK_FMT "llx"
 #else
+#ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS
+#endif
 #include <inttypes.h>
 #define MASK_FMT PRIx64
 #endif

@@ -2,17 +2,42 @@
 // save all Legion defines in the legion_defines.h file
 // -----------------------------------------------------------------------//
 
+#ifndef DEBUG_REALM
 #cmakedefine DEBUG_REALM 
+#endif
+#ifndef DEBUG_LEGION
 #cmakedefine DEBUG_LEGION
+#endif
+#ifndef PRIVILEGE_CHECKS
 #cmakedefine PRIVILEGE_CHECKS
+#endif
+#ifndef BOUNDS_CHECKS
 #cmakedefine BOUNDS_CHECKS
+#endif
+#ifndef GASNET_CONDUIT_MPI
 #cmakedefine GASNET_CONDUIT_MPI
+#endif
+#ifndef GASNET_CONDUIT_IBV
 #cmakedefine GASNET_CONDUIT_IBV
+#endif
+#ifndef GASNET_CONDUIT_UDP
 #cmakedefine GASNET_CONDUIT_UDP
+#endif
+#ifndef GASNET_CONDUIT_ARIES
 #cmakedefine GASNET_CONDUIT_ARIES
+#endif
+#ifndef GASNET_CONDUIT_GEMINI
 #cmakedefine GASNET_CONDUIT_GEMINI
+#endif
+#ifndef USE_CUDA
 #cmakedefine USE_CUDA
+#endif 
+#ifndef GASNETI_BUG1389_WORKAROUND
 #cmakedefine GASNETI_BUG1389_WORKAROUND @GASNETI_BUG1389_WORKAROUND@
+#endif
+#ifndef __STDC_FORMAT_MACROS
 #cmakedefine __STDC_FORMAT_MACROS
+#endif
+
 #include "legion.h"
 
