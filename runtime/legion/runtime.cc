@@ -4931,10 +4931,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
         AddressSpaceID local_address_space, 
-        size_t max_message_size, bool profile)
+        size_t max_message_size, LegionProfiler *prof)
       : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
-        observed_recent(true), profile_messages(profile)
+        observed_recent(true), profiler(prof)
     //--------------------------------------------------------------------------
     //
     {
@@ -4969,7 +4969,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(const VirtualChannel &rhs)
-      : sending_buffer(NULL), sending_buffer_size(0), profile_messages(false)
+      : sending_buffer(NULL), sending_buffer_size(0), profiler(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5071,11 +5071,20 @@ namespace Legion {
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
                                                             packaged_messages;
       // Send the message directly there, don't go through the
-      // runtime interface to avoid being counted
-      RtEvent next_event(target.spawn(LG_TASK_ID, sending_buffer, 
-            sending_index, last_message_event, LG_LATENCY_PRIORITY));
-      // Update the event
-      last_message_event = next_event;
+      // runtime interface to avoid being counted, still include
+      // a profiling request though if necessary in order to 
+      // see waits on message handlers
+      if ((Runtime::num_profiling_nodes > 0) && 
+          (runtime->find_address_space(target) < Runtime::num_profiling_nodes))
+      {
+        Realm::ProfilingRequestSet requests;
+        profiler->add_message_request(requests, target); 
+        last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
+              sending_index, last_message_event, LG_LATENCY_PRIORITY));
+      }
+      else
+        last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
+              sending_index, last_message_event, LG_LATENCY_PRIORITY));
       // Reset the state of the buffer
       sending_index = base_size + sizeof(header) + sizeof(unsigned);
       if (partial)
@@ -5203,7 +5212,7 @@ namespace Legion {
         if (idx == (num_messages-1))
           assert(message_size == arglen);
 #endif
-        if (profile_messages)
+        if (profiler != NULL)
           start = Realm::Clock::current_time_in_nanoseconds();
         // Build the deserializer
         Deserializer derez(args,message_size);
@@ -5827,13 +5836,13 @@ namespace Legion {
           default:
             assert(false); // should never get here
         }
-        if (profile_messages)
+        if (profiler != NULL)
         {
           stop = Realm::Clock::current_time_in_nanoseconds();
 #ifdef DEBUG_LEGION
           assert(runtime->profiler != NULL);
 #endif
-          runtime->profiler->record_message(kind, start, stop);
+          profiler->record_message(kind, start, stop);
         }
         // Update the args and arglen
         args += message_size;
@@ -5917,7 +5926,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
         new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
-            rt->address_space, max_message_size, (runtime->profiler != NULL));
+            rt->address_space, max_message_size, runtime->profiler);
       }
     }
 

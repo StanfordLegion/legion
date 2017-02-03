@@ -819,7 +819,7 @@ namespace Legion {
       };
     public:
       VirtualChannel(VirtualChannelKind kind,AddressSpaceID local_address_space,
-                     size_t max_message_size, bool profile_messages);
+                     size_t max_message_size, LegionProfiler *profiler);
       VirtualChannel(const VirtualChannel &rhs);
       ~VirtualChannel(void);
     public:
@@ -855,7 +855,7 @@ namespace Legion {
       unsigned received_messages;
       bool observed_recent;
     private:
-      const bool profile_messages;
+      LegionProfiler *const profiler;
     }; 
 
     /**

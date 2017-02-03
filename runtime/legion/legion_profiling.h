@@ -93,7 +93,7 @@ namespace Legion {
       struct MetaInfo {
       public:
         UniqueID op_id;
-        unsigned hlr_id;
+        unsigned lg_id;
         Processor proc;
         unsigned long long create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
@@ -180,6 +180,10 @@ namespace Legion {
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
                   Realm::ProfilingMeasurements::OperationEventWaits *waits);
+      void process_message(
+                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
       void process_copy(UniqueID op_id,
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
@@ -239,6 +243,7 @@ namespace Legion {
       enum ProfilingKind {
         LEGION_PROF_TASK,
         LEGION_PROF_META,
+        LEGION_PROF_MESSAGE,
         LEGION_PROF_COPY,
         LEGION_PROF_FILL,
         LEGION_PROF_INST,
@@ -281,6 +286,8 @@ namespace Legion {
                             TaskID tid, SingleTask *task);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
+      void add_message_request(Realm::ProfilingRequestSet &requests,
+                            Processor remote_target);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
                             Operation *op);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
