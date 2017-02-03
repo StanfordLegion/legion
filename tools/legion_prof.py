@@ -2358,6 +2358,9 @@ class State(object):
                 processor_tsv_file.write("%s\t%s\t%d\n" % 
                                 (repr(memory), tsv, levels))
         processor_tsv_file.close()
+        if not os.path.exists(os.path.join(output_dirname, "json")):
+            os.makedirs(os.path.join(output_dirname, "json"))
+
         num_stats = self.emit_statistics_tsv(output_dirname)
         stats_levels = 4
 
@@ -2368,8 +2371,6 @@ class State(object):
             'max_level': base_level + 1
         }
 
-        if not os.path.exists(os.path.join(output_dirname, "json")):
-            os.makedirs(os.path.join(output_dirname, "json"))
         with open(scale_json_file_name, "w") as scale_json_file:
             json.dump(scale_data, scale_json_file)
 
