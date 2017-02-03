@@ -509,16 +509,16 @@ namespace LegionRuntime {
    class HDFLayoutIterator {
    public:
      HDFLayoutIterator(Rect<DIM> rect, Mapping<DIM, 1> *m, size_t bs)
-     : orig_rect(rect), mapping(m), cur_idx(0), rect_size(rect.volume()), block_size(bs)
+     : orig_rect(rect), mapping(m), rect_size(rect.volume()), block_size(bs)
      {
        mapping->add_reference();
        Rect<DIM> local_rect;
-       cur_idx = mapping->image_linear_subrect(orig_rect, local_rect, strides);
-       assert(cur_idx == 0);
+       lo_idx = mapping->image_linear_subrect(orig_rect, local_rect, strides);
+       cur_idx = lo_idx;
        sub_rect = Rect<DIM>(local_rect.lo, local_rect.lo);
        size_t subtotal = 1;
        size_t left_over = block_size - cur_idx % block_size;
-       for (int j = 0; j < DIM; j++) {
+       for (unsigned j = 0; j < DIM; j++) {
          if (strides[j][0] == subtotal && subtotal * local_rect.dim_size(j) <= left_over) {
            sub_rect.hi.x[j] = local_rect.hi[j];
            subtotal *= local_rect.dim_size(j);
@@ -541,7 +541,7 @@ namespace LegionRuntime {
 
      bool any_left()
      {
-       return cur_idx < rect_size;
+       return cur_idx < rect_size + lo_idx;
      }
 
      bool step()
@@ -550,13 +550,16 @@ namespace LegionRuntime {
        size_t left_over = block_size - cur_idx % block_size;
        if (!any_left())
          return false;
-       Rect<DIM> r = mapping->preimage(make_point(cur_idx)), temp_rect;
-       assert(r.volume() == 1);
-       r.hi = orig_rect.hi;
+       coord_t idx = cur_idx - lo_rect;
+       Rect<DIM> r = orig_rect, temp_rect;
+       for (unsigned i = 0; i < DIM; i++) {
+         r.lo.x[i] += idx % orig_rect.dim_size(i);
+         idx = idx / orig_rect.dim_size(i);
+       }
        mapping->image_linear_subrect(r, temp_rect, strides);
        sub_rect = Rect<DIM>(temp_rect.lo, temp_rect.lo);
        coord_t subtotal = 1;
-       for (int j = 0; j < DIM; j++) {
+       for (unsigned j = 0; j < DIM; j++) {
          if (strides[j][0] == subtotal && subtotal * temp_rect.dim_size(j) <= left_over) {
            sub_rect.hi.x[j] = temp_rect.hi[j];
            subtotal *= temp_rect.dim_size(j);
@@ -566,11 +569,14 @@ namespace LegionRuntime {
        }
        return true;
      }
+   private:
+     Point<1> strides[DIM];
+     coord_t lo_idx;
    public:
      Rect<DIM> orig_rect, sub_rect;
-     Point<1> strides[DIM];
      Mapping<DIM, 1> *mapping;
-     size_t cur_idx, rect_size, block_size;
+     size_t rect_size, block_size;
+     coord_t cur_idx;
    };
 #endif
 
