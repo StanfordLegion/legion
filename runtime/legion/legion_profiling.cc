@@ -675,12 +675,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::add_message_request(
+    /*static*/ void LegionProfiler::add_message_request(
                   Realm::ProfilingRequestSet &requests, Processor remote_target)
     //--------------------------------------------------------------------------
     {
-      // Don't increment the outstanding profiling count here, 
-      // that will be done by the message on the remote node
+      // Don't increment here, we'll increment on the remote side since we
+      // that is where we know the profiler is going to handle the results
       ProfilingInfo info(LEGION_PROF_MESSAGE);
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
                         LG_LEGION_PROFILING_ID, &info, sizeof(info));

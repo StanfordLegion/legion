@@ -826,12 +826,13 @@ namespace Legion {
       VirtualChannel& operator=(const VirtualChannel &rhs);
     public:
       void package_message(Serializer &rez, MessageKind k, bool flush,
-                           Runtime *runtime, Processor target);
+                           Runtime *runtime, Processor target, bool shutdown);
       void process_message(const void *args, size_t arglen, 
                         Runtime *runtime, AddressSpaceID remote_address_space);
       void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
     private:
-      void send_message(bool complete, Runtime *runtime, Processor target);
+      void send_message(bool complete, Runtime *runtime, 
+                        Processor target, bool shutdown);
       void handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen);
@@ -887,8 +888,8 @@ namespace Legion {
       MessageManager& operator=(const MessageManager &rhs);
     public:
       void send_message(Serializer &rez, MessageKind kind, 
-                        VirtualChannelKind channel, bool flush);
-
+                        VirtualChannelKind channel, bool flush, 
+                        bool shutdown = false);
       void receive_message(const void *args, size_t arglen);
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);

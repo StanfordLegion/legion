@@ -4992,7 +4992,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VirtualChannel::package_message(Serializer &rez, MessageKind k,
-                                bool flush, Runtime *runtime, Processor target)
+                  bool flush, Runtime *runtime, Processor target, bool shutdown)
     //--------------------------------------------------------------------------
     {
       // First check to see if the message fits in the current buffer    
@@ -5008,7 +5008,7 @@ namespace Legion {
         // Since there is no partial data we can fake the flush
         if ((sending_buffer_size - sending_index) <= 
             (sizeof(k)+sizeof(buffer_size)))
-          send_message(true/*complete*/, runtime, target);
+          send_message(true/*complete*/, runtime, target, shutdown);
         // Now can package up the meta data
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
@@ -5019,7 +5019,7 @@ namespace Legion {
         {
           unsigned remaining = sending_buffer_size - sending_index;
           if (remaining == 0)
-            send_message(false/*complete*/, runtime, target);
+            send_message(false/*complete*/, runtime, target, shutdown);
           remaining = sending_buffer_size - sending_index;
 #ifdef DEBUG_LEGION
           assert(remaining > 0); // should be space after the send
@@ -5046,12 +5046,12 @@ namespace Legion {
         sending_index += buffer_size;
       }
       if (flush)
-        send_message(true/*complete*/, runtime, target);
+        send_message(true/*complete*/, runtime, target, shutdown);
     }
 
     //--------------------------------------------------------------------------
     void VirtualChannel::send_message(bool complete, Runtime *runtime,
-                                      Processor target)
+                                      Processor target, bool shutdown)
     //--------------------------------------------------------------------------
     {
       // See if we need to switch the header file
@@ -5076,13 +5076,15 @@ namespace Legion {
       // runtime interface to avoid being counted, still include
       // a profiling request though if necessary in order to 
       // see waits on message handlers
-      if ((Runtime::num_profiling_nodes > 0) && 
+      // Note that we don't profile on shutdown messages or we would 
+      // never actually finish running
+      if (!shutdown && (Runtime::num_profiling_nodes > 0) && 
           (runtime->find_address_space(target) < Runtime::num_profiling_nodes))
       {
         Realm::ProfilingRequestSet requests;
-        profiler->add_message_request(requests, target); 
+        LegionProfiler::add_message_request(requests, target);
         last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
-              sending_index, last_message_event, LG_LATENCY_PRIORITY));
+            sending_index, requests, last_message_event, LG_LATENCY_PRIORITY));
       }
       else
         last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
@@ -5143,6 +5145,9 @@ namespace Legion {
                          Runtime *runtime, AddressSpaceID remote_address_space)
     //--------------------------------------------------------------------------
     {
+      // If we have a profiler we need to increment our requests count
+      if (profiler != NULL)
+        profiler->increment_total_outstanding_requests();
       // Strip off our header and the number of messages, the 
       // processor part was already stipped off by the Legion runtime
       const char *buffer = (const char*)args;
@@ -5827,11 +5832,21 @@ namespace Legion {
             }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
+              // If we have a profiler, we shouldn't have incremented the
+              // outstanding profiling count because we don't actually
+              // do profiling requests on shutdown messages
+              if (profiler != NULL)
+                profiler->decrement_total_outstanding_requests();
               runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_RESPONSE:
             {
+              // If we have a profiler, we shouldn't have incremented the
+              // outstanding profiling count because we don't actually
+              // do profiling requests on shutdown messages
+              if (profiler != NULL)
+                profiler->decrement_total_outstanding_requests();
               runtime->handle_shutdown_response(derez);
               break;
             }
@@ -5841,9 +5856,6 @@ namespace Legion {
         if (profiler != NULL)
         {
           stop = Realm::Clock::current_time_in_nanoseconds();
-#ifdef DEBUG_LEGION
-          assert(runtime->profiler != NULL);
-#endif
           profiler->record_message(kind, start, stop);
         }
         // Update the args and arglen
@@ -5963,10 +5975,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MessageManager::send_message(Serializer &rez, MessageKind kind,
-                                      VirtualChannelKind channel, bool flush)
+                          VirtualChannelKind channel, bool flush, bool shutdown)
     //--------------------------------------------------------------------------
     {
-      channels[channel].package_message(rez, kind, flush, runtime, target);
+      channels[channel].package_message(rez, kind, flush, runtime, 
+                                        target, shutdown);
     }
 
     //--------------------------------------------------------------------------
@@ -13830,7 +13843,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_NOTIFICATION,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*shutdown*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13838,7 +13851,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*shutdown*/);
     }
 
     //--------------------------------------------------------------------------

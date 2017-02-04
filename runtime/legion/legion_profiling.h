@@ -286,14 +286,16 @@ namespace Legion {
                             TaskID tid, SingleTask *task);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
-      void add_message_request(Realm::ProfilingRequestSet &requests,
-                            Processor remote_target);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
                             Operation *op);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
                             Operation *op);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             Operation *op);
+      // Adding a message profiling request is a static method
+      // because we might not have a profiler on the local node
+      static void add_message_request(Realm::ProfilingRequestSet &requests,
+                            Processor remote_target);
     public:
       // Alternate versions of the one above with op ids
       void add_task_request(Realm::ProfilingRequestSet &requests, 
@@ -334,7 +336,7 @@ namespace Legion {
       const Processor target_proc;
       inline bool has_outstanding_requests(void)
         { return total_outstanding_requests != 0; }
-    private:
+    public:
       inline void increment_total_outstanding_requests(void)
         { __sync_fetch_and_add(&total_outstanding_requests,1); }
       inline void decrement_total_outstanding_requests(void)
