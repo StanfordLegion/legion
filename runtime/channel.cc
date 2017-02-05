@@ -149,13 +149,14 @@ namespace LegionRuntime {
                || (kind == XferDes::XFER_REMOTE_WRITE)
                || (kind == XferDes::XFER_MEM_CPY);
       }
-      /* void print_request_info(Request* req)
+      void print_request_info(Request* req)
       {
         printf("request(%dD): src_off(%zd) dst_off(%zd) src_str(%zd)"
                " dst_str(%zd) nbytes(%zu) nlines(%zu)",
-               req->dim, req->src_off, req->dst_off, req->src_str,
-               req->dst_str, req->nbytes, req->nlines);
-      }*/
+               req->dim, (ssize_t)req->src_off, (ssize_t)req->dst_off,
+               (ssize_t)req->src_str, (ssize_t)req->dst_str,
+               req->nbytes, req->nlines);
+      }
 
       template<unsigned DIM>
       long XferDes::default_get_requests(Request** reqs, long nr)
@@ -597,7 +598,7 @@ namespace LegionRuntime {
       {
         log_request.info(
             "update_write: guid(%llx) off(%zd) size(%zu) pre(%llx) next(%llx)",
-            guid, (off_t)offset, (size_t)size, pre_xd_guid, next_xd_guid);
+            guid, (ssize_t)offset, (size_t)size, pre_xd_guid, next_xd_guid);
         if (next_xd_guid != XFERDES_NO_GUID) {
           bool update = false;
           if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
