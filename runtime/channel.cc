@@ -596,8 +596,8 @@ namespace LegionRuntime {
       inline void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size)
       {
         log_request.info(
-            "update_write: guid(%llx) off(%" PRId64") size(%" PRIu64") "
-            "pre(%llx) next(%llx)", guid, offset, size, pre_xd_guid, next_xd_guid);
+            "update_write: guid(%llx) off(%zd) size(%zu) pre(%llx) next(%llx)",
+            guid, (off_t)offset, (size_t)size, pre_xd_guid, next_xd_guid);
         if (next_xd_guid != XFERDES_NO_GUID) {
           bool update = false;
           if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
@@ -2254,7 +2254,6 @@ namespace LegionRuntime {
                                        inst, _src_buf, _dst_buf, _domain, _oas_vec,
                                        _max_req_size, max_nr, _priority,
                                        _order, _kind, _complete_fence);
-            
               break;
             default:
               assert(false);
