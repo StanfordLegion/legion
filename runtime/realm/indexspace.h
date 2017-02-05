@@ -24,7 +24,7 @@
 
 #include "lowlevel_config.h"
 #include "arrays.h"
-#include "layouts.h"
+//#include "layouts.h"
 #include "custom_serdez.h"
 
 #ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS

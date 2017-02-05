@@ -562,9 +562,9 @@ namespace Realm {
       LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Arrays::FortranArrayLinearization<3> >();
       LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Arrays::Translation<1> >();
       // we also register split dim linearization
-      LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<1> >();
-      LegionRuntime::Arrays::Mapping<2,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<2> >();
-      LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<3> >();
+      //LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<1> >();
+      //LegionRuntime::Arrays::Mapping<2,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<2> >();
+      //LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<3> >();
 
 
       DetailedTimer::init_timers();

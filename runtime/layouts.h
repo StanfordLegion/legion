@@ -16,7 +16,8 @@
 #ifndef LEGION_LOWLEVEL_LAYOUTS
 #define LEGION_LOWLEVEL_LAYOUTS
 #include "arrays.h"
-
+// temporarily comment out the classes in layouts.h
+#ifdef USE_LAYOUT_ITERATORS
 using namespace LegionRuntime::Arrays;
 
 namespace LegionRuntime {
@@ -570,16 +571,16 @@ namespace LegionRuntime {
        return true;
      }
    private:
-     Point<1> strides[DIM];
      coord_t lo_idx;
    public:
      Rect<DIM> orig_rect, sub_rect;
      Mapping<DIM, 1> *mapping;
+     Point<1> strides[DIM];
      size_t rect_size, block_size;
      coord_t cur_idx;
    };
-#endif
-
+#endif // USE_HDF
+#endif //ifdef 0
   } // namespace Layout
 } // namespace LegionRuntime
 #endif

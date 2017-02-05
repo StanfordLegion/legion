@@ -3044,7 +3044,7 @@ namespace LegionRuntime {
 
     DomainLinearization create_ib_linearization(const Domain& dm)
     {
-      std::vector<Layouts::DimKind> kind_vec;
+      //std::vector<Layouts::DimKind> kind_vec;
       std::vector<size_t> size_vec;
       switch (dm.get_dim()) {
       case 1:

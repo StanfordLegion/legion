@@ -43,6 +43,8 @@
 #include "realm/hdf5/hdf5_internal.h"
 #endif
 
+using namespace LegionRuntime::Arrays;
+
 namespace LegionRuntime{
   namespace LowLevel{
     class XferDes;
@@ -253,7 +255,15 @@ namespace LegionRuntime{
     };
 #endif
 
-    typedef class Layouts::XferOrder XferOrder;
+    class XferOrder {
+    public:
+      enum Type {
+        SRC_FIFO,
+        DST_FIFO,
+        ANY_ORDER
+      };
+    };
+
     class XferDesFence : public Realm::Operation::AsyncWorkItem {
     public:
       XferDesFence(Realm::Operation *op) : Realm::Operation::AsyncWorkItem(op) {}
@@ -808,7 +818,7 @@ namespace LegionRuntime{
       ~HDFXferDes()
       {
         free(hdf_reqs);
-        delete hli;
+        delete lsi;
       }
 
       long get_requests(Request** requests, long nr);
@@ -822,8 +832,8 @@ namespace LegionRuntime{
       HDF5Memory::HDFMetadata *hdf_metadata;
       std::vector<OffsetsAndSize>::iterator fit;
       //GenericPointInRectIterator<DIM>* pir;
-      //GenericLinearSubrectIterator<Mapping<DIM, 1> >* lsi;
-      Layouts::HDFLayoutIterator<DIM>* hli;
+      GenericLinearSubrectIterator<Mapping<DIM, 1> >* lsi;
+      //Layouts::HDFLayoutIterator<DIM>* hli;
     };
 #endif
 
