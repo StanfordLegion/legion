@@ -2280,7 +2280,8 @@ namespace Legion {
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
       inline unsigned get_start_color(void) const { return address_space; }
-      inline unsigned get_color_modulus(void) const { return runtime_stride; }
+      inline unsigned get_color_modulus(void) const 
+        { return total_address_spaces; }
     public:
       // Manage the execution of tasks within a context
       void activate_context(InnerContext *context);
@@ -2484,7 +2485,7 @@ namespace Legion {
       InnerContext* find_context(UniqueID context_uid, 
                                  bool return_null_if_not_found = false);
       inline AddressSpaceID get_runtime_owner(UniqueID uid) const
-        { return (uid % runtime_stride); }
+        { return (uid % total_address_spaces); }
     public:
       bool is_local(Processor proc) const;
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
@@ -2563,7 +2564,9 @@ namespace Legion {
       const Machine machine;
       const AddressSpaceID address_space; 
       const unsigned total_address_spaces;
-      const unsigned runtime_stride; // stride for uniqueness
+      // stride for uniqueness, may or may not be the same depending
+      // on the number of available control replication contexts
+      const unsigned runtime_stride; 
       LegionProfiler *profiler;
       RegionTreeForest *const forest;
       Processor utility_group;
@@ -2859,6 +2862,7 @@ namespace Legion {
       static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned gc_epoch_size;
+      static unsigned max_control_replication_contexts;
       static bool runtime_started;
       static bool runtime_backgrounded;
       static bool runtime_warnings;

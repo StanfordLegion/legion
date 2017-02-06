@@ -6941,7 +6941,7 @@ namespace Legion {
                                                         Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      return (task_id % runtime->runtime_stride);
+      return (task_id % runtime->total_address_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -7275,7 +7275,7 @@ namespace Legion {
                                                            Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      return (vid % runtime->runtime_stride);
+      return (vid % runtime->total_address_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -7640,7 +7640,7 @@ namespace Legion {
                             LayoutConstraintID layout_id, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      return (layout_id % runtime->runtime_stride);
+      return (layout_id % runtime->total_address_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -8136,8 +8136,9 @@ namespace Legion {
         mapper_runtime(new Legion::Mapping::MapperRuntime()),
         machine(m), address_space(unique), 
         total_address_spaces(address_spaces.size()),
-        runtime_stride(address_spaces.size()), profiler(NULL),
-        forest(new RegionTreeForest(this)), 
+        runtime_stride((1/*normal set of nodes*/ + 
+              max_control_replication_contexts) * address_spaces.size()), 
+        profiler(NULL), forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
         prepared_for_shutdown(false),
 #ifdef DEBUG_LEGION
@@ -12557,7 +12558,7 @@ namespace Legion {
       int base = index * radix;
       int init = source.address_space();
       // The runtime stride is the same as the number of nodes
-      const int total_nodes = runtime_stride;
+      const int total_nodes = total_address_spaces;
       for (int r = 1; r <= radix; r++)
       {
         int offset = base + r;
@@ -15106,7 +15107,7 @@ namespace Legion {
         return result;
       }
       DistributedID result = unique_distributed_id;
-      unique_distributed_id += runtime_stride;
+      unique_distributed_id += total_address_spaces;
 #ifdef DEBUG_LEGION
       assert(result < LEGION_DISTRIBUTED_ID_MASK);
 #endif
@@ -15158,7 +15159,7 @@ namespace Legion {
     AddressSpaceID Runtime::determine_owner(DistributedID did) const
     //--------------------------------------------------------------------------
     {
-      return ((did & LEGION_DISTRIBUTED_ID_MASK) % runtime_stride);
+      return ((did & LEGION_DISTRIBUTED_ID_MASK) % total_address_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -16788,7 +16789,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert((context_uid % runtime_stride) == address_space); // sanity check
+      // sanity check
+      assert((context_uid % total_address_spaces) == address_space); 
 #endif
       AutoLock ctx_lock(context_lock);
 #ifdef DEBUG_LEGION
@@ -16802,7 +16804,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert((context_uid % runtime_stride) == address_space); // sanity check
+      // sanity check
+      assert((context_uid % total_address_spaces) == address_space); 
 #endif
       AutoLock ctx_lock(context_lock);
       std::map<UniqueID,InnerContext*>::iterator finder = 
@@ -17935,6 +17938,8 @@ namespace Legion {
                                       DEFAULT_MAX_MESSAGE_SIZE;
     /*static*/ unsigned Runtime::gc_epoch_size = 
                                       DEFAULT_GC_EPOCH_SIZE;
+    /*static*/ unsigned Runtime::max_control_replication_contexts =
+                                      DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ bool Runtime::runtime_warnings = false;
@@ -18061,6 +18066,8 @@ namespace Legion {
         superscalar_width = DEFAULT_SUPERSCALAR_WIDTH;
         max_message_size = DEFAULT_MAX_MESSAGE_SIZE;
         gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
+        max_control_replication_contexts = 
+          DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS;
         program_order_execution = false;
         num_profiling_nodes = 0;
         legion_collective_radix = LEGION_COLLECTIVE_RADIX;

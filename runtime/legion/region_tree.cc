@@ -5495,7 +5495,7 @@ namespace Legion {
                                                               Runtime *rt)
     //--------------------------------------------------------------------------
     {
-      return (handle.id % rt->runtime_stride);
+      return (handle.id % rt->total_address_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -6967,7 +6967,7 @@ namespace Legion {
                                           IndexPartition part, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      return (part.id % runtime->runtime_stride);
+      return (part.id % runtime->total_address_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -8434,9 +8434,9 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx)
-      : handle(sp), is_owner((sp.id % ctx->runtime->runtime_stride) ==
+      : handle(sp), is_owner((sp.id % ctx->runtime->total_address_spaces) ==
           ctx->runtime->address_space), 
-        owner(sp.id % ctx->runtime->runtime_stride), 
+        owner(sp.id % ctx->runtime->total_address_spaces), 
         context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
@@ -8448,9 +8448,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
                                    Deserializer &derez)
-      : handle(sp), is_owner((sp.id % ctx->runtime->runtime_stride) ==
+      : handle(sp), is_owner((sp.id % ctx->runtime->total_address_spaces) ==
           ctx->runtime->address_space), 
-        owner(sp.id % ctx->runtime->runtime_stride), 
+        owner(sp.id % ctx->runtime->total_address_spaces), 
         context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
@@ -8552,7 +8552,7 @@ namespace Legion {
                                                               Runtime *rt)
     //--------------------------------------------------------------------------
     {
-      return (handle.id % rt->runtime_stride);
+      return (handle.id % rt->total_address_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -10299,7 +10299,7 @@ namespace Legion {
                                                               Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      return (tid % runtime->runtime_stride);
+      return (tid % runtime->total_address_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -15309,7 +15309,7 @@ namespace Legion {
                                                           Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      return (handle.tree_id % runtime->runtime_stride);
+      return (handle.tree_id % runtime->total_address_spaces);
     }
 
     //--------------------------------------------------------------------------
@@ -17038,7 +17038,7 @@ namespace Legion {
                                      LogicalPartition handle, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      return (handle.tree_id % runtime->runtime_stride);
+      return (handle.tree_id % runtime->total_address_spaces);
     }
 
     //--------------------------------------------------------------------------

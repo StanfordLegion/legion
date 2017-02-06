@@ -125,6 +125,10 @@
 #ifndef DEFAULT_GC_EPOCH_SIZE
 #define DEFAULT_GC_EPOCH_SIZE           64
 #endif
+// Number of control replications to be supported
+#ifndef DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS
+#define DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS    1
+#endif
 
 // Used for debugging memory leaks
 // How often tracing information is dumped

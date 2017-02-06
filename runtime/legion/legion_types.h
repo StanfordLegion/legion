@@ -1188,6 +1188,7 @@ namespace Legion {
     class TaskContext;
     class InnerContext;;
     class TopLevelContext;
+    class ReplicateContext;
     class RemoteContext;
     class LeafContext;
     class InlineContext;

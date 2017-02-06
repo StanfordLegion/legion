@@ -892,7 +892,6 @@ namespace Legion {
       virtual void decrement_pending(void);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
-    
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -1055,6 +1054,193 @@ namespace Legion {
     };
 
     /**
+     * \class ReplicateContext
+     * A replicate context is a special kind of top-level context for
+     * executing control-replicated tasks.
+     */
+    class ReplicateContext : public TopLevelContext {
+    public:
+      ReplicateContext(Runtime *runtime, UniqueID ctx_uid);
+      ReplicateContext(const ReplicateContext &rhs);
+      virtual ~ReplicateContext(void);
+    public:
+      ReplicateContext& operator=(const ReplicateContext &rhs);
+    public:
+      // Interface to operations performed by a context
+      virtual IndexSpace create_index_space(RegionTreeForest *forest,
+                                            size_t max_num_elmts);
+      virtual IndexSpace create_index_space(RegionTreeForest *forest,
+                                            const Domain &domain);
+      virtual IndexSpace create_index_space(RegionTreeForest *forest,
+                                            const std::set<Domain> &domains);
+      virtual void destroy_index_space(IndexSpace handle);
+      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent, 
+                                            const Domain &color_space,
+                                            const PointColoring &coloring,
+                                            PartitionKind part_kind,
+                                            int color, bool allocable);
+      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Coloring &coloring,
+                                            bool disjoint, int part_color);
+      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const DomainPointColoring &coloring,
+                                            PartitionKind kind, int color);
+      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const DomainColoring &coloring,
+                                            bool disjoint, int part_color);
+      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                      const MultiDomainPointColoring &coloring,
+                                            PartitionKind part_kind, int color);
+      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const MultiDomainColoring &coloring,
+                                            bool disjoint, int part_color);
+      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                              LegionRuntime::Accessor::RegionAccessor<
+                LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
+                                            int part_color);
+      virtual void destroy_index_partition(IndexPartition handle);
+      virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            size_t granularity,
+                                            int color, bool allocable);
+      virtual IndexPartition create_weighted_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                              const std::map<DomainPoint,int> &weights,
+                                            size_t granularity,
+                                            int color, bool allocable);
+      virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            IndexPartition handle1,
+                                            IndexPartition handle2,
+                                            PartitionKind kind,
+                                            int color, bool allocable);
+      virtual IndexPartition create_partition_by_intersection(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            IndexPartition handle1,
+                                            IndexPartition handle2,
+                                            PartitionKind kind,
+                                            int color, bool allocable);
+      virtual IndexPartition create_partition_by_difference(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            IndexPartition handle1,
+                                            IndexPartition handle2,
+                                            PartitionKind kind,
+                                            int color, bool allocable);
+      virtual void create_cross_product_partition(
+                                            RegionTreeForest *forest,
+                                            IndexPartition handle1,
+                                            IndexPartition handle2,
+                              std::map<DomainPoint,IndexPartition> &handles,
+                                            PartitionKind kind,
+                                            int color, bool allocable);
+      virtual IndexPartition create_partition_by_field(
+                                            RegionTreeForest *forest,
+                                            LogicalRegion handle,
+                                            LogicalRegion parent_priv,
+                                            FieldID fid,
+                                            const Domain &color_space,
+                                            int color, bool allocable);
+      virtual IndexPartition create_partition_by_image(
+                                            RegionTreeForest *forest,
+                                            IndexSpace handle,
+                                            LogicalPartition projection,
+                                            LogicalRegion parent,
+                                            FieldID fid,
+                                            const Domain &color_space,
+                                            PartitionKind part_kind,
+                                            int color, bool allocable);
+      virtual IndexPartition create_partition_by_preimage(
+                                            RegionTreeForest *forest,
+                                            IndexPartition projection,
+                                            LogicalRegion handle,
+                                            LogicalRegion parent,
+                                            FieldID fid,
+                                            const Domain &color_space,
+                                            PartitionKind part_kind,
+                                            int color, bool allocable);
+      virtual IndexPartition create_pending_partition(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            PartitionKind part_kind,
+                                            int color, bool allocable);
+      virtual IndexSpace create_index_space_union(
+                                            RegionTreeForest *forest,
+                                            IndexPartition parent,
+                                            const DomainPoint &color,
+                                const std::vector<IndexSpace> &handles);
+      virtual IndexSpace create_index_space_union(
+                                            RegionTreeForest *forest,
+                                            IndexPartition parent,
+                                            const DomainPoint &color,
+                                            IndexPartition handle);
+      virtual IndexSpace create_index_space_intersection(
+                                            RegionTreeForest *forest,
+                                            IndexPartition parent,
+                                            const DomainPoint &color,
+                                const std::vector<IndexSpace> &handles);
+      virtual IndexSpace create_index_space_intersection(
+                                            RegionTreeForest *forest,
+                                            IndexPartition parent,
+                                            const DomainPoint &color,
+                                            IndexPartition handle);
+      virtual IndexSpace create_index_space_difference(
+                                            RegionTreeForest *forest,
+                                            IndexPartition parent,
+                                            const DomainPoint &color,
+                                            IndexSpace initial,
+                                const std::vector<IndexSpace> &handles);
+      virtual FieldSpace create_field_space(RegionTreeForest *forest);
+      virtual void destroy_field_space(FieldSpace handle);
+      virtual FieldID allocate_field(RegionTreeForest *forest,
+                                     FieldSpace space, size_t field_size,
+                                     FieldID fid, bool local,
+                                     CustomSerdezID serdez_id);
+      virtual void free_field(FieldSpace space, FieldID fid);
+      virtual void allocate_fields(RegionTreeForest *forest,
+                                   FieldSpace space,
+                                   const std::vector<size_t> &sizes,
+                                   std::vector<FieldID> &resuling_fields,
+                                   bool local, CustomSerdezID serdez_id);
+      virtual void free_fields(FieldSpace space, 
+                               const std::set<FieldID> &to_free);
+      virtual LogicalRegion create_logical_region(RegionTreeForest *forest,
+                                            IndexSpace index_space,
+                                            FieldSpace field_space);
+      virtual void destroy_logical_region(LogicalRegion handle);
+      virtual void destroy_logical_partition(LogicalPartition handle);
+    public:
+      virtual PhysicalRegion map_region(const InlineLauncher &launcher);
+      virtual void remap_region(PhysicalRegion region);
+      virtual void unmap_region(PhysicalRegion region);
+      virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
+      virtual void detach_resource(PhysicalRegion region);
+      virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
+    public:
+      virtual unsigned register_new_child_operation(Operation *op);
+    public:
+      virtual void record_dynamic_collective_contribution(DynamicCollective dc,
+                                                          const Future &f);
+      virtual void find_collective_contributions(DynamicCollective dc,
+                                       std::vector<Future> &contributions);
+    };
+
+    /**
      * \class RemoteTask
      * A small helper class for giving application
      * visibility to this remote context
@@ -1121,7 +1307,7 @@ namespace Legion {
     protected:
       std::vector<unsigned> local_parent_req_indexes;
       std::vector<bool> local_virtual_mapped;
-    };
+    }; 
 
     /**
      * \class LeafContext
