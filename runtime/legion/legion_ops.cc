@@ -3416,6 +3416,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CopyOp::log_copy_requirements(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = src_requirements[idx];
+        LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+                                           req.region.index_space.id,
+                                           req.region.field_space.id,
+                                           req.region.tree_id,
+                                           req.privilege,
+                                           req.prop, req.redop,
+                                           req.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, idx, 
+                                          req.instance_fields);
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = dst_requirements[idx];
+        LegionSpy::log_logical_requirement(unique_op_id, 
+                                           src_requirements.size()+idx, 
+                                           true/*region*/,
+                                           req.region.index_space.id,
+                                           req.region.field_space.id,
+                                           req.region.tree_id,
+                                           req.privilege,
+                                           req.prop, req.redop,
+                                           req.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 
+                                          src_requirements.size()+idx, 
+                                          req.instance_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void CopyOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
@@ -3436,37 +3471,7 @@ namespace Legion {
                                   dst_requirements[idx]);
       }
       if (Runtime::legion_spy_enabled)
-      { 
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = src_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
-                                             req.region.index_space.id,
-                                             req.region.field_space.id,
-                                             req.region.tree_id,
-                                             req.privilege,
-                                             req.prop, req.redop,
-                                             req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, idx, 
-                                            req.instance_fields);
-        }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = dst_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, 
-                                             src_requirements.size()+idx, 
-                                             true/*region*/,
-                                             req.region.index_space.id,
-                                             req.region.field_space.id,
-                                             req.region.tree_id,
-                                             req.privilege,
-                                             req.prop, req.redop,
-                                             req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, 
-                                            src_requirements.size()+idx, 
-                                            req.instance_fields);
-        }
-      }
+        log_copy_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -4948,6 +4953,12 @@ namespace Legion {
             it != points.end(); it++)
         (*it)->check_domination();
 #endif
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+              it != points.end(); it++) 
+          (*it)->log_copy_requirements();
+      }
       // Launch the points
       std::set<RtEvent> mapped_preconditions;
       std::set<ApEvent> executed_preconditions;
@@ -5181,6 +5192,8 @@ namespace Legion {
       src_restrict_infos = owner->src_restrict_infos;
       dst_restrict_infos = owner->dst_restrict_infos;
       predication_guard  = owner->predication_guard;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
 
 #ifdef DEBUG_LEGION
@@ -11709,6 +11722,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FillOp::log_fill_requirement(void) const
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
+    }
+
+    //--------------------------------------------------------------------------
     void FillOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
@@ -11716,19 +11746,7 @@ namespace Legion {
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
-      { 
-        LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
+        log_fill_requirement();
     }
 
     //--------------------------------------------------------------------------
@@ -12412,6 +12430,12 @@ namespace Legion {
       // Check for interfering point requirements in debug mode
       check_point_requirements();
 #endif
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::vector<PointFillOp*>::const_iterator it = points.begin();
+              it != points.end(); it++)
+          (*it)->log_fill_requirement();
+      }
       // Launch the points
       std::set<RtEvent> mapped_preconditions;
       std::set<ApEvent> executed_preconditions;
@@ -12583,6 +12607,8 @@ namespace Legion {
         value = malloc(value_size);
         memcpy(value, owner->value, value_size);
       }
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
 
     //--------------------------------------------------------------------------

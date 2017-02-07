@@ -773,6 +773,7 @@ namespace Legion {
                       bool check_privileges);
       void activate_copy(void);
       void deactivate_copy(void);
+      void log_copy_requirements(void) const;
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2288,6 +2289,7 @@ namespace Legion {
       void check_fill_privilege(void);
       void compute_parent_index(void);
       ApEvent compute_sync_precondition(void) const;
+      void log_fill_requirement(void) const;
     public:
       RegionTreePath privilege_path;
       VersionInfo version_info;

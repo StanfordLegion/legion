@@ -413,6 +413,14 @@ namespace Legion {
         log_spy.print("Point Point %llu %llu", p1, p2);
       }
 
+      static inline void log_index_point(UniqueID index_id, UniqueID point_id,
+                                         const DomainPoint &point)
+      {
+        log_spy.print("Index Point %llu %llu %u %d %d %d", index_id, point_id,
+                      point.dim, (int)point.point_data[0],
+                      (int)point.point_data[1], (int)point.point_data[2]);
+      }
+
       static inline void log_child_operation_index(UniqueID parent_id, 
                                        unsigned index, UniqueID child_id)
       {
