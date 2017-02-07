@@ -6301,11 +6301,15 @@ class Operation(object):
                 close.print_event_graph(printer, elevate, all_nodes, False)
         # Handle index space operations specially, everything
         # else is the same
-        if self.kind is INDEX_TASK_KIND:
+        if self.kind is INDEX_TASK_KIND or self.points:
             # Might have been predicated
             if self.points:
-                for point in self.points.itervalues():
-                    point.op.print_event_graph(printer, elevate, all_nodes, False)
+                if self.kind is INDEX_TASK_KIND:
+                    for point in self.points.itervalues():
+                        point.op.print_event_graph(printer, elevate, all_nodes, False)
+                else:
+                    for point in self.points.itervalues():
+                        point.print_event_graph(printer, elevate, all_nodes, False)
             # Put any operations we generated in the elevate set
             if self.realm_copies:
                 for copy in self.realm_copies:
