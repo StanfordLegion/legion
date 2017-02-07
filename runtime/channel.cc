@@ -152,8 +152,8 @@ namespace LegionRuntime {
       void print_request_info(Request* req)
       {
         printf("request(%dD): src_off(%zd) dst_off(%zd) src_str(%zd)"
-               " dst_str(%zd) nbytes(%zu) nlines(%zu)",
-               req->dim, (ssize_t)req->src_off, (ssize_t)req->dst_off,
+               " dst_str(%zd) nbytes(%zu) nlines(%zu)\n",
+               req->dim + 1, (ssize_t)req->src_off, (ssize_t)req->dst_off,
                (ssize_t)req->src_str, (ssize_t)req->dst_str,
                req->nbytes, req->nlines);
       }
@@ -1998,6 +1998,11 @@ namespace LegionRuntime {
               if ((*it2)->mark_start) {
                 (*it2)->dma_request->mark_started();
                 (*it2)->mark_start = false;
+              }
+              // Do nothing for empty copies
+              if ((*it2)->bytes_total ==0) {
+                finish_xferdes.push_back(*it2);
+                continue;
               }
               long nr_got = (*it2)->get_requests(requests, min(nr, max_nr));
               long nr_submitted = it->first->submit(requests, nr_got);
