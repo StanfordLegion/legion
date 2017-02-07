@@ -1399,6 +1399,7 @@ namespace Legion {
   }; // Internal namespace
 
   // Typedefs that are needed everywhere
+  typedef LegionRuntime::Accessor::ByteOffset ByteOffset;
   typedef Realm::Runtime RealmRuntime;
   typedef Realm::Machine Machine;
   typedef Realm::Domain Domain;
