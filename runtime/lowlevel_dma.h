@@ -156,6 +156,7 @@ namespace LegionRuntime {
       enum State {
 	STATE_INIT,
 	STATE_METADATA_FETCH,
+	STATE_DST_FETCH,
 	STATE_GEN_PATH,
 	STATE_ALLOC_IB,
 	STATE_BEFORE_EVENT,
@@ -183,6 +184,7 @@ namespace LegionRuntime {
         pthread_mutex_unlock(&request_lock);
         return all_completed;
       }
+      Event tgt_fetch_completion;
       // </NEWDMA>
 
       class Waiter : public EventWaiter {

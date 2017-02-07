@@ -1764,7 +1764,7 @@ namespace Realm {
 
       return e;
     }
-  
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class IndexSpaceAllocatorImpl
@@ -1877,7 +1877,7 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class IndexSpaceAllocatorImpl
+  // class ValidMaskDataMessage
   //
 
   /*static*/ void ValidMaskDataMessage::handle_request(RequestArgs args,
@@ -1952,6 +1952,97 @@ namespace Realm {
     args.first_enabled_elmt = first_enabled_elmt;
     args.last_enabled_elmt = last_enabled_elmt;
     Message::request(target, args, data, datalen, payload_mode);
+  }
+
+  class FetchISMaskWaiter : public EventWaiter {
+  public:
+    FetchISMaskWaiter(Event complete, IndexSpace is);
+    virtual ~FetchISMaskWaiter(void);
+    void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
+    bool fetch_is_mask();
+    virtual bool event_triggered(Event e, bool poisoned);
+    virtual void print(std::ostream& os) const;
+    virtual Event get_finish_event(void) const;
+    Event complete_event;
+    IndexSpace is;
+    Reservation current_lock;
+  };
+
+  FetchISMaskWaiter::FetchISMaskWaiter(Event _complete, IndexSpace _is)
+  : complete_event(_complete), is(_is), current_lock(Reservation::NO_RESERVATION) {}
+
+  FetchISMaskWaiter::~FetchISMaskWaiter() {}
+
+  void FetchISMaskWaiter::sleep_on_event(Event e, Reservation l)
+  {
+    current_lock = l;
+    EventImpl::add_waiter(e, this);
+  }
+
+  bool FetchISMaskWaiter::fetch_is_mask()
+  {
+    IndexSpaceImpl *is_impl = get_runtime()->get_index_space_impl(is);
+    if (!is_impl->locked_data.valid) {
+      Event e = is_impl->lock.acquire(1, false, ReservationImpl::ACQUIRE_BLOCKING);
+      if (e.has_triggered()) {
+        is_impl->lock.release();
+      } else {
+        sleep_on_event(e, is_impl->lock.me);
+        return false;
+      }
+    }
+
+    Event e = is_impl->request_valid_mask();
+    if (!e.has_triggered()) {
+      sleep_on_event(e);
+      return false;
+    }
+
+    GenEventImpl::trigger(complete_event, false/*poisoned*/);
+    return true;
+  }
+
+  bool FetchISMaskWaiter::event_triggered(Event e, bool poisoned)
+  {
+    if (poisoned) {
+      Realm::log_poison.info() << "poisoned fetch index space mask waiter";
+      GenEventImpl::trigger(complete_event, true/*poisoned*/);
+      return false;
+    }
+
+    if (current_lock.exists()) {
+      current_lock.release();
+      current_lock = Reservation::NO_RESERVATION;
+    }
+
+    bool ret = fetch_is_mask();
+    return ret;
+  }
+
+  void FetchISMaskWaiter::print(std::ostream& os) const
+  {
+  }
+
+  Event FetchISMaskWaiter::get_finish_event(void) const
+  {
+    return complete_event;
+  }
+
+  /*static*/ void ValidMaskFetchMessage::handle_request(RequestArgs args)
+  {
+    FetchISMaskWaiter* waiter = new FetchISMaskWaiter(args.complete, args.is);
+    // don't need to worry about delete, which will be performed by EventWaiter gc
+    waiter->fetch_is_mask();
+  }
+
+  /*static*/ void ValidMaskFetchMessage::send_request(gasnet_node_t target,
+                                                      IndexSpace is,
+                                                      Event complete)
+  {
+    RequestArgs args;
+    args.is = is;
+    args.complete = complete;
+    Message::request(target, args);
   }
   
 }; // namespace Realm

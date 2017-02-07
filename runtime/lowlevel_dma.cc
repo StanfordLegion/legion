@@ -128,6 +128,7 @@ namespace LegionRuntime {
       : Operation(_after_copy, Realm::ProfilingRequestSet()),
 	state(STATE_INIT), priority(_priority)
     {
+      tgt_fetch_completion = Event::NO_EVENT;
       pthread_mutex_init(&request_lock, NULL);
     }
 
@@ -136,6 +137,7 @@ namespace LegionRuntime {
       : Realm::Operation(_after_copy, reqs), state(STATE_INIT),
 	priority(_priority)
     {
+      tgt_fetch_completion = Event::NO_EVENT;
       pthread_mutex_init(&request_lock, NULL);
     }
 
@@ -815,7 +817,28 @@ namespace LegionRuntime {
 	}
 
 	// if we got all the way through, we've got all the metadata we need
-	state = STATE_GEN_PATH;
+	state = STATE_DST_FETCH;
+      }
+
+      // make sure the destination has fetched metadata
+      if(state == STATE_DST_FETCH) {
+        Memory tgt_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
+        gasnet_node_t tgt_node = ID(tgt_mem).memory.owner_node;
+        if ((domain.get_dim() == 0) && (tgt_node != gasnet_mynode())) {
+          if (tgt_fetch_completion == Event::NO_EVENT) {
+            tgt_fetch_completion = GenEventImpl::create_genevent()->current_event();
+            Realm::ValidMaskFetchMessage::send_request(tgt_node,
+                                                domain.get_index_space(),
+                                                tgt_fetch_completion);
+          }
+
+          if (!tgt_fetch_completion.has_triggered()) {
+            if (just_check) return false;
+            waiter.sleep_on_event(tgt_fetch_completion);
+            return false;
+          }
+        }
+        state = STATE_GEN_PATH;
       }
 
       if(state == STATE_GEN_PATH) {
