@@ -16,6 +16,7 @@
 #ifndef __LEGION_STL_H__
 #define __LEGION_STL_H__
 
+#include <vector>
 #include "legion.h"
 
 namespace Legion {
