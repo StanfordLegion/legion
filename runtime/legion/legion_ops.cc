@@ -2029,6 +2029,8 @@ namespace Legion {
         resolve_true(speculated, false/*launched*/);
       else if (continue_false)
       {
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_predicated_false_op(unique_op_id);
         // Can remove our predicate reference since we don't need it anymore
         predicate->remove_predicate_reference();
         // Still need a commit tracker here
@@ -2130,7 +2132,11 @@ namespace Legion {
       if (continue_true)
         resolve_true(true/*speculated*/, true/*launched*/);
       else if (continue_false)
+      {
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_predicated_false_op(unique_op_id);
         resolve_false(true/*speculated*/, true/*launched*/);
+      }
       if (need_resolve)
         resolve_speculation();
     }
