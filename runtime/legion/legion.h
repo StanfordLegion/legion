@@ -1368,6 +1368,7 @@ namespace Legion {
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
+      DomainPoint                     point;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1455,6 +1456,7 @@ namespace Legion {
       std::vector<PhaseBarrier>       arrive_barriers;
       MapperID                        map_id;
       MappingTagID                    tag;
+      DomainPoint                     point;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -2211,6 +2213,11 @@ namespace Legion {
       std::vector<PhaseBarrier>         wait_barriers;
       std::vector<PhaseBarrier>         arrive_barriers;
     public:
+      // Index copy argument information
+      bool                              is_index_space;
+      Domain                            index_domain;
+      DomainPoint                       index_point;
+    public:
       // Parent task for the copy operation
       Task*                             parent_task;
     };
@@ -2364,6 +2371,11 @@ namespace Legion {
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
+    public:
+      // Index fill argument information
+      bool                              is_index_space;
+      Domain                            index_domain;
+      DomainPoint                       index_point;
     public:
       // Parent task for the fill operation
       Task*                           parent_task;

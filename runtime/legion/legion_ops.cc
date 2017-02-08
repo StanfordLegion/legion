@@ -3111,6 +3111,7 @@ namespace Legion {
       : Copy(), SpeculativeOp(rt)
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = false;
     }
 
     //--------------------------------------------------------------------------
@@ -3205,6 +3206,7 @@ namespace Legion {
 #endif
       map_id = launcher.map_id;
       tag = launcher.tag;
+      index_point = launcher.point;
       if (check_privileges)
       {
         if (src_requirements.size() != dst_requirements.size())
@@ -4500,6 +4502,7 @@ namespace Legion {
       : CopyOp(rt)
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = true;
     }
 
     //--------------------------------------------------------------------------
@@ -4538,7 +4541,7 @@ namespace Legion {
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
                              launcher.predicate);
-      point_domain = launcher.domain;
+      index_domain = launcher.domain;
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
@@ -4693,25 +4696,25 @@ namespace Legion {
       {
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
-        switch (point_domain.get_dim())
+        switch (index_domain.get_dim())
         {
           case 1:
             {
-	      LegionRuntime::Arrays::Rect<1> rect = point_domain.get_rect<1>();
+	      LegionRuntime::Arrays::Rect<1> rect = index_domain.get_rect<1>();
               LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 2:
             {
-              LegionRuntime::Arrays::Rect<2> rect = point_domain.get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> rect = index_domain.get_rect<2>();
               LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 3:
             {
-              LegionRuntime::Arrays::Rect<3> rect = point_domain.get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> rect = index_domain.get_rect<3>();
               LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
@@ -4727,7 +4730,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_copy();
-      point_domain = Domain::NO_DOMAIN;
+      index_domain = Domain::NO_DOMAIN;
       points_committed = 0;
       commit_request = false;
     }
@@ -4830,7 +4833,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         src_projection_infos[idx] = 
-          ProjectionInfo(runtime, src_requirements[idx], point_domain);
+          ProjectionInfo(runtime, src_requirements[idx], index_domain);
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_restrict_infos[idx],
@@ -4842,7 +4845,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         dst_projection_infos[idx] = 
-          ProjectionInfo(runtime, dst_requirements[idx], point_domain);
+          ProjectionInfo(runtime, dst_requirements[idx], index_domain);
         unsigned index = src_requirements.size()+idx;
         // Perform this dependence analysis as if it was READ_WRITE
         // so that we can get the version numbers correct
@@ -4915,13 +4918,13 @@ namespace Legion {
           dst_requirements[idx].privilege = REDUCE;
       }
       // Now enumerate the points
-      size_t num_points = point_domain.get_volume();
+      size_t num_points = index_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
       unsigned point_idx = 0;
       points.resize(num_points);
-      for (Domain::DomainPointIterator itr(point_domain); 
+      for (Domain::DomainPointIterator itr(index_domain); 
             itr; itr++, point_idx++)
       {
         PointCopyOp *point = runtime->get_available_point_copy_op(false);
@@ -5181,7 +5184,7 @@ namespace Legion {
       // Initialize the operation
       initialize_operation(own->get_context(), false/*track*/, 
           own->src_requirements.size() + own->dst_requirements.size());
-      point = p;
+      index_point = p;
       owner = own;
       // From Copy
       src_requirements   = owner->src_requirements;
@@ -5347,7 +5350,7 @@ namespace Legion {
     const DomainPoint& PointCopyOp::get_domain_point(void) const
     //--------------------------------------------------------------------------
     {
-      return point;
+      return index_point;
     }
 
     //--------------------------------------------------------------------------
@@ -11568,6 +11571,7 @@ namespace Legion {
       : SpeculativeOp(rt), Fill()
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = false;
     }
 
     //--------------------------------------------------------------------------
@@ -12210,6 +12214,7 @@ namespace Legion {
       : FillOp(rt)
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = true;
     }
 
     //--------------------------------------------------------------------------
@@ -12246,7 +12251,7 @@ namespace Legion {
       parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 1, 
                              launcher.static_dependences, launcher.predicate);
-      point_domain = launcher.domain;
+      index_domain = launcher.domain;
       if (launcher.region.exists())
       {
 #ifdef DEBUG_LEGION
@@ -12289,25 +12294,25 @@ namespace Legion {
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
-        switch (point_domain.get_dim())
+        switch (index_domain.get_dim())
         {
           case 1:
             {
-	      LegionRuntime::Arrays::Rect<1> rect = point_domain.get_rect<1>();
+	      LegionRuntime::Arrays::Rect<1> rect = index_domain.get_rect<1>();
               LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 2:
             {
-              LegionRuntime::Arrays::Rect<2> rect = point_domain.get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> rect = index_domain.get_rect<2>();
               LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 3:
             {
-              LegionRuntime::Arrays::Rect<3> rect = point_domain.get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> rect = index_domain.get_rect<3>();
               LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
@@ -12323,7 +12328,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_fill();
-      point_domain = Domain::NO_DOMAIN;
+      index_domain = Domain::NO_DOMAIN;
       points_committed = 0;
       commit_request = false;
     }
@@ -12383,7 +12388,7 @@ namespace Legion {
       // If we are waiting on a future register a dependence
       if (future.impl != NULL)
         future.impl->register_dependence(this);
-      projection_info = ProjectionInfo(runtime, requirement, point_domain);
+      projection_info = ProjectionInfo(runtime, requirement, index_domain);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    restrict_info,
@@ -12412,13 +12417,13 @@ namespace Legion {
                                                      partial_traversal);
       }
       // Now enumerate the points
-      size_t num_points = point_domain.get_volume();
+      size_t num_points = index_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
       unsigned point_idx = 0;
       points.resize(num_points);
-      for (Domain::DomainPointIterator itr(point_domain); 
+      for (Domain::DomainPointIterator itr(index_domain); 
             itr; itr++, point_idx++)
       {
         PointFillOp *point = runtime->get_available_point_fill_op(false);
@@ -12591,7 +12596,7 @@ namespace Legion {
     {
       // Initialize the operation
       initialize_operation(own->get_context(), false/*track*/, 1/*regions*/); 
-      point = p;
+      index_point = p;
       owner = own;
       // From Fill
       requirement        = owner->get_requirement();
@@ -12692,7 +12697,7 @@ namespace Legion {
     const DomainPoint& PointFillOp::get_domain_point(void) const
     //--------------------------------------------------------------------------
     {
-      return point;
+      return index_point;
     }
 
     //--------------------------------------------------------------------------
