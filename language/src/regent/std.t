@@ -2003,7 +2003,7 @@ function std.generate_arithmetic_metamethods(ty)
 end
 
 local and_combinator = function(a, b) return `(([a]) and ([b])) end
-local or_combinator = function(a, b) return `(([a]) and ([b])) end
+local or_combinator = function(a, b) return `(([a]) or ([b])) end
 local conditional_combinators = {
   ["__eq"] = { elem_comb = function(a, b) return `([a] == [b]) end,
                res_comb = and_combinator, },
