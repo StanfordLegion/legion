@@ -182,6 +182,8 @@ namespace LegionRuntime {
           coord_t dst_in_block = dst_buf.block_size
                                - dst_idx % dst_buf.block_size;
           todo = min(todo, min(src_in_block, dst_in_block));
+          if (todo == 0)
+            break;
           coord_t src_start, dst_start;
           if (src_buf.is_ib) {
             src_start = calc_mem_loc_ib(0,
@@ -217,6 +219,8 @@ namespace LegionRuntime {
                                      dst_buf.elmt_size,
                                      dst_buf.block_size, dst_idx);
           }
+          if (todo == 0)
+            break;
           bool cross_src_ib = false, cross_dst_ib = false;
           if (src_buf.is_ib)
             cross_src_ib = cross_ib(src_start,
@@ -245,16 +249,22 @@ namespace LegionRuntime {
               size_t req_size = nbytes;
               Request* new_req = dequeue_request();
               new_req->dim = Request::DIM_1D;
+              if (src_buf.is_ib) {
+                src_start = src_start % src_buf.buf_size;
+                req_size = umin(req_size, src_buf.buf_size - src_start);
+              }
+              if (dst_buf.is_ib) {
+                dst_start = dst_start % dst_buf.buf_size;
+                req_size = umin(req_size, dst_buf.buf_size - dst_start);
+              }
               new_req->src_off = src_start;
               new_req->dst_off = dst_start;
-              if (src_buf.is_ib)
-                req_size = umin(req_size, src_buf.buf_size - src_start);
-              if (dst_buf.is_ib)
-                req_size = umin(req_size, dst_buf.buf_size - dst_start);
               new_req->nbytes = req_size;
               new_req->nlines = 1;
               reqs[idx++] = new_req;
               nbytes -= req_size;
+              src_start += req_size;
+              dst_start += req_size;
             }
           } else {
             // 2D case

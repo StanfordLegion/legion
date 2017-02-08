@@ -278,7 +278,8 @@ namespace LegionRuntime{
       MaskEnumerator(IndexSpace _is, Mapping<1, 1> *src_m,
                      Mapping<1, 1> *dst_m, XferOrder::Type order,
                      bool is_src_ib, bool is_dst_ib)
-        : is(_is), src_mapping(src_m), dst_mapping(dst_m), rstart(0), rlen(0), rleft(0)
+        : is(_is), src_mapping(src_m), dst_mapping(dst_m), rstart(0),
+          rlen(0), rleft(0), cur(0), src_ib(is_src_ib), dst_ib(is_dst_ib)
       {
         e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
         e->peek_next(rstart, rlen);
@@ -295,15 +296,15 @@ namespace LegionRuntime{
           e->get_next(rstart, rlen);
           rleft = rlen;
         }
-        src_idx = src_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - src_idx_offset;
-        dst_idx = dst_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - dst_idx_offset;
+        src_idx = src_ib ? cur : src_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - src_idx_offset;
+        dst_idx = dst_ib ? cur : dst_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - dst_idx_offset;
         return rleft;
       }
 
       void reset() {
         delete e;
         e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
-        rleft = 0;
+        rleft = 0; cur = 0;
       };
 
       bool any_left() {
@@ -315,13 +316,15 @@ namespace LegionRuntime{
       void move(size_t steps) {
         assert(steps <= rleft);
         rleft -= steps;
+        cur += steps;
       };
     private:
       IndexSpace is;
       ElementMask::Enumerator* e;
       Mapping<1, 1> *src_mapping, *dst_mapping;
       coord_t rstart, src_idx_offset, dst_idx_offset;
-      size_t rlen, rleft;
+      size_t rlen, rleft, cur;
+      bool src_ib, dst_ib;
     };
 
     class LayoutIterator {
