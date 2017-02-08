@@ -27,6 +27,7 @@ branches:
   only:
     - stable
     - master
+    - dma
 before_install:
   - export THREADS=2
   - |
