@@ -5710,6 +5710,9 @@ class Operation(object):
     def perform_logical_analysis(self, perform_checks):
         # We need a context to do this
         assert self.context is not None
+        # If this operation was predicated false, then there is nothing to do
+        if self.predicate and not self.predicate_result:
+            return True
         # See if there is a fence in place for this context
         if self.context.current_fence is not None:
             if perform_checks:

@@ -887,7 +887,6 @@ namespace Legion {
       std::vector<ProjectionInfo>   src_projection_infos;
       std::vector<ProjectionInfo>   dst_projection_infos;
     protected:
-      Domain                        point_domain;
       std::vector<PointCopyOp*>     points;
       unsigned                      points_committed;
       bool                          commit_request;
@@ -931,7 +930,6 @@ namespace Legion {
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
     protected:
-      DomainPoint               point;
       IndexCopyOp*              owner;
     };
 
@@ -2336,7 +2334,6 @@ namespace Legion {
     public:
       ProjectionInfo                projection_info;
     protected:
-      Domain                        point_domain;
       std::vector<PointFillOp*>     points;
       unsigned                      points_committed;
       bool                          commit_request;
@@ -2371,7 +2368,6 @@ namespace Legion {
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
     protected:
-      DomainPoint               point;
       IndexFillOp*              owner;
     };
 
