@@ -45,6 +45,7 @@ runtime_tests = [
     ['test/attach_file_mini/attach_file_mini', []],
     #['test/garbage_collection_mini/garbage_collection_mini', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/220
     #['test/hdf_attach/hdf_attach', []], # FIXME: Requires HDF5; Broken: https://github.com/StanfordLegion/legion/issues/221
+    #['test/matrix_multiply/matrix_multiply', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/222
 ]
 
 def cmd(command, env=None, cwd=None):
