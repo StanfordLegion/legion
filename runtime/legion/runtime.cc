@@ -17261,7 +17261,7 @@ namespace Legion {
         if (it->second.diff_allocations == 0)
           continue;
         log_allocation.info("%s on %d: "
-            "total=%d total_bytes=%ld diff=%d diff_bytes=%ld",
+            "total=%d total_bytes=%ld diff=%d diff_bytes=%lld",
             get_allocation_name(it->first), address_space,
             it->second.total_allocations, it->second.total_bytes,
             it->second.diff_allocations, it->second.diff_bytes);
@@ -19887,8 +19887,7 @@ namespace Legion {
                                        AllocationType a, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(
-                                  Processor::get_executing_processor());
+      Runtime *rt = Runtime::the_runtime;
       if (rt != NULL)
         rt->trace_allocation(a, size, elems);
     }
@@ -19898,17 +19897,16 @@ namespace Legion {
                                                  size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime ::get_runtime(
-                                  Processor::get_executing_processor());
+      Runtime *rt = Runtime::the_runtime;
       if (rt != NULL)
         rt->trace_free(a, size, elems);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Internal* LegionAllocation::find_runtime(void)
+    /*static*/ Runtime* LegionAllocation::find_runtime(void)
     //--------------------------------------------------------------------------
     {
-      return Runtime::get_runtime(Processor::get_executing_processor());
+      return Runtime::the_runtime;
     }
 
     //--------------------------------------------------------------------------
