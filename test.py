@@ -43,11 +43,18 @@ legion_cxx_tests = [
     # Tests
     ['test/attach_file_mini/attach_file_mini', []],
     #['test/garbage_collection_mini/garbage_collection_mini', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/220
-    #['test/hdf_attach/hdf_attach', []], # FIXME: Requires HDF5; Broken: https://github.com/StanfordLegion/legion/issues/221
     #['test/matrix_multiply/matrix_multiply', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/222
     #['test/predspec/predspec', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/223
     #['test/read_write/read_write', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/224
     #['test/rendering/rendering', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/225
+]
+
+legion_hdf_cxx_tests = [
+    # Examples
+    ['examples/attach_file/attach_file', []],
+
+    # Tests
+    #['test/hdf_attach/hdf_attach', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/221
 ]
 
 def cmd(command, env=None, cwd=None):
@@ -70,6 +77,10 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
 def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
     run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+
+def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    flags = ['-logfile', 'out_%.log']
+    run_cxx(legion_hdf_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
@@ -261,6 +272,8 @@ def run_tests(test_modules=None,
         if test_legion_cxx:
             with Stage('legion_cxx'):
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                if use_hdf:
+                    run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_fuzzer:
             with Stage('fuzzer'):
                 run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
