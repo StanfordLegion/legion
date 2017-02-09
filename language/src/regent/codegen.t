@@ -3455,6 +3455,7 @@ function codegen.expr_region(cx, node)
                     [fsa], terralib.sizeof([field_type]), [field_id]))
        end)]
     [fs_naming_actions];
+    c.legion_field_allocator_destroy([fsa])
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
     var [r] = [region_type]{ impl = [lr] }
   end
@@ -5690,6 +5691,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
              [cx.runtime], [field_space], [field_ids][i], field_name, false)
          end
        end)]
+    c.legion_field_allocator_destroy(fsa)
   end
 
   return values.value(node, expr.just(actions, field_ids), expr_type)
