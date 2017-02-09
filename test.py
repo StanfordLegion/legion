@@ -32,7 +32,6 @@ legion_cxx_tests = [
     ['tutorial/09_custom_mapper/custom_mapper', []],
 
     # Examples
-    #['examples/attach_file/attach_file', []], # FIXME: Requires HDF5
     ['examples/circuit/circuit', []],
     ['examples/dynamic_registration/dynamic_registration', []],
     ['examples/ghost/ghost', ['-ll:cpu', '4']],
