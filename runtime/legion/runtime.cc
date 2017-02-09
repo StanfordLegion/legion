@@ -343,7 +343,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Free up all the values that we had stored
-      for (std::set<TaskArgument>::const_iterator it = values.begin();
+      for (std::vector<TaskArgument>::const_iterator it = values.begin();
             it != values.end(); it++)
       {
         legion_free(STORE_ARGUMENT_ALLOC, it->get_ptr(), it->get_size());
@@ -366,7 +366,7 @@ namespace Legion {
       void *buffer = legion_malloc(STORE_ARGUMENT_ALLOC, arg.get_size());
       memcpy(buffer, arg.get_ptr(), arg.get_size());
       TaskArgument new_arg(buffer,arg.get_size());
-      values.insert(new_arg);
+      values.push_back(new_arg);
       return new_arg;
     }
 

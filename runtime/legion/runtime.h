@@ -125,7 +125,7 @@ namespace Legion {
     public:
       TaskArgument add_arg(const TaskArgument &arg);
     private:
-      std::set<TaskArgument> values;
+      std::vector<TaskArgument> values;
     };
 
     /**

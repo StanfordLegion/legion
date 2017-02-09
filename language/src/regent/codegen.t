@@ -409,6 +409,7 @@ end
 local function physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)
   assert(index_type and field_type and field_id and privilege and physical_region)
   local get_accessor = c.legion_physical_region_get_field_accessor_generic
+  local destroy_accessor = c.legion_accessor_generic_destroy
   local accessor_args = terralib.newlist({physical_region})
   if std.is_reduction_op(privilege) then
     get_accessor = c.legion_physical_region_get_accessor_generic
@@ -441,6 +442,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
     local actions = quote
       var accessor = [get_accessor]([accessor_args])
       var [base_pointer] = [get_base](accessor)
+      [destroy_accessor](accessor)
     end
     return actions, base_pointer, terralib.newlist({expected_stride})
   else
@@ -505,6 +507,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
          function(i)
            return quote var [ strides[i] ] = offsets[i-1].offset end
          end)]
+      [destroy_accessor](accessor)
     end
     return actions, base_pointer, strides
   end
@@ -2800,7 +2803,7 @@ function codegen.expr_call(cx, node)
       return values.value(node, expr.just(actions, quote end), terralib.types.unit)
     else
       assert(future_value)
-      return codegen.expr(
+      local value = codegen.expr(
         cx,
         ast.typed.expr.FutureGetResult {
           value = ast.typed.expr.Internal {
@@ -2813,6 +2816,11 @@ function codegen.expr_call(cx, node)
           annotations = node.annotations,
           span = node.span,
         })
+      local actions = quote
+        [value.actions]
+        c.legion_future_destroy(future)
+      end
+      return values.value(node, expr.just(actions, value.value), value_type)
     end
   else
     return values.value(
@@ -7275,6 +7283,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
         [task_args_setup]
         c.legion_argument_map_set_point(
           [argument_map], [point], [task_args], true)
+        [task_args_cleanup]
       end
       c.legion_domain_point_iterator_destroy(it)
     end
@@ -7889,7 +7898,9 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
       var [future] = c.legion_task_get_future([c_task], @[future_i])
       @[future_i] = @[future_i] + 1
       [future_result.actions]
-      return [future_result.value]
+      var result = [future_result.value]
+      c.legion_future_destroy([future])
+      return result
     end
   end
   helper:setinlined(false)
