@@ -136,7 +136,10 @@ def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx):
     os.mkdir(build_dir)
     os.mkdir(install_dir)
     cmd(['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir] +
-        (['-DLegion_BUILD_EXAMPLES=ON'] if test_legion_cxx else []) +
+        (['-DLegion_BUILD_TUTORIAL=ON',
+          '-DLegion_BUILD_EXAMPLES=ON',
+          '-DLegion_BUILD_TESTS=ON',
+         ] if test_legion_cxx else []) +
         [root_dir],
         env=env, cwd=build_dir)
     cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
