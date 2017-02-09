@@ -1553,6 +1553,7 @@ end
 
 function rawref:reduce(cx, value, op)
   local ref_expr = self:__ref(cx)
+  local cleanup = make_cleanup_item(cx, ref_expr.value, self.value_type.type)
   local value_expr = value:read(cx)
 
   local ref_type = std.get_field_path(self.value_type.type, self.field_path)
@@ -1583,6 +1584,7 @@ function rawref:reduce(cx, value, op)
     [value_expr.actions];
     [ref_expr.actions];
     [reduce_expr.actions];
+    [cleanup];
     [ref_expr.value] = [reduce_expr.value]
   end
   return expr.just(actions, quote end)
@@ -3453,6 +3455,7 @@ function codegen.expr_region(cx, node)
                     [fsa], terralib.sizeof([field_type]), [field_id]))
        end)]
     [fs_naming_actions];
+    c.legion_field_allocator_destroy([fsa])
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
     var [r] = [region_type]{ impl = [lr] }
   end
@@ -5688,6 +5691,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
              [cx.runtime], [field_space], [field_ids][i], field_name, false)
          end
        end)]
+    c.legion_field_allocator_destroy(fsa)
   end
 
   return values.value(node, expr.just(actions, field_ids), expr_type)
