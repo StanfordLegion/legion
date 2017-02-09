@@ -1553,6 +1553,7 @@ end
 
 function rawref:reduce(cx, value, op)
   local ref_expr = self:__ref(cx)
+  local cleanup = make_cleanup_item(cx, ref_expr.value, self.value_type.type)
   local value_expr = value:read(cx)
 
   local ref_type = std.get_field_path(self.value_type.type, self.field_path)
@@ -1583,6 +1584,7 @@ function rawref:reduce(cx, value, op)
     [value_expr.actions];
     [ref_expr.actions];
     [reduce_expr.actions];
+    [cleanup];
     [ref_expr.value] = [reduce_expr.value]
   end
   return expr.just(actions, quote end)
