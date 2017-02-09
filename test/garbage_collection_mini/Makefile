@@ -26,9 +26,9 @@ USE_HDF=0
 #ALT_MAPPERS=1		  # Compile the alternative mappers
 
 # Put the binary file name here
-OUTFILE		:= garbage_collection
+OUTFILE		:= garbage_collection_mini
 # List all the application source files here
-GEN_SRC		:= garbage_collection.cc	# .cc files
+GEN_SRC		:= garbage_collection_mini.cc	# .cc files
 GEN_GPU_SRC	:=				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
