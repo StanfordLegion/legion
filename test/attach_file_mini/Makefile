@@ -26,9 +26,9 @@ USE_HDF=0
 #ALT_MAPPERS=1		  # Compile the alternative mappers
 
 # Put the binary file name here
-OUTFILE		:= attach_file
+OUTFILE		:= attach_file_mini
 # List all the application source files here
-GEN_SRC		:= attach_file.cc		# .cc files
+GEN_SRC		:= attach_file_mini.cc		# .cc files
 GEN_GPU_SRC	:=				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
