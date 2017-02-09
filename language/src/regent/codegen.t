@@ -3393,7 +3393,6 @@ function codegen.expr_region(cx, node)
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local fs = terralib.newsymbol(c.legion_field_space_t, "fs")
-  local fsa = terralib.newsymbol(c.legion_field_allocator_t, "fsa")
   local pr = terralib.newsymbol(c.legion_physical_region_t, "pr")
 
   local field_paths, field_types = std.flatten_struct_fields(fspace_type)
@@ -3447,15 +3446,15 @@ function codegen.expr_region(cx, node)
     var capacity = [ispace.value]
     var [is] = [ispace.value].impl
     var [fs] = c.legion_field_space_create([cx.runtime], [cx.context])
-    var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
+    var fsa = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
     [data.zip(field_types, field_ids):map(
        function(field)
          local field_type, field_id = unpack(field)
          return `(c.legion_field_allocator_allocate_field(
-                    [fsa], terralib.sizeof([field_type]), [field_id]))
+                    fsa, terralib.sizeof([field_type]), [field_id]))
        end)]
     [fs_naming_actions];
-    c.legion_field_allocator_destroy([fsa])
+    c.legion_field_allocator_destroy(fsa)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
     var [r] = [region_type]{ impl = [lr] }
   end
