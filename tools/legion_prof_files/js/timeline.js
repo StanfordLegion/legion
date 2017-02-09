@@ -176,6 +176,19 @@ function mouseDownHandler() {
   $(document).off("keydown");
 }
 
+function getLineColor(elem) {
+  var kind = elem.text.split(" ")[2];
+  const colorMap = {
+    "(CPU)": "steelblue",
+    "(GPU)": "olivedrab",
+    "(Utility)": "crimson",
+    "(I/O)": "orangered"
+  };
+  return colorMap[kind];
+}
+
+
+
 function drawStats() {
   // TODO: Add to state
   var windowStart = $("#timeline").scrollLeft();
@@ -206,15 +219,7 @@ function drawStats() {
         var y = lineLevelCalculator(d);
         return "translate(0," + y + ")"
     })
-    .attr("stroke",
-      function(d) {
-        if (d.text == "all nodes") {
-          return "steelblue";
-        } else {
-          var num_colors = constants.line_colors.length;
-          return constants.line_colors[d.text.hashCode() % num_colors];
-        }
-    })
+    .attr("stroke", getLineColor)
     .on("mouseover", function() { 
         var focus = state.timelineSvg.append("g")
           .attr("class", "focus")
@@ -455,11 +460,15 @@ function calculateLayout() {
   // programmatically
   var num_nodes = Object.keys(stats_files).length;
   if (num_nodes > 1) {
-    state.layoutData.push(getElement(0, "all nodes", "stats", 
-                                     constants.stats_levels,
-                                     load_stats,
-                                     "tsv/all_stats.tsv",
-                                     stats_files["all"], false, true));
+    var proc_kinds = stats_files["all"];
+    proc_kinds.forEach(function(kind) {
+      var stats_name = "node " + kind;
+      var kind_element = getElement(0, stats_name, "stats", 
+                                     constants.stats_levels, load_stats,
+                                     "tsv/" + kind + "_stats.tsv",
+                                     stats_files[kind], false, true);
+      state.layoutData.push(kind_element);
+    });
   }
   
   var seen_nodes = {};
@@ -472,12 +481,16 @@ function calculateLayout() {
       var node_id = parseInt(proc_match[1], 16);
       if (!(node_id in seen_nodes)) {
         seen_nodes[node_id] = 1;
-        var stats_name = "node " + node_id;
-        state.layoutData.push(getElement(0, stats_name, "stats", 
-                                         constants.stats_levels,
-                                         load_stats,
-                                         "tsv/" + node_id + "_stats.tsv",
-                                         stats_files[node_id], false, true));
+        var proc_kinds = stats_files[node_id];
+
+        proc_kinds.forEach(function(kind) {
+          var stats_name = "node " + kind;
+          var kind_element = getElement(0, stats_name, "stats", 
+                                         constants.stats_levels, load_stats,
+                                         "tsv/" + kind + "_stats.tsv",
+                                         stats_files[kind], false, true);
+          state.layoutData.push(kind_element);
+        });
       }
     } else {
       state.layoutData.push(getElement(0, proc.processor, "proc", 
@@ -534,7 +547,6 @@ function drawTimeline() {
 function redraw() {
   if (state.numLoading == 0) {
     calculateBases();
-    console.log(state.flattenedLayoutData);
     filterAndMergeBlocks(state);
     constants.max_level = calculateVisibileLevels();
     recalculateHeight();

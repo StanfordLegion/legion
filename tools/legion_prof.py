@@ -2203,7 +2203,7 @@ class State(object):
         # this is a map from node ids to a list of timepoints in that node
         timepoints_dict = {}
 
-        self.group_node_proc_timepoints(timepoints_dict)
+        #self.group_node_proc_timepoints(timepoints_dict)
         self.group_node_proc_kind_timepoints(timepoints_dict)
 
         # add in the all group
