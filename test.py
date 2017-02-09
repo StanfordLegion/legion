@@ -47,6 +47,7 @@ runtime_tests = [
     #['test/hdf_attach/hdf_attach', []], # FIXME: Requires HDF5; Broken: https://github.com/StanfordLegion/legion/issues/221
     #['test/matrix_multiply/matrix_multiply', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/222
     #['test/predspec/predspec', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/223
+    #['test/read_write/read_write', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/224
 ]
 
 def cmd(command, env=None, cwd=None):
