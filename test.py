@@ -18,7 +18,8 @@
 from __future__ import print_function
 import argparse, datetime, multiprocessing, os, shutil, subprocess, sys, traceback, tempfile
 
-tutorial = [
+legion_cxx_tests = [
+    # Tutorial
     ['tutorial/00_hello_world/hello_world', []],
     ['tutorial/01_tasks_and_futures/tasks_and_futures', []],
     ['tutorial/02_index_tasks/index_tasks', []],
@@ -29,9 +30,8 @@ tutorial = [
     ['tutorial/07_partitioning/partitioning', []],
     ['tutorial/08_multiple_partitions/multiple_partitions', []],
     ['tutorial/09_custom_mapper/custom_mapper', []],
-]
 
-examples = [
+    # Examples
     #['examples/attach_file/attach_file', []], # FIXME: Requires HDF5
     ['examples/circuit/circuit', []],
     ['examples/dynamic_registration/dynamic_registration', []],
@@ -39,9 +39,8 @@ examples = [
     ['examples/ghost_pull/ghost_pull', ['-ll:cpu', '4']],
     ['examples/realm_saxpy/realm_saxpy', []],
     ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
-]
 
-runtime_tests = [
+    # Tests
     ['test/attach_file_mini/attach_file_mini', []],
     #['test/garbage_collection_mini/garbage_collection_mini', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/220
     #['test/hdf_attach/hdf_attach', []], # FIXME: Requires HDF5; Broken: https://github.com/StanfordLegion/legion/issues/221
@@ -68,17 +67,9 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
             cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
-def run_test_tutorial(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
-    run_cxx(tutorial, flags, launcher, root_dir, bin_dir, env, thread_count)
-
-def run_test_examples(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
-    flags = ['-logfile', 'out_%.log']
-    run_cxx(examples, flags, launcher, root_dir, bin_dir, env, thread_count)
-
-def run_test_runtime(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
-    flags = ['-logfile', 'out_%.log']
-    run_cxx(runtime_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+    run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
@@ -139,15 +130,13 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         test_dir = os.path.join(miniaero_dir, 'tests', test)
         cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir)
 
-def build_cmake(root_dir, tmp_dir, env, thread_count,
-                test_tutorial, test_examples, test_runtime):
+def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
     os.mkdir(install_dir)
     cmd(['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir] +
-        (['-DLegion_BUILD_EXAMPLES=ON']
-         if test_tutorial or test_examples or test_runtime else []) +
+        (['-DLegion_BUILD_EXAMPLES=ON'] if test_legion_cxx else []) +
         [root_dir],
         env=env, cwd=build_dir)
     cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
@@ -159,13 +148,9 @@ def clean_cxx(tests, root_dir, env, thread_count):
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         cmd(['make', '-C', test_dir, 'clean'], env=env)
 
-def build_make_clean(root_dir, env, thread_count, test_tutorial, test_examples, test_runtime):
-    if test_tutorial:
-        clean_cxx(tutorial, root_dir, env, thread_count)
-    if test_examples:
-        clean_cxx(examples, root_dir, env, thread_count)
-    if test_runtime:
-        clean_cxx(runtime_tests, root_dir, env, thread_count)
+def build_make_clean(root_dir, env, thread_count, test_legion_cxx):
+    if test_legion_cxx:
+        clean_cxx(legion_cxx_tests, root_dir, env, thread_count)
 
 def option_enabled(option, options, var_prefix='', default=True):
     if options is not None: return option in options
@@ -214,9 +199,7 @@ def run_tests(test_modules=None,
     def module_enabled(module, default=True):
         return option_enabled(module, test_modules, 'TEST_', default)
     test_regent = module_enabled('regent')
-    test_tutorial = module_enabled('tutorial')
-    test_examples = module_enabled('examples')
-    test_runtime = module_enabled('runtime')
+    test_legion_cxx = module_enabled('legion_cxx')
     test_fuzzer = module_enabled('fuzzer', debug)
     test_realm = module_enabled('realm', not debug)
     test_external = module_enabled('external', False)
@@ -261,28 +244,20 @@ def run_tests(test_modules=None,
         with Stage('build'):
             if use_cmake:
                 bin_dir = build_cmake(
-                    root_dir, tmp_dir, env, thread_count, test_tutorial,
-                    test_examples, test_runtime)
+                    root_dir, tmp_dir, env, thread_count, test_legion_cxx)
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(
-                    root_dir, env, thread_count, test_tutorial, test_examples,
-                    test_runtime)
+                    root_dir, env, thread_count, test_legion_cxx)
                 bin_dir = None
 
         # Run tests.
         if test_regent:
             with Stage('regent'):
                 run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
-        if test_tutorial:
-            with Stage('tutorial'):
-                run_test_tutorial(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
-        if test_examples:
-            with Stage('examples'):
-                run_test_examples(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
-        if test_runtime:
-            with Stage('runtime_tests'):
-                run_test_runtime(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+        if test_legion_cxx:
+            with Stage('legion_cxx'):
+                run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_fuzzer:
             with Stage('fuzzer'):
                 run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
@@ -312,8 +287,7 @@ def driver():
     # What tests to run:
     parser.add_argument(
         '--test', dest='test_modules', action='append',
-        choices=['regent', 'tutorial', 'examples', 'runtime', 'fuzzer', 'realm',
-                 'external', 'private'],
+        choices=['regent', 'legion_cxx', 'fuzzer', 'realm', 'external', 'private'],
         default=None,
         help='Test modules to run (also via TEST_*).')
 
