@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, multiprocessing, os, shutil, subprocess, sys, traceback, tempfile
+import argparse, datetime, multiprocessing, os, shutil, subprocess, sys, traceback, tempfile
 
 tutorial = [
     ['tutorial/00_hello_world/hello_world', []],
@@ -168,6 +168,29 @@ def option_enabled(option, options, var_prefix='', default=True):
     if option_var in os.environ: return os.environ[option_var] == '1'
     return default
 
+class Stage(object):
+    __slots__ = ['name', 'begin_time']
+    def __init__(self, name):
+        self.name = name
+    def __enter__(self):
+        self.begin_time = datetime.datetime.now()
+        print()
+        print('#'*60)
+        print('### Entering Stage: %s' % self.name)
+        print('#'*60)
+        print()
+        sys.stdout.flush()
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        end_time = datetime.datetime.now()
+        print()
+        print('#'*60)
+        print('### Exiting Stage: %s' % self.name)
+        print('###   * Exception Type: %s' % exc_type)
+        print('###   * Elapsed Time: %s' % (end_time - self.begin_time))
+        print('#'*60)
+        print()
+        sys.stdout.flush()
+
 def run_tests(test_modules=None,
               debug=True,
               use_features=None,
@@ -230,32 +253,43 @@ def run_tests(test_modules=None,
         print()
     try:
         # Build tests.
-        if use_cmake:
-            bin_dir = build_cmake(root_dir, tmp_dir, env, thread_count,
-                                  test_tutorial, test_examples, test_runtime)
-        else:
-            # With GNU Make, builds happen inline. But clean here.
-            build_make_clean(root_dir, env, thread_count,
-                             test_tutorial, test_examples, test_runtime)
-            bin_dir = None
+        with Stage('build'):
+            if use_cmake:
+                bin_dir = build_cmake(
+                    root_dir, tmp_dir, env, thread_count, test_tutorial,
+                    test_examples, test_runtime)
+            else:
+                # With GNU Make, builds happen inline. But clean here.
+                build_make_clean(
+                    root_dir, env, thread_count, test_tutorial, test_examples,
+                    test_runtime)
+                bin_dir = None
 
         # Run tests.
         if test_regent:
-            run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+            with Stage('regent'):
+                run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_tutorial:
-            run_test_tutorial(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+            with Stage('tutorial'):
+                run_test_tutorial(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_examples:
-            run_test_examples(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+            with Stage('examples'):
+                run_test_examples(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_runtime:
-            run_test_runtime(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+            with Stage('runtime_tests'):
+                run_test_runtime(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_fuzzer:
-            run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+            with Stage('fuzzer'):
+                run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_realm:
-            run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+            with Stage('realm'):
+                run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_external:
-            run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+            with Stage('external'):
+                run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_private:
-            run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+            with Stage('private'):
+                run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
