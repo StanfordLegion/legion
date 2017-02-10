@@ -158,8 +158,9 @@ def git_commit_id(repo_dir):
 def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
+    # Performance test configuration:
     metadata = {
-        'host': hostname(),
+        'host': 'n0004', #hostname(), # FIXME: Get correct hostname.
         'commit': git_commit_id(root_dir),
     }
     measurements = {
@@ -183,9 +184,15 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         ('PERF_LAUNCHER', ' '.join(launcher)),
     ])
 
+    # Run performance tests.
     runner = os.path.join(root_dir, 'perf.py')
     launcher = [runner] # Note: LAUNCHER is still passed via the environment
     run_cxx(legion_cxx_perf_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+
+    # Render the final charts.
+    subprocess.check_call(
+        [os.path.join(root_dir, 'tools', 'perf_chart.py'),
+         'https://github.com/StanfordLegion/perf-data.git'])
 
 def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx):
     build_dir = os.path.join(tmp_dir, 'build')
