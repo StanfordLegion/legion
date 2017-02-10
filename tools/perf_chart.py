@@ -60,11 +60,12 @@ def get_measurements(repo_url):
 
 def extract_benchmarks(measurements):
     benchmarks = collections.defaultdict(
-        lambda: collections.defaultdict(lambda: []))
+        lambda: collections.defaultdict(
+            lambda: collections.defaultdict(lambda: [])))
 
     for path, measurement in measurements:
         benchmark = measurement['metadata']['benchmark']
-        date = measurement['metadata']['date']
+        host = measurement['metadata']['host']
         argv = ' '.join(measurement['measurements']['argv'])
 
         data = {}
@@ -72,7 +73,7 @@ def extract_benchmarks(measurements):
         data.update(measurement['measurements'])
         data['argv'] = argv
 
-        benchmarks[benchmark][argv].append(data)
+        benchmarks[benchmark][host][argv].append(data)
 
     return benchmarks
 
