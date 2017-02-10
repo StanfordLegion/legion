@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, datetime, multiprocessing, os, shutil, subprocess, sys, traceback, tempfile
+import argparse, datetime, json, multiprocessing, os, shutil, subprocess, sys, traceback, tempfile
 
 legion_cxx_tests = [
     # Tutorial
@@ -54,6 +54,14 @@ legion_hdf_cxx_tests = [
 
     # Tests
     #['test/hdf_attach/hdf_attach', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/221
+]
+
+legion_cxx_perf_tests = [
+    # Circuit: Heavy Compute
+    ['examples/circuit/circuit', '-l 10 -p 2 -npp 2500 -wpp 10000 -ll:cpu 2'.split()],
+
+    # Circuit: Light Compute
+    ['examples/circuit/circuit', '-l 10 -p 100 -npp 2 -wpp 4 -ll:cpu 2'.split()],
 ]
 
 def cmd(command, env=None, cwd=None):
@@ -140,6 +148,45 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         test_dir = os.path.join(miniaero_dir, 'tests', test)
         cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir)
 
+def hostname():
+    return subprocess.check_output(['hostname']).strip()
+
+def git_commit_id(repo_dir):
+    return subprocess.check_output(
+        ['git', 'rev-parse', 'HEAD'], cwd=repo_dir).strip()
+
+def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    flags = ['-logfile', 'out_%.log']
+
+    metadata = {
+        'host': hostname(),
+        'commit': git_commit_id(root_dir),
+    }
+    measurements = {
+        # Capture command line arguments following flags.
+        'argv': {
+            'type': 'argv',
+            'start': 1 + len(flags),
+        },
+        # Record running time in seconds.
+        'time_seconds': {
+            'type': 'regex',
+            'pattern': r'^ELAPSED TIME\s*=\s*(.*) s$',
+            'multiline': True,
+        }
+    }
+    env = dict(list(env.items()) + [
+        ('PERF_OWNER', 'StanfordLegion'),
+        ('PERF_REPOSITORY', 'perf-data'),
+        ('PERF_METADATA', json.dumps(metadata)),
+        ('PERF_MEASUREMENTS', json.dumps(measurements)),
+        ('PERF_LAUNCHER', ' '.join(launcher)),
+    ])
+
+    runner = os.path.join(root_dir, 'perf.py')
+    launcher = [runner] # Note: LAUNCHER is still passed via the environment
+    run_cxx(legion_cxx_perf_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+
 def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
@@ -217,6 +264,7 @@ def run_tests(test_modules=None,
     test_realm = module_enabled('realm', not debug)
     test_external = module_enabled('external', False)
     test_private = module_enabled('private', False)
+    test_perf = module_enabled('perf', False)
 
     # Determine which features to build with.
     def feature_enabled(feature, default=True):
@@ -285,6 +333,9 @@ def run_tests(test_modules=None,
         if test_private:
             with Stage('private'):
                 run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+        if test_perf:
+            with Stage('perf'):
+                run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
@@ -302,7 +353,7 @@ def driver():
     # What tests to run:
     parser.add_argument(
         '--test', dest='test_modules', action='append',
-        choices=['regent', 'legion_cxx', 'fuzzer', 'realm', 'external', 'private'],
+        choices=['regent', 'legion_cxx', 'fuzzer', 'realm', 'external', 'private', 'perf'],
         default=None,
         help='Test modules to run (also via TEST_*).')
 
