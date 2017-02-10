@@ -160,8 +160,10 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 
     # Performance test configuration:
     metadata = {
-        'host': 'n0004', #hostname(), # FIXME: Get correct hostname.
-        'commit': git_commit_id(root_dir),
+        'host': (os.environ['CI_RUNNER_DESCRIPTION']
+                 if 'CI_RUNNER_DESCRIPTION' in os.environ else hostname()),
+        'commit': (os.environ['CI_BUILD_REF'] if 'CI_BUILD_REF' in os.environ
+                   else git_commit_id(root_dir)),
     }
     measurements = {
         # Capture command line arguments following flags.
@@ -184,10 +186,6 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         ('PERF_LAUNCHER', ' '.join(launcher)),
     ])
 
-    print(os.environ['CI_BUILD_REF'])
-    print(os.environ['CI_RUNNER_ID'])
-    print(os.environ['CI_RUNNER_DESCRIPTION'])
-
     # Run performance tests.
     runner = os.path.join(root_dir, 'perf.py')
     launcher = [runner] # Note: LAUNCHER is still passed via the environment
@@ -196,7 +194,8 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # Render the final charts.
     subprocess.check_call(
         [os.path.join(root_dir, 'tools', 'perf_chart.py'),
-         'https://github.com/StanfordLegion/perf-data.git'])
+         'https://github.com/StanfordLegion/perf-data.git'],
+        env=env)
 
 def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx):
     build_dir = os.path.join(tmp_dir, 'build')
