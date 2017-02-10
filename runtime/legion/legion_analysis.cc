@@ -5899,7 +5899,6 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       unpack_send_infos(derez, current_update, runtime, preconditions);
       unpack_send_infos(derez, previous_update, runtime, preconditions);
-      WrapperReferenceMutator mutator(*applied_events);
       // If we have any preconditions here we must wait
       if (!preconditions.empty())
       {
@@ -5909,8 +5908,8 @@ namespace Legion {
       // Take our lock and apply our updates
       {
         AutoLock m_lock(manager_lock);
-        merge_send_infos(current_version_infos, current_update, &mutator);
-        merge_send_infos(previous_version_infos, previous_update, &mutator);
+        merge_send_infos(current_version_infos, current_update);
+        merge_send_infos(previous_version_infos, previous_update);
         // Update the remote valid fields
         remote_valid_fields |= update_mask;
         // Remove our outstanding request
@@ -5949,8 +5948,7 @@ namespace Legion {
     /*static*/ void VersionManager::merge_send_infos(
         LegionMap<VersionID,
                   VersioningSet<VERSION_MANAGER_REF> >::aligned& target_infos,
-        const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
-        ReferenceMutator *mutator)
+        const LegionMap<VersionState*,FieldMask>::aligned &source_infos)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
