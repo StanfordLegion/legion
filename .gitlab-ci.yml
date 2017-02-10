@@ -111,7 +111,7 @@ before_script:
     - compute
 
 # For performance tests, always use specific machines:
-.linux_n004: &linux_n004
+.linux_n0004: &linux_n0004
   tags:
     - linux
     - n0004
