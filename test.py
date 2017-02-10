@@ -184,6 +184,10 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         ('PERF_LAUNCHER', ' '.join(launcher)),
     ])
 
+    print(os.environ['CI_BUILD_REF'])
+    print(os.environ['CI_RUNNER_ID'])
+    print(os.environ['CI_RUNNER_DESCRIPTION'])
+
     # Run performance tests.
     runner = os.path.join(root_dir, 'perf.py')
     launcher = [runner] # Note: LAUNCHER is still passed via the environment
