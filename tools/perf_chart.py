@@ -59,21 +59,20 @@ def get_measurements(repo_url):
         shutil.rmtree(tmp_dir)
 
 def extract_benchmarks(measurements):
-    benchmark_names = set()
-    for path, measurement in measurements:
-        benchmark = measurement['metadata']['benchmark']
-        benchmark_names.add(benchmark)
+    benchmarks = collections.defaultdict(
+        lambda: collections.defaultdict(lambda: []))
 
-    benchmarks = collections.defaultdict(lambda: [])
     for path, measurement in measurements:
         benchmark = measurement['metadata']['benchmark']
         date = measurement['metadata']['date']
+        argv = ' '.join(measurement['measurements']['argv'])
 
         data = {}
         data.update(measurement['metadata'])
         data.update(measurement['measurements'])
-        data['argv'] = ' '.join(data['argv'])
-        benchmarks[benchmark].append(data)
+        data['argv'] = argv
+
+        benchmarks[benchmark][argv].append(data)
 
     return benchmarks
 
