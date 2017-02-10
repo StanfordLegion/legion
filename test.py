@@ -348,7 +348,7 @@ def run_tests(test_modules=None,
 
 def driver():
     parser = argparse.ArgumentParser(
-        description = 'Install Regent front end.')
+        description = 'Legion test suite')
 
     # What tests to run:
     parser.add_argument(
