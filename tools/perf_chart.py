@@ -17,7 +17,7 @@
 
 from __future__ import print_function
 
-import argparse, collections, json, os, shutil, subprocess, sys, tempfile
+import argparse, collections, datetime, json, os, shutil, subprocess, sys, tempfile
 
 import github3 # Requires: pip install github3.py
 
@@ -59,21 +59,20 @@ def get_measurements(repo_url):
         shutil.rmtree(tmp_dir)
 
 def extract_benchmarks(measurements):
-    benchmarks = collections.defaultdict(
-        lambda: collections.defaultdict(
-            lambda: collections.defaultdict(lambda: [])))
-
+    commits = {}
+    benchmarks = collections.defaultdict(lambda: [])
     for path, measurement in measurements:
-        benchmark = measurement['metadata']['benchmark']
-        host = measurement['metadata']['host']
-        argv = ' '.join(measurement['measurements']['argv'])
+        commit = measurement['metadata']['commit']
+        argv = ' '.join(measurement['metadata']['argv'])
 
-        data = {}
-        data.update(measurement['metadata'])
-        data.update(measurement['measurements'])
-        data['argv'] = argv
+        measurement['metadata']['argv'] = argv
 
-        benchmarks[benchmark][host][argv].append(data)
+        date = datetime.datetime.strptime(
+            measurement['metadata']['date'],
+            '%Y-%m-%dT%H:%M:%S.%f')
+        if commit not in commits or date < commits[commit]:
+            commits[commit] = date
+        benchmarks[commit].append(measurement)
 
     return benchmarks
 

@@ -155,6 +155,15 @@ def git_commit_id(repo_dir):
     return subprocess.check_output(
         ['git', 'rev-parse', 'HEAD'], cwd=repo_dir).strip()
 
+def git_branch_name(repo_dir):
+    proc = subprocess.Popen(
+        ['git', 'symbolic-ref', '--short', 'HEAD'], cwd=repo_dir,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output, errors = proc.communicate()
+    if proc.returncode == 0:
+        return output.strip()
+    return None
+
 def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
@@ -164,8 +173,16 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
                  if 'CI_RUNNER_DESCRIPTION' in os.environ else hostname()),
         'commit': (os.environ['CI_BUILD_REF'] if 'CI_BUILD_REF' in os.environ
                    else git_commit_id(root_dir)),
+        'branch': (os.environ['CI_BUILD_REF_NAME'] if 'CI_BUILD_REF_NAME' in os.environ
+                   else git_branch_name(root_dir)),
     }
     measurements = {
+        # Hack: Use the command name as the benchmark name.
+        'benchmark': {
+            'type': 'argv',
+            'index': 0,
+            'filter': 'basename',
+        },
         # Capture command line arguments following flags.
         'argv': {
             'type': 'argv',
@@ -197,7 +214,7 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
          'https://github.com/StanfordLegion/perf-data.git'],
         env=env)
 
-def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx):
+def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
@@ -206,7 +223,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx):
         (['-DLegion_BUILD_TUTORIAL=ON',
           '-DLegion_BUILD_EXAMPLES=ON',
           '-DLegion_BUILD_TESTS=ON',
-         ] if test_legion_cxx else []) +
+         ] if test_legion_cxx or test_perf else []) +
         [root_dir],
         env=env, cwd=build_dir)
     cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
@@ -218,8 +235,8 @@ def clean_cxx(tests, root_dir, env, thread_count):
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         cmd(['make', '-C', test_dir, 'clean'], env=env)
 
-def build_make_clean(root_dir, env, thread_count, test_legion_cxx):
-    if test_legion_cxx:
+def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf):
+    if test_legion_cxx or test_perf:
         clean_cxx(legion_cxx_tests, root_dir, env, thread_count)
 
 def option_enabled(option, options, var_prefix='', default=True):
@@ -315,11 +332,11 @@ def run_tests(test_modules=None,
         with Stage('build'):
             if use_cmake:
                 bin_dir = build_cmake(
-                    root_dir, tmp_dir, env, thread_count, test_legion_cxx)
+                    root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf)
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(
-                    root_dir, env, thread_count, test_legion_cxx)
+                    root_dir, env, thread_count, test_legion_cxx, test_perf)
                 bin_dir = None
 
         # Run tests.

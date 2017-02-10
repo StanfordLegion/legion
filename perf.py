@@ -15,6 +15,10 @@
 # limitations under the License.
 #
 
+###
+### Tool to run a performance measurement and upload results
+###
+
 from __future__ import print_function
 
 import datetime, json, os, re, sys, subprocess
@@ -34,11 +38,25 @@ def create_result_file(repo, path, result):
     repo.create_file(path, 'Add measurement %s.' % path, content)
 
 class ArgvMeasurement(object):
-    __slots__ = ['start']
-    def __init__(self, start=None):
-        self.start = int(start)
+    __slots__ = ['start', 'index', 'filter']
+    def __init__(self, start=None, index=None, filter=None):
+        if (start is None) == (index is None):
+            raise Exception('ArgvMeasurement requires start or index, but not both')
+        self.start = int(start) if start is not None else None
+        self.index = int(index) if index is not None else None
+        if filter is None:
+            self.filter = lambda x: x
+        elif filter == "basename":
+            self.filter = os.path.basename
+        else:
+            raise Exception('Unrecognized filter "%s"' % filter)
     def measure(self, argv, output):
-        return argv[self.start:]
+        if self.start is not None:
+            return [self.filter(x) for x in argv[self.start:]]
+        elif self.index is not None:
+            return self.filter(argv[self.index])
+        else:
+            assert False
 
 class RegexMeasurement(object):
     __slots__ = ['pattern']
@@ -83,6 +101,12 @@ def driver():
         get_variable('PERF_MEASUREMENTS', 'JSON-encoded measurements'))
     launcher = get_variable('PERF_LAUNCHER', 'launcher command').split()
 
+    # Validate inputs.
+    if 'benchmark' not in measurements:
+        raise Exception('Malformed measurements: Measurement "benchmark" is required')
+    if 'argv' not in measurements:
+        raise Exception('Malformed measurements: Measurement "argv" is required')
+
     # Run command.
     args = sys.argv[1:]
     command = launcher + args
@@ -94,10 +118,13 @@ def driver():
         measurement_data[key] = get_measurement(value, args, output)
 
     # Build result.
-    benchmark = os.path.basename(sys.argv[1]) # FIXME: Get this properly
-    metadata['benchmark'] = benchmark
-    now = datetime.datetime.now()
-    metadata['date'] = str(now)
+    # Move benchmark and argv into metadata from measurements.
+    metadata['benchmark'] = measurement_data['benchmark']
+    del measurement_data['benchmark']
+    metadata['argv'] = measurement_data['argv']
+    del measurement_data['argv']
+    # Capture measurement time.
+    metadata['date'] = datetime.datetime.now().isoformat()
     result = {
         'metadata': metadata,
         'measurements': measurement_data,
@@ -105,7 +132,7 @@ def driver():
 
     # Insert result into target repository.
     repo = get_repository(owner, repository, access_token)
-    path = os.path.join('measurements', benchmark, '%s.json' % now)
+    path = os.path.join('measurements', metadata['benchmark'], '%s.json' % metadata['date'])
     create_result_file(repo, path, result)
 
 if __name__ == '__main__':
