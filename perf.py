@@ -29,11 +29,9 @@ def get_repository(owner, repository, token):
     session = github3.login(token=token)
     return session.repository(owner=owner, repository=repository)
 
-def create_result_file(repo, filename, result):
-    now = datetime.datetime.now()
-    path = '%s/%s.json' % (filename, now)
+def create_result_file(repo, path, result):
     content = json.dumps(result)
-    repo.create_file(path, path, content)
+    repo.create_file(path, 'Add measurement %s.' % path, content)
 
 class ArgvMeasurement(object):
     __slots__ = ['start']
@@ -96,6 +94,10 @@ def driver():
         measurement_data[key] = get_measurement(value, args, output)
 
     # Build result.
+    benchmark = os.path.basename(sys.argv[1]) # FIXME: Get this properly
+    metadata['benchmark'] = benchmark
+    now = datetime.datetime.now()
+    metadata['date'] = str(now)
     result = {
         'metadata': metadata,
         'measurements': measurement_data,
@@ -103,8 +105,8 @@ def driver():
 
     # Insert result into target repository.
     repo = get_repository(owner, repository, access_token)
-    measurement_prefix = os.path.join('measurements', os.path.basename(sys.argv[1]))
-    create_result_file(repo, measurement_prefix, result)
+    path = os.path.join('measurements', benchmark, now)
+    create_result_file(repo, path, result)
 
 if __name__ == '__main__':
     driver()
