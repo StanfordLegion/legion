@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 17.01.0 (January ??, 2017)
+Version 17.02.0 (February ??, 2017)
   * General
     - Bumped copyright dates
   * Legion
@@ -21,6 +21,12 @@ Version 17.01.0 (January ??, 2017)
         views
     - Added on-demand loading of each processor/stats in a timeline.
         Elements are only loaded when you expand them, saving bandwidth
+  * CMake
+    - Switched to separate flags for each of the Legion extras directories:
+          -DLegion_BUILD_APPS (for ./apps)
+          -DLegion_BUILD_EXAMPLES (for ./examples)
+          -DLegion_BUILD_TUTORIAL (for ./tutorial)
+          -DLegion_BUILD_TESTS (for ./test)
 
 Version 16.10.0 (October 7, 2016)
   * Realm
