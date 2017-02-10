@@ -12,14 +12,15 @@ RUN apt-get update -qq && \
     add-apt-repository ppa:pypy/ppa -y && \
     apt-get update -qq && \
     apt-get install -qq \
-      build-essential git pypy time wget \
+      build-essential git python-pip pypy time wget \
       g++-4.8 g++-4.9 g++-5 g++-6 \
       gcc-4.9-multilib g++-4.9-multilib \
       clang-3.5 libclang-3.5-dev llvm-3.5-dev \
       clang-3.8 libclang-3.8-dev llvm-3.8-dev \
       libncurses5-dev zlib1g-dev \
       openmpi-bin libopenmpi-dev libblas-dev liblapack-dev libhdf5-dev && \
-    apt-get clean
+    apt-get clean && \
+    pip install github3.py
 
 RUN wget https://cmake.org/files/v3.6/cmake-3.6.2-Linux-x86_64.tar.gz && \
     echo "dd9d8d57b66109d4bac6eef9209beb94608a185c  cmake-3.6.2-Linux-x86_64.tar.gz" | shasum --check && \

@@ -148,7 +148,6 @@ before_script:
 # For performance tests, run these commands:
 .perf_tests: &perf_tests
   script:
-    - pip install github3.py
     - ./test.py --test=perf
 
 ###
