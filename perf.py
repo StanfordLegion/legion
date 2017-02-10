@@ -105,7 +105,7 @@ def driver():
 
     # Insert result into target repository.
     repo = get_repository(owner, repository, access_token)
-    path = os.path.join('measurements', benchmark, now)
+    path = os.path.join('measurements', benchmark, str(now))
     create_result_file(repo, path, result)
 
 if __name__ == '__main__':
