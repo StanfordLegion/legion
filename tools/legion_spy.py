@@ -9751,14 +9751,12 @@ class State(object):
         #    print("  This usually indicates a runtime bug and should be reported.")
         #    print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
         #    return
-        def traverse_node(node, traverser):
-            if node not in traverser.order:
-                traverser.order.append(node)
-            return True
+        def post_traverse_node(node, traverser):
+            traverser.postorder.append(node)
         # Build a topological order of everything 
         topological_sorter = PhysicalTraverser(True, True,
-            self.get_next_traversal_generation(), traverse_node)
-        topological_sorter.order = list()
+            self.get_next_traversal_generation(), None, post_traverse_node)
+        topological_sorter.postorder = list()
         # Traverse all the sources 
         for op in self.ops.itervalues():
             if not op.physical_incoming:
@@ -9770,11 +9768,14 @@ class State(object):
             if not fill.physical_incoming:
                 topological_sorter.visit_node(fill)
         # Now that we have everything sorted based on topology
-        # Do the simplification in order
+        # Do the simplification in postorder so we simplify
+        # the smallest subgraphs first and only do the largest
+        # subgraphs later after the smallest ones are already simplified
         count = 0;
-        for src in topological_sorter.order:
+        for src in topological_sorter.postorder:
             if self.verbose:
-                print('Simplifying node %s %d of %d' % (str(src), count, len(topological_sorter.order)))
+                print('Simplifying node %s %d of %d' % (str(src), count, 
+                                          len(topological_sorter.order)))
                 count += 1
             if src.physical_outgoing is None:
                 continue

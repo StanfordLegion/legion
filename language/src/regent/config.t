@@ -55,6 +55,7 @@ local default_options = {
   ["layout-constraints"] = true,
   ["trace"] = true,
   ["validate"] = true,
+  ["emergency-gc"] = false,
 
   -- Need this here to make the logger happy.
   ["log"] = "",

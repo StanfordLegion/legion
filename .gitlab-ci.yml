@@ -110,6 +110,12 @@ before_script:
     - linux
     - compute
 
+# For performance tests, always use specific machines:
+.linux_n0004: &linux_n0004
+  tags:
+    - linux
+    - n0004
+
 ###
 ### Docker Image
 ###
@@ -138,6 +144,11 @@ before_script:
         [[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
       fi
     - ./test.py --test=external --test=private
+
+# For performance tests, run these commands:
+.perf_tests: &perf_tests
+  script:
+    - ./test.py --test=perf
 
 ###
 ### Jobs
@@ -255,3 +266,9 @@ linux_clang38_terra38_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_checks]
+
+# Performance tests:
+linux_n0004_gcc49_terra35_cxx98_release_perf:
+  <<: [*linux_n0004, *image, *perf_tests]
+  variables:
+    <<: [*gcc49, *terra35, *release, *cxx98_normal]

@@ -119,7 +119,7 @@ namespace Legion {
                                    const InstanceSet &physical_instances)
     //--------------------------------------------------------------------------
     {
-      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
+      PhysicalRegionImpl *impl = legion_new<PhysicalRegionImpl>(req, 
           ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
           is_leaf_context(), virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));

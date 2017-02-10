@@ -343,7 +343,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Free up all the values that we had stored
-      for (std::set<TaskArgument>::const_iterator it = values.begin();
+      for (std::vector<TaskArgument>::const_iterator it = values.begin();
             it != values.end(); it++)
       {
         legion_free(STORE_ARGUMENT_ALLOC, it->get_ptr(), it->get_size());
@@ -366,7 +366,7 @@ namespace Legion {
       void *buffer = legion_malloc(STORE_ARGUMENT_ALLOC, arg.get_size());
       memcpy(buffer, arg.get_ptr(), arg.get_size());
       TaskArgument new_arg(buffer,arg.get_size());
-      values.insert(new_arg);
+      values.push_back(new_arg);
       return new_arg;
     }
 
@@ -17261,7 +17261,7 @@ namespace Legion {
         if (it->second.diff_allocations == 0)
           continue;
         log_allocation.info("%s on %d: "
-            "total=%d total_bytes=%ld diff=%d diff_bytes=%ld",
+            "total=%d total_bytes=%ld diff=%d diff_bytes=%lld",
             get_allocation_name(it->first), address_space,
             it->second.total_allocations, it->second.total_bytes,
             it->second.diff_allocations, it->second.diff_bytes);
@@ -19887,8 +19887,7 @@ namespace Legion {
                                        AllocationType a, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(
-                                  Processor::get_executing_processor());
+      Runtime *rt = Runtime::the_runtime;
       if (rt != NULL)
         rt->trace_allocation(a, size, elems);
     }
@@ -19898,17 +19897,16 @@ namespace Legion {
                                                  size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime ::get_runtime(
-                                  Processor::get_executing_processor());
+      Runtime *rt = Runtime::the_runtime;
       if (rt != NULL)
         rt->trace_free(a, size, elems);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Internal* LegionAllocation::find_runtime(void)
+    /*static*/ Runtime* LegionAllocation::find_runtime(void)
     //--------------------------------------------------------------------------
     {
-      return Runtime::get_runtime(Processor::get_executing_processor());
+      return Runtime::the_runtime;
     }
 
     //--------------------------------------------------------------------------
