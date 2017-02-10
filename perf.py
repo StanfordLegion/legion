@@ -103,7 +103,8 @@ def driver():
 
     # Insert result into target repository.
     repo = get_repository(owner, repository, access_token)
-    create_result_file(repo, os.path.basename(sys.argv[1]), result)
+    measurement_prefix = os.path.join('measurements', os.path.basename(sys.argv[1]))
+    create_result_file(repo, measurement_prefix, result)
 
 if __name__ == '__main__':
     driver()
