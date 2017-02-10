@@ -46,6 +46,21 @@ local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
 -- accessors.
 local bounds_checks = std.config["bounds-checks"]
 
+local emergency = std.config["emergency-gc"]
+
+local function manual_gc() end
+
+if emergency then
+  local emergency_threshold = 600 * 1024
+  -- Manually call GC whenever the current heap size exceeds threshold
+  manual_gc = function()
+    if collectgarbage("count") >= emergency_threshold then
+      collectgarbage("collect")
+      collectgarbage("collect")
+    end
+  end
+end
+
 local codegen = {}
 
 -- load Legion dynamic library
@@ -7759,6 +7774,8 @@ function codegen.stat_parallelize_with(cx, node)
 end
 
 function codegen.stat(cx, node)
+  manual_gc()
+
   if node:is(ast.typed.stat.Internal) then
     return codegen.stat_internal(cx, node)
 
@@ -8361,6 +8378,9 @@ function codegen.top_task(cx, node)
   end
   proto:setname(tostring(task:getname()))
   task:setdefinition(proto)
+
+  if emergency then proto:compile() end
+  manual_gc()
 
   return task
 end
