@@ -58,23 +58,41 @@ def get_measurements(repo_url):
     finally:
         shutil.rmtree(tmp_dir)
 
-def extract_benchmarks(measurements):
-    commits = {}
-    benchmarks = collections.defaultdict(lambda: [])
+def extract_measurements(measurements):
+    branches = set()
+    commit_date = {}
+    commits_by_branch = collections.defaultdict(lambda: set())
+    measurements_by_commit = collections.defaultdict(lambda: [])
     for path, measurement in measurements:
         commit = measurement['metadata']['commit']
+        branch = measurement['metadata']['branch']
         argv = ' '.join(measurement['metadata']['argv'])
 
+        # Reinsert the compact argv into the measurement.
         measurement['metadata']['argv'] = argv
 
+        # Record the branch used.
+        branches.add(branch)
+
+        # Record the earliest measurement date for this commit.
         date = datetime.datetime.strptime(
             measurement['metadata']['date'],
             '%Y-%m-%dT%H:%M:%S.%f')
-        if commit not in commits or date < commits[commit]:
-            commits[commit] = date
-        benchmarks[commit].append(measurement)
+        if commit not in commit_date or date < commit_date[commit]:
+            commit_date[commit] = date
 
-    return benchmarks
+        # Add the commit to this branch.
+        commits_by_branch[branch].add(commit)
+
+        # Record the measurement.
+        measurements_by_commit[commit].append(measurement)
+
+    # Sort commits by earliest measurement date.
+    commits_by_branch_by_date = dict(
+        (branch, sorted(commits, key=lambda x: commit_date[x]))
+        for branch, commits in commits_by_branch.items())
+
+    return branches, commits_by_branch_by_date, measurements_by_commit
 
 def get_repository(owner, repository, token):
     session = github3.login(token=token)
@@ -91,10 +109,16 @@ def push_json_file(repo, path, value):
 def make_charts(owner, repository, access_token, measurement_url):
     measurements = get_measurements(measurement_url)
     print('Got %s measurements...' % len(measurements))
-    benchmarks = extract_benchmarks(measurements)
+    branches, commits, measurements = extract_measurements(measurements)
+
+    result = {
+        'branches': list(branches),
+        'commits': commits,
+        'measurements': measurements,
+    }
 
     repo = get_repository(owner, repository, access_token)
-    push_json_file(repo, 'rendered/chart.json', benchmarks)
+    push_json_file(repo, 'rendered/chart.json', result)
 
 def get_variable(name, description):
     if name not in os.environ:
