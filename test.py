@@ -268,6 +268,34 @@ class Stage(object):
         print()
         sys.stdout.flush()
 
+def report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
+                test_external, test_private, test_perf, use_gasnet,
+                use_cuda, use_llvm, use_hdf, use_spy, use_cmake, use_rdir):
+    print()
+    print('#'*60)
+    print('### Test Suite Configuration')
+    print('###')
+    print('### Running Tests:')
+    print('###   * Regent:     %s' % test_regent)
+    print('###   * Legion C++: %s' % test_legion_cxx)
+    print('###   * Fuzzer:     %s' % test_fuzzer)
+    print('###   * Realm:      %s' % test_realm)
+    print('###   * External:   %s' % test_external)
+    print('###   * Private:    %s' % test_private)
+    print('###   * Perf:       %s' % test_perf)
+    print('###')
+    print('### Build Flags:')
+    print('###   * GASNet:     %s' % use_gasnet)
+    print('###   * CUDA:       %s' % use_cuda)
+    print('###   * LLVM:       %s' % use_llvm)
+    print('###   * HDF5:       %s' % use_hdf)
+    print('###   * SPY:        %s' % use_spy)
+    print('###   * CMake:      %s' % use_cmake)
+    print('###   * RDIR:       %s' % use_rdir)
+    print('#'*60)
+    print()
+    sys.stdout.flush()
+
 def run_tests(test_modules=None,
               debug=True,
               use_features=None,
@@ -323,6 +351,10 @@ def run_tests(test_modules=None,
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
     ])
 
+    report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
+                test_external, test_private, test_perf, use_gasnet,
+                use_cuda, use_llvm, use_hdf, use_spy, use_cmake, use_rdir)
+
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
     if verbose:
         print('Using build directory: %s' % tmp_dir)
@@ -372,6 +404,10 @@ def run_tests(test_modules=None,
                 print('Removing build directory:')
                 print('  %s' % tmp_dir)
             shutil.rmtree(tmp_dir)
+
+    report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
+                test_external, test_private, test_perf, use_gasnet,
+                use_cuda, use_llvm, use_hdf, use_spy, use_cmake, use_rdir)
 
 def driver():
     parser = argparse.ArgumentParser(
