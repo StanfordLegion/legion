@@ -61,3 +61,65 @@ case, whatever defaults are chosen by the script). The same applies to
 `--use` and `USE_` options as well.
 
 ## Automated Test Infrastructure
+
+The Legion project currently uses *two* different CI services to run
+automated tests: [Travis](https://travis-ci.org/) and [Gitlab
+CI](https://about.gitlab.com/gitlab-ci/). Each service has a number of
+advantages, so at the moment it makes sense to use both.
+
+Travis:
+
+  * Has better Github integration, which is nice for pull requests, etc.
+  * Supports builds on macOS
+  * However, Travis tends to be slower and provides a less flexible environment
+
+Gitlab CI:
+
+  * Is more flexible:
+      * We can provide our own Docker image(s) for tests
+      * We can *simultaneously* use on-premises and cloud-based machines
+  * Gitlab generally tends to be faster
+  * Has no built-in Github integration (for obvious reasons)
+
+An advantage of both approaches is that they are entirely configured
+via text files stored in the Legion repository. Thus there is no
+long-term state associated with a local installation of a product such
+as Jenkins, and very little operational knowledge required to run
+either service.
+
+The configurations are stored in the following files:
+
+  * Travis: `.travis.yml`
+  * Gitlab CI: `.gitlab-ci.yml`
+      * Docker scripts are in the `docker/` directory
+
+The two formats are similar, but different. Since the actual bulk of
+the test suite is stored in the `test.py` script, the contents of the
+two `.yml` files amount to essentially setting environment variables
+and kicking off the script.
+
+### Rebuilding the Docker Image
+
+Docker images are also built with scripts to ensure that the results
+are reproducible. To update the Docker image for Gitlab, modify the
+file `docker/Dockerfile.gitlab-ci` as desired, then commit the change
+to the Legion repository.
+
+**Important:** To avoid constantly rebuilding the Docker image, we use
+a separate branch to trigger the build. After changing the build
+script, always merge `master` into `docker-snapshot` and push the
+latter branch to Github. If you forget this step the automatic build
+will not trigger.
+
+While the rebuild process is fully automated, it can take a while. If
+you get impatient, you can build and upload the image yourself. *You
+will need access to the* `stanfordlegion` *organization on Docker Hub
+before you can do this.* The following commands will rebuild the
+image:
+
+```
+# from the root of the Legion repository
+docker build -t stanfordlegion/gitlab-ci -f docker/Dockerfile.gitlab-ci docker
+docker login
+docker push stanfordlegion/gitlab-ci
+```
