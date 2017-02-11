@@ -4018,8 +4018,6 @@ namespace Legion {
         FieldMask overlap = it->second & close_mask;
         if (!overlap)
           continue;
-        // Record this version state as a top version state
-        composite_view->record_top_version_state(it->first);
         it->first->capture_root(composite_view, overlap);
       }
       // Finally record any valid above views
