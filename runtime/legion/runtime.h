@@ -2364,6 +2364,10 @@ namespace Legion {
       template<typename T>
       inline T* get_available(Reservation reservation,
                               std::deque<T*> &queue, bool has_lock);
+
+      template<typename T>
+      inline void release_object(std::deque<T*> &queue, T* object);
+
     public:
       IndividualTask*       get_available_individual_task(bool need_cont,
                                                   bool has_lock = false);
@@ -3071,6 +3075,17 @@ namespace Legion {
 #endif
       result->activate();
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void Runtime::release_object(std::deque<T*> &queue, T* object)
+    //--------------------------------------------------------------------------
+    {
+      if (queue.size() == LEGION_MAX_RECYCLABLE_OBJECTS)
+        legion_delete(object);
+      else
+        queue.push_front(object);
     }
 
     //--------------------------------------------------------------------------
