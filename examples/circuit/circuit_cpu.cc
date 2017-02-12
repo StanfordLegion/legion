@@ -33,7 +33,7 @@ void AccumulateCharge::apply<true>(LHS &lhs, RHS rhs)
 template<>
 void AccumulateCharge::apply<false>(LHS &lhs, RHS rhs)
 {
-  int *target = (int *)&lhs;
+  volatile int *target = (volatile int *)&lhs;
   union { int as_int; float as_float; } oldval, newval;
   do {
     oldval.as_int = *target;
@@ -50,7 +50,7 @@ void AccumulateCharge::fold<true>(RHS &rhs1, RHS rhs2)
 template<>
 void AccumulateCharge::fold<false>(RHS &rhs1, RHS rhs2)
 {
-  int *target = (int *)&rhs1;
+  volatile int *target = (volatile int *)&rhs1;
   union { int as_int; float as_float; } oldval, newval;
   do {
     oldval.as_int = *target;

@@ -1243,7 +1243,6 @@ namespace Legion {
       void record_reduction_view(ReductionView *view, const FieldMask &mask);
       void record_child_version_state(const ColorPoint &child_color, 
                                  VersionState *state, const FieldMask &mask);
-      void record_top_version_state(VersionState *state);
       void finalize_capture(bool need_prune);
     public:
       void pack_composite_view(Serializer &rez) const;
@@ -1264,11 +1263,6 @@ namespace Legion {
       // record the views and children we immediately depend on and that
       // is how we break the inifinite meta-data cycle
       LegionMap<CompositeView*,FieldMask>::aligned nested_composite_views;
-    protected:
-      // Keep track of the top version states for this composite instance
-      // We keep valid views to these version state objects as long
-      // as we are valid
-      std::vector<VersionState*> top_version_states;
     protected:
       LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned node_versions;
     };
