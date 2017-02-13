@@ -777,6 +777,9 @@ function check_vectorizability.stat(cx, node)
     elseif node:is(ast.typed.stat.EndTrace) then
       cx:report_error_when_demanded(node, error_prefix .. "a trace statement")
 
+    elseif node:is(ast.typed.stat.IndexLaunchList) then
+      cx:report_error_when_demanded(node, error_prefix .. "an inner loop")
+
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
     end
