@@ -5701,8 +5701,8 @@ namespace Legion {
 #else
       SingleTask *single_task = static_cast<SingleTask*>(owner_task); 
 #endif
-      const LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked&
-        physical_instances = single_task->get_physical_instances();
+      const std::deque<InstanceSet> &physical_instances = 
+        single_task->get_physical_instances();
       const std::vector<bool> &no_access_regions = 
         single_task->get_no_access_regions();
 #ifdef DEBUG_LEGION
@@ -6130,8 +6130,8 @@ namespace Legion {
       }
       // Unmap any of our mapped regions before issuing any close operations
       unmap_all_regions();
-      const LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked&
-        physical_instances = single_task->get_physical_instances();
+      const std::deque<InstanceSet> &physical_instances = 
+        single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
       // we deal with that case below
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)

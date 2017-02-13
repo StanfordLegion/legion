@@ -387,7 +387,7 @@ namespace Legion {
         { target = virtual_mapped; }
       inline void clone_parent_req_indexes(std::vector<unsigned> &target) const
         { target = parent_req_indexes; }
-      inline const LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked&
+      inline const std::deque<InstanceSet>&
         get_physical_instances(void) const { return physical_instances; }
       inline const std::vector<bool>& get_no_access_regions(void) const
         { return no_access_regions; }
@@ -466,8 +466,7 @@ namespace Legion {
     protected:
       std::vector<Processor> target_processors;
       // Hold the result of the mapping 
-      LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked 
-                                                             physical_instances;
+      std::deque<InstanceSet> physical_instances;
     protected: // Mapper choices 
       VariantID                             selected_variant;
       TaskPriority                          task_priority;
