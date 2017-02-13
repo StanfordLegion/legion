@@ -99,7 +99,8 @@ def get_repository(owner, repository, token):
     return session.repository(owner=owner, repository=repository)
 
 def push_json_file(repo, path, value):
-    content = json.dumps(value)
+    # Try to produce JSON files will that will generate small diffs.
+    content = json.dumps(value, indent=0, separators=(',', ':'), sort_keys=True)
     previous = repo.contents(path)
     if previous is not None:
         repo.update_file(path, 'Update rendered chart.', content, previous.sha)
