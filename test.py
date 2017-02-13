@@ -16,7 +16,22 @@
 #
 
 from __future__ import print_function
-import argparse, datetime, json, multiprocessing, os, shutil, subprocess, sys, traceback, tempfile
+import argparse, datetime, json, multiprocessing, os, platform, shutil, subprocess, sys, traceback, tempfile
+
+# Find physical core count of the machine.
+if platform.system() == 'Linux':
+    lines = subprocess.check_output(['lscpu', '--parse=core'])
+    physical_cores = len(set(line for line in lines.strip().split('\n')
+                             if not line.startswith('#')))
+elif platform.system() == 'Darwin':
+    physical_cores = int(
+        subprocess.check_output(['sysctl', '-n', 'hw.physicalcpu']))
+else:
+    raise Exception('Unknown platform: %s' % platform.system())
+
+# Choose a reasonable number of application cores given the
+# available physical cores.
+app_cores = max(physical_cores - 2, 1)
 
 legion_cxx_tests = [
     # Tutorial
@@ -58,10 +73,12 @@ legion_hdf_cxx_tests = [
 
 legion_cxx_perf_tests = [
     # Circuit: Heavy Compute
-    ['examples/circuit/circuit', '-l 10 -p 2 -npp 2500 -wpp 10000 -ll:cpu 2'.split()],
+    ['examples/circuit/circuit',
+     ['-l', '10', '-p', str(app_cores), '-npp', '2500', '-wpp', '10000', '-ll:cpu', str(app_cores)]],
 
     # Circuit: Light Compute
-    ['examples/circuit/circuit', '-l 10 -p 100 -npp 2 -wpp 4 -ll:cpu 2'.split()],
+    ['examples/circuit/circuit',
+     ['-l', '10', '-p', '100', '-npp', '2', '-wpp', '4', '-ll:cpu', '2']],
 ]
 
 def cmd(command, env=None, cwd=None):
