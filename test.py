@@ -235,8 +235,11 @@ def clean_cxx(tests, root_dir, env, thread_count):
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         cmd(['make', '-C', test_dir, 'clean'], env=env)
 
-def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf):
-    if test_legion_cxx or test_perf:
+def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
+                     test_external, test_private):
+    # External and private also require cleaning, even though they get
+    # built separately.
+    if test_legion_cxx or test_perf or test_external or test_private:
         clean_cxx(legion_cxx_tests, root_dir, env, thread_count)
 
 def option_enabled(option, options, var_prefix='', default=True):
@@ -368,7 +371,9 @@ def run_tests(test_modules=None,
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(
-                    root_dir, env, thread_count, test_legion_cxx, test_perf)
+                    root_dir, env, thread_count, test_legion_cxx, test_perf,
+                    # These configurations also need to be cleaned first.
+                    test_external, test_private)
                 bin_dir = None
 
         # Run tests.
