@@ -192,6 +192,27 @@ namespace LegionRuntime{
       Dimension dim;
     };
 #ifdef USE_DISK
+    inline int io_setup(unsigned nr, aio_context_t *ctxp)
+    {
+      return syscall(__NR_io_setup, nr, ctxp);
+    }
+
+    inline int io_destroy(aio_context_t ctx)
+    {
+      return syscall(__NR_io_destroy, ctx);
+    }
+
+    inline int io_submit(aio_context_t ctx, long nr, struct iocb **iocbpp)
+    {
+      return syscall(__NR_io_submit, ctx, nr, iocbpp);
+    }
+
+    inline int io_getevents(aio_context_t ctx, long min_nr, long max_nr,
+                            struct io_event *events, struct timespec *timeout)
+    {
+      return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
+    }
+
     class DiskRequest : public Request {
     public:
       int fd;
@@ -975,6 +996,8 @@ namespace LegionRuntime{
     };
 #endif
 
+    class FileChannel;
+
     class ChannelManager {
     public:
       ChannelManager(void) {
@@ -984,6 +1007,8 @@ namespace LegionRuntime{
 #ifdef USE_DISK
         disk_read_channel = NULL;
         disk_write_channel = NULL;
+        file_read_channel = NULL;
+        file_write_channel = NULL;
 #endif /*USE_DISK*/
 #ifdef USE_HDF
         hdf_read_channel = NULL;
@@ -1052,19 +1077,9 @@ namespace LegionRuntime{
         disk_write_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_WRITE);
         return disk_write_channel;
       }
+      FileChannel* create_file_read_channel(long max_nr);
+      FileChannel* create_file_write_channel(long max_nr);
 #endif /*USE_DISK*/
-#ifdef USE_FILE
-      FileChannel* create_file_read_channel(long max_nr) {
-        assert(file_read_channel == NULL);
-        file_read_channel = new FileChannel(max_nr, XferDes::XFER_FILE_READ);
-        return file_read_channel;
-      }
-      FileChannel* create_file_write_channel(long max_nr) {
-        assert(file_write_channel == NULL);
-        file_write_channel = new FileChannel(max_nr, XferDes::XFER_FILE_WRITE);
-        return file_write_channel;
-      }
-#endif
 #ifdef USE_CUDA
       GPUChannel* create_gpu_to_fb_channel(long max_nr, GPU* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
@@ -1114,8 +1129,6 @@ namespace LegionRuntime{
       DiskChannel* get_disk_write_channel() {
         return disk_write_channel;
       }
-#endif /*USE_DISK*/
-#ifdef USE_FILE
       FileChannel* get_file_read_channel() {
         return file_read_channel;
       }
@@ -1163,8 +1176,6 @@ namespace LegionRuntime{
       RemoteWriteChannel* remote_write_channel;
 #ifdef USE_DISK
       DiskChannel *disk_read_channel, *disk_write_channel;
-#endif /*USE_DISK*/
-#ifdef USE_FILE
       FileChannel *file_read_channel, *file_write_channel;
 #endif
 #ifdef USE_CUDA
@@ -1659,6 +1670,7 @@ namespace LegionRuntime{
     };
 
     XferDesQueue* get_xdq_singleton();
+    ChannelManager* get_channel_manager();
 #ifdef USE_CUDA
     void register_gpu_in_dma_systems(GPU* gpu);
 #endif

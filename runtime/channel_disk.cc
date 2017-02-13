@@ -43,166 +43,76 @@ namespace LegionRuntime {
     {
       MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
       MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-      size_t total_field_size = 0;
-      for (unsigned i = 0; i < oas_vec.size(); i++) {
-        total_field_size += oas_vec[i].size;
-      }
-      bytes_total = total_field_size * domain.get_volume();
-      pre_bytes_write = (pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-      if (DIM == 0) {
-        li = NULL;
-        // index space instances use 1D linearizations for translation
-        me = new MaskEnumerator(domain.get_index_space(), src_buf.linearization.get_mapping<1>(),
-                                dst_buf.linearization.get_mapping<1>(), order,
-                                src_buf.is_ib, dst_buf.is_ib);
-      } else {
-        li = new Layouts::GenericLayoutIterator<DIM>(domain.get_rect<DIM>(), src_buf.linearization.get_mapping<DIM>(),
-                                                     dst_buf.linearization.get_mapping<DIM>(), order);
-        me = NULL;
-      }
-      offset_idx = 0;
-
       switch (kind) {
         case XferDes::XFER_FILE_READ:
         {
           ID src_id(inst);
-          unsigned src_index = id.instance.inst_idx();
-          fd = (FileMemory*)src_mem_impl->get_file_des(src_index);
-          channel = channel_manager->get_file_read_channel();
+          unsigned src_index = src_id.instance.inst_idx();
+          fd = ((FileMemory*)src_mem_impl)->get_file_des(src_index);
+          channel = get_channel_manager()->get_file_read_channel();
           buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
           assert(src_mem_impl->kind == MemoryImpl::MKIND_FILE);
-          FileReadRequest* file_read_reqs
-	    = (FileReadRequest*) calloc(max_nr, sizeof(FileReadRequest));
-          for (int i = 0; i < max_nr; i++) {
-            file_read_reqs[i].xd = this;
-            available_reqs.push(&file_read_reqs[i]);
-          }
-          requests = file_read_reqs;
           break;
         }
         case XferDes::XFER_FILE_WRITE:
         {
           ID dst_id(inst);
-          unsigned dst_index = id.instance.inst_idx();
-          fd = (FileMemory*)dst_mem_impl->get_file_des(dst_index);
-          channel = channel_manager->get_file_write_channel();
+          unsigned dst_index = dst_id.instance.inst_idx();
+          fd = ((FileMemory*)dst_mem_impl)->get_file_des(dst_index);
+          channel = get_channel_manager()->get_file_write_channel();
           buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
           assert(dst_mem_impl->kind == MemoryImpl::MKIND_FILE);
-          FileWriteRequest* file_write_reqs
-	    = (FileWriteRequest*) calloc(max_nr, sizeof(FileWriteRequest));
-          for (int i = 0; i < max_nr; i++) {
-            file_write_reqs[i].xd = this;
-            available_reqs.push(&file_write_reqs[i]);
-          }
-          requests = file_write_reqs;
           break;
         }
         default:
           assert(0);
+      }
+      file_reqs = (FileRequest*) calloc(max_nr, sizeof(DiskRequest));
+      for (int i = 0; i < max_nr; i++) {
+        file_reqs[i].xd = this;
+        file_reqs[i].fd = fd;
+        enqueue_request(&file_reqs[i]);
       }
     }
 
     template<unsigned DIM>
     long FileXferDes<DIM>::get_requests(Request** requests, long nr)
     {
-      long idx = 0;
-      while (idx < nr && !available_reqs.empty() && offset_idx < oas_vec.size()) {
-        off_t src_start, dst_start;
-        size_t nbytes;
-        if (DIM == 0) {
-          simple_get_mask_request(src_start, dst_start, nbytes, me, offset_idx, min(available_reqs.size(), nr - idx));
-        } else {
-          simple_get_request<DIM>(src_start, dst_start, nbytes, li, offset_idx, min(available_reqs.size(), nr - idx));
-        }
-        if (nbytes == 0)
+      FileRequest** reqs = (FileRequest**) requests;
+      long new_nr = default_get_requests<DIM>(requests, nr);
+      switch (kind) {
+        case XferDes::XFER_FILE_READ:
+        {
+          for (long i = 0; i < new_nr; i++) {
+            reqs[i]->file_off = reqs[i]->src_off;
+            reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
+          }
           break;
-        while (nbytes > 0) {
-          size_t req_size = nbytes;
-          if (src_buf.is_ib) {
-            src_start = src_start % src_buf.buf_size;
-            req_size = umin(req_size, src_buf.buf_size - src_start);
-          }
-          if (dst_buf.is_ib) {
-            dst_start = dst_start % dst_buf.buf_size;
-            req_size = umin(req_size, dst_buf.buf_size - dst_start);
-          }
-          requests[idx] = available_reqs.front();
-          available_reqs.pop();
-          requests[idx]->is_read_done = false;
-          requests[idx]->is_write_done = false;
-          switch (kind) {
-            case XferDes::XFER_FILE_READ:
-            {
-              FileReadRequest* file_read_req = (FileReadRequest*) requests[idx];
-              file_read_req->fd = fd;
-              file_read_req->src_offset = src_buf.alloc_offset + src_start;
-              file_read_req->dst_buf = (uint64_t)(buf_base + dst_start);
-              file_read_req->nbytes = req_size;
-              break;
-            }
-            case XferDes::XFER_FILE_WRITE:
-            {
-              FileWriteRequest* disk_write_req = (FileWriteRequest*) requests[idx];
-              file_write_req->fd = fd;
-              file_write_req->src_buf = (uint64_t)(buf_base + src_start);
-              file_write_req->dst_offset = dst_buf.alloc_offset + dst_start;
-              file_write_req->nbytes = req_size;
-              break;
-            }
-            default:
-              assert(0);
-          }
-          src_start += req_size;
-          dst_start += req_size;
-          nbytes -= req_size;
-          idx ++;
         }
+        case XferDes::XFER_FILE_WRITE:
+        {
+          for (long i = 0; i < new_nr; i++) {
+            reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
+            reqs[i]->file_off = reqs[i]->dst_off;
+          }
+          break;
+        }
+        default:
+          assert(0);
       }
-      return idx;
+      return new_nr;
     }
 
     template<unsigned DIM>
     void FileXferDes<DIM>::notify_request_read_done(Request* req)
     {
-      req->is_read_done = true;
-      int64_t offset;
-      uint64_t size;
-      switch(kind) {
-        case XferDes::XFER_FILE_READ:
-          offset = ((FileReadRequest*)req)->src_offset - src_buf.alloc_offset;
-          size = ((FileReadRequest*)req)->nbytes;
-          break;
-        case XferDes::XFER_FILE_WRITE:
-          offset = ((FileWriteRequest*)req)->src_buf - (uint64_t) buf_base;
-          size = ((FileWriteRequest*)req)->nbytes;
-          break;
-        default:
-          assert(0);
-      }
-      simple_update_bytes_read(offset, size);
+      default_notify_request_read_done(req);
     }
 
     template<unsigned DIM>
     void FileXferDes<DIM>::notify_request_write_done(Request* req)
     {
-      req->is_write_done = true;
-      int64_t offset;
-      uint64_t size;
-      switch(kind) {
-        case XferDes::XFER_FILE_READ:
-          offset = ((FileReadRequest*)req)->dst_buf - (uint64_t) buf_base;
-          size = ((FileReadRequest*)req)->nbytes;
-          break;
-        case XferDes::XFER_FILE_WRITE:
-          offset = ((FileWriteRequest*)req)->dst_offset - dst_buf.alloc_offset;
-          size = ((FileWriteRequest*)req)->nbytes;
-          break;
-        default:
-          assert(0);
-      }
-      simple_update_bytes_write(offset, size);
-      available_reqs.push(req);
-      //printf("bytes_write = %lu, bytes_total = %lu\n", bytes_write, bytes_total);
+      default_notify_request_write_done(req);
     }
 
     template<unsigned DIM>
@@ -254,28 +164,16 @@ namespace LegionRuntime {
       int ns = 0;
       switch (kind) {
         case XferDes::XFER_FILE_READ:
-          while (ns < nr && !available_cb.empty()) {
-            FileReadRequest* file_read_req = (FileReadRequest*) requests[ns];
-            cbs[ns] = available_cb.back();
-            available_cb.pop_back();
-            cbs[ns]->aio_fildes = file_read_req->fd;
-            cbs[ns]->aio_data = (uint64_t) (file_read_req);
-            cbs[ns]->aio_buf = file_read_req->dst_buf;
-            cbs[ns]->aio_offset = file_read_req->src_offset;
-            cbs[ns]->aio_nbytes = file_read_req->nbytes;
-            ns++;
-          }
-          break;
         case XferDes::XFER_FILE_WRITE:
           while (ns < nr && !available_cb.empty()) {
-            FileWriteRequest* file_write_req = (FileWriteRequest*) requests[ns];
+            FileRequest* req = (FileRequest*) requests[ns];
             cbs[ns] = available_cb.back();
             available_cb.pop_back();
-            cbs[ns]->aio_fildes = file_write_req->fd;
-            cbs[ns]->aio_data = (uint64_t) (file_write_req);
-            cbs[ns]->aio_buf = file_write_req->src_buf;
-            cbs[ns]->aio_offset = file_write_req->dst_offset;
-            cbs[ns]->aio_nbytes = file_write_req->nbytes;
+            cbs[ns]->aio_fildes = req->fd;
+            cbs[ns]->aio_data = (uint64_t) (req);
+            cbs[ns]->aio_buf = (uint64_t) (req->mem_base);
+            cbs[ns]->aio_offset = req->file_off;
+            cbs[ns]->aio_nbytes = req->nbytes;
             ns++;
           }
           break;

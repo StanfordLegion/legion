@@ -20,17 +20,14 @@
 
 namespace LegionRuntime {
   namespace LowLevel {
-    class FileReadRequest : public Request {
+#ifdef USE_DISK
+    typedef Realm::FileMemory FileMemory;
+#endif
+    class FileRequest : public Request {
     public:
       int fd;
-      uint64_t dst_buf;
-      int64_t src_offset;
-      uint64_t nbytes;
-    };
-
-    class FileWriteRequest : public Request {
-    public:
-      int fd;
+      char *mem_base;
+      off_t file_off;
     };
 
     template<unsigned DIM>
@@ -39,26 +36,15 @@ namespace LegionRuntime {
       FileXferDes(
           DmaRequest* _dma_request, gasnet_node_t _launch_node,
           XferDesID _guid, XferDesID _pre_guid, XferDesID _next_guid,
-          bool mark_started, const Buffer& _src_buf, const Buffer& _dst_buf,
+          bool mark_started, RegionInstance inst,
+          const Buffer& _src_buf, const Buffer& _dst_buf,
           const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
           uint64_t max_req_size, long max_nr, int _priority,
-          XferOrder::Type _order, XferDesFence* _complete_fence);
+          XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
 
       ~FileXferDes()
-     {
-        // clear available_reqs
-        while (!available_reqs.empty()) {
-          available_reqs.pop();
-        }
-        if (DIM == 0) {
-          delete me;
-        } else {
-          delete li;
-        }
-        free(requests);
-        if (src_buf.is_ib) {
-          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(src_buf.alloc_offset, src_buf.buf_size);
-        }
+      {
+        free(file_reqs);
       }
 
       long get_requests(Request** requests, long nr);
@@ -66,11 +52,9 @@ namespace LegionRuntime {
       void notify_request_write_done(Request* req);
       void flush();
     private:
-      Request* requests;
-      Layouts::GenericLayoutIterator<DIM>* li;
-      MaskEnumerator* me;
-      unsigned offset_idx;
+      FileRequest* file_reqs;
       int fd; // The file that stores the physical instance
+      const char *buf_base;
     };
 
     class FileChannel : public Channel {

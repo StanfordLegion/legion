@@ -32,6 +32,7 @@ else()
     lowlevel_config.h
     lowlevel_disk.cc
     channel.h                 channel.cc
+    channel_disk.h            channel_disk.cc
     lowlevel_dma.h            lowlevel_dma.cc
     lowlevel_dma.inl
     lowlevel.h                lowlevel.cc

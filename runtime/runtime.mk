@@ -351,7 +351,8 @@ ASM_SRC		?=
 # Set the source files
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
-                   $(LG_RT_DIR)/channel.cc \
+	           $(LG_RT_DIR)/channel.cc \
+	           $(LG_RT_DIR)/channel_disk.cc \
 	           $(LG_RT_DIR)/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
