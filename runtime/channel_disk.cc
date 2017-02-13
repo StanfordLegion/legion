@@ -209,6 +209,7 @@ namespace LegionRuntime {
     }
 
 #ifdef USE_DISK
+      template class FileXferDes<0>;
       template class FileXferDes<1>;
       template class FileXferDes<2>;
       template class FileXferDes<3>;
