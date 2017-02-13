@@ -207,5 +207,11 @@ namespace LegionRuntime {
     {
       return available_cb.size();
     }
+
+#ifdef USE_DISK
+      template class FileXferDes<1>;
+      template class FileXferDes<2>;
+      template class FileXferDes<3>;
+#endif
   } // namespace LowLevel
 } // namespace LegionRuntime
