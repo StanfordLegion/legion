@@ -3410,15 +3410,12 @@ namespace Legion {
       // record our users because we skipped that during traversal
       if (multiple_requirements)
       {
-        // C++ type system suckiness
-        std::deque<InstanceSet> &phy_inst_ref = 
-          *(reinterpret_cast<std::deque<InstanceSet>*>(&physical_instances));
         // This is really ugly, I hate C++ and its const awfulness
         runtime->forest->physical_register_users(this,
             local_termination_event, regions, virtual_mapped, 
             *const_cast<std::vector<VersionInfo>*>(get_version_infos()),
             *const_cast<std::vector<RestrictInfo>*>(get_restrict_infos()), 
-            phy_inst_ref, map_applied_conditions);
+            physical_instances, map_applied_conditions);
         // Release any read-only reservations that we're holding
         if (!read_only_reservations.empty())
         {
