@@ -47,7 +47,7 @@ namespace LegionRuntime {
         case XferDes::XFER_FILE_READ:
         {
           ID src_id(inst);
-          unsigned src_index = src_id.instance.inst_idx();
+          unsigned src_index = src_id.instance.inst_idx;
           fd = ((FileMemory*)src_mem_impl)->get_file_des(src_index);
           channel = get_channel_manager()->get_file_read_channel();
           buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
@@ -57,7 +57,7 @@ namespace LegionRuntime {
         case XferDes::XFER_FILE_WRITE:
         {
           ID dst_id(inst);
-          unsigned dst_index = dst_id.instance.inst_idx();
+          unsigned dst_index = dst_id.instance.inst_idx;
           fd = ((FileMemory*)dst_mem_impl)->get_file_des(dst_index);
           channel = get_channel_manager()->get_file_write_channel();
           buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
