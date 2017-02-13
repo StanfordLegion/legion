@@ -58,7 +58,7 @@ typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
   template <>                                                           \
   void CLASS::apply<false>(LHS &lhs, RHS rhs)                           \
   {                                                                     \
-    U *target = (U *)&(lhs);                                            \
+    volatile U *target = (U *)&(lhs);                                   \
     union { U as_U; T as_T; } oldval, newval;                           \
     do {                                                                \
       oldval.as_U = *target;                                            \
@@ -75,7 +75,7 @@ typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
   template <>                                                           \
   void CLASS::fold<false>(RHS &rhs1, RHS rhs2)                          \
   {                                                                     \
-    U *target = (U *)&rhs1;                                             \
+    volatile U *target = (U *)&rhs1;                                    \
     union { U as_U; T as_T; } oldval, newval;                           \
     do {                                                                \
       oldval.as_U = *target;                                            \
