@@ -3343,13 +3343,15 @@ namespace LegionRuntime {
               order = XferOrder::ANY_ORDER;
             else
               order = idx == 1 ? XferOrder::DST_FIFO : XferOrder::SRC_FIFO;
-            RegionInstance hdf_inst;
-            if (kind == XferDes::XFER_HDF_READ)
-              hdf_inst = src_inst;
-            else if (kind == XferDes::XFER_HDF_WRITE)
-              hdf_inst = dst_inst;
+            RegionInstance attach_inst;
+            if ((kind == XferDes::XFER_HDF_READ)
+              ||(kind == XferDes::XFER_FILE_READ))
+              attach_inst = src_inst;
+            else if ((kind == XferDes::XFER_HDF_WRITE)
+              ||(kind == XferDes::XFER_FILE_WRITE))
+              attach_inst = dst_inst;
             else
-              hdf_inst = RegionInstance::NO_INST;
+              attach_inst = RegionInstance::NO_INST;
 
             
             XferDesFence* complete_fence = new XferDesFence(this);
@@ -3377,7 +3379,7 @@ namespace LegionRuntime {
                                    next_xd_guid, mark_started, pre_buf, cur_buf,
                                    new_domain, oasvec_src,
                                    16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
-                                   priority, order, kind, complete_fence, hdf_inst);
+                                   priority, order, kind, complete_fence, attach_inst);
               } else {
                 if (idx != mem_path.size() - 1) {
                   cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
@@ -3391,7 +3393,7 @@ namespace LegionRuntime {
                                    next_xd_guid, mark_started, pre_buf, cur_buf,
                                    domain, oasvec_src,
                                    16 * 1024 * 1024 /*max_req_size*/, 100/*max_nr*/,
-                                   priority, order, kind, complete_fence, hdf_inst);
+                                   priority, order, kind, complete_fence, attach_inst);
               }
             }
             else {
@@ -3407,7 +3409,7 @@ namespace LegionRuntime {
                                    next_xd_guid, mark_started, pre_buf, cur_buf,
                                    domain, oasvec_src,
                                    16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
-                                   priority, order, kind, complete_fence, hdf_inst);
+                                   priority, order, kind, complete_fence, attach_inst);
             }
             pre_buf = cur_buf;
             oasvec = oasvec_dst;

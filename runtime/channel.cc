@@ -2231,6 +2231,15 @@ namespace LegionRuntime {
                                       _max_req_size, max_nr, _priority,
                                       _order, _kind, _complete_fence);
             break;
+          case XferDes::XFER_FILE_READ:
+          case XferDes::XFER_FILE_WRITE:
+            xd = new FileXferDes<DIM>(_dma_request, _launch_node,
+                                      _guid, _pre_xd_guid, _next_xd_guid,
+                                      mark_started,
+                                      inst, _src_buf, _dst_buf, _domain, _oas_vec,
+                                      _max_req_size, max_nr, _priority,
+                                      _order, _kind, _complete_fence);
+            break;
 #endif
 #ifdef USE_CUDA
           case XferDes::XFER_GPU_FROM_FB:
