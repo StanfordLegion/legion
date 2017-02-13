@@ -119,6 +119,9 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
     prk_dir = os.path.join(tmp_dir, 'prk')
     cmd(['git', 'clone', 'https://github.com/magnatelee/PRK.git', prk_dir])
+    # This uses a custom Makefile that requires additional
+    # configuration. Rather than go to that trouble it's easier to
+    # just use a copy of the standard Makefile template.
     stencil_dir = os.path.join(prk_dir, 'LEGION', 'Stencil')
     stencil_env = dict(list(env.items()) + [
         ('OUTFILE', 'stencil'),
@@ -130,6 +133,16 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd(['make', '-f', makefile, '-C', stencil_dir, '-j', str(thread_count)], env=stencil_env)
     stencil = os.path.join(stencil_dir, 'stencil')
     cmd([stencil, '4', '10', '1000'])
+
+    # SNAP
+    # Contact: Mike Bauer <mbauer@nvidia.com>
+    snap_dir = os.path.join(tmp_dir, 'snap')
+    cmd(['git', 'clone', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
+    # This can't handle flags before application arguments, so place
+    # them after.
+    snap = [[os.path.join(snap_dir, 'src/snap'),
+             [os.path.join(snap_dir, 'input/test.in')] + flags]]
+    run_cxx(snap, [], launcher, root_dir, None, env, thread_count)
 
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
