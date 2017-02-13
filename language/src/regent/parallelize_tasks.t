@@ -1798,9 +1798,14 @@ local function collect_calls(cx, parallelizable)
         end
         continuation(node, true)
       elseif node:is(ast.typed.stat.ParallelizeWith) then
+        local hints_id = data.filter(function(hint)
+          return hint:is(ast.typed.expr.ID) end, node.hints)
         local hints_primary = data.filter(function(hint)
-          return hint:is(ast.typed.expr.ID) end, node.hints):map(function(hint)
+          return std.is_partition(std.as_read(hint.expr_type)) end, hints_id):map(function(hint)
           return std.as_read(hint.expr_type) end)
+        local hints_color_space = data.filter(function(hint)
+          return std.is_ispace(std.as_read(hint.expr_type)) end, hints_id)
+
         local hints_constraint = data.filter(function(hint)
           return hint:is(ast.typed.expr.ParallelizerConstraint) end, node.hints)
         local param = parallel_param.new({
@@ -1808,6 +1813,10 @@ local function collect_calls(cx, parallelizable)
           constraints = hints_constraint,
         })
         cx:push_scope(param)
+        if #hints_color_space > 0 then
+          assert(#hints_color_space == 1, "only one color space should be given")
+          cx:add_color_space(param, hints_color_space[#hints_color_space].value)
+        end
         cx:add_parallel_param_for_hints(node.hints, param)
         for idx = 1, #hints_primary do
           local partition_type = hints_primary[idx]

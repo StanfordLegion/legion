@@ -3458,9 +3458,9 @@ function type_check.stat_parallelize_with(cx, node)
     if expr:is(ast.specialized.expr.ID) then
       local value = type_check.expr_id(cx, expr)
       local value_type = std.check_read(cx, value)
-      if not std.is_partition(value_type) then
+      if not (std.is_partition(value_type) or std.is_ispace(value_type)) then
         report.error(node,
-          "type mismatch in __parallelize_with: expected a partition or constraint on partitions but got " ..
+          "type mismatch in __parallelize_with: expected a partition, index space, or constraint on partitions but got " ..
           tostring(value_type))
       end
       return value
