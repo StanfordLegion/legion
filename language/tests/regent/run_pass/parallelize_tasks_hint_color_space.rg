@@ -14,9 +14,9 @@
 
 -- runs-with:
 -- [
---  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
---   "-fparallelize-dop", "5"],
---  ["-ll:cpu", "4", "-fparallelize-dop", "12"]
+--  ["-ll:cpu", "4"],
+--  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1"],
+--  ["-ll:cpu", "9", "-fflow", "1", "-fflow-spmd", "1"]
 -- ]
 
 import "regent"
@@ -31,44 +31,40 @@ fspace fs
 }
 
 __demand(__parallel)
-task init(r : region(ispace(int3d), fs))
+task init(r : region(ispace(int2d), fs))
 where reads writes(r)
 do
-  for e in r do e.f = 0.3 * (e.x + 1) + 0.3 * (e.y + 1) + 0.4 (e.z + 1) end
+  for e in r do e.f = 0.3 * (e.x + 1) + 0.7 * (e.y + 1) end
   for e in r do e.g = 0 end
   for e in r do e.h = 0 end
 end
 
 __demand(__parallel)
-task stencil(r : region(ispace(int3d), fs))
+task stencil(r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g)
 do
   var ts_start = c.legion_get_current_time_in_micros()
   for e in r do
     e.g = 0.5 * (e.f +
-                 r[(e + { 2,  0,  0}) % r.bounds].f +
-                 r[(e + { 0,  1,  0}) % r.bounds].f +
-                 r[(e + { 1,  2,  0}) % r.bounds].f +
-                 r[(e + { 0, -2, -2}) % r.bounds].f +
-                 r[(e + { 0,  0, -1}) % r.bounds].f +
-                 r[(e + { 0, -1,  0}) % r.bounds].f)
+                 r[(e + {-2, 0}) % r.bounds].f +
+                 r[(e - {1, 1}) % r.bounds].f +
+                 r[(e - {-2, -2}) % r.bounds].f +
+                 r[(e + {1, 0}) % r.bounds].f)
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("parallel version: %lu us\n", ts_end - ts_start)
 end
 
-task stencil_serial(r : region(ispace(int3d), fs))
+task stencil_serial(r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.h)
 do
   var ts_start = c.legion_get_current_time_in_micros()
   for e in r do
     e.h = 0.5 * (e.f +
-                 r[(e + { 2,  0,  0}) % r.bounds].f +
-                 r[(e + { 0,  1,  0}) % r.bounds].f +
-                 r[(e + { 1,  2,  0}) % r.bounds].f +
-                 r[(e + { 0, -2, -2}) % r.bounds].f +
-                 r[(e + { 0,  0, -1}) % r.bounds].f +
-                 r[(e + { 0, -1,  0}) % r.bounds].f)
+                 r[(e + {-2, 0}) % r.bounds].f +
+                 r[(e - {1, 1}) % r.bounds].f +
+                 r[(e - {-2, -2}) % r.bounds].f +
+                 r[(e + {1, 0}) % r.bounds].f)
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("serial version: %lu us\n", ts_end - ts_start)
@@ -76,21 +72,29 @@ end
 
 local cmath = terralib.includec("math.h")
 
-task test(size : int)
+task test(size : int, p : int)
   c.srand48(12345)
-  var is = ispace(int3d, {size, size, size})
+  var is = ispace(int2d, {size, size})
   var primary_region = region(is, fs)
-  init(primary_region)
-  stencil(primary_region)
-  stencil_serial(primary_region)
+  var color_space = ispace(int2d, {p, p})
+  var primary_partition = partition(equal, primary_region, color_space)
+  __parallelize_with primary_partition, color_space
+  do
+    __demand(__spmd)
+    do
+      init(primary_region)
+      stencil(primary_region)
+    end
+    stencil_serial(primary_region)
+  end
   for e in primary_region do
     regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
   end
 end
 
 task toplevel()
-  test(10)
-  test(100)
+  test(100, 2)
+  test(300, 3)
 end
 
 regentlib.start(toplevel)

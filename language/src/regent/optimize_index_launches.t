@@ -55,10 +55,12 @@ function context:is_loop_variable(variable)
   return self.loop_variables[variable]
 end
 
-local function check_privilege_noninterference(cx, task, region_type,
-                                         other_region_type, mapping)
-  local param_region_type = mapping[region_type]
-  local other_param_region_type = mapping[other_region_type]
+local function check_privilege_noninterference(cx, task, arg,
+                                         other_arg, mapping)
+  local region_type = std.as_read(arg.expr_type)
+  local other_region_type = std.as_read(other_arg.expr_type)
+  local param_region_type = mapping[arg]
+  local other_param_region_type = mapping[other_arg]
   assert(param_region_type and other_param_region_type)
 
   local privileges_by_field_path, coherence_modes_by_field_path =
@@ -90,8 +92,10 @@ local function check_privilege_noninterference(cx, task, region_type,
 end
 
 local function analyze_noninterference_previous(
-    cx, task, region_type, regions_previously_used, mapping)
-  for i, other_region_type in pairs(regions_previously_used) do
+    cx, task, arg, regions_previously_used, mapping)
+  local region_type = std.as_read(arg.expr_type)
+  for i, other_arg in pairs(regions_previously_used) do
+    local other_region_type = std.as_read(other_arg.expr_type)
     local constraint = std.constraint(
       region_type,
       other_region_type,
@@ -99,7 +103,7 @@ local function analyze_noninterference_previous(
 
     if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
       not std.check_constraint(cx, constraint) and
-      not check_privilege_noninterference(cx, task, region_type, other_region_type, mapping)
+      not check_privilege_noninterference(cx, task, arg, other_arg, mapping)
     then
       return false, i
     end
@@ -108,12 +112,13 @@ local function analyze_noninterference_previous(
 end
 
 local function analyze_noninterference_self(
-    cx, task, region_type, partition_type, mapping)
+    cx, task, arg, partition_type, mapping)
+  local region_type = std.as_read(arg.expr_type)
   if partition_type and partition_type:is_disjoint() then
     return true
   end
 
-  local param_region_type = mapping[region_type]
+  local param_region_type = mapping[arg]
   assert(param_region_type)
   local privileges, privilege_field_paths, privilege_field_types,
         privilege_coherence_modes, privilege_flags = std.find_task_privileges(
@@ -472,7 +477,10 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     local partition_type
 
     local arg_type = std.as_read(arg.expr_type)
-    mapping[arg_type] = param_types[i]
+    -- XXX: This will break again if arg isn't unique for each argument,
+    --      which can happen when de-duplicating AST nodes.
+    assert(mapping[arg] == nil)
+    mapping[arg] = param_types[i]
     -- Tests for conformance to index launch requirements.
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
       if arg:is(ast.typed.expr.IndexAccess) and
@@ -519,7 +527,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     if std.is_region(arg_type) then
       do
         local passed, failure_i = analyze_noninterference_previous(
-          cx, task, arg_type, regions_previously_used, mapping)
+          cx, task, arg, regions_previously_used, mapping)
         if not passed then
           report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with argument " .. tostring(failure_i))
           return
@@ -528,7 +536,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
       do
         local passed = analyze_noninterference_self(
-          cx, task, arg_type, partition_type, mapping)
+          cx, task, arg, partition_type, mapping)
         if not passed then
           report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with itself")
           return
@@ -541,7 +549,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
     regions_previously_used[i] = nil
     if std.is_region(arg_type) then
-      regions_previously_used[i] = arg_type
+      regions_previously_used[i] = arg
     end
   end
 
