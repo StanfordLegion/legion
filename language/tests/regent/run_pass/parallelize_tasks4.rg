@@ -62,9 +62,9 @@ task init(r : region(ispace(int2d), fs))
 where reads writes(r)
 do
   for e in r do
-    e.f.x = c.drand48()
-    e.f.y = c.drand48()
-    e.g = c.drand48()
+    e.f.x = 0.3 * (e.x + 1) + 0.7 * (e.y + 1)
+    e.f.y = 0.4 * (e.x + 1) + 0.6 * (e.y + 1)
+    e.g = 0.5 * (e.x + 1) + 0.5 * (e.y + 1)
     e.a = 0
     e.b = 0
   end

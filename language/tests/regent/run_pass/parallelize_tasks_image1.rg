@@ -39,7 +39,7 @@ fspace fs2(r : region(ispace(int2d), fs1))
 task init(r1 : region(ispace(int2d), fs1), r2 : region(fs2(r1)), size : int)
 where reads writes(r1, r2)
 do
-  for e in r1 do e.f = c.drand48() end
+  for e in r1 do e.f = 0.3 * (e.x + 1) + 0.7 * (e.y + 1) end
   for e in r2 do
     e.p = unsafe_cast(int2d(fs1, r1), int2d { __raw(e).value / size,
                                               __raw(e).value % size })

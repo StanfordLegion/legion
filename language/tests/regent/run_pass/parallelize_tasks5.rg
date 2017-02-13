@@ -34,7 +34,7 @@ __demand(__parallel)
 task init(r : region(ispace(int2d), fs))
 where reads writes(r)
 do
-  for e in r do e.f = c.drand48() end
+  for e in r do e.f = 0.3 * (e.x + 1) + 0.7 * (e.y + 1) end
   for e in r do e.g = 0 end
   for e in r do e.h = 0 end
 end
