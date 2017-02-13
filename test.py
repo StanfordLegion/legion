@@ -348,6 +348,9 @@ def run_tests(test_modules=None,
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
 
+    if test_perf and debug:
+        raise Exception('Performance tests requested but DEBUG is enabled')
+
     if use_gasnet and launcher is None:
         raise Exception('GASNet is enabled but launcher is not set (use --launcher or LAUNCHER)')
     launcher = launcher.split() if launcher is not None else []
