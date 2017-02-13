@@ -4833,7 +4833,7 @@ namespace Legion {
       // Delete our children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
-        delete it->first;
+        legion_delete(it->first);
       children.clear();
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
