@@ -17439,8 +17439,6 @@ namespace Legion {
           return "Runtime Futures";
         case RUNTIME_REMOTE_ALLOC:
           return "Runtime Remote Contexts";
-        case TASK_INSTANCE_REGION_ALLOC:
-          return "Task Physical Instances";
         case TASK_INLINE_REGION_ALLOC:
           return "Task Inline Regions";
         case TASK_TRACES_ALLOC:
