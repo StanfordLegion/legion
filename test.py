@@ -158,7 +158,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # This can't handle flags before application arguments, so place
     # them after.
     snap = [[os.path.join(snap_dir, 'src/snap'),
-             [os.path.join(snap_dir, 'input/test.in')] + flags]]
+             [os.path.join(snap_dir, 'input/mms.in')] + flags]]
     run_cxx(snap, [], launcher, root_dir, None, env, thread_count)
 
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
