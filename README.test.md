@@ -98,6 +98,44 @@ the test suite is stored in the `test.py` script, the contents of the
 two `.yml` files amount to essentially setting environment variables
 and kicking off the script.
 
+### Gitlab Mirroring
+
+There is one slight wrinkle in the Gitlab CI approach: Gitlab only
+understands how to run CI jobs on repos hosted on its own
+service. Therefore, to run Gitlab CI on a Github repo, that repo must
+first be mirrored onto Gitlab.
+
+Gitlab does provide a mirror feature. However, this only mirrors the
+contents of the remote repo about once an hour. This means that any CI
+jobs would also have an average latency of about half an hour, which
+is unnacceptable.
+
+Instead we do the mirroring ourselves. We accomplish this with an
+extremely simple cronjob that runs every two minutes (so average
+latency is one minute). The following steps describe the process to
+set this up. In normal conditions, it should never be necessary to
+touch this, but if something goes wrong (e.g. Sapling loses a hard
+drive) it might be necessary to do this over.
+
+ 1. Create a new user `gitlab-mirror`:
+
+    sudo adduser --system gitlab-mirror
+    sudo chsh -s /bin/bash gitlab-mirror
+
+ 2. Switch to the user `gitlab-mirror` and initialize the local
+    mirrors:
+
+    ```
+    git clone --mirror https://github.com/StanfordLegion/legion.git legion.git
+    git clone --mirror https://github.com/StanfordLegion/rdir.git rdir.git
+    ```
+
+ 3. Set up the cronjob:
+
+    ```
+    */2 * * * * git -C /home/gitlab-mirror/rdir.git fetch && git -C /home/gitlab-mirror/rdir.git push git@gitlab.com:StanfordLegion/rdir.git --mirror && git -C /home/gitlab-mirror/legion.git fetch && git -C /home/gitlab-mirror/legion.git push git@gitlab.com:StanfordLegion/legion.git --mirror
+    ```
+
 ### Rebuilding the Docker Image
 
 Docker images are also built with scripts to ensure that the results
