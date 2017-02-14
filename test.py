@@ -151,15 +151,15 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     stencil = os.path.join(stencil_dir, 'stencil')
     cmd([stencil, '4', '10', '1000'])
 
-    # # SNAP
-    # # Contact: Mike Bauer <mbauer@nvidia.com>
-    # snap_dir = os.path.join(tmp_dir, 'snap')
-    # cmd(['git', 'clone', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
-    # # This can't handle flags before application arguments, so place
-    # # them after.
-    # snap = [[os.path.join(snap_dir, 'src/snap'),
-    #          [os.path.join(snap_dir, 'input/test.in')] + flags]]
-    # run_cxx(snap, [], launcher, root_dir, None, env, thread_count)
+    # SNAP
+    # Contact: Mike Bauer <mbauer@nvidia.com>
+    snap_dir = os.path.join(tmp_dir, 'snap')
+    cmd(['git', 'clone', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
+    # This can't handle flags before application arguments, so place
+    # them after.
+    snap = [[os.path.join(snap_dir, 'src/snap'),
+             [os.path.join(snap_dir, 'input/test.in')] + flags]]
+    run_cxx(snap, [], launcher, root_dir, None, env, thread_count)
 
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
