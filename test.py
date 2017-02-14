@@ -16,7 +16,22 @@
 #
 
 from __future__ import print_function
-import argparse, datetime, json, multiprocessing, os, shutil, subprocess, sys, traceback, tempfile
+import argparse, datetime, json, multiprocessing, os, platform, shutil, subprocess, sys, traceback, tempfile
+
+# Find physical core count of the machine.
+if platform.system() == 'Linux':
+    lines = subprocess.check_output(['lscpu', '--parse=core'])
+    physical_cores = len(set(line for line in lines.strip().split('\n')
+                             if not line.startswith('#')))
+elif platform.system() == 'Darwin':
+    physical_cores = int(
+        subprocess.check_output(['sysctl', '-n', 'hw.physicalcpu']))
+else:
+    raise Exception('Unknown platform: %s' % platform.system())
+
+# Choose a reasonable number of application cores given the
+# available physical cores.
+app_cores = max(physical_cores - 2, 1)
 
 legion_cxx_tests = [
     # Tutorial
@@ -58,10 +73,12 @@ legion_hdf_cxx_tests = [
 
 legion_cxx_perf_tests = [
     # Circuit: Heavy Compute
-    ['examples/circuit/circuit', '-l 10 -p 2 -npp 2500 -wpp 10000 -ll:cpu 2'.split()],
+    ['examples/circuit/circuit',
+     ['-l', '10', '-p', str(app_cores), '-npp', '2500', '-wpp', '10000', '-ll:cpu', str(app_cores)]],
 
     # Circuit: Light Compute
-    ['examples/circuit/circuit', '-l 10 -p 100 -npp 2 -wpp 4 -ll:cpu 2'.split()],
+    ['examples/circuit/circuit',
+     ['-l', '10', '-p', '100', '-npp', '2', '-wpp', '4', '-ll:cpu', '2']],
 ]
 
 def cmd(command, env=None, cwd=None):
@@ -119,6 +136,9 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
     prk_dir = os.path.join(tmp_dir, 'prk')
     cmd(['git', 'clone', 'https://github.com/magnatelee/PRK.git', prk_dir])
+    # This uses a custom Makefile that requires additional
+    # configuration. Rather than go to that trouble it's easier to
+    # just use a copy of the standard Makefile template.
     stencil_dir = os.path.join(prk_dir, 'LEGION', 'Stencil')
     stencil_env = dict(list(env.items()) + [
         ('OUTFILE', 'stencil'),
@@ -130,6 +150,16 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd(['make', '-f', makefile, '-C', stencil_dir, '-j', str(thread_count)], env=stencil_env)
     stencil = os.path.join(stencil_dir, 'stencil')
     cmd([stencil, '4', '10', '1000'])
+
+    # SNAP
+    # Contact: Mike Bauer <mbauer@nvidia.com>
+    snap_dir = os.path.join(tmp_dir, 'snap')
+    cmd(['git', 'clone', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
+    # This can't handle flags before application arguments, so place
+    # them after.
+    snap = [[os.path.join(snap_dir, 'src/snap'),
+             [os.path.join(snap_dir, 'input/test.in')] + flags]]
+    run_cxx(snap, [], launcher, root_dir, None, env, thread_count)
 
 def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
@@ -235,8 +265,11 @@ def clean_cxx(tests, root_dir, env, thread_count):
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         cmd(['make', '-C', test_dir, 'clean'], env=env)
 
-def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf):
-    if test_legion_cxx or test_perf:
+def build_make_clean(root_dir, env, thread_count, test_legion_cxx, test_perf,
+                     test_external, test_private):
+    # External and private also require cleaning, even though they get
+    # built separately.
+    if test_legion_cxx or test_perf or test_external or test_private:
         clean_cxx(legion_cxx_tests, root_dir, env, thread_count)
 
 def option_enabled(option, options, var_prefix='', default=True):
@@ -332,6 +365,9 @@ def run_tests(test_modules=None,
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
 
+    if test_perf and debug:
+        raise Exception('Performance tests requested but DEBUG is enabled')
+
     if use_gasnet and launcher is None:
         raise Exception('GASNet is enabled but launcher is not set (use --launcher or LAUNCHER)')
     launcher = launcher.split() if launcher is not None else []
@@ -368,7 +404,9 @@ def run_tests(test_modules=None,
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(
-                    root_dir, env, thread_count, test_legion_cxx, test_perf)
+                    root_dir, env, thread_count, test_legion_cxx, test_perf,
+                    # These configurations also need to be cleaned first.
+                    test_external, test_private)
                 bin_dir = None
 
         # Run tests.
