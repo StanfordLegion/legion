@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 17.02.0 (February ??, 2017)
+Version 17.02.0 (February 14, 2017)
   * General
     - Bumped copyright dates
   * Legion
