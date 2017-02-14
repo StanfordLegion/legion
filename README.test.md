@@ -119,8 +119,10 @@ drive) it might be necessary to do this over.
 
  1. Create a new user `gitlab-mirror`:
 
+    ```
     sudo adduser --system gitlab-mirror
     sudo chsh -s /bin/bash gitlab-mirror
+    ```
 
  2. Switch to the user `gitlab-mirror` and initialize the local
     mirrors:
