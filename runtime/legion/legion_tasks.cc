@@ -3695,13 +3695,29 @@ namespace Legion {
       {
         if (!variant->is_leaf() || has_virtual_instances())
         {
-          InnerContext *inner_ctx = new InnerContext(runtime, this, 
-              variant->is_inner(), regions, parent_req_indexes, 
-              virtual_mapped, unique_op_id);
-          if (mapper == NULL)
-            mapper = runtime->find_mapper(current_proc, map_id);
-          inner_ctx->configure_context(mapper);
-          execution_context = inner_ctx;
+          if (is_replicated_task)
+          {
+#ifdef DEBUG_LEGION
+            assert(variant->is_replicable()); // checked by mapper output
+#endif
+            ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
+                variant->is_inner(), regions, parent_req_indexes,
+                virtual_mapped, unique_op_id);
+            if (mapper == NULL)
+              mapper = runtime->find_mapper(current_proc, map_id);
+            repl_ctx->configure_context(mapper);
+            execution_context = repl_ctx;
+          }
+          else
+          {
+            InnerContext *inner_ctx = new InnerContext(runtime, this, 
+                variant->is_inner(), regions, parent_req_indexes, 
+                virtual_mapped, unique_op_id);
+            if (mapper == NULL)
+              mapper = runtime->find_mapper(current_proc, map_id);
+            inner_ctx->configure_context(mapper);
+            execution_context = inner_ctx;
+          }
         }
         else
           execution_context = new LeafContext(runtime, this);

@@ -1157,6 +1157,7 @@ namespace Legion {
       inline bool is_leaf(void) const { return leaf_variant; }
       inline bool is_inner(void) const { return inner_variant; }
       inline bool is_idempotent(void) const { return idempotent_variant; }
+      inline bool is_replicable(void) const { return replicable_variant; }
       inline bool returns_value(void) const { return has_return_value; }
       inline const char* get_name(void) const { return variant_name; }
       inline const ExecutionConstraintSet&

@@ -6674,15 +6674,19 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplicateContext::ReplicateContext(Runtime *rt, UniqueID ctx_uid)
-      : TopLevelContext(rt, ctx_uid)
+    ReplicateContext::ReplicateContext(Runtime *rt, TaskOp *owner, bool full,
+                                   const std::vector<RegionRequirement> &reqs,
+                                   const std::vector<unsigned> &parent_indexes,
+                                   const std::vector<bool> &virt_mapped,
+                                   UniqueID ctx_uid)
+      : InnerContext(rt, owner, full, reqs, parent_indexes, virt_mapped,ctx_uid)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplicateContext::ReplicateContext(const ReplicateContext &rhs)
-      : TopLevelContext(NULL, 0)
+      : InnerContext(*this)
     //--------------------------------------------------------------------------
     {
       // should never be called

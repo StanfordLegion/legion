@@ -1063,14 +1063,16 @@ namespace Legion {
 
     /**
      * \class ReplicateContext
-     * A replicate context is a special kind of top-level context for
+     * A replicate context is a special kind of inner context for
      * executing control-replicated tasks.
-     * TODO: Make this inherit from InnerContext at some point
-     * so that we can do control replication anywhere
      */
-    class ReplicateContext : public TopLevelContext {
+    class ReplicateContext : public InnerContext {
     public:
-      ReplicateContext(Runtime *runtime, UniqueID ctx_uid);
+      ReplicateContext(Runtime *runtime, TaskOp *owner, bool full_inner,
+                       const std::vector<RegionRequirement> &reqs,
+                       const std::vector<unsigned> &parent_indexes,
+                       const std::vector<bool> &virt_mapped,
+                       UniqueID context_uid);
       ReplicateContext(const ReplicateContext &rhs);
       virtual ~ReplicateContext(void);
     public:
