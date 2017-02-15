@@ -81,6 +81,25 @@ legion_cxx_perf_tests = [
      ['-l', '10', '-p', '100', '-npp', '2', '-wpp', '4', '-ll:cpu', '2']],
 ]
 
+regent_perf_tests = [
+    # Circuit: Heavy Compute
+    ['language/examples/circuit_sparse.rg',
+     ['-l', '10', '-p', str(app_cores), '-npp', '2500', '-wpp', '10000', '-ll:cpu', str(app_cores),
+      '-fflow-spmd-shardsize', str(app_cores)]],
+
+    # Circuit: Light Compute
+    ['language/examples/circuit_sparse.rg',
+     ['-l', '10', '-p', '100', '-npp', '2', '-wpp', '4', '-ll:cpu', '2',
+      '-fflow-spmd-shardsize', '2']],
+
+    # PENNANT: Heavy Compute
+    ['language/examples/pennant_fast.rg',
+     ['pennant.tests/sedovbig3x30/sedovbig.pnt',
+      '-seq_init', '0', '-par_init', '1', '-print_ts', '1', '-prune', '5',
+      '-npieces', str(app_cores), '-numpcx', '1', '-numpcy', str(app_cores),
+      '-ll:csize', '8192', '-ll:cpu', str(app_cores), '-fflow-spmd-shardsize', str(app_cores)]],
+]
+
 def cmd(command, env=None, cwd=None):
     print(' '.join(command))
     return subprocess.check_call(command, env=env, cwd=cwd)
@@ -96,6 +115,12 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
         else:
             test_path = os.path.join(root_dir, test_file)
             cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
+        cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
+
+def run_regent(tests, flags, launcher, root_dir, env, thread_count):
+    for test_file, test_flags in tests:
+        test_dir = os.path.dirname(os.path.join(root_dir, test_file))
+        test_path = os.path.join(root_dir, test_file)
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
 def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
@@ -206,7 +231,7 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         'branch': (os.environ['CI_BUILD_REF_NAME'] if 'CI_BUILD_REF_NAME' in os.environ
                    else git_branch_name(root_dir)),
     }
-    measurements = {
+    cxx_measurements = {
         # Hack: Use the command name as the benchmark name.
         'benchmark': {
             'type': 'argv',
@@ -225,18 +250,57 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
             'multiline': True,
         }
     }
+    regent_measurements = {
+        # Hack: Use the command name as the benchmark name.
+        'benchmark': {
+            'type': 'argv',
+            'index': 1,
+            'filter': 'basename',
+        },
+        # Capture command line arguments following flags.
+        'argv': {
+            'type': 'argv',
+            'start': 2,# + len(flags), # FIXME: Skipping flags, see below.
+        },
+        # Record running time in seconds.
+        'time_seconds': {
+            'type': 'command',
+            'args': [
+                os.path.join(root_dir, 'language/scripts/summarize.py'),
+                '--machine-readable', '-',
+            ],
+        }
+    }
     env = dict(list(env.items()) + [
         ('PERF_OWNER', 'StanfordLegion'),
         ('PERF_REPOSITORY', 'perf-data'),
         ('PERF_METADATA', json.dumps(metadata)),
-        ('PERF_MEASUREMENTS', json.dumps(measurements)),
+    ])
+    cxx_env = dict(list(env.items()) + [
+        ('PERF_MEASUREMENTS', json.dumps(cxx_measurements)),
+        # Launch through perf.py
         ('PERF_LAUNCHER', ' '.join(launcher)),
+        ('LAUNCHER', ''),
+    ])
+    regent_env = dict(list(env.items()) + [
+        ('PERF_MEASUREMENTS', json.dumps(regent_measurements)),
+        # Launch through regent.py
+        ('PERF_LAUNCHER', ''),
+        ('LAUNCHER', ' '.join(launcher)),
     ])
 
-    # Run performance tests.
+    # Build Regent first to avoid recompiling later.
+    cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
+
+    # Run Legion C++ performance tests.
     runner = os.path.join(root_dir, 'perf.py')
     launcher = [runner] # Note: LAUNCHER is still passed via the environment
-    run_cxx(legion_cxx_perf_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+    run_cxx(legion_cxx_perf_tests, flags, launcher, root_dir, bin_dir, cxx_env, thread_count)
+
+    # Run Regent performance tests.
+    regent_path = os.path.join(root_dir, 'language/regent.py')
+    # FIXME: PENNANT can't handle the -logfile flag coming first, so just skip it.
+    run_regent(regent_perf_tests, [], [runner, regent_path], root_dir, regent_env, thread_count)
 
     # Render the final charts.
     subprocess.check_call(

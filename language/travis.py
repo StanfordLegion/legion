@@ -15,9 +15,10 @@
 # limitations under the License.
 #
 
-import os, platform, subprocess
+from __future__ import print_function
+import argparse, os, platform, subprocess
 
-def test(root_dir, debug, spy, hdf5, env):
+def test(root_dir, install_only, debug, spy, hdf5, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     debug_flag = ['--debug'] if debug else []
@@ -36,23 +37,31 @@ def test(root_dir, debug, spy, hdf5, env):
         ['time', './install.py', '--rdir=%s' % rdir] + threads + terra + debug_flag,
         env = env,
         cwd = root_dir)
-    if spy:
-        subprocess.check_call(
-            ['time', './test.py', '-q', '--spy'] + threads + inner_flag,
-            env = env,
-            cwd = root_dir)
-    elif hdf5:
-        subprocess.check_call(
-            ['time', './test.py', '-q', '--hdf5'] + threads + inner_flag,
-            env = env,
-            cwd = root_dir)
-    else:
-        subprocess.check_call(
-            ['time', './test.py', '-q'] + threads + debug_flag + inner_flag,
-            env = env,
-            cwd = root_dir)
+    if not install_only:
+        if spy:
+            subprocess.check_call(
+                ['time', './test.py', '-q', '--spy'] + threads + inner_flag,
+                env = env,
+                cwd = root_dir)
+        elif hdf5:
+            subprocess.check_call(
+                ['time', './test.py', '-q', '--hdf5'] + threads + inner_flag,
+                env = env,
+                cwd = root_dir)
+        else:
+            subprocess.check_call(
+                ['time', './test.py', '-q'] + threads + debug_flag + inner_flag,
+                env = env,
+                cwd = root_dir)
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Regent compiler test suite')
+    parser.add_argument('--install-only',
+                        action='store_true',
+                        help='Only install, do not run tests',
+                        dest='install_only')
+    args = parser.parse_args()
+
     root_dir = os.path.realpath(os.path.dirname(__file__))
     legion_dir = os.path.dirname(root_dir)
     runtime_dir = os.path.join(legion_dir, 'runtime')
@@ -66,4 +75,4 @@ if __name__ == '__main__':
     debug = env['DEBUG'] == '1'
     spy = 'TEST_SPY' in env and env['TEST_SPY'] == '1'
     hdf5 = 'TEST_HDF' in env and env['TEST_HDF'] == '1'
-    test(root_dir, debug, spy, hdf5, env)
+    test(root_dir, args.install_only, debug, spy, hdf5, env)

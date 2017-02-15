@@ -64,12 +64,32 @@ class RegexMeasurement(object):
         self.pattern = re.compile(pattern, re.MULTILINE if multiline else None)
     def measure(self, argv, output):
         match = re.search(self.pattern, output)
-        assert match is not None
-        return match.group(1)
+        if match is None:
+            raise Exception('Regex match failed')
+        result = match.group(1).strip()
+        if len(result) == 0:
+            raise Exception('Regex produced empty match')
+        return result
+
+class CommandMeasurement(object):
+    __slots__ = ['args']
+    def __init__(self, args=None):
+        self.args = args
+    def measure(self, argv, output):
+        proc = subprocess.Popen(
+            self.args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        result, _ = proc.communicate(output)
+        if proc.returncode != 0:
+            raise Exception('Command failed')
+        result = result.strip()
+        if len(result) == 0:
+            raise Exception('Command produced no output')
+        return result
 
 measurement_types = {
     'argv': ArgvMeasurement,
     'regex': RegexMeasurement,
+    'command': CommandMeasurement,
 }
 
 def strip_type(type=None, **kwargs):
@@ -129,6 +149,9 @@ def driver():
         'metadata': metadata,
         'measurements': measurement_data,
     }
+
+    print()
+    print('"measurements":', json.dumps(measurement_data, indent=4, sort_keys=True))
 
     # Insert result into target repository.
     repo = get_repository(owner, repository, access_token)
