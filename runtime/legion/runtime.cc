@@ -16512,7 +16512,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(individual_task_lock);
-      release_object(available_individual_tasks, task);
+      release_operation<false>(available_individual_tasks, task);
 #ifdef DEBUG_LEGION
       out_individual_tasks.erase(task);
 #endif
@@ -16530,7 +16530,7 @@ namespace Legion {
       // never registered in the logical state of the region tree
       // as part of the dependence analysis. This does not apply
       // to all operation objects.
-      release_object(available_point_tasks, task);
+      release_operation<true>(available_point_tasks, task);
     }
 
     //--------------------------------------------------------------------------
@@ -16538,7 +16538,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(index_task_lock);
-      release_object(available_index_tasks, task);
+      release_operation<false>(available_index_tasks, task);
 #ifdef DEBUG_LEGION
       out_index_tasks.erase(task);
 #endif
@@ -16556,7 +16556,7 @@ namespace Legion {
       // never registered in the logical state of the region tree
       // as part of the dependence analysis. This does not apply
       // to all operation objects.
-      release_object(available_slice_tasks, task);
+      release_operation<true>(available_slice_tasks, task);
     }
 
     //--------------------------------------------------------------------------
@@ -16564,7 +16564,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(map_op_lock);
-      release_object(available_map_ops, op);
+      release_operation<false>(available_map_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16572,7 +16572,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(copy_op_lock);
-      release_object(available_copy_ops, op);
+      release_operation<false>(available_copy_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16580,7 +16580,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(copy_op_lock);
-      release_object(available_index_copy_ops, op);
+      release_operation<false>(available_index_copy_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16588,7 +16588,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(copy_op_lock);
-      release_object(available_point_copy_ops, op);
+      release_operation<true>(available_point_copy_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16596,7 +16596,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fence_op_lock);
-      release_object(available_fence_ops, op);
+      release_operation<false>(available_fence_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16604,7 +16604,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(frame_op_lock);
-      release_object(available_frame_ops, op);
+      release_operation<false>(available_frame_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16612,7 +16612,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(deletion_op_lock);
-      release_object(available_deletion_ops, op);
+      release_operation<false>(available_deletion_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16620,7 +16620,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(open_op_lock);
-      release_object(available_open_ops, op);
+      release_operation<false>(available_open_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16628,7 +16628,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(advance_op_lock);
-      release_object(available_advance_ops, op);
+      release_operation<false>(available_advance_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16636,7 +16636,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inter_close_op_lock);
-      release_object(available_inter_close_ops, op);
+      release_operation<false>(available_inter_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16660,7 +16660,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(read_close_op_lock);
-      release_object(available_read_close_ops, op);
+      release_operation<false>(available_read_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16668,7 +16668,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(post_close_op_lock);
-      release_object(available_post_close_ops, op);
+      release_operation<false>(available_post_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16676,7 +16676,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(virtual_close_op_lock);
-      release_object(available_virtual_close_ops, op);
+      release_operation<false>(available_virtual_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16684,7 +16684,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock dc_lock(dynamic_collective_op_lock);
-      release_object(available_dynamic_collective_ops, op);
+      release_operation<false>(available_dynamic_collective_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16692,7 +16692,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_pred_op_lock);
-      release_object(available_future_pred_ops, op);
+      release_operation<false>(available_future_pred_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16700,7 +16700,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(not_pred_op_lock);
-      release_object(available_not_pred_ops, op);
+      release_operation<false>(available_not_pred_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16708,7 +16708,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(and_pred_op_lock);
-      release_object(available_and_pred_ops, op);
+      release_operation<false>(available_and_pred_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16716,7 +16716,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(or_pred_op_lock);
-      release_object(available_or_pred_ops, op);
+      release_operation<false>(available_or_pred_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16724,7 +16724,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(acquire_op_lock);
-      release_object(available_acquire_ops, op);
+      release_operation<false>(available_acquire_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16732,7 +16732,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(release_op_lock);
-      release_object(available_release_ops, op);
+      release_operation<false>(available_release_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16740,7 +16740,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(capture_op_lock);
-      release_object(available_capture_ops, op);
+      release_operation<false>(available_capture_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16748,7 +16748,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_op_lock);
-      release_object(available_trace_ops, op);
+      release_operation<false>(available_trace_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16756,7 +16756,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock e_lock(epoch_op_lock);
-      release_object(available_epoch_ops, op);
+      release_operation<false>(available_epoch_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16764,7 +16764,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(pending_partition_op_lock);
-      release_object(available_pending_partition_ops, op);
+      release_operation<false>(available_pending_partition_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16772,7 +16772,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(dependent_partition_op_lock);
-      release_object(available_dependent_partition_ops, op);
+      release_operation<false>(available_dependent_partition_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16780,7 +16780,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fill_op_lock);
-      release_object(available_fill_ops, op);
+      release_operation<false>(available_fill_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16788,7 +16788,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fill_op_lock);
-      release_object(available_index_fill_ops, op);
+      release_operation<false>(available_index_fill_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16796,7 +16796,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fill_op_lock);
-      release_object(available_point_fill_ops, op);
+      release_operation<true>(available_point_fill_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16804,7 +16804,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(attach_op_lock);
-      release_object(available_attach_ops, op);
+      release_operation<false>(available_attach_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16812,7 +16812,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(detach_op_lock);
-      release_object(available_detach_ops, op);
+      release_operation<false>(available_detach_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16820,7 +16820,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(timing_op_lock);
-      release_object(available_timing_ops, op);
+      release_operation<false>(available_timing_ops, op);
     }
 
     //--------------------------------------------------------------------------
