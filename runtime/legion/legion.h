@@ -1685,6 +1685,7 @@ namespace Legion {
       inline void set_leaf(bool is_leaf = true);
       inline void set_inner(bool is_inner = true);
       inline void set_idempotent(bool is_idempotent = true);
+      inline void set_replicable(bool is_replicable = true);
     public:
       TaskID                            task_id;
       GeneratorContext                  generator;
@@ -1697,6 +1698,7 @@ namespace Legion {
       bool                              leaf_variant;
       bool                              inner_variant;
       bool                              idempotent_variant;
+      bool                              replicable_variant;
     };
 
     //==========================================================================
@@ -5176,6 +5178,9 @@ namespace Legion {
        * -lg:disjointness Verify the specified disjointness of 
        *              partitioning operations.  The runtime must be
        *              compiled with the DEBUG_LEGION macro defined.
+       * -lg:disable_top_level_control_replication Disable the runtime
+       *              control replication of the top-level task for
+       *              multi-node runs
        * -lg:separate Indicate that separate instances of the high
        *              level runtime should be made for each processor.
        *              The default is one runtime instance per node.

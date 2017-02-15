@@ -1199,6 +1199,7 @@ namespace Legion {
       bool leaf_variant;
       bool inner_variant;
       bool idempotent_variant;
+      bool replicable_variant;
     private:
       char *variant_name; 
     };
@@ -2878,6 +2879,7 @@ namespace Legion {
       static bool runtime_backgrounded;
       static bool runtime_warnings;
       static bool separate_runtime_instances;
+      static bool top_level_control_replication;
       static bool record_registration;
       static bool stealing_disabled;
       static bool resilient_mode;

@@ -7026,7 +7026,8 @@ namespace Legion {
         layout_constraints(registrar.layout_constraints),
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
-        idempotent_variant(registrar.idempotent_variant)
+        idempotent_variant(registrar.idempotent_variant),
+        replicable_variant(registrar.replicable_variant)
     //--------------------------------------------------------------------------
     { 
 #ifdef LEGION_SPY
@@ -7243,6 +7244,7 @@ namespace Legion {
         rez.serialize(leaf_variant);
         rez.serialize(inner_variant);
         rez.serialize(idempotent_variant);
+        rez.serialize(replicable_variant);
         size_t name_size = strlen(variant_name)+1;
         rez.serialize(variant_name, name_size);
         // Pack the constraints
@@ -7370,6 +7372,7 @@ namespace Legion {
       derez.deserialize(registrar.leaf_variant);
       derez.deserialize(registrar.inner_variant);
       derez.deserialize(registrar.idempotent_variant);
+      derez.deserialize(registrar.replicable_variant);
       // The last thing will be the name
       registrar.task_variant_name = (const char*)derez.get_current_pointer();
       size_t name_size = strlen(registrar.task_variant_name)+1;
@@ -8926,18 +8929,28 @@ namespace Legion {
     void Runtime::launch_top_level_task(Processor target)
     //--------------------------------------------------------------------------
     {
-      // Get an individual task to be the top-level task
-      IndividualTask *top_task = get_available_individual_task(false);
-      // Get a remote task to serve as the top of the top-level task
+      const bool control_replication = 
+        top_level_control_replication && (total_address_spaces > 1);
+      // Make a top-level context for our our, give them all the same ID
+      // if we're doing control replication
       TopLevelContext *top_context = 
-        new TopLevelContext(this, get_unique_operation_id());
+        new TopLevelContext(this, control_replication && (address_space > 0) ? 
+                                                1 : get_unique_operation_id());
+#ifdef DEBUG_LEGION
+      assert(top_context->get_unique_id() == 1); // should all be one
+#endif
       // Add a reference to the top level context
       top_context->add_reference();
       // Set the executing processor
       top_context->set_executing_processor(target);
+      // Get an individual task to be the top-level task
+      IndividualTask *top_task = get_available_individual_task(false);
       TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
       // Mark that this task is the top-level task
       top_task->set_top_level();
+      // If we're doing control replication mark it as such
+      if (control_replication)
+        top_task->mark_replicated(2/*unique ID*/);
       top_task->initialize_task(top_context, launcher, 
                                 false/*check priv*/, false/*track parent*/);
       // Set up the input arguments
@@ -18016,6 +18029,7 @@ namespace Legion {
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ bool Runtime::runtime_warnings = false;
     /*static*/ bool Runtime::separate_runtime_instances = false;
+    /*static*/ bool Runtime::top_level_control_replication = true;
     /*static*/ bool Runtime::record_registration = false;
     /*sattic*/ bool Runtime::stealing_disabled = false;
     /*static*/ bool Runtime::resilient_mode = false;
@@ -18112,6 +18126,7 @@ namespace Legion {
         mpi_rank_table = NULL;
         runtime_warnings = false;
         separate_runtime_instances = false;
+        top_level_control_replication = true;
         record_registration = false;
         stealing_disabled = false;
         resilient_mode = false;
@@ -18160,6 +18175,8 @@ namespace Legion {
         {
           BOOL_ARG("-lg:warn",runtime_warnings);
           BOOL_ARG("-lg:separate",separate_runtime_instances);
+          if (!strcmp(argv[i],"-lg:disable_top_level_control_replication"))
+            top_level_control_replication = false;
           BOOL_ARG("-lg:registration",record_registration);
           BOOL_ARG("-lg:nosteal",stealing_disabled);
           BOOL_ARG("-lg:resilient",resilient_mode);
@@ -18280,7 +18297,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (num_profiling_nodes > 0)
       {
-        // Give a massive warning about profiling with Legion Spy enabled
+        // Give a massive warning about profiling with debug enabled
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         for (int i = 0; i < 4; i++)
@@ -18354,7 +18371,7 @@ namespace Legion {
 #ifdef BOUNDS_CHECKS
       if (num_profiling_nodes > 0)
       {
-        // Give a massive warning about profiling with Legion Spy enabled
+        // Give a massive warning about profiling with bounds checks enabled
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         for (int i = 0; i < 4; i++)
@@ -18379,7 +18396,7 @@ namespace Legion {
 #ifdef PRIVILEGE_CHECKS
       if (num_profiling_nodes > 0)
       {
-        // Give a massive warning about profiling with Legion Spy enabled
+        // Give a massive warning about profiling with privilege checks enabled
         for (int i = 0; i < 2; i++)
           fprintf(stderr,"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
         for (int i = 0; i < 4; i++)
@@ -18449,7 +18466,7 @@ namespace Legion {
         }
       }
       // Check for exceeding the local number of processors
-      // and also see if we are supposed to launch the top-level task
+      // and get a top-level processor if we need one
       Processor top_level_proc = Processor::NO_PROC;
       {
         Machine::ProcessorQuery local_procs(machine);
@@ -18465,22 +18482,19 @@ namespace Legion {
 #endif
           exit(ERROR_MAXIMUM_PROCS_EXCEEDED);
         }
-        AddressSpace local_space = local_procs.begin()->address_space();
-        // If we are node 0 then we have to launch the top-level task
-        if (local_space == 0)
+        // Either we are multi-node and we're doing control
+        // replication or we are single node so we need a top processor
+        local_procs.only_kind(Processor::LOC_PROC);
+        // If we don't have one that is very bad
+        if (local_procs.count() == 0)
         {
-          local_procs.only_kind(Processor::LOC_PROC);
-          // If we don't have one that is very bad
-          if (local_procs.count() == 0)
-          {
-            log_run.error("Machine model contains no CPU processors!");
+          log_run.error("Machine model contains no CPU processors!");
 #ifdef DEBUG_LEGION
-            assert(false);
+          assert(false);
 #endif
-            exit(ERROR_NO_PROCESSORS);
-          }
-          top_level_proc = local_procs.first();
+          exit(ERROR_NO_PROCESSORS);
         }
+        top_level_proc = local_procs.first();
       }
       // Now perform a collective spawn to initialize the runtime everywhere
       // Save the precondition in case we are the node that needs to start
@@ -18516,13 +18530,21 @@ namespace Legion {
 	  RtEvent mpi_sync_event(realm.collective_spawn_by_kind(
                 Processor::LOC_PROC, LG_MPI_SYNC_ID, NULL, 0,
                 true/*one per node*/, runtime_startup_event));
-	  // The mpi init event then becomes the new runtime startup event
+	  // The mpi sync event then becomes the new runtime startup event
 	  runtime_startup_event = mpi_sync_event;
         }
       } 
-      // See if we are supposed to start the top-level task
-      if (top_level_proc.exists())
+      // Now launch the top-level task either in a control replication 
+      // style for mulit-node or normal mode for single node
+      if (top_level_control_replication)
       {
+        realm.collective_spawn_by_kind(
+            Processor::LOC_PROC, LG_LAUNCH_TOP_LEVEL_ID, NULL, 0,
+            !separate_runtime_instances, runtime_startup_event);
+      }
+      else if (top_level_proc.address_space() == 0)
+      {
+        // If this is address space 0 then we launch the top-level task
         Realm::ProfilingRequestSet empty_requests;
         top_level_proc.spawn(LG_LAUNCH_TOP_LEVEL_ID, NULL, 0,
                              empty_requests, runtime_startup_event);

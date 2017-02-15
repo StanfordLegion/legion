@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-
 #include "region_tree.h"
 #include "legion_tasks.h"
 #include "legion_spy.h"
@@ -2301,6 +2300,7 @@ namespace Legion {
       inner_cached = false;
       has_virtual_instances_result = false;
       has_virtual_instances_cached = false;
+      is_replicated_task = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2347,6 +2347,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool SingleTask::is_replicated(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_replicated_task;
+    }
+
+    //--------------------------------------------------------------------------
     bool SingleTask::has_virtual_instances(void) const
     //--------------------------------------------------------------------------
     {
@@ -2381,6 +2388,17 @@ namespace Legion {
         no_access_regions[idx] = IS_NO_ACCESS(regions[idx]) || 
                                   regions[idx].privilege_fields.empty();
     } 
+
+    //--------------------------------------------------------------------------
+    void SingleTask::mark_replicated(UniqueID common_uid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_replicated_task);
+#endif
+      unique_op_id = common_uid;
+      is_replicated_task = true;
+    }
 
     //--------------------------------------------------------------------------
     void SingleTask::pack_single_task(Serializer &rez, AddressSpaceID target)

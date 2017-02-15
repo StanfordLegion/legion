@@ -1065,6 +1065,8 @@ namespace Legion {
      * \class ReplicateContext
      * A replicate context is a special kind of top-level context for
      * executing control-replicated tasks.
+     * TODO: Make this inherit from InnerContext at some point
+     * so that we can do control replication anywhere
      */
     class ReplicateContext : public TopLevelContext {
     public:
@@ -1240,7 +1242,8 @@ namespace Legion {
       virtual void detach_resource(PhysicalRegion region);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
     public:
-      virtual unsigned register_new_child_operation(Operation *op);
+      virtual unsigned register_new_child_operation(Operation *op,
+                            const std::vector<StaticDependence> *dependences);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
