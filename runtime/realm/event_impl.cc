@@ -1235,7 +1235,7 @@ namespace Realm {
 	assert(num_poisoned_generations <= new_poisoned_count);
 	if(num_poisoned_generations > 0)
 	  assert(memcmp(poisoned_generations, new_poisoned_generations, 
-			new_poisoned_count * sizeof(gen_t)) == 0);
+			num_poisoned_generations * sizeof(gen_t)) == 0);
       } else {
 	// we shouldn't have any local ones either
 	assert(num_poisoned_generations == 0);

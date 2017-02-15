@@ -189,7 +189,41 @@ namespace Legion {
       meta_infos.push_back(MetaInfo());
       MetaInfo &info = meta_infos.back();
       info.op_id = op_id;
-      info.hlr_id = id;
+      info.lg_id = id;
+      info.proc = usage->proc;
+      info.create = timeline->create_time;
+      info.ready = timeline->ready_time;
+      info.start = timeline->start_time;
+      // use complete_time instead of end_time to include async work
+      info.stop = timeline->complete_time;
+      unsigned num_intervals = waits->intervals.size();
+      if (num_intervals > 0)
+      {
+        for (unsigned idx = 0; idx < num_intervals; ++idx)
+        {
+          info.wait_intervals.push_back(WaitInfo());
+          WaitInfo& wait_info = info.wait_intervals.back();
+          wait_info.wait_start = waits->intervals[idx].wait_start;
+          wait_info.wait_ready = waits->intervals[idx].wait_ready;
+          wait_info.wait_end = waits->intervals[idx].wait_end;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::process_message(
+                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
+                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
+                  Realm::ProfilingMeasurements::OperationEventWaits *waits)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(timeline->is_valid());
+#endif
+      meta_infos.push_back(MetaInfo());
+      MetaInfo &info = meta_infos.back();
+      info.op_id = 0;
+      info.lg_id = LG_MESSAGE_ID;
       info.proc = usage->proc;
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
@@ -399,13 +433,13 @@ namespace Legion {
             it != meta_infos.end(); it++)
       {
         log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
-		       it->op_id, it->hlr_id, it->proc.id,
+		       it->op_id, it->lg_id, it->proc.id,
 		       it->create, it->ready, it->start, it->stop);
         for (std::deque<WaitInfo>::const_iterator wit =
              it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
         {
           log_prof.print("Prof Meta Wait Info %llu %u %llu %llu %llu",
-                       it->op_id, it->hlr_id, wit->wait_start, wit->wait_ready,
+                       it->op_id, it->lg_id, wit->wait_start, wit->wait_ready,
                        wit->wait_end);
         }
       }
@@ -641,6 +675,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void LegionProfiler::add_message_request(
+                  Realm::ProfilingRequestSet &requests, Processor remote_target)
+    //--------------------------------------------------------------------------
+    {
+      // Don't increment here, we'll increment on the remote side since we
+      // that is where we know the profiler is going to handle the results
+      ProfilingInfo info(LEGION_PROF_MESSAGE);
+      Realm::ProfilingRequest &req = requests.add_request(remote_target,
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationProcessorUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationEventWaits>();
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
                                           Operation *op)
     //--------------------------------------------------------------------------
@@ -859,6 +911,33 @@ namespace Legion {
             if (usage != NULL)
               thread_local_profiling_instance->process_meta(info->id, 
                   info->op_id, timeline, usage, waits);
+            if (timeline != NULL)
+              delete timeline;
+            if (usage != NULL)
+              delete usage;
+            decrement_total_outstanding_requests();
+            break;
+          }
+        case LEGION_PROF_MESSAGE:
+          {
+#ifdef DEBUG_LEGION
+            assert(response.has_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>());
+            assert(response.has_measurement<
+                Realm::ProfilingMeasurements::OperationProcessorUsage>());
+#endif
+            Realm::ProfilingMeasurements::OperationTimeline *timeline = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>();
+            Realm::ProfilingMeasurements::OperationProcessorUsage *usage = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationProcessorUsage>();
+            Realm::ProfilingMeasurements::OperationEventWaits *waits = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationEventWaits>();
+            if (usage != NULL)
+              thread_local_profiling_instance->process_message(timeline, 
+                  usage, waits);
             if (timeline != NULL)
               delete timeline;
             if (usage != NULL)

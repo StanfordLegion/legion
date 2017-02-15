@@ -19,6 +19,7 @@
 #include "legion_tasks.h"
 #include "region_tree.h"
 #include "legion_spy.h"
+#include "legion_trace.h"
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
@@ -1933,6 +1934,26 @@ namespace Legion {
           restrictions.erase(*it);
           delete (*it);
         }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // TraceInfo 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TraceInfo::TraceInfo(bool already_tr, LegionTrace *tr, unsigned idx,
+                         const RegionRequirement &r)
+      : already_traced(already_tr), trace(tr), req_idx(idx), req(r)
+    //--------------------------------------------------------------------------
+    {
+      // If we have a trace but it doesn't handle the region tree then
+      // we should mark that this is not part of a trace
+      if ((trace != NULL) && 
+          !trace->handles_region_tree(req.parent.get_tree_id()))
+      {
+        already_traced = false;
+        trace = NULL;
       }
     }
 
@@ -4043,8 +4064,6 @@ namespace Legion {
         FieldMask overlap = it->second & close_mask;
         if (!overlap)
           continue;
-        // Record this version state as a top version state
-        composite_view->record_top_version_state(it->first);
         it->first->capture_root(composite_view, overlap);
       }
       // Finally record any valid above views
@@ -4341,22 +4360,7 @@ namespace Legion {
         owner_space = context->get_version_owner(node, local_space);
         is_owner = (owner_space == local_space);
         current_context = context;
-      }
-      // See if we are the owner
-      if (!is_owner)
-      {
-        FieldMask request_mask = version_mask - remote_valid_fields;
-        if (!!request_mask)
-        {
-          RtEvent wait_on = send_remote_version_request(request_mask,
-                                                        ready_events);
-          wait_on.wait();
-#ifdef DEBUG_LEGION
-          // When we wake up everything should be good
-          assert(!(version_mask - remote_valid_fields));
-#endif
-        }
-      }
+      } 
       // We'll only track unversioned in the reading cases
       FieldMask unversioned;
       // Now we can record our versions
@@ -4370,6 +4374,27 @@ namespace Legion {
 #endif
         // At first we only need the lock in read-only mode
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        // See if we are the owner
+        if (!is_owner)
+        {
+          FieldMask request_mask = version_mask - remote_valid_fields;
+          if (!!request_mask)
+          {
+            // Release the lock before sending the message
+            Runtime::release_reservation(manager_lock);
+            RtEvent wait_on = send_remote_version_request(request_mask,
+                                                          ready_events);
+            // Only retake the reservation, when we are ready
+            RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
+                            manager_lock, false/*exclusive*/, wait_on);
+            // Might as well wait since we just sent a message
+            lock_reacquired.wait();
+#ifdef DEBUG_LEGION
+            // When we wake up everything should be good
+            assert(!(version_mask - remote_valid_fields));
+#endif
+          }
+        }
 #ifdef DEBUG_LEGION
         sanity_check();
 #endif
@@ -4409,6 +4434,27 @@ namespace Legion {
         unversioned = version_mask;
         // At first we only need the lock in read-only mode
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        // See if we are the owner
+        if (!is_owner)
+        {
+          FieldMask request_mask = version_mask - remote_valid_fields;
+          if (!!request_mask)
+          {
+            // Release the lock before sending the message
+            Runtime::release_reservation(manager_lock);
+            RtEvent wait_on = send_remote_version_request(request_mask,
+                                                          ready_events);
+            // Only retake the reservation, when we are ready
+            RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
+                            manager_lock, false/*exclusive*/, wait_on);
+            // Might as well wait since we just sent a message
+            lock_reacquired.wait();
+#ifdef DEBUG_LEGION
+            // When we wake up everything should be good
+            assert(!(version_mask - remote_valid_fields));
+#endif
+          }
+        }
 #ifdef DEBUG_LEGION
         sanity_check();
 #endif
@@ -4508,22 +4554,28 @@ namespace Legion {
         is_owner = (owner_space == local_space);
         current_context = context;
       }
+      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
       // See if we are the owner
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
         if (!!request_mask)
         {
+          // Release the lock before sending the message
+          Runtime::release_reservation(manager_lock);
           RtEvent wait_on = send_remote_version_request(request_mask,
                                                         ready_events);
-          wait_on.wait();
+          // Retake the lock only once we're ready to
+          RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
+                          manager_lock, false/*exclusive*/, wait_on);
+          // Might as well wait since we're sending a remote message
+          lock_reacquired.wait();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
 #endif
         }
       }
-      AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
       for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
             vit = current_version_infos.begin(); vit != 
             current_version_infos.end(); vit++)
@@ -4561,22 +4613,28 @@ namespace Legion {
         is_owner = (owner_space == local_space);
         current_context = context;
       }
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
       // See if we are the owner
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
         if (!!request_mask)
         {
+          // Release the lock before sending the message
+          Runtime::release_reservation(manager_lock);
           RtEvent wait_on = send_remote_version_request(request_mask,
                                                         ready_events); 
-          wait_on.wait();
+          // Retake the lock only once we're ready to
+          RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
+                          manager_lock, false/*exclusive*/, wait_on);
+          // Might as well wait since we're sending a remote message
+          lock_reacquired.wait();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
 #endif
         }
       }
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
       // See if we've done any previous advances for this projection epoch
       for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator it =
             advance_epochs.begin(); it != advance_epochs.end(); it++)
@@ -4614,25 +4672,31 @@ namespace Legion {
         is_owner = (owner_space == local_space);
         current_context = context;
       }
+      // We aren't mutating our data structures, so we just need 
+      // the manager lock in read only mode
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
       // See if we are the owner
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
         if (!!request_mask)
         {
+          // Release the lock before sending the message
+          Runtime::release_reservation(manager_lock);
           RtEvent wait_on = send_remote_version_request(request_mask,
                                                         ready_events); 
-          wait_on.wait();
+          // Retake the lock only once we're ready to
+          RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
+                          manager_lock, false/*exclusive*/, wait_on);
+          // Might as well wait since we're sending a remote message
+          lock_reacquired.wait();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
 #endif
         }
       }
-      FieldMask unversioned = version_mask;
-      // We aren't mutating our data structures, so we just need 
-      // the manager lock in read only mode
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+      FieldMask unversioned = version_mask; 
 #ifdef DEBUG_LEGION
       sanity_check();
 #endif
@@ -5326,6 +5390,9 @@ namespace Legion {
         is_owner = (owner_space == local_space);
         current_context = context;
       }
+      // Only need to hold the lock in read-only mode since we're not
+      // going to be updating any of these local data structures
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
       // If we are not the owner, see if we need to issue any requests
       if (!is_owner)
       {
@@ -5333,18 +5400,21 @@ namespace Legion {
           new_states.get_valid_mask() - remote_valid_fields;
         if (!!request_mask)
         {
+          // Release the lock before sending the message
+          Runtime::release_reservation(manager_lock);
           RtEvent wait_on = send_remote_version_request(
               new_states.get_valid_mask(), applied_events);
-          wait_on.wait();
+          // Retake the lock only once we're ready to
+          RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
+                          manager_lock, false/*exclusive*/, wait_on);
+          // Might as well wait since we're sending a remote message
+          lock_reacquired.wait();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(new_states.get_valid_mask() - remote_valid_fields));
 #endif
         }
       }
-      // Only need to hold the lock in read-only mode since we're not
-      // going to be updating any of these local data structures
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
       for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit = 
             current_version_infos.begin(); vit != 
             current_version_infos.end(); vit++)
@@ -5844,7 +5914,6 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       unpack_send_infos(derez, current_update, runtime, preconditions);
       unpack_send_infos(derez, previous_update, runtime, preconditions);
-      WrapperReferenceMutator mutator(*applied_events);
       // If we have any preconditions here we must wait
       if (!preconditions.empty())
       {
@@ -5854,8 +5923,8 @@ namespace Legion {
       // Take our lock and apply our updates
       {
         AutoLock m_lock(manager_lock);
-        merge_send_infos(current_version_infos, current_update, &mutator);
-        merge_send_infos(previous_version_infos, previous_update, &mutator);
+        merge_send_infos(current_version_infos, current_update);
+        merge_send_infos(previous_version_infos, previous_update);
         // Update the remote valid fields
         remote_valid_fields |= update_mask;
         // Remove our outstanding request
@@ -5894,8 +5963,7 @@ namespace Legion {
     /*static*/ void VersionManager::merge_send_infos(
         LegionMap<VersionID,
                   VersioningSet<VERSION_MANAGER_REF> >::aligned& target_infos,
-        const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
-        ReferenceMutator *mutator)
+        const LegionMap<VersionState*,FieldMask>::aligned &source_infos)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator

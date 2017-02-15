@@ -36,6 +36,8 @@ ifdef GASNET_ROOT
 GASNET ?= $(GASNET_ROOT)
 endif
 
+# For backwards compatibility
+SHARED_LOWLEVEL ?= 0
 # generate libraries for Legion and Realm
 SLIB_LEGION     := liblegion.a
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
@@ -323,9 +325,6 @@ CC_FLAGS        += -Wall -Wno-strict-overflow
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 endif
-
-# fix for some systems that need this for printf formatting macros
-CC_FLAGS	+= -D__STDC_FORMAT_MACROS
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 

@@ -89,7 +89,7 @@ namespace Legion {
       resolved_event = Runtime::create_rt_user_event();
       completion_event = Runtime::create_ap_user_event();
       if (Runtime::resilient_mode)
-        commit_event = Runtime::create_rt_user_event();
+        commit_event = Runtime::create_rt_user_event(); 
       trace = NULL;
       tracing = false;
       must_epoch = NULL;
@@ -119,6 +119,8 @@ namespace Legion {
         delete dependence_tracker.commit;
         dependence_tracker.commit = NULL;
       }
+      if ((trace != NULL) && (trace->remove_reference()))
+        LegionTrace::delete_trace(trace);
       if (!mapped_event.has_triggered())
         Runtime::trigger_event(mapped_event);
       if (!resolved_event.has_triggered())
@@ -200,7 +202,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_trace(LegionTrace *t, bool is_tracing)
+    void Operation::set_trace(LegionTrace *t, bool is_tracing,
+                              const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -208,7 +211,9 @@ namespace Legion {
       assert(t != NULL);
 #endif
       trace = t; 
+      trace->add_reference();
       tracing = is_tracing;
+      trace->record_static_dependences(this, dependences);
     }
 
     //--------------------------------------------------------------------------
@@ -255,7 +260,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::initialize_operation(TaskContext *ctx, bool track, 
-                                         unsigned regs/*= 0*/)
+                                         unsigned regs/*= 0*/,
+                      const std::vector<StaticDependence> *dependences/*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -265,7 +271,8 @@ namespace Legion {
       parent_ctx = ctx;
       track_parent = track;
       if (track_parent)
-        context_index = parent_ctx->register_new_child_operation(this);
+        context_index = 
+          parent_ctx->register_new_child_operation(this, dependences);
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
     }
@@ -1808,8 +1815,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SpeculativeOp::initialize_speculation(TaskContext *ctx, bool track,
-                                               unsigned regions,
-                                               const Predicate &p)
+        unsigned regions, const std::vector<StaticDependence> *dependences,
+        const Predicate &p)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, track, regions);
@@ -2022,6 +2029,8 @@ namespace Legion {
         resolve_true(speculated, false/*launched*/);
       else if (continue_false)
       {
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_predicated_false_op(unique_op_id);
         // Can remove our predicate reference since we don't need it anymore
         predicate->remove_predicate_reference();
         // Still need a commit tracker here
@@ -2123,7 +2132,11 @@ namespace Legion {
       if (continue_true)
         resolve_true(true/*speculated*/, true/*launched*/);
       else if (continue_false)
+      {
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_predicated_false_op(unique_op_id);
         resolve_false(true/*speculated*/, true/*launched*/);
+      }
       if (need_resolve)
         resolve_speculation();
     }
@@ -2170,7 +2183,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/, 
+                           launcher.static_dependences);
       if (launcher.requirement.privilege_fields.empty())
       {
         log_task.warning("WARNING: REGION REQUIREMENT OF INLINE MAPPING "
@@ -2200,7 +2214,7 @@ namespace Legion {
     void MapOp::initialize(TaskContext *ctx, const PhysicalRegion &reg)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/);
       parent_task = ctx->get_task();
       requirement = reg.impl->get_requirement();
       map_id = reg.impl->map_id;
@@ -3097,6 +3111,7 @@ namespace Legion {
       : Copy(), SpeculativeOp(rt)
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = false;
     }
 
     //--------------------------------------------------------------------------
@@ -3132,6 +3147,7 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/, 
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
+                             launcher.static_dependences,
                              launcher.predicate);
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
@@ -3190,6 +3206,7 @@ namespace Legion {
 #endif
       map_id = launcher.map_id;
       tag = launcher.tag;
+      index_point = launcher.point;
       if (check_privileges)
       {
         if (src_requirements.size() != dst_requirements.size())
@@ -3407,6 +3424,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CopyOp::log_copy_requirements(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = src_requirements[idx];
+        LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+                                           req.region.index_space.id,
+                                           req.region.field_space.id,
+                                           req.region.tree_id,
+                                           req.privilege,
+                                           req.prop, req.redop,
+                                           req.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, idx, 
+                                          req.instance_fields);
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = dst_requirements[idx];
+        LegionSpy::log_logical_requirement(unique_op_id, 
+                                           src_requirements.size()+idx, 
+                                           true/*region*/,
+                                           req.region.index_space.id,
+                                           req.region.field_space.id,
+                                           req.region.tree_id,
+                                           req.privilege,
+                                           req.prop, req.redop,
+                                           req.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 
+                                          src_requirements.size()+idx, 
+                                          req.instance_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void CopyOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
@@ -3427,37 +3479,7 @@ namespace Legion {
                                   dst_requirements[idx]);
       }
       if (Runtime::legion_spy_enabled)
-      { 
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = src_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
-                                             req.region.index_space.id,
-                                             req.region.field_space.id,
-                                             req.region.tree_id,
-                                             req.privilege,
-                                             req.prop, req.redop,
-                                             req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, idx, 
-                                            req.instance_fields);
-        }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = dst_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, 
-                                             src_requirements.size()+idx, 
-                                             true/*region*/,
-                                             req.region.index_space.id,
-                                             req.region.field_space.id,
-                                             req.region.tree_id,
-                                             req.privilege,
-                                             req.prop, req.redop,
-                                             req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, 
-                                            src_requirements.size()+idx, 
-                                            req.instance_fields);
-        }
-      }
+        log_copy_requirements();
     }
 
     //--------------------------------------------------------------------------
@@ -4480,6 +4502,7 @@ namespace Legion {
       : CopyOp(rt)
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = true;
     }
 
     //--------------------------------------------------------------------------
@@ -4516,8 +4539,9 @@ namespace Legion {
       initialize_speculation(ctx, true/*track*/, 
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
+                             launcher.static_dependences,
                              launcher.predicate);
-      point_domain = launcher.domain;
+      index_domain = launcher.domain;
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
@@ -4672,25 +4696,25 @@ namespace Legion {
       {
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
-        switch (point_domain.get_dim())
+        switch (index_domain.get_dim())
         {
           case 1:
             {
-	      LegionRuntime::Arrays::Rect<1> rect = point_domain.get_rect<1>();
+	      LegionRuntime::Arrays::Rect<1> rect = index_domain.get_rect<1>();
               LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 2:
             {
-              LegionRuntime::Arrays::Rect<2> rect = point_domain.get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> rect = index_domain.get_rect<2>();
               LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 3:
             {
-              LegionRuntime::Arrays::Rect<3> rect = point_domain.get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> rect = index_domain.get_rect<3>();
               LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
@@ -4706,7 +4730,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_copy();
-      point_domain = Domain::NO_DOMAIN;
+      index_domain = Domain::NO_DOMAIN;
       points_committed = 0;
       commit_request = false;
     }
@@ -4809,7 +4833,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         src_projection_infos[idx] = 
-          ProjectionInfo(runtime, src_requirements[idx], point_domain);
+          ProjectionInfo(runtime, src_requirements[idx], index_domain);
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_restrict_infos[idx],
@@ -4821,7 +4845,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         dst_projection_infos[idx] = 
-          ProjectionInfo(runtime, dst_requirements[idx], point_domain);
+          ProjectionInfo(runtime, dst_requirements[idx], index_domain);
         unsigned index = src_requirements.size()+idx;
         // Perform this dependence analysis as if it was READ_WRITE
         // so that we can get the version numbers correct
@@ -4894,13 +4918,13 @@ namespace Legion {
           dst_requirements[idx].privilege = REDUCE;
       }
       // Now enumerate the points
-      size_t num_points = point_domain.get_volume();
+      size_t num_points = index_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
       unsigned point_idx = 0;
       points.resize(num_points);
-      for (Domain::DomainPointIterator itr(point_domain); 
+      for (Domain::DomainPointIterator itr(index_domain); 
             itr; itr++, point_idx++)
       {
         PointCopyOp *point = runtime->get_available_point_copy_op(false);
@@ -4938,6 +4962,12 @@ namespace Legion {
             it != points.end(); it++)
         (*it)->check_domination();
 #endif
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+              it != points.end(); it++) 
+          (*it)->log_copy_requirements();
+      }
       // Launch the points
       std::set<RtEvent> mapped_preconditions;
       std::set<ApEvent> executed_preconditions;
@@ -5154,7 +5184,7 @@ namespace Legion {
       // Initialize the operation
       initialize_operation(own->get_context(), false/*track*/, 
           own->src_requirements.size() + own->dst_requirements.size());
-      point = p;
+      index_point = p;
       owner = own;
       // From Copy
       src_requirements   = owner->src_requirements;
@@ -5171,6 +5201,8 @@ namespace Legion {
       src_restrict_infos = owner->src_restrict_infos;
       dst_restrict_infos = owner->dst_restrict_infos;
       predication_guard  = owner->predication_guard;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
 
 #ifdef DEBUG_LEGION
@@ -5318,7 +5350,7 @@ namespace Legion {
     const DomainPoint& PointCopyOp::get_domain_point(void) const
     //--------------------------------------------------------------------------
     {
-      return point;
+      return index_point;
     }
 
     //--------------------------------------------------------------------------
@@ -5982,7 +6014,7 @@ namespace Legion {
       create_gen = creator->get_generation();
       creator_req_idx = intern_idx;
       if (trace_info.trace != NULL)
-        set_trace(trace_info.trace, !trace_info.already_traced); 
+        set_trace(trace_info.trace, !trace_info.already_traced, NULL); 
     }
 
     //--------------------------------------------------------------------------
@@ -7967,6 +7999,7 @@ namespace Legion {
       parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/,
                              1/*num region requirements*/,
+                             launcher.static_dependences,
                              launcher.predicate);
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
@@ -8556,6 +8589,7 @@ namespace Legion {
       parent_task = ctx->get_task();
       initialize_speculation(ctx, true/*track*/, 
                              1/*num region requirements*/,
+                             launcher.static_dependences,
                              launcher.predicate);
       // Note we give it READ WRITE EXCLUSIVE to make sure that nobody
       // can be re-ordered around this operation for mapping or
@@ -9993,7 +10027,7 @@ namespace Legion {
         indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
-          indiv_tasks[idx]->set_trace(trace, !trace->is_fixed());
+          indiv_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
         indiv_tasks[idx]->must_epoch_task = true;
       }
       indiv_triggered.resize(indiv_tasks.size(), false);
@@ -10006,7 +10040,7 @@ namespace Legion {
         index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx, 
                                          true/*register*/);
         if (trace != NULL)
-          index_tasks[idx]->set_trace(trace, !trace->is_fixed());
+          index_tasks[idx]->set_trace(trace, !trace->is_fixed(), NULL);
         index_tasks[idx]->must_epoch_task = true;
       }
       index_triggered.resize(index_tasks.size(), false);
@@ -11692,6 +11726,7 @@ namespace Legion {
       : SpeculativeOp(rt), Fill()
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = false;
     }
 
     //--------------------------------------------------------------------------
@@ -11725,7 +11760,8 @@ namespace Legion {
     {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 1, launcher.predicate);
+      initialize_speculation(ctx, true/*track*/, 1, 
+                             launcher.static_dependences, launcher.predicate);
       requirement = RegionRequirement(launcher.handle, WRITE_DISCARD,
                                       EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
@@ -11851,6 +11887,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FillOp::log_fill_requirement(void) const
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
+    }
+
+    //--------------------------------------------------------------------------
     void FillOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
@@ -11858,19 +11911,7 @@ namespace Legion {
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
       if (Runtime::legion_spy_enabled)
-      { 
-        LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
+        log_fill_requirement();
     }
 
     //--------------------------------------------------------------------------
@@ -12328,6 +12369,7 @@ namespace Legion {
       : FillOp(rt)
     //--------------------------------------------------------------------------
     {
+      this->is_index_space = true;
     }
 
     //--------------------------------------------------------------------------
@@ -12362,8 +12404,9 @@ namespace Legion {
     {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 1, launcher.predicate);
-      point_domain = launcher.domain;
+      initialize_speculation(ctx, true/*track*/, 1, 
+                             launcher.static_dependences, launcher.predicate);
+      index_domain = launcher.domain;
       if (launcher.region.exists())
       {
 #ifdef DEBUG_LEGION
@@ -12406,25 +12449,25 @@ namespace Legion {
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
-        switch (point_domain.get_dim())
+        switch (index_domain.get_dim())
         {
           case 1:
             {
-	      LegionRuntime::Arrays::Rect<1> rect = point_domain.get_rect<1>();
+	      LegionRuntime::Arrays::Rect<1> rect = index_domain.get_rect<1>();
               LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 2:
             {
-              LegionRuntime::Arrays::Rect<2> rect = point_domain.get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> rect = index_domain.get_rect<2>();
               LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
             }
           case 3:
             {
-              LegionRuntime::Arrays::Rect<3> rect = point_domain.get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> rect = index_domain.get_rect<3>();
               LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
                                                         rect.lo.x, rect.hi.x);
               break;
@@ -12440,7 +12483,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_fill();
-      point_domain = Domain::NO_DOMAIN;
+      index_domain = Domain::NO_DOMAIN;
       points_committed = 0;
       commit_request = false;
     }
@@ -12500,7 +12543,7 @@ namespace Legion {
       // If we are waiting on a future register a dependence
       if (future.impl != NULL)
         future.impl->register_dependence(this);
-      projection_info = ProjectionInfo(runtime, requirement, point_domain);
+      projection_info = ProjectionInfo(runtime, requirement, index_domain);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    restrict_info,
@@ -12529,13 +12572,13 @@ namespace Legion {
                                                      partial_traversal);
       }
       // Now enumerate the points
-      size_t num_points = point_domain.get_volume();
+      size_t num_points = index_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
       unsigned point_idx = 0;
       points.resize(num_points);
-      for (Domain::DomainPointIterator itr(point_domain); 
+      for (Domain::DomainPointIterator itr(index_domain); 
             itr; itr++, point_idx++)
       {
         PointFillOp *point = runtime->get_available_point_fill_op(false);
@@ -12553,6 +12596,12 @@ namespace Legion {
       // Check for interfering point requirements in debug mode
       check_point_requirements();
 #endif
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::vector<PointFillOp*>::const_iterator it = points.begin();
+              it != points.end(); it++)
+          (*it)->log_fill_requirement();
+      }
       // Launch the points
       std::set<RtEvent> mapped_preconditions;
       std::set<ApEvent> executed_preconditions;
@@ -12702,7 +12751,7 @@ namespace Legion {
     {
       // Initialize the operation
       initialize_operation(own->get_context(), false/*track*/, 1/*regions*/); 
-      point = p;
+      index_point = p;
       owner = own;
       // From Fill
       requirement        = owner->get_requirement();
@@ -12724,6 +12773,8 @@ namespace Legion {
         value = malloc(value_size);
         memcpy(value, owner->value, value_size);
       }
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
 
     //--------------------------------------------------------------------------
@@ -12801,7 +12852,7 @@ namespace Legion {
     const DomainPoint& PointFillOp::get_domain_point(void) const
     //--------------------------------------------------------------------------
     {
-      return point;
+      return index_point;
     }
 
     //--------------------------------------------------------------------------
@@ -12855,7 +12906,8 @@ namespace Legion {
                           const AttachLauncher &launcher, bool check_privileges)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize_operation(ctx, true/*track*/, 1/*regions*/, 
+                           launcher.static_dependences);
       resource = launcher.resource;
       switch (resource)
       {
@@ -13059,7 +13111,8 @@ namespace Legion {
       InstanceRef result = runtime->forest->attach_file(this, 0/*idx*/,
                                                         requirement,
                                                         file_instance,
-                                                        version_info);
+                                                        version_info,
+                                                        map_applied_conditions);
 #ifdef DEBUG_LEGION
       assert(result.has_ref());
 #endif
@@ -13489,11 +13542,10 @@ namespace Legion {
 #endif
         exit(ERROR_ILLEGAL_DETACH_OPERATION);
       }
-      
+      std::set<RtEvent> applied_conditions;
       ApEvent detach_event = 
         runtime->forest->detach_file(requirement, this, 0/*idx*/, 
-                                     version_info, reference);
-      std::set<RtEvent> applied_conditions;
+                                     version_info,reference,applied_conditions);
       version_info.apply_mapping(applied_conditions);
       if (!applied_conditions.empty())
         complete_mapping(Runtime::merge_events(applied_conditions));

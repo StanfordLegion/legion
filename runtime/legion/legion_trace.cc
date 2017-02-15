@@ -31,19 +31,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LegionTrace::LegionTrace(TraceID t, TaskContext *c)
-      : tid(t), ctx(c), fixed(false), tracing(true)
+    LegionTrace::LegionTrace(TaskContext *c)
+      : ctx(c)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    LegionTrace::LegionTrace(const LegionTrace &rhs)
-      : tid(0), ctx(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -53,7 +44,71 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionTrace& LegionTrace::operator=(const LegionTrace &rhs)
+    void LegionTrace::replay_aliased_children(
+                             std::vector<RegionTreePath> &privilege_paths) const
+    //--------------------------------------------------------------------------
+    {
+      unsigned index = operations.size() - 1;
+      std::map<unsigned,LegionVector<AliasChildren>::aligned>::const_iterator
+        finder = aliased_children.find(index);
+      if (finder == aliased_children.end())
+        return;
+      for (LegionVector<AliasChildren>::aligned::const_iterator it = 
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->req_index < privilege_paths.size());
+#endif
+        privilege_paths[it->req_index].record_aliased_children(it->depth,
+                                                               it->mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void LegionTrace::delete_trace(LegionTrace *trace)
+    //--------------------------------------------------------------------------
+    {
+      if (trace->is_dynamic_trace())
+        legion_delete(trace->as_dynamic_trace());
+      else
+        legion_delete(trace->as_static_trace());
+    }
+
+    /////////////////////////////////////////////////////////////
+    // StaticTrace
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    StaticTrace::StaticTrace(TaskContext *c,const std::set<RegionTreeID> *trees)
+      : LegionTrace(c)
+    //--------------------------------------------------------------------------
+    {
+      if (trees != NULL)
+        application_trees.insert(trees->begin(), trees->end());
+    }
+    
+    //--------------------------------------------------------------------------
+    StaticTrace::StaticTrace(const StaticTrace &rhs)
+      : LegionTrace(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    StaticTrace::~StaticTrace(void)
+    //--------------------------------------------------------------------------
+    {
+      // Remove our mapping references and then clear the operations
+      for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator it =
+            operations.begin(); it != operations.end(); it++)
+        it->first->remove_mapping_reference(it->second);
+      operations.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    StaticTrace& StaticTrace::operator=(const StaticTrace &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -62,7 +117,264 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::fix_trace(void)
+    bool StaticTrace::is_fixed(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Static traces are always fixed
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool StaticTrace::handles_region_tree(RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      if (application_trees.empty())
+        return true;
+      return (application_trees.find(tid) != application_trees.end());
+    }
+
+    //--------------------------------------------------------------------------
+    void StaticTrace::record_static_dependences(Operation *op,
+                               const std::vector<StaticDependence> *dependences)
+    //--------------------------------------------------------------------------
+    {
+      // Internal operations get to skip this
+      if (op->is_internal_op())
+        return;
+      // All other operations have to add something to the list
+      if (dependences == NULL)
+        static_dependences.resize(static_dependences.size() + 1);
+      else // Add it to the list of static dependences
+        static_dependences.push_back(*dependences);
+    }
+
+    //--------------------------------------------------------------------------
+    void StaticTrace::register_operation(Operation *op, GenerationID gen)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<Operation*,GenerationID> key(op,gen);
+      const unsigned index = operations.size();
+      if (!op->is_internal_op())
+      {
+        const LegionVector<DependenceRecord>::aligned &deps = 
+          translate_dependence_records(op, index); 
+        operations.push_back(key);
+#ifdef LEGION_SPY
+        current_uids.push_back(op->get_unique_op_id());
+        num_regions.push_back(op->get_region_count());
+#endif
+        // Add a mapping reference since people will be 
+        // registering dependences
+        op->add_mapping_reference(gen);  
+        // Then compute all the dependences on this operation from
+        // our previous recording of the trace
+        for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
+              deps.begin(); it != deps.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((it->operation_idx >= 0) &&
+                 ((size_t)it->operation_idx < operations.size()));
+#endif
+          const std::pair<Operation*,GenerationID> &target = 
+                                                operations[it->operation_idx];
+
+          if ((it->prev_idx == -1) || (it->next_idx == -1))
+          {
+            op->register_dependence(target.first, target.second);
+#ifdef LEGION_SPY
+            LegionSpy::log_mapping_dependence(
+                op->get_context()->get_unique_id(),
+                current_uids[it->operation_idx], 
+                (it->prev_idx == -1) ? 0 : it->prev_idx,
+                op->get_unique_op_id(), 
+                (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+#endif
+          }
+          else
+          {
+            op->register_region_dependence(it->next_idx, target.first,
+                                           target.second, it->prev_idx,
+                                           it->dtype, it->validates,
+                                           it->dependent_mask);
+#ifdef LEGION_SPY
+            LegionSpy::log_mapping_dependence(
+                op->get_context()->get_unique_id(),
+                current_uids[it->operation_idx], it->prev_idx,
+                op->get_unique_op_id(), it->next_idx, it->dtype);
+#endif
+          }
+        }
+      }
+      else
+      {
+        // We already added our creator to the list of operations
+        // so the set of dependences is index-1
+#ifdef DEBUG_LEGION
+        assert(index > 0);
+#endif
+        const LegionVector<DependenceRecord>::aligned &deps = 
+          translate_dependence_records(operations[index-1].first, index-1);
+        // Special case for internal operations
+        // Internal operations need to register transitive dependences
+        // on all the other operations with which it interferes.
+        // We can get this from the set of operations on which the
+        // operation we are currently performing dependence analysis
+        // has dependences.
+        InternalOp *internal_op = static_cast<InternalOp*>(op);
+#ifdef DEBUG_LEGION
+        assert(internal_op == dynamic_cast<InternalOp*>(op));
+#endif
+        int internal_index = internal_op->get_internal_index();
+        for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
+              deps.begin(); it != deps.end(); it++)
+        {
+          // We only record dependences for this internal operation on
+          // the indexes for which this internal operation is being done
+          if (internal_index != it->next_idx)
+            continue;
+#ifdef DEBUG_LEGION
+          assert((it->operation_idx >= 0) &&
+                 ((size_t)it->operation_idx < operations.size()));
+#endif
+          const std::pair<Operation*,GenerationID> &target = 
+                                                operations[it->operation_idx];
+          // If this is the case we can do the normal registration
+          if ((it->prev_idx == -1) || (it->next_idx == -1))
+          {
+            internal_op->register_dependence(target.first, target.second);
+#ifdef LEGION_SPY
+            LegionSpy::log_mapping_dependence(
+                op->get_context()->get_unique_id(),
+                current_uids[it->operation_idx], 
+                (it->prev_idx == -1) ? 0 : it->prev_idx,
+                op->get_unique_op_id(), 
+                (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+#endif
+          }
+          else
+          {
+            internal_op->record_trace_dependence(target.first, target.second,
+                                               it->prev_idx, it->next_idx,
+                                               it->dtype, it->dependent_mask);
+#ifdef LEGION_SPY
+            LegionSpy::log_mapping_dependence(
+                internal_op->get_context()->get_unique_id(),
+                current_uids[it->operation_idx], it->prev_idx,
+                internal_op->get_unique_op_id(), 0, it->dtype);
+#endif
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void StaticTrace::record_dependence(
+                                     Operation *target, GenerationID target_gen,
+                                     Operation *source, GenerationID source_gen)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+    
+    //--------------------------------------------------------------------------
+    void StaticTrace::record_region_dependence(
+                                    Operation *target, GenerationID target_gen,
+                                    Operation *source, GenerationID source_gen,
+                                    unsigned target_idx, unsigned source_idx,
+                                    DependenceType dtype, bool validates,
+                                    const FieldMask &dependent_mask)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void StaticTrace::record_aliased_children(unsigned req_index,unsigned depth,
+                                              const FieldMask &aliase_mask)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    const LegionVector<LegionTrace::DependenceRecord>::aligned& 
+        StaticTrace::translate_dependence_records(Operation *op, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      // If we already translated it then we are done
+      if (index < translated_deps.size())
+        return translated_deps[index];
+      const unsigned start_idx = translated_deps.size();
+      translated_deps.resize(index+1);
+      RegionTreeForest *forest = ctx->runtime->forest;
+      for (unsigned op_idx = start_idx; op_idx <= index; op_idx++)
+      {
+        const std::vector<StaticDependence> &static_deps = 
+          static_dependences[op_idx];
+        LegionVector<DependenceRecord>::aligned &translation = 
+          translated_deps[op_idx];
+        for (std::vector<StaticDependence>::const_iterator it = 
+              static_deps.begin(); it != static_deps.end(); it++)
+        {
+          // Convert the previous offset into an absoluate offset    
+          // If the previous offset is larger than the index then 
+          // this dependence doesn't matter
+          if (it->previous_offset > index)
+            continue;
+          // Compute the field mask by getting the parent region requirement
+          unsigned parent_index = op->find_parent_index(it->current_req_index);
+          FieldSpace field_space =  
+            ctx->find_logical_region(parent_index).get_field_space();
+          const FieldMask dependence_mask = 
+            forest->get_node(field_space)->get_field_mask(it->dependent_fields);
+          translation.push_back(DependenceRecord(index - it->previous_offset, 
+                it->previous_req_index, it->current_req_index,
+                it->validates, it->dependence_type, dependence_mask));
+        }
+      }
+      return translated_deps[index];
+    }
+
+    /////////////////////////////////////////////////////////////
+    // DynamicTrace 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DynamicTrace::DynamicTrace(TraceID t, TaskContext *c)
+      : LegionTrace(c), tid(t), fixed(false), tracing(true)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicTrace::DynamicTrace(const DynamicTrace &rhs)
+      : LegionTrace(NULL), tid(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicTrace::~DynamicTrace(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DynamicTrace& DynamicTrace::operator=(const DynamicTrace &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicTrace::fix_trace(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -72,7 +384,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::end_trace_capture(void)
+    void DynamicTrace::end_trace_capture(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -89,7 +401,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::end_trace_execution(Operation *op)
+    void DynamicTrace::end_trace_execution(Operation *op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -120,7 +432,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::register_operation(Operation *op, GenerationID gen)
+    bool DynamicTrace::handles_region_tree(RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      // Always handles all of them
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicTrace::record_static_dependences(Operation *op,
+                               const std::vector<StaticDependence> *dependences)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    void DynamicTrace::register_operation(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
       std::pair<Operation*,GenerationID> key(op,gen);
@@ -307,8 +635,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::record_dependence(Operation *target, GenerationID tar_gen,
-                                        Operation *source, GenerationID src_gen)
+    void DynamicTrace::record_dependence(Operation *target,GenerationID tar_gen,
+                                         Operation *source,GenerationID src_gen)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -378,15 +706,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::record_region_dependence(Operation *target, 
-                                               GenerationID tar_gen,
-                                               Operation *source, 
-                                               GenerationID src_gen,
-                                               unsigned target_idx, 
-                                               unsigned source_idx,
-                                               DependenceType dtype,
-                                               bool validates,
-                                               const FieldMask &dep_mask)
+    void DynamicTrace::record_region_dependence(Operation *target, 
+                                                GenerationID tar_gen,
+                                                Operation *source, 
+                                                GenerationID src_gen,
+                                                unsigned target_idx, 
+                                                unsigned source_idx,
+                                                DependenceType dtype,
+                                                bool validates,
+                                                const FieldMask &dep_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -485,34 +813,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::record_aliased_children(unsigned req_index,unsigned depth,
-                                              const FieldMask &mask)
+    void DynamicTrace::record_aliased_children(unsigned req_index,
+                                          unsigned depth, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       unsigned index = operations.size() - 1;
       aliased_children[index].push_back(AliasChildren(req_index, depth, mask));
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionTrace::replay_aliased_children(
-                             std::vector<RegionTreePath> &privilege_paths) const
-    //--------------------------------------------------------------------------
-    {
-      unsigned index = operations.size() - 1;
-      std::map<unsigned,LegionVector<AliasChildren>::aligned>::const_iterator
-        finder = aliased_children.find(index);
-      if (finder == aliased_children.end())
-        return;
-      for (LegionVector<AliasChildren>::aligned::const_iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->req_index < privilege_paths.size());
-#endif
-        privilege_paths[it->req_index].record_aliased_children(it->depth,
-                                                               it->mask);
-      }
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // TraceCaptureOp 
@@ -556,8 +863,9 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
+      assert(trace->is_dynamic_trace());
 #endif
-      local_trace = trace;
+      local_trace = trace->as_dynamic_trace();
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
       tracing = false;
@@ -648,8 +956,9 @@ namespace Legion {
       initialize(ctx, MIXED_FENCE);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
+      assert(trace->is_dynamic_trace());
 #endif
-      local_trace = trace;
+      local_trace = trace->as_dynamic_trace();
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
     }

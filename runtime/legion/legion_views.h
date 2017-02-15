@@ -1243,7 +1243,6 @@ namespace Legion {
       void record_reduction_view(ReductionView *view, const FieldMask &mask);
       void record_child_version_state(const ColorPoint &child_color, 
                                  VersionState *state, const FieldMask &mask);
-      void record_top_version_state(VersionState *state);
       void finalize_capture(bool need_prune);
     public:
       void pack_composite_view(Serializer &rez) const;
@@ -1264,11 +1263,6 @@ namespace Legion {
       // record the views and children we immediately depend on and that
       // is how we break the inifinite meta-data cycle
       LegionMap<CompositeView*,FieldMask>::aligned nested_composite_views;
-    protected:
-      // Keep track of the top version states for this composite instance
-      // We keep valid views to these version state objects as long
-      // as we are valid
-      std::vector<VersionState*> top_version_states;
     protected:
       LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned node_versions;
     };
@@ -1325,8 +1319,8 @@ namespace Legion {
                      DistributedID owner_did, std::set<RtEvent> &preconditions);
       static void handle_deferred_node_ref(const void *args);
     public:
-      void notify_valid(ReferenceMutator *mutator);
-      void notify_invalid(ReferenceMutator *mutator);
+      void notify_valid(ReferenceMutator *mutator, bool root);
+      void notify_invalid(ReferenceMutator *mutator, bool root);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
       void record_valid_view(LogicalView *view, const FieldMask &mask);
@@ -1334,7 +1328,8 @@ namespace Legion {
       void record_reduction_view(ReductionView *view, const FieldMask &mask);
       void record_child_version_state(const ColorPoint &child_color, 
                                  VersionState *state, const FieldMask &mask);
-      void record_version_state(VersionState *state, const FieldMask &mask);
+      void record_version_state(VersionState *state, 
+                                const FieldMask &mask, bool root);
     public:
       void capture_field_versions(FieldVersions &versions,
                                   const FieldMask &capture_mask) const;
@@ -1344,9 +1339,10 @@ namespace Legion {
       const DistributedID owner_did;
     protected:
       Reservation node_lock;
-      // No need to hold references, the version tree does that
-      // automatically for us so we can be dumb about things
+      // No need to hold references in general, but we do have to hold
+      // them if we are the root child of a composite view subtree
       LegionMap<VersionState*,FieldMask>::aligned version_states;
+    protected:
       // Keep track of the fields that are valid because we've captured them
       FieldMask valid_fields;
       LegionMap<RtUserEvent,FieldMask>::aligned pending_captures;

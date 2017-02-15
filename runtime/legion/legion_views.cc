@@ -4833,15 +4833,8 @@ namespace Legion {
       // Delete our children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
-        delete it->first;
+        legion_delete(it->first);
       children.clear();
-      for (std::vector<VersionState*>::const_iterator it = 
-            top_version_states.begin(); it != top_version_states.end(); it++)
-      {
-        if ((*it)->remove_nested_resource_ref(did))
-          legion_delete(*it);
-      }
-      top_version_states.clear();
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
@@ -4974,18 +4967,9 @@ namespace Legion {
     void CompositeView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<VersionState*>::const_iterator it = 
-            top_version_states.begin(); it != top_version_states.end(); it++)
-      {
-        if ((*it)->is_owner())
-          (*it)->add_nested_valid_ref(did, mutator);
-        else
-          (*it)->send_remote_valid_update((*it)->owner_space, 
-                                          mutator, 1, true/*add*/);
-      }
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
-        it->first->notify_valid(mutator);
+        it->first->notify_valid(mutator, true/*root*/);
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
         it->first->add_nested_valid_ref(did, mutator);
@@ -5002,18 +4986,9 @@ namespace Legion {
     void CompositeView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<VersionState*>::const_iterator it = 
-            top_version_states.begin(); it != top_version_states.end(); it++)
-      {
-        if ((*it)->is_owner())
-          (*it)->remove_nested_valid_ref(did, mutator);
-        else
-          (*it)->send_remote_valid_update((*it)->owner_space, 
-                                          mutator, 1, false/*add*/);
-      }
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
-        it->first->notify_invalid(mutator);
+        it->first->notify_invalid(mutator, true/*root*/);
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
@@ -5596,7 +5571,7 @@ namespace Legion {
       {
         if (it->first->logical_node == child_node)
         {
-          it->first->record_version_state(state, mask);
+          it->first->record_version_state(state, mask, true/*root*/);
           it->second |= mask;
           return;
         }
@@ -5604,32 +5579,14 @@ namespace Legion {
       // Didn't find it so make it
       CompositeNode *child = 
         legion_new<CompositeNode>(child_node, this, did); 
-      child->record_version_state(state, mask);
+      child->record_version_state(state, mask, true/*root*/);
       children[child] = mask;
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::record_top_version_state(VersionState *state)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // Should not be any duplicates
-      for (std::vector<VersionState*>::const_iterator it = 
-            top_version_states.begin(); it != top_version_states.end(); it++)
-        assert((*it) != state);
-#endif
-      // Just record it for now, we'll add a reference shortly
-      top_version_states.push_back(state);
-    }
-    
-    //--------------------------------------------------------------------------
     void CompositeView::finalize_capture(bool need_prune)
     //--------------------------------------------------------------------------
     {
-      // Add base references to all our version states
-      for (std::vector<VersionState*>::const_iterator it = 
-            top_version_states.begin(); it != top_version_states.end(); it++)
-        (*it)->add_nested_resource_ref(did);
       // We add base resource references to all our views
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
             valid_views.begin(); it != valid_views.end(); it++)
@@ -5667,8 +5624,8 @@ namespace Legion {
         }
         if (!to_erase.empty())
         {
-          for (std::vector<CompositeView*>::const_iterator it = to_erase.begin();
-                it != to_erase.end(); it++)
+          for (std::vector<CompositeView*>::const_iterator it = 
+                to_erase.begin(); it != to_erase.end(); it++)
             nested_composite_views.erase(*it);
         }
         if (!replacements.empty())
@@ -5701,10 +5658,6 @@ namespace Legion {
     void CompositeView::pack_composite_view(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(top_version_states.size());
-      for (std::vector<VersionState*>::const_iterator it = 
-            top_version_states.begin(); it != top_version_states.end(); it++)
-        rez.serialize((*it)->did);
       rez.serialize(dirty_mask);
       rez.serialize<size_t>(valid_views.size());
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
@@ -5743,21 +5696,6 @@ namespace Legion {
                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      size_t num_top_states;
-      derez.deserialize(num_top_states);
-      for (unsigned idx = 0; idx < num_top_states; idx++)
-      {
-        DistributedID state_did;
-        derez.deserialize(state_did);
-        RtEvent ready;
-        VersionState *state = 
-          runtime->find_or_request_version_state(state_did, ready);
-        top_version_states.push_back(state);
-        if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(state, ready));
-        else // Otherwise we can add the reference now
-          state->add_nested_resource_ref(did);
-      }
       derez.deserialize(dirty_mask);
       size_t num_mat_views;
       derez.deserialize(num_mat_views);
@@ -6165,7 +6103,12 @@ namespace Legion {
           preconditions.insert(precondition);
         }
         else
+        {
           state->add_nested_resource_ref(owner_did);
+          // We are the root so add our valid ref too
+          WrapperReferenceMutator mutator(preconditions);
+          state->add_nested_valid_ref(owner_did, &mutator);
+        }
       }
       return result;
     }
@@ -6177,17 +6120,26 @@ namespace Legion {
       const DeferCompositeNodeRefArgs *nargs = 
         (const DeferCompositeNodeRefArgs*)args;
       nargs->state->add_nested_resource_ref(nargs->owner_did);
+      // We are the root so add our valid ref too
+      LocalReferenceMutator mutator;
+      nargs->state->add_nested_valid_ref(nargs->owner_did, &mutator);
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::notify_valid(ReferenceMutator *mutator)
+    void CompositeNode::notify_valid(ReferenceMutator *mutator, bool root)
     //--------------------------------------------------------------------------
     {
       if (!currently_valid)
       {
+        if (root)
+        {
+          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+                version_states.begin(); it != version_states.end(); it++)
+            it->first->add_nested_valid_ref(owner_did, mutator);
+        }
         for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
               children.begin(); it != children.end(); it++)
-          it->first->notify_valid(mutator);
+          it->first->notify_valid(mutator, false/*root*/);
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
               valid_views.begin(); it != valid_views.end(); it++)
           it->first->add_nested_valid_ref(owner_did, mutator);
@@ -6199,15 +6151,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::notify_invalid(ReferenceMutator *mutator)
+    void CompositeNode::notify_invalid(ReferenceMutator *mutator, bool root)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(currently_valid);
 #endif
+      if (root)
+      {
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              version_states.begin(); it != version_states.end(); it++)
+          it->first->remove_nested_valid_ref(owner_did, mutator);
+      }
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
-        it->first->notify_invalid(mutator);
+        it->first->notify_invalid(mutator, false/*root*/);
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
         it->first->remove_nested_valid_ref(owner_did, mutator);
@@ -6289,7 +6247,7 @@ namespace Legion {
       {
         if (it->first->logical_node == child_node)
         {
-          it->first->record_version_state(state, mask);
+          it->first->record_version_state(state, mask, false/*root*/);
           it->second |= mask;
           return;
         }
@@ -6297,13 +6255,13 @@ namespace Legion {
       // Didn't find it so make it
       CompositeNode *child = 
         legion_new<CompositeNode>(child_node, this, owner_did); 
-      child->record_version_state(state, mask);
+      child->record_version_state(state, mask, false/*root*/);
       children[child] = mask;
     }
 
     //--------------------------------------------------------------------------
     void CompositeNode::record_version_state(VersionState *state, 
-                                             const FieldMask &mask)
+                                             const FieldMask &mask, bool root)
     //--------------------------------------------------------------------------
     {
       LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
@@ -6312,6 +6270,8 @@ namespace Legion {
       {
         state->add_nested_resource_ref(owner_did);
         version_states[state] = mask;
+        if (root && currently_valid)
+          state->add_nested_valid_ref(owner_did);
       }
       else
         finder->second |= mask;

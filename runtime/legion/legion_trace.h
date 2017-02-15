@@ -26,22 +26,11 @@ namespace Legion {
 
     /**
      * \class LegionTrace
-     * This class is used for memoizing the dynamic
-     * dependence analysis for series of operations
-     * in a given task's context.
+     * This is the abstract base class for a trace object
+     * and is used to support both static and dynamic traces
      */
-    class LegionTrace {
+    class LegionTrace : public Collectable {
     public:
-      static const AllocationType alloc_type = TRACE_ALLOC;
-    public:
-      struct OperationInfo {
-      public:
-        OperationInfo(Operation *op)
-          : kind(op->get_operation_kind()), count(op->get_region_count()) { }
-      public:
-        Operation::OpKind kind;
-        unsigned count;
-      };
       struct DependenceRecord {
       public:
         DependenceRecord(int idx)
@@ -71,34 +60,147 @@ namespace Legion {
         FieldMask mask;
       };
     public:
-      LegionTrace(TraceID tid, TaskContext *ctx);
-      LegionTrace(const LegionTrace &rhs);
-      ~LegionTrace(void);
+      LegionTrace(TaskContext *ctx);
+      virtual ~LegionTrace(void);
     public:
-      LegionTrace& operator=(const LegionTrace &rhs);
+      virtual bool is_static_trace(void) const = 0;
+      virtual bool is_dynamic_trace(void) const = 0;
+      virtual StaticTrace* as_static_trace(void) = 0;
+      virtual DynamicTrace* as_dynamic_trace(void) = 0;
+    public:
+      virtual bool is_fixed(void) const = 0;
+      virtual bool handles_region_tree(RegionTreeID tid) const = 0;
+      virtual void record_static_dependences(Operation *op,
+                     const std::vector<StaticDependence> *dependences) = 0;
+      virtual void register_operation(Operation *op, GenerationID gen) = 0; 
+      virtual void record_dependence(Operation *target, GenerationID target_gen,
+                                Operation *source, GenerationID source_gen) = 0;
+      virtual void record_region_dependence(
+                                    Operation *target, GenerationID target_gen,
+                                    Operation *source, GenerationID source_gen,
+                                    unsigned target_idx, unsigned source_idx,
+                                    DependenceType dtype, bool validates,
+                                    const FieldMask &dependent_mask) = 0;
+      virtual void record_aliased_children(unsigned req_index, unsigned depth,
+                                           const FieldMask &aliased_mask) = 0;
+    public:
+      void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
+    public:
+      static void delete_trace(LegionTrace *trace);
+    public:
+      TaskContext *const ctx;
+    protected:
+      std::vector<std::pair<Operation*,GenerationID> > operations; 
+      // We also need a data structure to record when there are
+      // aliased but non-interfering region requirements. This should
+      // be pretty sparse so we'll make it a map
+      std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
+#ifdef LEGION_SPY
+    protected:
+      std::vector<UniqueID> current_uids;
+      std::vector<unsigned> num_regions;
+#endif
+    };
+
+    /**
+     * \class StaticTrace
+     * A static trace is a trace object that is used for 
+     * handling cases where the application knows the dependneces
+     * for a trace of operations
+     */
+    class StaticTrace : public LegionTrace {
+    public:
+      static const AllocationType alloc_type = STATIC_TRACE_ALLOC;
+    public:
+      StaticTrace(TaskContext *ctx, const std::set<RegionTreeID> *trees);
+      StaticTrace(const StaticTrace &rhs);
+      virtual ~StaticTrace(void);
+    public:
+      StaticTrace& operator=(const StaticTrace &rhs);
+    public:
+      virtual bool is_static_trace(void) const { return true; }
+      virtual bool is_dynamic_trace(void) const { return false; }
+      virtual StaticTrace* as_static_trace(void) { return this; }
+      virtual DynamicTrace* as_dynamic_trace(void) { return NULL; }
+    public:
+      virtual bool is_fixed(void) const;
+      virtual bool handles_region_tree(RegionTreeID tid) const;
+      virtual void record_static_dependences(Operation *op,
+                              const std::vector<StaticDependence> *dependences);
+      virtual void register_operation(Operation *op, GenerationID gen); 
+      virtual void record_dependence(Operation *target,GenerationID target_gen,
+                                     Operation *source,GenerationID source_gen);
+      virtual void record_region_dependence(
+                                    Operation *target, GenerationID target_gen,
+                                    Operation *source, GenerationID source_gen,
+                                    unsigned target_idx, unsigned source_idx,
+                                    DependenceType dtype, bool validates,
+                                    const FieldMask &dependent_mask);
+      virtual void record_aliased_children(unsigned req_index, unsigned depth,
+                                           const FieldMask &aliased_mask);
+    protected:
+      const LegionVector<DependenceRecord>::aligned&
+                  translate_dependence_records(Operation *op, unsigned index);
+    protected:
+      std::deque<std::vector<StaticDependence> > static_dependences;
+      std::deque<LegionVector<DependenceRecord>::aligned> translated_deps;
+      std::set<RegionTreeID> application_trees;
+    };
+
+    /**
+     * \class DynamicTrace
+     * This class is used for memoizing the dynamic
+     * dependence analysis for series of operations
+     * in a given task's context.
+     */
+    class DynamicTrace : public LegionTrace {
+    public:
+      static const AllocationType alloc_type = DYNAMIC_TRACE_ALLOC;
+    public:
+      struct OperationInfo {
+      public:
+        OperationInfo(Operation *op)
+          : kind(op->get_operation_kind()), count(op->get_region_count()) { }
+      public:
+        Operation::OpKind kind;
+        unsigned count;
+      }; 
+    public:
+      DynamicTrace(TraceID tid, TaskContext *ctx);
+      DynamicTrace(const DynamicTrace &rhs);
+      virtual ~DynamicTrace(void);
+    public:
+      DynamicTrace& operator=(const DynamicTrace &rhs);
+    public:
+      virtual bool is_static_trace(void) const { return false; }
+      virtual bool is_dynamic_trace(void) const { return true; }
+      virtual StaticTrace* as_static_trace(void) { return NULL; }
+      virtual DynamicTrace* as_dynamic_trace(void) { return this; }
     public:
       // Called by task execution thread
-      inline bool is_fixed(void) const { return fixed; }
+      virtual bool is_fixed(void) const { return fixed; }
       void fix_trace(void);
     public:
       // Called by analysis thread
       void end_trace_capture(void);
       void end_trace_execution(Operation *op);
     public:
+      virtual void record_static_dependences(Operation *op,
+                          const std::vector<StaticDependence> *dependences);
+      virtual bool handles_region_tree(RegionTreeID tid) const;
       // Called by analysis thread
-      void register_operation(Operation *op, GenerationID gen);
-      void record_dependence(Operation *target, GenerationID target_gen,
-                             Operation *source, GenerationID source_gen);
-      void record_region_dependence(Operation *target, GenerationID target_gen,
+      virtual void register_operation(Operation *op, GenerationID gen);
+      virtual void record_dependence(Operation *target,GenerationID target_gen,
+                                     Operation *source,GenerationID source_gen);
+      virtual void record_region_dependence(
+                                    Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
                                     const FieldMask &dependent_mask);
-      void record_aliased_children(unsigned req_index, unsigned depth,
-                                   const FieldMask &aliased_mask);
-      void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
+      virtual void record_aliased_children(unsigned req_index, unsigned depth,
+                                           const FieldMask &aliased_mask);
     protected:
-      std::vector<std::pair<Operation*,GenerationID> > operations;
       // Only need this backwards lookup for recording dependences
       std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
       // Internal operations have a nasty interaction with traces because
@@ -110,34 +212,24 @@ namespace Legion {
       // not been necessary.
       std::map<std::pair<InternalOp*,GenerationID>,
                LegionVector<DependenceRecord>::aligned> internal_dependences;
-    protected:
+    protected: 
       // This is the generalized form of the dependences
       // For each operation, we remember a list of operations that
       // it dependens on and whether it is a validates the region
       std::deque<LegionVector<DependenceRecord>::aligned> dependences;
-      // We also need a data structure to record when there are
-      // aliased but non-interfering region requirements. This should
-      // be pretty sparse so we'll make it a map
-      std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
       // Metadata for checking the validity of a trace when it is replayed
       std::vector<OperationInfo> op_info;
     protected:
       const TraceID tid;
-      TaskContext *const ctx;
       bool fixed;
       bool tracing;
-#ifdef LEGION_SPY
-    protected:
-      std::vector<UniqueID> current_uids;
-      std::vector<unsigned> num_regions;
-#endif
     };
 
     /**
      * \class TraceCaptureOp
      * This class represents trace operations which we inject
      * into the operation stream to mark when a trace capture
-     * is finished so the LegionTrace object can compute the
+     * is finished so the DynamicTrace object can compute the
      * dependences data structure.
      */
     class TraceCaptureOp : public Operation {
@@ -158,7 +250,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
     protected:
-      LegionTrace *local_trace;
+      DynamicTrace *local_trace;
     };
 
     /**
@@ -187,7 +279,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
     protected:
-      LegionTrace *local_trace;
+      DynamicTrace *local_trace;
     };
 
   }; // namespace Internal 

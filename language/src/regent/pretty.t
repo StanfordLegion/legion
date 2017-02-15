@@ -755,6 +755,9 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.FutureGetResult) then
     return pretty.expr_future_get_result(cx, node)
 
+  elseif node:is(ast.typed.expr.ParallelizerConstraint) then
+    return pretty.expr_binary(cx, node)
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end
@@ -935,6 +938,16 @@ function pretty.stat_raw_delete(cx, node)
     ")"})
 end
 
+function pretty.stat_parallelize_with(cx, node)
+  local result = terralib.newlist()
+  result:insert(join({"__parallelize_with ",
+    commas(node.hints:map(function(hint) return pretty.expr(cx, hint) end)),
+    " do"}))
+  result:insert(pretty.block(cx, node.block))
+  result:insert(text.Line { value = "end" })
+  return text.Lines { lines = result }
+end
+
 function pretty.stat(cx, node)
   if not cx then cx = context.new_global_scope() end
   if node:is(ast.typed.stat.If) then
@@ -1002,6 +1015,9 @@ function pretty.stat(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return pretty.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.typed.stat.ParallelizeWith) then
+    return pretty.stat_parallelize_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

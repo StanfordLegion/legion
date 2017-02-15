@@ -379,7 +379,10 @@ namespace Realm {
     }
 
     template <typename T, unsigned DIM>
-    static void copy_rect(Rect<DIM> r, T *mpc, RegionInstanceImpl *local_impl, HDF5Memory::HDFMetadata *md,
+    static void copy_rect(LegionRuntime::Arrays::Rect<DIM> r,
+			  T *mpc,
+			  RegionInstanceImpl *local_impl,
+			  HDF5Memory::HDFMetadata *md,
 			  OASVec& oas_vec)
     {
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(local_impl->memory);
@@ -429,18 +432,20 @@ namespace Realm {
 	  // create a memory space that describes the a contiguous N-D array
 	  // that our memory buffer is a subset of - i.e. use our strides as
 	  // the extents of the effectively-contiguous supserset
+	  // CAREFUL: HDF5 wants the fastest-changing dimension to be last - ours
+	  //  is first, so reverse the dimensions on things we give to HDF5 API calls
 	  hsize_t ms_dims[DIM];
 	  assert(lsi.strides[0][0] == 1);
 	  if(DIM > 1) {
-	    ms_dims[0] = lsi.strides[1][0];
+	    ms_dims[DIM - 1] = lsi.strides[1][0];
 	    for(unsigned i = 1; i < DIM - 1; i++) {
 	      // this has to divide evenly
 	      assert((lsi.strides[i + 1][0] % lsi.strides[i][0]) == 0);
-	      ms_dims[i] = lsi.strides[i + 1][0] / lsi.strides[i][0];
+	      ms_dims[DIM - 1 - i] = lsi.strides[i + 1][0] / lsi.strides[i][0];
 	    }
 	  }
-	  // last dim just needs to be at least what we want to copy
-	  ms_dims[DIM - 1] = lsi.subrect.hi[DIM - 1] - lsi.subrect.lo[DIM - 1] + 1;
+	  // "last" dim just needs to be at least what we want to copy
+	  ms_dims[0] = lsi.subrect.hi[DIM - 1] - lsi.subrect.lo[DIM - 1] + 1;
 	  log_hdf5.debug() << " ms_dims: " << ms_dims[0];
 	  hid_t ms_id = H5Screate_simple(DIM, ms_dims, 0);
 	  assert(ms_id > 0);
@@ -448,7 +453,7 @@ namespace Realm {
 	  hsize_t ms_start[DIM], ms_count[DIM];
 	  for(unsigned i = 0; i < DIM; i++) {
 	    ms_start[i] = 0;
-	    ms_count[i] = lsi.subrect.hi[i] - lsi.subrect.lo[i] + 1;
+	    ms_count[i] = lsi.subrect.hi[DIM - 1 - i] - lsi.subrect.lo[DIM - 1 - i] + 1;
 	  }
 	  {
 	    herr_t err = H5Sselect_hyperslab(ms_id, H5S_SELECT_SET,
@@ -463,10 +468,10 @@ namespace Realm {
 	  assert(ds_id > 0);
 	  hsize_t ds_start[DIM], ds_count[DIM];
 	  for(unsigned i = 0; i < DIM; i++) {
-	    ds_start[i] = lsi.subrect.lo[i] - md->lo[i];
+	    ds_start[i] = lsi.subrect.lo[DIM - 1 - i] - md->lo[DIM - 1 - i];
 	    ds_count[i] = ms_count[i];
 	    assert(ds_start[i] >= 0);
-	    assert((ds_start[i] + ds_count[i]) <= md->dims[i]);
+	    assert((ds_start[i] + ds_count[i]) <= md->dims[DIM - 1 - i]);
 	  }
 	  {
 	    herr_t err = H5Sselect_hyperslab(ds_id, H5S_SELECT_SET,

@@ -125,7 +125,7 @@ namespace Legion {
     public:
       TaskArgument add_arg(const TaskArgument &arg);
     private:
-      std::set<TaskArgument> values;
+      std::vector<TaskArgument> values;
     };
 
     /**
@@ -819,19 +819,20 @@ namespace Legion {
       };
     public:
       VirtualChannel(VirtualChannelKind kind,AddressSpaceID local_address_space,
-                     size_t max_message_size, bool profile_messages);
+                     size_t max_message_size, LegionProfiler *profiler);
       VirtualChannel(const VirtualChannel &rhs);
       ~VirtualChannel(void);
     public:
       VirtualChannel& operator=(const VirtualChannel &rhs);
     public:
       void package_message(Serializer &rez, MessageKind k, bool flush,
-                           Runtime *runtime, Processor target);
+                           Runtime *runtime, Processor target, bool shutdown);
       void process_message(const void *args, size_t arglen, 
                         Runtime *runtime, AddressSpaceID remote_address_space);
       void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
     private:
-      void send_message(bool complete, Runtime *runtime, Processor target);
+      void send_message(bool complete, Runtime *runtime, 
+                        Processor target, bool shutdown);
       void handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen);
@@ -855,7 +856,7 @@ namespace Legion {
       unsigned received_messages;
       bool observed_recent;
     private:
-      const bool profile_messages;
+      LegionProfiler *const profiler;
     }; 
 
     /**
@@ -887,8 +888,8 @@ namespace Legion {
       MessageManager& operator=(const MessageManager &rhs);
     public:
       void send_message(Serializer &rez, MessageKind kind, 
-                        VirtualChannelKind channel, bool flush);
-
+                        VirtualChannelKind channel, bool flush, 
+                        bool shutdown = false);
       void receive_message(const void *args, size_t arglen);
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
@@ -1804,6 +1805,9 @@ namespace Legion {
       void issue_execution_fence(Context ctx);
       void begin_trace(Context ctx, TraceID tid);
       void end_trace(Context ctx, TraceID tid);
+      void begin_static_trace(Context ctx, 
+                              const std::set<RegionTreeID> *managed);
+      void end_static_trace(Context ctx);
       void complete_frame(Context ctx);
       FutureMap execute_must_epoch(Context ctx, 
                                    const MustEpochLauncher &launcher);
@@ -2361,6 +2365,10 @@ namespace Legion {
       template<typename T>
       inline T* get_available(Reservation reservation,
                               std::deque<T*> &queue, bool has_lock);
+
+      template<typename T>
+      inline void release_object(std::deque<T*> &queue, T* object);
+
     public:
       IndividualTask*       get_available_individual_task(bool need_cont,
                                                   bool has_lock = false);
@@ -2545,6 +2553,9 @@ namespace Legion {
 			  const void *userdata, size_t userlen,
 			  Processor p);
       static void init_mpi_interop(const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
+      static void init_mpi_sync(const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
     protected:
@@ -2817,7 +2828,7 @@ namespace Legion {
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
       static const SerdezOp* get_serdez_op(CustomSerdezID serdez_id);
       static const SerdezRedopFns* get_serdez_redop_fns(ReductionOpID redop_id);
-      static void set_registration_callback(RegistrationCallbackFnptr callback);
+      static void add_registration_callback(RegistrationCallbackFnptr callback);
       static InputArgs& get_input_args(void);
       static Runtime* get_runtime(Processor p);
       static ReductionOpTable& get_reduction_table(void);
@@ -2854,7 +2865,7 @@ namespace Legion {
       static Runtime *the_runtime;
       // the runtime map is only valid when running with -hl:separate
       static std::map<Processor,Runtime*> *runtime_map;
-      static volatile RegistrationCallbackFnptr registration_callback;
+      static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static Processor::TaskFuncID legion_main_id;
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
@@ -3076,6 +3087,17 @@ namespace Legion {
 #endif
       result->activate();
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline void Runtime::release_object(std::deque<T*> &queue, T* object)
+    //--------------------------------------------------------------------------
+    {
+      if (queue.size() == LEGION_MAX_RECYCLABLE_OBJECTS)
+        legion_delete(object);
+      else
+        queue.push_front(object);
     }
 
     //--------------------------------------------------------------------------

@@ -18,26 +18,26 @@ ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
 
-#Flags for directing the runtime makefile what to include
-DEBUG=1                   # Include debugging symbols
-OUTPUT_LEVEL=LEVEL_DEBUG  # Compile time print level
-SHARED_LOWLEVEL=0	  # Use the shared low level
-USE_HDF=0
-#ALT_MAPPERS=1		  # Compile the alternative mappers
+# Flags for directing the runtime makefile what to include
+DEBUG           ?= 1		# Include debugging symbols
+OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
+USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
+USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
+USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
+ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		:= runtests
+OUTFILE		?= predspec
 # List all the application source files here
-GEN_SRC		:= runtests.cc testmapper.cc testtasks.cc
-GEN_SRC         += $(wildcard test_*.cc)
-GEN_GPU_SRC	:=				# .cu files
+GEN_SRC		?= runtests.cc testmapper.cc testtasks.cc test_predsimple.cc test_specsimple.cc		# .cc files
+GEN_GPU_SRC	?=		# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
-INC_FLAGS	:=
+INC_FLAGS	?=
 CC_FLAGS	?=
-NVCC_FLAGS	:=
-GASNET_FLAGS	:=
-LD_FLAGS	:=
+NVCC_FLAGS	?=
+GASNET_FLAGS	?=
+LD_FLAGS	?=
 
 ###########################################################################
 #

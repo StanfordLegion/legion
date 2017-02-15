@@ -13,6 +13,17 @@
  * limitations under the License.
  */
 
+// SJT: this comes first because some systems require __STDC_FORMAT_MACROS
+//  to be defined before inttypes.h is included anywhere
+#ifdef __MACH__
+#define MASK_FMT "llx"
+#else
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
+#endif
+#include <inttypes.h>
+#define MASK_FMT PRIx64
+#endif
 
 #include "legion.h"
 #include "runtime.h"
@@ -332,7 +343,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Free up all the values that we had stored
-      for (std::set<TaskArgument>::const_iterator it = values.begin();
+      for (std::vector<TaskArgument>::const_iterator it = values.begin();
             it != values.end(); it++)
       {
         legion_free(STORE_ARGUMENT_ALLOC, it->get_ptr(), it->get_size());
@@ -355,7 +366,7 @@ namespace Legion {
       void *buffer = legion_malloc(STORE_ARGUMENT_ALLOC, arg.get_size());
       memcpy(buffer, arg.get_ptr(), arg.get_size());
       TaskArgument new_arg(buffer,arg.get_size());
-      values.insert(new_arg);
+      values.push_back(new_arg);
       return new_arg;
     }
 
@@ -1743,9 +1754,21 @@ namespace Legion {
       // We already have our contributions for each stage so
       // we can set the inditial participants to 1
       if (participating)
+      {
         stage_notifications.resize(Runtime::legion_collective_stages, 1);
+	// Special case: if we expect a stage -1 message from a non-participating
+	//  space, we'll count that as part of stage 0
+	if ((Runtime::legion_collective_stages > 0) &&
+	    (runtime->address_space <
+	     (runtime->total_address_spaces -
+	      Runtime::legion_collective_participating_spaces)))
+	  stage_notifications[0]--;
+      }
       if (runtime->total_address_spaces > 1)
         done_event = Runtime::create_rt_user_event();
+      // Add ourselves to the set before any exchanges start
+      assert(Runtime::mpi_rank >= 0);
+      forward_mapping[Runtime::mpi_rank] = runtime->address_space;
     }
     
     //--------------------------------------------------------------------------
@@ -1778,15 +1801,6 @@ namespace Legion {
     void MPIRankTable::perform_rank_exchange(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(Runtime::mpi_rank >= 0);
-#endif
-      // Add ourselves to the set first
-      // Have to hold the lock in case we are already receiving
-      {
-        AutoLock r_lock(reservation);
-        forward_mapping[Runtime::mpi_rank] = runtime->address_space;
-      }
       // We can skip this part if there are not multiple nodes
       if (runtime->total_address_spaces > 1)
       {
@@ -1811,9 +1825,7 @@ namespace Legion {
         // Wait for our done event to be ready
         done_event.wait();
       }
-#ifdef DEBUG_LEGION
       assert(forward_mapping.size() == runtime->total_address_spaces);
-#endif
       // Reverse the mapping
       for (std::map<int,AddressSpace>::const_iterator it = 
             forward_mapping.begin(); it != forward_mapping.end(); it++)
@@ -1879,6 +1891,9 @@ namespace Legion {
       DerezCheck z(derez);
       int stage;
       derez.deserialize(stage);
+#ifdef DEBUG_LEGION
+      assert(participating || (stage == -1));
+#endif
       bool send_next = unpack_exchange(stage, derez);
       if (stage == -1)
       {
@@ -1887,29 +1902,25 @@ namespace Legion {
         else
           Runtime::trigger_event(done_event);
       }
-      else
+      // send_next may be true even for stage -1 if it arrives after all the
+      //  stage 0 messages
+      if (send_next)
       {
-#ifdef DEBUG_LEGION
-        assert(participating);
-#endif
-        if (send_next)
+	stage = (stage == -1) ? 1 : stage + 1;
+	if (stage == Runtime::legion_collective_stages)
         {
-          stage += 1;
-          if (stage == Runtime::legion_collective_stages)
-          {
-            // We are done
-            Runtime::trigger_event(done_event);
-            // See if we have to send a message back to a
-            // non-participating node
-            if ((int(runtime->total_address_spaces) > 
-                Runtime::legion_collective_participating_spaces) &&
+	  // We are done
+	  Runtime::trigger_event(done_event);
+	  // See if we have to send a message back to a
+	  // non-participating node
+	  if ((int(runtime->total_address_spaces) > 
+	       Runtime::legion_collective_participating_spaces) &&
               (int(runtime->address_space) < int(runtime->total_address_spaces -
                 Runtime::legion_collective_participating_spaces)))
-              send_stage(-1);
-          }
-          else // Send the next stage
-            send_stage(stage);
-        }
+	    send_stage(-1);
+	}
+	else // Send the next stage
+	  send_stage(stage);
       }
     }
 
@@ -1924,12 +1935,23 @@ namespace Legion {
       {
         int rank;
         derez.deserialize(rank);
-        derez.deserialize(forward_mapping[rank]);
+	unsigned space;
+	derez.deserialize(space);
+	// Duplicates are possible because later messages aren't "held", but
+	// they should be exact matches
+	assert ((forward_mapping.count(rank) == 0) ||
+		(forward_mapping[rank] == space));
+	forward_mapping[rank] = space;
       }
+      // A stage -1 message is counted as part of stage 0 (if it exists
+      //  and we are participating)
+      if ((stage == -1) && participating &&
+	  (Runtime::legion_collective_stages > 0))
+	stage = 0;
       if (stage >= 0)
       {
 #ifdef DEBUG_LEGION
-        assert(stage < int(stage_notifications.size()));
+	assert(stage < int(stage_notifications.size()));
 #endif
         stage_notifications[stage]++;
         if (stage_notifications[stage] == (Runtime::legion_collective_radix))
@@ -4911,10 +4933,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(VirtualChannelKind kind, 
         AddressSpaceID local_address_space, 
-        size_t max_message_size, bool profile)
+        size_t max_message_size, LegionProfiler *prof)
       : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
-        observed_recent(true), profile_messages(profile)
+        observed_recent(true), profiler(prof)
     //--------------------------------------------------------------------------
     //
     {
@@ -4949,7 +4971,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(const VirtualChannel &rhs)
-      : sending_buffer(NULL), sending_buffer_size(0), profile_messages(false)
+      : sending_buffer(NULL), sending_buffer_size(0), profiler(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4970,7 +4992,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VirtualChannel::package_message(Serializer &rez, MessageKind k,
-                                bool flush, Runtime *runtime, Processor target)
+                  bool flush, Runtime *runtime, Processor target, bool shutdown)
     //--------------------------------------------------------------------------
     {
       // First check to see if the message fits in the current buffer    
@@ -4986,7 +5008,7 @@ namespace Legion {
         // Since there is no partial data we can fake the flush
         if ((sending_buffer_size - sending_index) <= 
             (sizeof(k)+sizeof(buffer_size)))
-          send_message(true/*complete*/, runtime, target);
+          send_message(true/*complete*/, runtime, target, shutdown);
         // Now can package up the meta data
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
@@ -4997,7 +5019,7 @@ namespace Legion {
         {
           unsigned remaining = sending_buffer_size - sending_index;
           if (remaining == 0)
-            send_message(false/*complete*/, runtime, target);
+            send_message(false/*complete*/, runtime, target, shutdown);
           remaining = sending_buffer_size - sending_index;
 #ifdef DEBUG_LEGION
           assert(remaining > 0); // should be space after the send
@@ -5024,12 +5046,12 @@ namespace Legion {
         sending_index += buffer_size;
       }
       if (flush)
-        send_message(true/*complete*/, runtime, target);
+        send_message(true/*complete*/, runtime, target, shutdown);
     }
 
     //--------------------------------------------------------------------------
     void VirtualChannel::send_message(bool complete, Runtime *runtime,
-                                      Processor target)
+                                      Processor target, bool shutdown)
     //--------------------------------------------------------------------------
     {
       // See if we need to switch the header file
@@ -5051,11 +5073,22 @@ namespace Legion {
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
                                                             packaged_messages;
       // Send the message directly there, don't go through the
-      // runtime interface to avoid being counted
-      RtEvent next_event(target.spawn(LG_TASK_ID, sending_buffer, 
-            sending_index, last_message_event, LG_LATENCY_PRIORITY));
-      // Update the event
-      last_message_event = next_event;
+      // runtime interface to avoid being counted, still include
+      // a profiling request though if necessary in order to 
+      // see waits on message handlers
+      // Note that we don't profile on shutdown messages or we would 
+      // never actually finish running
+      if (!shutdown && (Runtime::num_profiling_nodes > 0) && 
+          (runtime->find_address_space(target) < Runtime::num_profiling_nodes))
+      {
+        Realm::ProfilingRequestSet requests;
+        LegionProfiler::add_message_request(requests, target);
+        last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
+            sending_index, requests, last_message_event, LG_LATENCY_PRIORITY));
+      }
+      else
+        last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
+              sending_index, last_message_event, LG_LATENCY_PRIORITY));
       // Reset the state of the buffer
       sending_index = base_size + sizeof(header) + sizeof(unsigned);
       if (partial)
@@ -5112,6 +5145,9 @@ namespace Legion {
                          Runtime *runtime, AddressSpaceID remote_address_space)
     //--------------------------------------------------------------------------
     {
+      // If we have a profiler we need to increment our requests count
+      if (profiler != NULL)
+        profiler->increment_total_outstanding_requests();
       // Strip off our header and the number of messages, the 
       // processor part was already stipped off by the Legion runtime
       const char *buffer = (const char*)args;
@@ -5183,7 +5219,7 @@ namespace Legion {
         if (idx == (num_messages-1))
           assert(message_size == arglen);
 #endif
-        if (profile_messages)
+        if (profiler != NULL)
           start = Realm::Clock::current_time_in_nanoseconds();
         // Build the deserializer
         Deserializer derez(args,message_size);
@@ -5796,24 +5832,31 @@ namespace Legion {
             }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
+              // If we have a profiler, we shouldn't have incremented the
+              // outstanding profiling count because we don't actually
+              // do profiling requests on shutdown messages
+              if (profiler != NULL)
+                profiler->decrement_total_outstanding_requests();
               runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_RESPONSE:
             {
+              // If we have a profiler, we shouldn't have incremented the
+              // outstanding profiling count because we don't actually
+              // do profiling requests on shutdown messages
+              if (profiler != NULL)
+                profiler->decrement_total_outstanding_requests();
               runtime->handle_shutdown_response(derez);
               break;
             }
           default:
             assert(false); // should never get here
         }
-        if (profile_messages)
+        if (profiler != NULL)
         {
           stop = Realm::Clock::current_time_in_nanoseconds();
-#ifdef DEBUG_LEGION
-          assert(runtime->profiler != NULL);
-#endif
-          runtime->profiler->record_message(kind, start, stop);
+          profiler->record_message(kind, start, stop);
         }
         // Update the args and arglen
         args += message_size;
@@ -5897,7 +5940,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
         new (channels+idx) VirtualChannel((VirtualChannelKind)idx,
-            rt->address_space, max_message_size, (runtime->profiler != NULL));
+            rt->address_space, max_message_size, runtime->profiler);
       }
     }
 
@@ -5932,10 +5975,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MessageManager::send_message(Serializer &rez, MessageKind kind,
-                                      VirtualChannelKind channel, bool flush)
+                          VirtualChannelKind channel, bool flush, bool shutdown)
     //--------------------------------------------------------------------------
     {
-      channels[channel].package_message(rez, kind, flush, runtime, target);
+      channels[channel].package_message(rez, kind, flush, runtime, 
+                                        target, shutdown);
     }
 
     //--------------------------------------------------------------------------
@@ -8836,11 +8880,14 @@ namespace Legion {
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
           // Now ask the application what it wants to do
-          if (Runtime::registration_callback != NULL)
+          if (!Runtime::registration_callbacks.empty())
           {
-            log_run.info("Invoking mapper registration callback function...");
-            (*Runtime::registration_callback)(machine, external, local_procs);
-            log_run.info("Completed execution of mapper registration callback");
+            log_run.info("Invoking mapper registration callback functions...");
+            for (std::vector<RegistrationCallbackFnptr>::const_iterator it = 
+                  Runtime::registration_callbacks.begin(); it !=
+                  Runtime::registration_callbacks.end(); it++)
+              (**it)(machine, external, local_procs);
+            log_run.info("Finished execution of mapper registration callbacks");
           }
         }
       }
@@ -11620,6 +11667,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::begin_static_trace(Context ctx, 
+                                     const std::set<RegionTreeID> *managed)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context begin static trace!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->begin_static_trace(managed);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::end_static_trace(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context end static trace!");
+ #ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->end_static_trace(); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::complete_frame(Context ctx)
     //--------------------------------------------------------------------------
     {
@@ -13766,7 +13844,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_NOTIFICATION,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*shutdown*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13774,7 +13852,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*shutdown*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16421,7 +16499,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(individual_task_lock);
-      available_individual_tasks.push_front(task);
+      release_object(available_individual_tasks, task);
 #ifdef DEBUG_LEGION
       out_individual_tasks.erase(task);
 #endif
@@ -16439,10 +16517,7 @@ namespace Legion {
       // never registered in the logical state of the region tree
       // as part of the dependence analysis. This does not apply
       // to all operation objects.
-      if (available_point_tasks.size() == LEGION_MAX_RECYCLABLE_OBJECTS)
-        legion_delete(task);
-      else
-        available_point_tasks.push_front(task);
+      release_object(available_point_tasks, task);
     }
 
     //--------------------------------------------------------------------------
@@ -16450,7 +16525,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(index_task_lock);
-      available_index_tasks.push_front(task);
+      release_object(available_index_tasks, task);
 #ifdef DEBUG_LEGION
       out_index_tasks.erase(task);
 #endif
@@ -16468,10 +16543,7 @@ namespace Legion {
       // never registered in the logical state of the region tree
       // as part of the dependence analysis. This does not apply
       // to all operation objects.
-      if (available_slice_tasks.size() == LEGION_MAX_RECYCLABLE_OBJECTS)
-        legion_delete(task);
-      else
-        available_slice_tasks.push_front(task);
+      release_object(available_slice_tasks, task);
     }
 
     //--------------------------------------------------------------------------
@@ -16479,7 +16551,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(map_op_lock);
-      available_map_ops.push_front(op);
+      release_object(available_map_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16487,7 +16559,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(copy_op_lock);
-      available_copy_ops.push_front(op);
+      release_object(available_copy_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16495,7 +16567,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(copy_op_lock);
-      available_index_copy_ops.push_front(op);
+      release_object(available_index_copy_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16503,7 +16575,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(copy_op_lock);
-      available_point_copy_ops.push_front(op);
+      release_object(available_point_copy_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16511,7 +16583,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fence_op_lock);
-      available_fence_ops.push_front(op);
+      release_object(available_fence_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16519,7 +16591,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(frame_op_lock);
-      available_frame_ops.push_back(op);
+      release_object(available_frame_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16527,7 +16599,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(deletion_op_lock);
-      available_deletion_ops.push_front(op);
+      release_object(available_deletion_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16535,7 +16607,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(open_op_lock);
-      available_open_ops.push_front(op);
+      release_object(available_open_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16543,7 +16615,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(advance_op_lock);
-      available_advance_ops.push_front(op);
+      release_object(available_advance_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16551,7 +16623,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inter_close_op_lock);
-      available_inter_close_ops.push_front(op);
+      release_object(available_inter_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16575,7 +16647,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(read_close_op_lock);
-      available_read_close_ops.push_front(op);
+      release_object(available_read_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16583,7 +16655,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(post_close_op_lock);
-      available_post_close_ops.push_front(op);
+      release_object(available_post_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16591,7 +16663,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(virtual_close_op_lock);
-      available_virtual_close_ops.push_front(op);
+      release_object(available_virtual_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16599,7 +16671,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock dc_lock(dynamic_collective_op_lock);
-      available_dynamic_collective_ops.push_front(op);
+      release_object(available_dynamic_collective_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16607,7 +16679,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_pred_op_lock);
-      available_future_pred_ops.push_front(op);
+      release_object(available_future_pred_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16615,7 +16687,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(not_pred_op_lock);
-      available_not_pred_ops.push_front(op);
+      release_object(available_not_pred_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16623,7 +16695,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(and_pred_op_lock);
-      available_and_pred_ops.push_front(op);
+      release_object(available_and_pred_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16631,7 +16703,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(or_pred_op_lock);
-      available_or_pred_ops.push_front(op);
+      release_object(available_or_pred_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16639,7 +16711,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(acquire_op_lock);
-      available_acquire_ops.push_front(op);
+      release_object(available_acquire_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16647,7 +16719,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock r_lock(release_op_lock);
-      available_release_ops.push_front(op);
+      release_object(available_release_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16655,7 +16727,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(capture_op_lock);
-      available_capture_ops.push_front(op);
+      release_object(available_capture_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16663,7 +16735,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_op_lock);
-      available_trace_ops.push_front(op);
+      release_object(available_trace_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16671,7 +16743,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock e_lock(epoch_op_lock);
-      available_epoch_ops.push_front(op);
+      release_object(available_epoch_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16679,7 +16751,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(pending_partition_op_lock);
-      available_pending_partition_ops.push_front(op);
+      release_object(available_pending_partition_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16687,7 +16759,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(dependent_partition_op_lock);
-      available_dependent_partition_ops.push_front(op);
+      release_object(available_dependent_partition_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16695,7 +16767,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fill_op_lock);
-      available_fill_ops.push_front(op);
+      release_object(available_fill_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16703,7 +16775,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fill_op_lock);
-      available_index_fill_ops.push_front(op);
+      release_object(available_index_fill_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16711,7 +16783,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(fill_op_lock);
-      available_point_fill_ops.push_front(op);
+      release_object(available_point_fill_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16719,7 +16791,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock a_lock(attach_op_lock);
-      available_attach_ops.push_front(op);
+      release_object(available_attach_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16727,7 +16799,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock d_lock(detach_op_lock);
-      available_detach_ops.push_front(op);
+      release_object(available_detach_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16735,7 +16807,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(timing_op_lock);
-      available_timing_ops.push_front(op);
+      release_object(available_timing_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -17240,7 +17312,7 @@ namespace Legion {
         if (it->second.diff_allocations == 0)
           continue;
         log_allocation.info("%s on %d: "
-            "total=%d total_bytes=%ld diff=%d diff_bytes=%ld",
+            "total=%d total_bytes=%ld diff=%d diff_bytes=%lld",
             get_allocation_name(it->first), address_space,
             it->second.total_allocations, it->second.total_bytes,
             it->second.diff_allocations, it->second.diff_bytes);
@@ -17272,8 +17344,10 @@ namespace Legion {
           return "Future Map";
         case PHYSICAL_REGION_ALLOC:
           return "Physical Region";
-        case TRACE_ALLOC:
-          return "Trace";
+        case STATIC_TRACE_ALLOC:
+          return "Static Trace";
+        case DYNAMIC_TRACE_ALLOC:
+          return "Dynamic Trace";
         case ALLOC_MANAGER_ALLOC:
           return "Allocation Manager";
         case ALLOC_INTERNAL_ALLOC:
@@ -17422,8 +17496,6 @@ namespace Legion {
           return "Runtime Futures";
         case RUNTIME_REMOTE_ALLOC:
           return "Runtime Remote Contexts";
-        case TASK_INSTANCE_REGION_ALLOC:
-          return "Task Physical Instances";
         case TASK_INLINE_REGION_ALLOC:
           return "Task Inline Regions";
         case TASK_TRACES_ALLOC:
@@ -17923,8 +17995,8 @@ namespace Legion {
 
     /*static*/ Runtime* Runtime::the_runtime = NULL;
     /*static*/ std::map<Processor,Runtime*>* Runtime::runtime_map = NULL;
-    /*static*/ volatile RegistrationCallbackFnptr Runtime::
-                                              registration_callback = NULL;
+    /*static*/ std::vector<RegistrationCallbackFnptr> 
+                                             Runtime::registration_callbacks;
     /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
     /*static*/ int Runtime::initial_task_window_size = 
                                       DEFAULT_MAX_TASK_WINDOW;
@@ -18438,6 +18510,14 @@ namespace Legion {
             it->impl->initialize();
           delete pending_handshakes;
           pending_handshakes = NULL;
+	  // Another (dummy) collective task launch to ensure that
+	  // all ranks have initialized their handshakes before
+	  // the top-level task is started
+	  RtEvent mpi_sync_event(realm.collective_spawn_by_kind(
+                Processor::LOC_PROC, LG_MPI_SYNC_ID, NULL, 0,
+                true/*one per node*/, runtime_startup_event));
+	  // The mpi init event then becomes the new runtime startup event
+	  runtime_startup_event = mpi_sync_event;
         }
       } 
       // See if we are supposed to start the top-level task
@@ -18578,11 +18658,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_registration_callback(
+    /*static*/ void Runtime::add_registration_callback(
                                             RegistrationCallbackFnptr callback)
     //--------------------------------------------------------------------------
     {
-      registration_callback = callback;
+      registration_callbacks.push_back(callback);
     }
 
     //--------------------------------------------------------------------------
@@ -18801,6 +18881,7 @@ namespace Legion {
       CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
       CodeDescriptor mpi_interop_task(Runtime::init_mpi_interop);
+      CodeDescriptor mpi_sync_task(Runtime::init_mpi_sync);
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
@@ -18830,6 +18911,9 @@ namespace Legion {
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                           LG_MPI_INTEROP_ID, mpi_interop_task, no_requests)));
+        registered_events.insert(RtEvent(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                          LG_MPI_SYNC_ID, mpi_sync_task, no_requests)));
       }
       if (record_registration)
       {
@@ -19777,6 +19861,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::init_mpi_sync(
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
+    //--------------------------------------------------------------------------
+    {
+      log_run.debug() << "MPI sync task";
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::configure_collective_settings(int total_spaces)
     //--------------------------------------------------------------------------
     {
@@ -19841,8 +19935,7 @@ namespace Legion {
                                        AllocationType a, size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(
-                                  Processor::get_executing_processor());
+      Runtime *rt = Runtime::the_runtime;
       if (rt != NULL)
         rt->trace_allocation(a, size, elems);
     }
@@ -19852,17 +19945,16 @@ namespace Legion {
                                                  size_t size, int elems)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime ::get_runtime(
-                                  Processor::get_executing_processor());
+      Runtime *rt = Runtime::the_runtime;
       if (rt != NULL)
         rt->trace_free(a, size, elems);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ Internal* LegionAllocation::find_runtime(void)
+    /*static*/ Runtime* LegionAllocation::find_runtime(void)
     //--------------------------------------------------------------------------
     {
-      return Runtime::get_runtime(Processor::get_executing_processor());
+      return Runtime::the_runtime;
     }
 
     //--------------------------------------------------------------------------
@@ -19897,6 +19989,30 @@ namespace Legion {
 #endif
 
   }; // namespace Internal 
+
+  //--------------------------------------------------------------------------
+  /*static*/ char* BitMaskHelper::to_string(const uint64_t *bits, int count)
+  //--------------------------------------------------------------------------
+  {
+    char *result = (char*)malloc((((count + 7) >> 3) + 1)*sizeof(char));
+    assert(result != 0);
+    char *p = result;
+    // special case for non-multiple-of-64
+    if((count & 63) != 0) {
+      // each nibble (4 bits) takes one character
+      int nibbles = ((count & 63) + 3) >> 2;
+      sprintf(p, "%*.*" MASK_FMT, nibbles, nibbles, bits[count >> 6]);
+      p += nibbles;
+    }
+    // rest are whole words
+    int idx = (count >> 6);
+    while(idx >= 0) {
+      sprintf(p, "%16.16" MASK_FMT, bits[--idx]);
+      p += 16;
+    }
+    return result;
+  }
+
 }; // namespace Legion 
 
 // EOF

@@ -1607,6 +1607,37 @@ function specialize.stat_raw_delete(cx, node)
   }
 end
 
+function specialize.stat_parallelize_with(cx, node)
+  local hints = data.flatmap(function(expr)
+    return specialize.expr(cx, expr, true) end, node.hints)
+  hints = hints:map(function(hint)
+    if not (hint:is(ast.specialized.expr.ID) or hint:is(ast.specialized.expr.Binary)) then
+      report.error(hint, "parallelizer hint should be a partition or constraint on two partitions")
+    elseif hint:is(ast.specialized.expr.Binary) then
+      if not (hint.op == "<=" or hint.op == ">=") then
+        report.error(hint, "operator '" .. hint.op .."' is not supported in parallelizer hints")
+      end
+      if hint.op == ">=" then
+        hint = hint {
+          lhs = hint.rhs,
+          rhs = hint.lhs,
+          op = "<="
+        }
+      end
+      if not ((hint.lhs:is(ast.specialized.expr.Image) and hint.rhs:is(ast.specialized.expr.ID))) then
+        report.error(node, "unsupported constraint for parallelizer hints")
+      end
+    end
+    return hint
+  end)
+  return ast.specialized.stat.ParallelizeWith {
+    hints = hints,
+    block = specialize.block(cx, node.block),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.stat(cx, node)
   if node:is(ast.unspecialized.stat.If) then
     return specialize.stat_if(cx, node)
@@ -1655,6 +1686,9 @@ function specialize.stat(cx, node)
 
   elseif node:is(ast.unspecialized.stat.RawDelete) then
     return specialize.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.unspecialized.stat.ParallelizeWith) then
+    return specialize.stat_parallelize_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

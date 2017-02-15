@@ -1641,6 +1641,25 @@ function parser.stat_raw_delete(p, annotations)
   }
 end
 
+function parser.stat_parallelize_with(p, annotations)
+  local start = ast.save(p)
+  p:expect("__parallelize_with")
+  local hints = terralib.newlist()
+  hints:insert(p:expr())
+  while p:nextif(",") do
+    hints:insert(p:expr())
+  end
+  p:expect("do")
+  local block = p:block()
+  p:expect("end")
+  return ast.unspecialized.stat.ParallelizeWith {
+    hints = hints,
+    block = block,
+    annotations = annotations,
+    span = ast.span(start, p),
+  }
+end
+
 function parser.stat_expr_assignment(p, start, first_lhs, annotations)
   local lhs = terralib.newlist()
   lhs:insert(first_lhs)
@@ -1773,6 +1792,9 @@ function parser.stat(p)
 
   elseif p:matches("__delete") then
     return p:stat_raw_delete(annotations)
+
+  elseif p:matches("__parallelize_with") then
+    return p:stat_parallelize_with(annotations)
 
   else
     return p:stat_expr(annotations)

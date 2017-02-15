@@ -268,7 +268,7 @@ def driver():
         default = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1',
         help = 'Build Legion with CUDA.')
     parser.add_argument(
-        '--hdf', dest = 'hdf', action = 'store_true', required = False,
+        '--hdf5', '--hdf', dest = 'hdf', action = 'store_true', required = False,
         default = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1',
         help = 'Build Legion with HDF.')
     parser.add_argument(
