@@ -91,6 +91,13 @@ regent_perf_tests = [
     ['language/examples/circuit_sparse.rg',
      ['-l', '10', '-p', '100', '-npp', '2', '-wpp', '4', '-ll:cpu', '2',
       '-fflow-spmd-shardsize', '2']],
+
+    # PENNANT: Heavy Compute
+    ['language/examples/pennant_fast.rg',
+     ['pennant.tests/sedovbig3x30/sedovbig.pnt',
+      '-seq_init', '0', '-par_init', '1', '-print_ts', '1', '-prune', '5',
+      '-npieces', str(app_cores), '-numpcx', '1', '-numpcy', str(app_cores),
+      '-ll:csize', '8192', '-ll:cpu', str(app_cores), '-fflow-spmd-shardsize', str(app_cores)]],
 ]
 
 def cmd(command, env=None, cwd=None):
@@ -253,7 +260,7 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         # Capture command line arguments following flags.
         'argv': {
             'type': 'argv',
-            'start': 2 + len(flags),
+            'start': 2,# + len(flags), # FIXME: Skipping flags, see below.
         },
         # Record running time in seconds.
         'time_seconds': {
@@ -292,7 +299,8 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 
     # Run Regent performance tests.
     regent_path = os.path.join(root_dir, 'language/regent.py')
-    run_regent(regent_perf_tests, flags, [runner, regent_path], root_dir, regent_env, thread_count)
+    # FIXME: PENNANT can't handle the -logfile flag coming first, so just skip it.
+    run_regent(regent_perf_tests, [], [runner, regent_path], root_dir, regent_env, thread_count)
 
     # Render the final charts.
     subprocess.check_call(
