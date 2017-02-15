@@ -20,12 +20,32 @@ of components. The flow is roughly:
     renders the aggregated results.
 
 This may seem complicated, but critically all of the moving parts are
-configured in human-readable text, and versioned and stored in Git
-repositories (including the data). There is no local configuration
+configured explicitly, and versioned and stored in Git repositories
+(including the data). There is no local configuration
 that is required and no local state that can be corrupted or
 lost.
 
 ## Running Performance Tests
+
+All tests run through the main `test.py` script:
+
+```
+PERF_ACCESS_TOKEN=... DEBUG=0 ./test.py --test=perf
+```
+
+A couple of notes:
+
+  * `PERF_ACCESS_TOKEN` is a [Github personal access
+    token](https://github.com/settings/tokens). The token must be for
+    a user account with write permission to the
+    [`perf-data` repository](https://github.com/StanfordLegion/perf-data).
+    We have a special Github account which we use for this purpose.
+
+  * `DEBUG=0` is required to ensure performance.
+
+  * `--test=perf` requests that the performance tests be run.
+
+### How to Add New Tests
 
 ## Capturing Measurements
 
