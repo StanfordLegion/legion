@@ -16644,7 +16644,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inter_close_op_lock);
-      available_index_close_ops.push_front(op);
+      release_operation<false>(available_index_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -16652,7 +16652,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inter_close_op_lock);
-      available_point_close_ops.push_front(op);
+      release_operation<true>(available_point_close_ops, op);
     }
 
     //--------------------------------------------------------------------------

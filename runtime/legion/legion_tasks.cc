@@ -3067,6 +3067,34 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+      // Always check for control replication cases
+      if (is_replicated_task && !variant_impl->is_replicable())
+      {
+        if (is_top_level_task() && (runtime->total_address_spaces > 1))
+          log_run.error("Invalid mapper output from invocation of '%s' on "
+                        "mapper %s. Mapper failed to pick a replicable "
+                        "variant for the top-level task %s (UID %lld). "
+                        "By default all multi-node runs of a Legion program "
+                        "now require the top-level tasks to be control "
+                        "replicated for performance reasons. If you would "
+                        "like to revert to the singular top-level task model "
+                        "please indicate this by passing the "
+                        "'-lg:disable_top_level_control_replication' flag "
+                        "on the command line.", "map_task", 
+                        mapper->get_mapper_name(), get_task_name(),
+                        get_unique_id());
+        else
+          log_run.error("Invalid mapper output from invocation of '%s' on "
+                        "mapper %s. Mapper failed to pick a replicable "
+                        "variant for task %s (UID %lld) that was designated "
+                        "to be control replicated.", "map_task",
+                        mapper->get_mapper_name(), get_task_name(),
+                        get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
         validate_variant_selection(mapper, variant_impl, "map_task"); 
