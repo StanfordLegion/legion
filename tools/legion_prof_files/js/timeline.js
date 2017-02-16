@@ -669,9 +669,11 @@ function drawLayout() {
   var names = namesGroup.append("text");
 
   var thickness = state.thickness;
+  var xCalculator = function(d) { return (d.depth + 1) * 15; };
+
   names.attr("text-anchor", "start")
     .attr("class", "processor")
-    .attr("x", function(d) { return (d.depth + 1) * 15; })
+    .attr("x", xCalculator)
     .attr("y", lineLevelCalculator)
     .attr("visibility", function(elem) {
       return (elem.visible) ? "visible" : "hidden"  
@@ -691,9 +693,11 @@ function drawLayout() {
       var source = tokens[0];
       var target = tokens[1].replace(" Channel", "");
       elem.append("tspan").text(source)
-        .attr({x : 0, dy : -10});
+        .attr("x", xCalculator)
+        .attr("dy", -10);
       elem.append("tspan").text("==> " + target)
-      .attr({x : 0, dy : 10});
+        .attr("x", xCalculator)
+        .attr("dy", 10);
     }
   });
   names.on({
