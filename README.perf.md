@@ -15,7 +15,8 @@ of components. The flow is roughly:
   * Raw measurements are stored in the
     [`perf-data` repository](https://github.com/StanfordLegion/perf-data).
   * The script `tools/perf_chart.py` parses the raw measurements to
-    produce a table aggregating the results, which it uploads.
+    produce a table aggregating the results, which it uploads to the
+    same repository.
   * An [HTML-based front-end](https://stanfordlegion.github.io/perf-frontend/perf_chart.html)
     renders the aggregated results.
 
@@ -65,7 +66,7 @@ document.
 
 ### How to Add New Tests
 
-Tests are in `test.py` under `run_test_perf`. The specific way in
+Tests are in `test.py` under the `perf` test stage. The specific way in
 which you add a new test depends on the kind of test you're adding:
 
   * C++ test in the main Legion repository: Add the test to
@@ -74,10 +75,10 @@ which you add a new test depends on the kind of test you're adding:
     `regent_perf_tests` at the top of the file.
   * External C++ or Regent test: Add code to the end of
     `run_test_perf` to clone, build, and run the repository. Remember
-    to use `perf.py` to launch the test as described below.
+    to run the command through `perf.py` as described below.
 
 ## Capturing Measurements
 
-## Measurement Storage and Aggregation
+## Measurement Storage and Processing
 
 ## Visualization Front-end
