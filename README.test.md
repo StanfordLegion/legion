@@ -33,7 +33,7 @@ Tests:
   * `--test=realm` or `TEST_REALM`: Realm tests
   * `--test=external` or `TEST_EXTERNAL`: Various external applications
   * `--test=private` or `TEST_PRIVATE`: Private external applications
-  * `--test=perf` or `TEST_PERF`: Performance tests
+  * `--test=perf` or `TEST_PERF`: [Performance tests](README.perf.md)
 
 Build flags:
 
@@ -59,6 +59,8 @@ The first will run **only** Regent tests. The second will run Regent
 tests **in addition to** any other tests already enabled (in this
 case, whatever defaults are chosen by the script). The same applies to
 `--use` and `USE_` options as well.
+
+### How to Add New Tests
 
 ## Automated Test Infrastructure
 
