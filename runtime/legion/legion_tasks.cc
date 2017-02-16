@@ -2300,7 +2300,6 @@ namespace Legion {
       inner_cached = false;
       has_virtual_instances_result = false;
       has_virtual_instances_cached = false;
-      is_replicated_task = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2347,13 +2346,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SingleTask::is_replicated(void) const
-    //--------------------------------------------------------------------------
-    {
-      return is_replicated_task;
-    }
-
-    //--------------------------------------------------------------------------
     bool SingleTask::has_virtual_instances(void) const
     //--------------------------------------------------------------------------
     {
@@ -2388,17 +2380,6 @@ namespace Legion {
         no_access_regions[idx] = IS_NO_ACCESS(regions[idx]) || 
                                   regions[idx].privilege_fields.empty();
     } 
-
-    //--------------------------------------------------------------------------
-    void SingleTask::mark_replicated(UniqueID common_uid)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_replicated_task);
-#endif
-      unique_op_id = common_uid;
-      is_replicated_task = true;
-    }
 
     //--------------------------------------------------------------------------
     void SingleTask::pack_single_task(Serializer &rez, AddressSpaceID target)
@@ -2577,7 +2558,6 @@ namespace Legion {
       // their valid instances, then fill in the mapper input structure
       valid.resize(regions.size());
       input.valid_instances.resize(regions.size());
-      output.chosen_instances.resize(regions.size());
       // If we have must epoch owner, we have to check for any 
       // constrained mappings which must be heeded
       if (must_epoch_owner != NULL)
@@ -2633,6 +2613,8 @@ namespace Legion {
       output.chosen_variant = 0;
       output.postmap_task = false;
       output.task_priority = 0;
+      output.postmap_task = false;
+      output.control_replicate = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2711,7 +2693,22 @@ namespace Legion {
       // visible from all the target processors
       std::set<Memory> visible_memories;
       if (!Runtime::unsafe_mapper)
-        runtime->find_visible_memories(target_proc, visible_memories);
+      {
+        if (target_processors.size() > 1)
+        {
+          // If we have multiple processor, we want the set of 
+          // memories visible to all of them
+          Machine::MemoryQuery visible_query(runtime->machine);
+          for (std::vector<Processor>::const_iterator it = 
+                target_processors.begin(); it != target_processors.end(); it++)
+            visible_query.has_affinity_to(*it);
+          for (Machine::MemoryQuery::iterator it = visible_query.begin();
+                it != visible_query.end(); it++)
+            visible_memories.insert(*it);
+        }
+        else
+          runtime->find_visible_memories(target_proc, visible_memories);
+      }
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // If it was early mapped, that was easy
@@ -2750,6 +2747,28 @@ namespace Legion {
                 assert(false);
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
+              }
+              else if (output.control_replicate && IS_READ_ONLY(regions[idx]))
+              {
+                // Make sure we flush Realm's buffers here
+                for (int i = 0; i < 20; i++)
+                  log_run.warning("WARNING WARNING WARNING WARNING WARNING");
+                log_run.warning("Mapper %s mapped input region %d of task %s "
+                                "(UID %lld) to a concrete instance without "
+                                "specifying the NO-ACCESS flag. Mapping any "
+                                "input region with non-READ-ONLY privileges and"
+                                " no NO-ACCESS flag for a control replicated "
+                                "task is almost guaranteed to result in "
+                                "undefined behavior for your application. To "
+                                "ensure that you do not see non-determinism "
+                                "please describe your use case to Sean to "
+                                "verify that you will not see non-determinism "
+                                "during the execution of your application.",
+                                mapper->get_mapper_name(), idx, get_task_name(),
+                                get_unique_id());
+                // Make sure we flush Realm's buffers here
+                for (int i = 0; i < 20; i++)
+                  log_run.warning("WARNING WARNING WARNING WARNING WARNING");
               }
             }
           }
@@ -2962,6 +2981,28 @@ namespace Legion {
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
               }
+              else if (output.control_replicate && !IS_READ_ONLY(regions[idx]))
+              {
+                // Make sure we flush Realm's buffers here
+                for (int i = 0; i < 20; i++)
+                  log_run.warning("WARNING WARNING WARNING WARNING WARNING");
+                log_run.warning("Mapper %s mapped input region %d of task %s "
+                                "(UID %lld) to a concrete instance without "
+                                "specifying the NO-ACCESS flag. Mapping any "
+                                "input region with non-READ-ONLY privileges and"
+                                " no NO-ACCESS flag for a control replicated "
+                                "task is almost guaranteed to result in "
+                                "undefined behavior for your application. To "
+                                "ensure that you do not see non-determinism "
+                                "please describe your use case to Sean to "
+                                "verify that you will not see non-determinism "
+                                "during the execution of your application.",
+                                mapper->get_mapper_name(), idx, get_task_name(),
+                                get_unique_id());
+                // Make sure we flush Realm's buffers here
+                for (int i = 0; i < 20; i++)
+                  log_run.warning("WARNING WARNING WARNING WARNING WARNING");
+              }
             }
           }
           // If this is a reduction region requirement make sure all the 
@@ -3067,29 +3108,15 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
-      // Always check for control replication cases
-      if (is_replicated_task && !variant_impl->is_replicable())
+      // If we're doing control replication then we need a replicated task
+      if (output.control_replicate && !variant_impl->is_replicable())
       {
-        if (is_top_level_task() && (runtime->total_address_spaces > 1))
-          log_run.error("Invalid mapper output from invocation of '%s' on "
-                        "mapper %s. Mapper failed to pick a replicable "
-                        "variant for the top-level task %s (UID %lld). "
-                        "By default all multi-node runs of a Legion program "
-                        "now require the top-level tasks to be control "
-                        "replicated for performance reasons. If you would "
-                        "like to revert to the singular top-level task model "
-                        "please indicate this by passing the "
-                        "'-lg:disable_top_level_control_replication' flag "
-                        "on the command line.", "map_task", 
-                        mapper->get_mapper_name(), get_task_name(),
-                        get_unique_id());
-        else
-          log_run.error("Invalid mapper output from invocation of '%s' on "
-                        "mapper %s. Mapper failed to pick a replicable "
-                        "variant for task %s (UID %lld) that was designated "
-                        "to be control replicated.", "map_task",
-                        mapper->get_mapper_name(), get_task_name(),
-                        get_unique_id());
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper failed to pick a replicable "
+                      "variant for task %s (UID %lld) that was designated "
+                      "to be control replicated.", "map_task",
+                      mapper->get_mapper_name(), get_task_name(),
+                      get_unique_id());
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -3723,29 +3750,13 @@ namespace Legion {
       {
         if (!variant->is_leaf() || has_virtual_instances())
         {
-          if (is_replicated_task)
-          {
-#ifdef DEBUG_LEGION
-            assert(variant->is_replicable()); // checked by mapper output
-#endif
-            ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
-                variant->is_inner(), regions, parent_req_indexes,
-                virtual_mapped, unique_op_id);
-            if (mapper == NULL)
-              mapper = runtime->find_mapper(current_proc, map_id);
-            repl_ctx->configure_context(mapper);
-            execution_context = repl_ctx;
-          }
-          else
-          {
-            InnerContext *inner_ctx = new InnerContext(runtime, this, 
-                variant->is_inner(), regions, parent_req_indexes, 
-                virtual_mapped, unique_op_id);
-            if (mapper == NULL)
-              mapper = runtime->find_mapper(current_proc, map_id);
-            inner_ctx->configure_context(mapper);
-            execution_context = inner_ctx;
-          }
+          InnerContext *inner_ctx = new InnerContext(runtime, this, 
+              variant->is_inner(), regions, parent_req_indexes, 
+              virtual_mapped, unique_op_id);
+          if (mapper == NULL)
+            mapper = runtime->find_mapper(current_proc, map_id);
+          inner_ctx->configure_context(mapper);
+          execution_context = inner_ctx;
         }
         else
           execution_context = new LeafContext(runtime, this);

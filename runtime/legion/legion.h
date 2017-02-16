@@ -5178,9 +5178,6 @@ namespace Legion {
        * -lg:disjointness Verify the specified disjointness of 
        *              partitioning operations.  The runtime must be
        *              compiled with the DEBUG_LEGION macro defined.
-       * -lg:disable_top_level_control_replication Disable the runtime
-       *              control replication of the top-level task for
-       *              multi-node runs
        * -lg:separate Indicate that separate instances of the high
        *              level runtime should be made for each processor.
        *              The default is one runtime instance per node.

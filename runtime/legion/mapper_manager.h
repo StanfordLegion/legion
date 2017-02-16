@@ -321,6 +321,8 @@ namespace Legion {
                             VariantID variant_id);
       bool is_idempotent_variant(MappingCallInfo *ctx,
                                  TaskID task_id, VariantID variant_id);
+      bool is_replicable_variant(MappingCallInfo *ctx,
+                                 TaskID task_id, VariantID variant_id);
     public:
       void filter_variants(MappingCallInfo *ctx, const Task &task,
             const std::vector<std::vector<MappingInstance> > &chosen_instances,

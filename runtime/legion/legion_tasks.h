@@ -383,7 +383,6 @@ namespace Legion {
       bool has_virtual_instances(void) const;
       bool is_created_region(unsigned index) const;
       void update_no_access_regions(void);
-      void mark_replicated(UniqueID common_uid);
     public:
       inline void clone_virtual_mapped(std::vector<bool> &target) const
         { target = virtual_mapped; }
@@ -482,7 +481,6 @@ namespace Legion {
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
       mutable bool has_virtual_instances_cached, has_virtual_instances_result;
-      bool is_replicated_task;
     protected:
       // Profiling information
       std::vector<ProfilingMeasurementID> task_profiling_requests;

@@ -1450,6 +1450,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperManager::is_replicable_variant(MappingCallInfo *ctx,
+                                           TaskID task_id, VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
+      bool result = impl->is_replicable();
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::filter_variants(MappingCallInfo *ctx, const Task &task,
             const std::vector<std::vector<MappingInstance> > &chosen_instances,
                                         std::vector<VariantID> &variants)

@@ -367,6 +367,7 @@ typedef enum legion_error_t {
   ERROR_INNER_TASK_VIOLATION = 161,
   ERROR_REQUEST_FOR_EMPTY_FUTURE = 162,
   ERROR_ILLEGAL_REMAP_IN_STATIC_TRACE = 163,
+  ERROR_REPLICABLE_NOT_IDEMPOTENT = 164,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

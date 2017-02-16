@@ -6708,6 +6708,20 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    unsigned ReplicateContext::register_new_child_operation(Operation *op,
+                               const std::vector<StaticDependence> *dependences)
+    //--------------------------------------------------------------------------
+    {
+      // perform the base version of this    
+      unsigned op_index = 
+        InnerContext::register_new_child_operation(op, dependences);
+      // Now we have to assign a phase barrier to each operation
+
+
+      return op_index;
+    }
+
     /////////////////////////////////////////////////////////////
     // Remote Task 
     /////////////////////////////////////////////////////////////
