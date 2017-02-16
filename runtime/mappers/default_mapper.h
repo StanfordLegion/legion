@@ -77,12 +77,14 @@ namespace Legion {
       struct VariantInfo {
       public:
         VariantInfo(void)
-          : variant(0), tight_bound(false), is_inner(false) { }
+          : variant(0), tight_bound(false), 
+            is_inner(false), is_replicable(false) { }
       public:
         VariantID            variant;
         Processor::Kind      proc_kind;
         bool                 tight_bound;
         bool                 is_inner;
+        bool                 is_replicable;
       };
       struct CachedTaskMapping {
       public:

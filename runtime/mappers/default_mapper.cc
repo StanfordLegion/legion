@@ -549,7 +549,6 @@ namespace Legion {
           result.proc_kind = Processor::PROC_SET;
           result.variant = variants[0];
           result.tight_bound = (variants.size() == 1);
-          result.is_inner = false;
           return result;
         }
       }
@@ -690,6 +689,8 @@ namespace Legion {
         // a variant for a specific kind
         if (cache_result)
         {
+          result.is_replicable = 
+            runtime->is_replicable_variant(ctx, task.task_id, result.variant);
           result.is_inner = runtime->is_inner_variant(ctx, task.task_id,
                                                        result.variant);
           if (result.is_inner)
@@ -1308,6 +1309,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_mapper.spew("Default map_task in %s", get_mapper_name());
+      
       Processor::Kind target_kind = task.target_proc.kind();
       // Get the variant that we are going to use to map this task
       VariantInfo chosen = default_find_preferred_variant(task, ctx,
@@ -1316,9 +1318,32 @@ namespace Legion {
       // TODO: some criticality analysis to assign priorities
       output.task_priority = 0;
       output.postmap_task = false;
+      output.control_replicate = true;
+      // A special case for the top-level task
+      // Try to control replicate this task if possible
+      if ((total_nodes > 1) && task.get_depth() == 0)
+      {
+        if (chosen.is_replicable)
+        {
+          // Place on replicate on each node by default
+          assert(remote_cpus.size() == total_nodes);
+          output.target_procs = remote_cpus;
+          output.control_replicate = true;
+          // We're done since we know that the top-level task has no regions
+          assert(task.regions.empty());
+          return;
+        }
+        else
+          log_mapper.warning("WARNING: Default mapper was unable to locate "
+                             "a replicable task variant for the top-level "
+                             "task during a multi-node execution! We STRONGLY "
+                             "encourage users to make their top-level tasks "
+                             "replicable to avoid sequential bottlenecks on "
+                             "one node during the execution of an "
+                             "application!");
+      }
       // Figure out our target processors
       default_policy_select_target_processors(ctx, task, output.target_procs);
-
       // See if we have an inner variant, if we do virtually map all the regions
       // We don't even both caching these since they are so simple
       if (chosen.is_inner)
