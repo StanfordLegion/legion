@@ -57,16 +57,13 @@ document.
 Tests are in `test.py` under `run_test_perf`. The specific way in
 which you add a new test depends on the kind of test you're adding:
 
-  * **C++ test in the main Legion repository:** Add the test to
+  * C++ test in the main Legion repository: Add the test to
     `legion_cxx_perf_tests` at the top of the file.
-
-  * **Regent test in the main Legion repository:** Add the test to
+  * Regent test in the main Legion repository: Add the test to
     `regent_perf_tests` at the top of the file.
-
-  * **External C++ or Regent test:** Add code to the end of
-      `run_test_perf` to clone, build, and run the
-      repository. Remember to use `perf.py` to launch the test as
-      described below.
+  * External C++ or Regent test: Add code to the end of
+    `run_test_perf` to clone, build, and run the repository. Remember
+    to use `perf.py` to launch the test as described below.
 
 ## Capturing Measurements
 
