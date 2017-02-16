@@ -682,17 +682,18 @@ function drawLayout() {
     });
 
   names.each(function(d) {
-    var text = d3.select(this);
+    var elem = d3.select(this);
+    var text = d.text;
     var tokens = d.text.split(" to ");
     if (tokens.length == 1)
-      text.text(d.text);
+      elem.append("tspan").text(d.text);
     else {
       var source = tokens[0];
       var target = tokens[1].replace(" Channel", "");
-      text.text(source)
+      elem.append("tspan").text(source)
         .attr({x : 0, dy : -10});
-      text.text("==> " + target)
-        .attr({x : 0, dy : 10});
+      elem.append("tspan").text("==> " + target)
+      .attr({x : 0, dy : 10});
     }
   });
   names.on({
