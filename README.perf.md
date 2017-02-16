@@ -22,10 +22,21 @@ of components. The flow is roughly:
 This may seem complicated, but critically all of the moving parts are
 configured explicitly, and versioned and stored in Git repositories
 (including the data). There is no local configuration that is required
-and no local state that can be corrupted or lost. In the past, as a
-result of hard drive crashes on Sapling, we've lost both data and
-locally modified installations of tools, making it impossible to
-recover past versions of our performance infrastructure.
+and no local state that can be corrupted or lost.
+
+This is in opposition to, primarily, a system you might install
+locally: something with a database, a web server, and a job
+scheduler. The advantage of such an approach is that it is completely
+self-hosted and minimizes reliance on external services. However, this
+approach also suffers from high operational complexity. Without
+special care, local installations of tools can come to depend on the
+implicit configuration of the machine, making those installations
+brittle. We suffered a hard drive crash on the machine serving our
+previous system, lost both the database and locally modified
+configuration of the tool, and found that our documentation on the
+installation procedure was insufficient to get the system running
+again. We built our current solution to ensure this would not happen
+again.
 
 ## Running Performance Tests
 
