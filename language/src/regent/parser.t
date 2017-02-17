@@ -57,6 +57,8 @@ function parser.annotation_name(p, required)
   if p:nextif("__cuda") then
     local values = p:annotation_values()
     return "cuda", values
+  elseif p:nextif("__external") then
+    return "external"
   elseif p:nextif("__inline") then
     return "inline"
   elseif p:nextif("__parallel") then

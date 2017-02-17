@@ -79,7 +79,7 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
+ast.annotation:leaf("Set", {"cuda", "external", "inline", "parallel", "spmd", "trace",
                             "vectorize"},
                     false, true)
 
@@ -87,6 +87,7 @@ function ast.default_annotations()
   local allow = ast.annotation.Allow { value = false }
   return ast.annotation.Set {
     cuda = allow,
+    external = allow,
     inline = allow,
     parallel = allow,
     spmd = allow,
