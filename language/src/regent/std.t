@@ -3731,7 +3731,7 @@ function std.setup(main_task, extra_setup_thunk)
               local field_type = field_types[1]
               layout = layout_reduction[op][field_type]
             end
-            if options.inner then
+            if options.inner or task:getexternal() then
               -- No layout constraints for inner tasks
               layout = layout_unconstrained
             end
