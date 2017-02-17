@@ -2295,7 +2295,9 @@ namespace Legion {
       selected_variant = 0;
       task_priority = 0;
       perform_postmap = false;
+      control_replicate = false;
       execution_context = NULL;
+      replication_manager = NULL;
       leaf_cached = false;
       inner_cached = false;
       has_virtual_instances_result = false;
@@ -2317,6 +2319,9 @@ namespace Legion {
       copy_profiling_requests.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
         delete execution_context;
+      if ((replication_manager != NULL) && 
+          replication_manager->broadcast_delete())
+        delete replication_manager;
     }
 
     //--------------------------------------------------------------------------
@@ -2343,6 +2348,13 @@ namespace Legion {
         inner_cached = true;
       }
       return is_inner_result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool SingleTask::is_control_replicated(void) const
+    //--------------------------------------------------------------------------
+    {
+      return control_replicate;
     }
 
     //--------------------------------------------------------------------------
@@ -2391,6 +2403,8 @@ namespace Legion {
       if (map_locally)
       {
         rez.serialize(selected_variant);
+        rez.serialize(task_priority);
+        rez.serialize(control_replicate);
         rez.serialize<size_t>(target_processors.size());
         for (unsigned idx = 0; idx < target_processors.size(); idx++)
           rez.serialize(target_processors[idx]);
@@ -2422,6 +2436,8 @@ namespace Legion {
       if (map_locally)
       {
         derez.deserialize(selected_variant);
+        derez.deserialize(task_priority);
+        derez.deserialize(control_replicate);
         size_t num_target_processors;
         derez.deserialize(num_target_processors);
         target_processors.resize(num_target_processors);
@@ -3129,6 +3145,7 @@ namespace Legion {
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;
       perform_postmap = output.postmap_task;
+      control_replicate = output.control_replicate;
     }
 
     //--------------------------------------------------------------------------
@@ -3693,6 +3710,52 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void SingleTask::control_replicate_task(void)
+    //--------------------------------------------------------------------------
+    {
+      // Only support control replication of the top-level task for now
+      if (!is_top_level_task())
+      {
+        log_run.error("ERROR: Only control replication of the top-level "
+                      "task is currently supported. Support for addition "
+                      "control replication contexts is planned.");
+        assert(false);
+      }
+      // TODO: ask the runtime to allocate a control replication context
+      const ControlReplicationID repl_context = 1;
+#ifdef DEBUG_LEGION
+      assert(!target_processors.empty());
+#endif
+      // Sort the processors by their IDs to get procs grouped together by node
+      std::sort(target_processors.begin(), target_processors.end());  
+      // Count how many total nodes there are and processors for each node
+      std::vector<AddressSpaceID> address_spaces;
+      std::vector<unsigned> address_space_counts;
+      std::vector<unsigned> address_space_starts;
+      for (unsigned idx = 0; idx < target_processors.size(); idx++)
+      {
+        AddressSpaceID current = target_processors[idx].address_space();
+        if ((idx == 0) || (address_spaces.back() != current))
+        {
+          address_spaces.push_back(current);
+          address_space_counts.push_back(1);
+          address_space_starts.push_back(idx);
+        }
+        else
+          address_space_counts.back() += 1;
+      }
+#ifdef DEBUG_LEGION
+      assert(replication_manager == NULL);
+#endif
+      // Now make the control replication manager which will use a 
+      // tree broadcast to spread out across the nodes
+      replication_manager = 
+        new ControlReplicationManager(runtime, repl_context, 0/*idx*/);
+      replication_manager->launch(this, target_processors, address_spaces, 
+                                  address_space_counts, address_space_starts);
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::launch_task(void)
     //--------------------------------------------------------------------------
     {
@@ -3701,6 +3764,11 @@ namespace Legion {
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == no_access_regions.size());
 #endif 
+      if (control_replicate)
+      {
+        control_replicate_task();
+        return;
+      }
       // If we haven't computed our virtual mapping information
       // yet (e.g. because we mapped locally) then we have to
       // do that now
@@ -3750,13 +3818,21 @@ namespace Legion {
       {
         if (!variant->is_leaf() || has_virtual_instances())
         {
-          InnerContext *inner_ctx = new InnerContext(runtime, this, 
-              variant->is_inner(), regions, parent_req_indexes, 
-              virtual_mapped, unique_op_id);
-          if (mapper == NULL)
-            mapper = runtime->find_mapper(current_proc, map_id);
-          inner_ctx->configure_context(mapper);
-          execution_context = inner_ctx;
+          if (is_shard_task())
+          {
+            // This is the path for shard tasks that are part
+            // of a control replicated execution 
+          }
+          else
+          {
+            InnerContext *inner_ctx = new InnerContext(runtime, this, 
+                variant->is_inner(), regions, parent_req_indexes, 
+                virtual_mapped, unique_op_id);
+            if (mapper == NULL)
+              mapper = runtime->find_mapper(current_proc, map_id);
+            inner_ctx->configure_context(mapper);
+            execution_context = inner_ctx;
+          }
         }
         else
           execution_context = new LeafContext(runtime, this);
@@ -6213,6 +6289,107 @@ namespace Legion {
       if (execution_context->has_created_requirements())
         execution_context->send_back_created_state(target);
     } 
+
+    /////////////////////////////////////////////////////////////
+    // Shard Task 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardTask::ShardTask(Runtime *rt, ControlReplicationManager *man,ShardID id)
+      : SingleTask(rt), manager(man), shard_id(id)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    ShardTask::ShardTask(const ShardTask &rhs)
+      : SingleTask(NULL), manager(NULL), shard_id(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardTask::~ShardTask(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardTask& ShardTask::operator=(const ShardTask &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::early_map_task(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardTask::distribute_task(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardTask::perform_must_epoch_version_analysis(MustEpochOp *own)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardTask::perform_mapping(MustEpochOp *owner)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
+    }
+    
+    //--------------------------------------------------------------------------
+    bool ShardTask::is_stealable(void) const
+    //--------------------------------------------------------------------------
+    {
+      return false;
+    }
 
     /////////////////////////////////////////////////////////////
     // Index Task 
@@ -8872,6 +9049,307 @@ namespace Legion {
         derez.deserialize(arg, arglen);
         own_arg = true;
       }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Control Replication Manager 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ControlReplicationManager::ControlReplicationManager(Runtime *rt,
+        ControlReplicationID id, unsigned index)
+      : runtime(rt), repl_id(id), address_space_index(index)
+    //--------------------------------------------------------------------------
+    {
+      runtime->register_control_replication_manager(repl_id, this);
+    }
+
+    //--------------------------------------------------------------------------
+    ControlReplicationManager::ControlReplicationManager(
+                                           const ControlReplicationManager &rhs)
+      : runtime(NULL), repl_id(0), address_space_index(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+    
+    //--------------------------------------------------------------------------
+    ControlReplicationManager::~ControlReplicationManager(void)
+    //--------------------------------------------------------------------------
+    { 
+      // We can delete our shard tasks
+      for (std::vector<ShardTask*>::const_iterator it = shard_tasks.begin();
+            it != shard_tasks.end(); it++)
+        delete (*it);
+      shard_tasks.clear();
+      // Finally unregister ourselves with the runtime
+      const bool free_index = (address_space_index == 0);
+      runtime->unregister_control_replication_manager(repl_id, free_index);
+    }
+
+    //--------------------------------------------------------------------------
+    ControlReplicationManager& ControlReplicationManager::operator=(
+                                           const ControlReplicationManager &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ControlReplicationManager::launch(SingleTask *task, 
+                                      const std::vector<Processor> &procs,
+                                      const std::vector<AddressSpaceID> &spaces,
+                                      const std::vector<unsigned> &space_counts,
+                                      const std::vector<unsigned> &space_starts)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(address_space_index == 0); // should only be called on the owner
+#endif
+      replicated_procs = procs;
+      address_spaces = spaces;
+      address_space_counts = space_counts;
+      address_space_starts = space_starts;
+      // Make our local shards
+      shard_tasks.resize(address_space_counts[0]);
+      for (unsigned idx = 0; idx < address_space_counts[0]; idx++)
+      {
+        shard_tasks[idx] = new ShardTask(runtime, this, 
+            address_space_starts[0] + idx);
+        // Clone the necessary meta-data 
+        shard_tasks[idx]->clone_single_from(task);
+      }
+      // Recursively spawn any other tasks across the machine
+      if (address_spaces.size() > 1)
+      {
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        broadcast_launch(ready_event, ready_event, task);
+        // Spawn a task to launch the tasks when ready
+        ControlReplicationLaunchArgs args;
+        args.manager = this;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+                                         task, ready_event);
+      }
+      else
+        launch_shards();
+    }
+
+    //--------------------------------------------------------------------------
+    void ControlReplicationManager::unpack_launch(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent ready_event;
+      derez.deserialize(ready_event);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      // Unpack our local information
+      size_t num_procs;
+      derez.deserialize(num_procs);
+      replicated_procs.resize(num_procs);
+      for (unsigned idx = 0; idx < num_procs; idx++)
+        derez.deserialize(replicated_procs[idx]);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      address_spaces.resize(num_spaces);
+      address_space_counts.resize(num_spaces);
+      address_space_starts.resize(num_spaces);
+      for (unsigned idx = 0; idx < num_spaces; idx++)
+        derez.deserialize(address_spaces[idx]);
+      for (unsigned idx = 0; idx < num_spaces; idx++)
+        derez.deserialize(address_space_counts[idx]);
+      for (unsigned idx = 0; idx < num_spaces; idx++)
+        derez.deserialize(address_space_starts[idx]);
+      // TODO: Unpack our first shard here
+      ShardTask *first_shard = new ShardTask(runtime, this,
+          address_space_starts[address_space_index]);
+
+      // Broadcast any the launch to the next nodes
+      broadcast_launch(ready_event, to_trigger, first_shard);
+      // Clone points for all our local shards
+      shard_tasks.resize(address_space_counts[address_space_index]);
+      shard_tasks[0] = first_shard;
+      for (unsigned idx = 1; idx < 
+            address_space_counts[address_space_index]; idx++)
+      {
+        shard_tasks[idx] = new ShardTask(runtime, this,
+            address_space_starts[address_space_index] + idx);
+        // Clone the necessary meta-data
+        shard_tasks[idx]->clone_single_from(first_shard);
+      }
+      // Perform our launches
+      if (!ready_event.has_triggered())
+      {
+        // Spawn a task to launch the tasks when ready
+        ControlReplicationLaunchArgs args;
+        args.manager = this;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                         first_shard, ready_event);
+      }
+      else
+        launch_shards();
+    }
+
+    //--------------------------------------------------------------------------
+    void ControlReplicationManager::launch_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<ShardTask*>::const_iterator it = shard_tasks.begin();
+            it != shard_tasks.end(); it++)
+        (*it)->launch_task();
+    }
+
+    //--------------------------------------------------------------------------
+    void ControlReplicationManager::broadcast_launch(RtEvent ready_event,
+                             RtUserEvent to_trigger, SingleTask *to_clone) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(address_spaces[address_space_index] == runtime->address_space);
+#endif
+      std::set<RtEvent> preconditions;
+      const unsigned phase_offset = 
+        (address_space_index+1) * Runtime::legion_collective_radix;
+      for (int idx = 0; idx < Runtime::legion_collective_radix; idx++)
+      {
+        unsigned index = phase_offset + idx - 1;
+        if (index >= address_spaces.size())
+          break;
+        RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          // Package up the information we need to send to the next manager
+          rez.serialize(repl_id);
+          rez.serialize(index);
+          rez.serialize(ready_event);
+          rez.serialize(done);
+          rez.serialize<size_t>(replicated_procs.size());
+          for (std::vector<Processor>::const_iterator it = 
+                replicated_procs.begin(); it != replicated_procs.end(); it++)
+            rez.serialize(*it); 
+#ifdef DEBUG_LEGION
+          assert(address_spaces.size() == address_space_counts.size());
+          assert(address_spaces.size() == address_space_starts.size());
+#endif
+          rez.serialize<size_t>(address_spaces.size());
+          for (std::vector<AddressSpaceID>::const_iterator it = 
+                address_spaces.begin(); it != address_spaces.end(); it++)
+            rez.serialize(*it);
+          for (std::vector<unsigned>::const_iterator it = 
+                address_space_counts.begin(); it != 
+                address_space_counts.end(); it++)
+            rez.serialize(*it);
+          for (std::vector<unsigned>::const_iterator it = 
+                address_space_starts.begin(); it !=
+                address_space_starts.end(); it++)
+            rez.serialize(*it);
+          // TODO: Package up the task to clone
+
+        }
+        // Send the message
+        runtime->send_control_rep_launch(address_spaces[index], rez);
+        // Add the event to the preconditions
+        preconditions.insert(done);
+      }
+      if (!preconditions.empty())
+        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ControlReplicationManager::broadcast_delete(RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      // Send messages to any constituents
+      std::set<RtEvent> preconditions;
+      const unsigned phase_offset = 
+        (address_space_index+1) * Runtime::legion_collective_radix;
+      for (int idx = 0; idx < Runtime::legion_collective_radix; idx++)
+      {
+        unsigned index = phase_offset + idx - 1;
+        if (index >= address_spaces.size())
+          break;
+        RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(repl_id);
+          rez.serialize(done);
+        }
+        runtime->send_control_rep_delete(address_spaces[index], rez);
+        preconditions.insert(done);
+      }
+      if (!preconditions.empty())
+      {
+        // Launch a task to perform the deletion when it is ready
+        ControlReplicationDeleteArgs args;
+        args.manager = this;
+        RtEvent precondition = 
+         runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL, 
+                                          Runtime::merge_events(preconditions));
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger, precondition);
+        return false;
+      }
+      else
+      {
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        return true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ControlReplicationManager::handle_launch(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ControlReplicationLaunchArgs *largs = 
+        (const ControlReplicationLaunchArgs*)args;
+      largs->manager->launch_shards();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ControlReplicationManager::handle_delete(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ControlReplicationDeleteArgs *dargs = 
+        (const ControlReplicationDeleteArgs*)args;
+      delete dargs->manager;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ControlReplicationManager::handle_launch(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      unsigned index;
+      derez.deserialize(index);
+      ControlReplicationManager *manager = 
+        new ControlReplicationManager(runtime, repl_id, index);
+      manager->unpack_launch(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ControlReplicationManager::handle_delete(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      ControlReplicationManager *manager = 
+        runtime->find_control_replication_manager(repl_id);
+      if (manager->broadcast_delete(to_trigger))
+        delete manager;
     }
 
   }; // namespace Internal 

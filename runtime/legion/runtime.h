@@ -2074,6 +2074,8 @@ namespace Legion {
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
       void send_constraint_removal(AddressSpaceID target, Serializer &rez);
       void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
+      void send_control_rep_launch(AddressSpaceID target, Serializer &rez);
+      void send_control_rep_delete(AddressSpaceID target, Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2241,6 +2243,8 @@ namespace Legion {
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
+      void handle_control_rep_launch(Deserializer &derez);
+      void handle_control_rep_delete(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -2496,6 +2500,13 @@ namespace Legion {
       inline AddressSpaceID get_runtime_owner(UniqueID uid) const
         { return (uid % total_address_spaces); }
     public:
+      void register_control_replication_manager(ControlReplicationID repl_id,
+                                        ControlReplicationManager *manager);
+      void unregister_control_replication_manager(ControlReplicationID repl_id,
+                                                  bool reclaim_id);
+      ControlReplicationManager* find_control_replication_manager(
+                                                  ControlReplicationID repl_id);
+    public:
       bool is_local(Processor proc) const;
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
     public:
@@ -2691,6 +2702,11 @@ namespace Legion {
       std::map<UniqueID,RtUserEvent> pending_remote_contexts;
       unsigned total_contexts;
       std::deque<RegionTreeContext> available_contexts;
+    protected:
+      // Keep track of managers for control replication execution
+      Reservation control_replication_lock;
+      std::map<ControlReplicationID,
+               ControlReplicationManager*> control_replication_managers;
     protected:
       // For generating random numbers
       Reservation random_lock;

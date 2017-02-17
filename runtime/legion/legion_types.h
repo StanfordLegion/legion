@@ -311,6 +311,8 @@ namespace Legion {
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
+      LG_CONTROL_REP_LAUNCH_TASK_ID,
+      LG_CONTROL_REP_DELETE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -406,6 +408,8 @@ namespace Legion {
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
+        "Control Replication Spawn",                              \
+        "Control Replciation Delete",                             \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -657,6 +661,8 @@ namespace Legion {
       SEND_TOP_LEVEL_TASK_REQUEST,
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_MPI_RANK_EXCHANGE,
+      SEND_CONTROL_REP_LAUNCH,
+      SEND_CONTROL_REP_DELETE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -778,6 +784,8 @@ namespace Legion {
         "Top Level Task Request",                                     \
         "Top Level Task Complete",                                    \
         "Send MPI Rank Exchange",                                     \
+        "Send Control Replication Launch",                            \
+        "Send Control Replication Delete",                            \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1174,10 +1182,12 @@ namespace Legion {
     class MultiTask;
     class IndividualTask;
     class PointTask;
+    class ShardTask;
     class IndexTask;
     class SliceTask;
     class RemoteTask;
     class MinimalPoint;
+    class ControlReplicationManager;
 
     // legion_context.h
     /**
@@ -1459,6 +1469,8 @@ namespace Legion {
   typedef ::legion_projection_epoch_id_t ProjectionEpochID;
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
+  typedef ::legion_control_replication_id_t ControlReplicationID;
+  typedef ::legion_shard_id_t ShardID;
   typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
   typedef std::map<Color,Domain> DomainColoring;
   typedef std::map<Color,std::set<Domain> > MultiDomainColoring;

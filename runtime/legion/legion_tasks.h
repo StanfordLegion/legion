@@ -379,10 +379,11 @@ namespace Legion {
       // the task has had its variant selected
       bool is_leaf(void) const;
       bool is_inner(void) const;
-      bool is_replicated(void) const;
+      bool is_control_replicated(void) const;
       bool has_virtual_instances(void) const;
       bool is_created_region(unsigned index) const;
       void update_no_access_regions(void);
+      void clone_single_from(SingleTask *task);
     public:
       inline void clone_virtual_mapped(std::vector<bool> &target) const
         { target = virtual_mapped; }
@@ -412,6 +413,7 @@ namespace Legion {
       void map_all_regions(ApEvent user_event,
                            MustEpochOp *must_epoch_owner = NULL); 
       void perform_post_mapping(void);
+      void control_replicate_task(void);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez, 
@@ -425,6 +427,7 @@ namespace Legion {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
       virtual bool is_top_level_task(void) const { return false; }
+      virtual bool is_shard_task(void) const { return false; }
     public:
       virtual void resolve_false(bool speculated, bool launched) = 0;
       virtual void launch_task(void);
@@ -472,11 +475,13 @@ namespace Legion {
       VariantID                             selected_variant;
       TaskPriority                          task_priority;
       bool                                  perform_postmap;
+      bool                                  control_replicate;
     protected:
       // Events that must be triggered before we are done mapping
-      std::set<RtEvent> map_applied_conditions;
+      std::set<RtEvent>                     map_applied_conditions;
     protected:
       TaskContext*                          execution_context;
+      ControlReplicationManager*            replication_manager;
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
@@ -767,6 +772,64 @@ namespace Legion {
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     protected:
       std::vector<VersionInfo>    version_infos;
+    };
+
+    /**
+     * \class ShardTask
+     * A shard task is copy of a single task that is used for
+     * executing a single copy of a control replicated task.
+     * It implements the functionality of a single task so that 
+     * we can use it mostly transparently for the execution of 
+     * a single shard.
+     */
+    class ShardTask : public SingleTask {
+    public:
+      ShardTask(Runtime *rt, 
+                ControlReplicationManager *manager, ShardID shard_id);
+      ShardTask(const ShardTask &rhs);
+      virtual ~ShardTask(void);
+    public:
+      ShardTask& operator=(const ShardTask &rhs);
+    public:
+      virtual void activate(void); 
+      virtual void deactivate(void);
+      virtual bool is_shard_task(void) const { return true; }
+    public:
+      virtual void trigger_dependence_analysis(void);
+      virtual void resolve_false(bool speculated, bool launched);
+      virtual void early_map_task(void);
+      virtual bool distribute_task(void);
+      virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
+      virtual bool is_stealable(void) const;
+      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
+      virtual bool can_early_complete(ApUserEvent &chain_event);
+    public:
+      virtual ApEvent get_task_completion(void) const;
+      virtual TaskKind get_task_kind(void) const;
+    public:
+      virtual void send_remote_context(AddressSpaceID target, RemoteTask *dst);
+    public:
+      // Override these methods from operation class
+      virtual void trigger_mapping(void); 
+    protected:
+      virtual void trigger_task_complete(void);
+      virtual void trigger_task_commit(void);
+    public:
+      virtual void perform_physical_traversal(unsigned idx,
+                                RegionTreeContext ctx, InstanceSet &valid);
+      virtual bool pack_task(Serializer &rez, Processor target);
+      virtual bool unpack_task(Deserializer &derez, Processor current,
+                               std::set<RtEvent> &ready_events); 
+      virtual void perform_inlining(void);
+    public:
+      virtual void handle_future(const void *res, 
+                                 size_t res_size, bool owned); 
+      virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
+      virtual void handle_misspeculation(void);
+    public:
+      ControlReplicationManager *const manager;
+      const ShardID shard_id;
     };
 
     /**
@@ -1092,6 +1155,69 @@ namespace Legion {
       void *arg;
       size_t arglen;
       bool own_arg;
+    };
+
+    /**
+     * \class ControlReplicationManager
+     * This is a class the provides the functionality for
+     * executing a task in a control replication style across
+     * one or more nodes.  It has logic for doing broadcasts
+     * and reductions and for performing other needed 
+     * communications for knowing when different phases of
+     * the execution of the task has completed.
+     */
+    class ControlReplicationManager {
+    public:
+      struct ControlReplicationLaunchArgs :
+        public LgTaskArgs<ControlReplicationLaunchArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONTROL_REP_LAUNCH_TASK_ID;
+      public:
+        ControlReplicationManager *manager;
+      };
+      struct ControlReplicationDeleteArgs :
+        public LgTaskArgs<ControlReplicationDeleteArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONTROL_REP_DELETE_TASK_ID;
+      public:
+        ControlReplicationManager *manager;
+      };
+    public:
+      ControlReplicationManager(Runtime *rt, ControlReplicationID repl_id,
+                                unsigned address_space_index);
+      ControlReplicationManager(const ControlReplicationManager &rhs);
+      ~ControlReplicationManager(void);
+    public:
+      ControlReplicationManager& operator=(
+                                const ControlReplicationManager &rhs);
+    public:
+      void launch(SingleTask *task, const std::vector<Processor> &procs,
+                 const std::vector<AddressSpaceID> &spaces,
+                 const std::vector<unsigned> &address_space_counts,
+                 const std::vector<unsigned> &address_space_starts);
+      void unpack_launch(Deserializer &derez);
+      void launch_shards(void) const;
+    public:
+      void broadcast_launch(RtEvent start, RtUserEvent to_trigger,
+                            SingleTask *to_clone) const;
+      bool broadcast_delete(
+              RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+    public:
+      static void handle_launch(const void *args);
+      static void handle_delete(const void *args);
+    public:
+      static void handle_launch(Deserializer &derez, Runtime *rt);
+      static void handle_delete(Deserializer &derez, Runtime *rt);
+    public:
+      Runtime *const runtime;
+      const ControlReplicationID repl_id;
+      const unsigned address_space_index;
+    protected:
+      std::vector<Processor> replicated_procs;
+      std::vector<AddressSpaceID> address_spaces;
+      std::vector<unsigned> address_space_counts;
+      std::vector<unsigned> address_space_starts;
+      std::vector<ShardTask*> shard_tasks;
     };
 
   }; // namespace Internal 

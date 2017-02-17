@@ -5830,6 +5830,16 @@ namespace Legion {
               runtime->handle_mpi_rank_exchange(derez);
               break;
             }
+          case SEND_CONTROL_REP_LAUNCH:
+            {
+              runtime->handle_control_rep_launch(derez);
+              break;
+            }
+          case SEND_CONTROL_REP_DELETE:
+            {
+              runtime->handle_control_rep_delete(derez);
+              break;
+            }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
               // If we have a profiler, we shouldn't have incremented the
@@ -8229,6 +8239,7 @@ namespace Legion {
         distributed_collectable_lock(Reservation::create_reservation()),
         gc_epoch_lock(Reservation::create_reservation()), gc_epoch_counter(0),
         context_lock(Reservation::create_reservation()),
+        control_replication_lock(Reservation::create_reservation()),
         random_lock(Reservation::create_reservation()),
         individual_task_lock(Reservation::create_reservation()), 
         point_task_lock(Reservation::create_reservation()),
@@ -8751,6 +8762,8 @@ namespace Legion {
       gc_epoch_lock = Reservation::NO_RESERVATION;
       context_lock.destroy_reservation();
       context_lock = Reservation::NO_RESERVATION;
+      control_replication_lock.destroy_reservation();
+      control_replication_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
       outstanding_task_lock.destroy_reservation();
       outstanding_task_lock = Reservation::NO_RESERVATION;
@@ -13853,6 +13866,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_rep_launch(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONTROL_REP_LAUNCH,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_rep_delete(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONTROL_REP_DELETE,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_shutdown_notification(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14859,6 +14888,20 @@ namespace Legion {
       assert(Runtime::mpi_rank_table != NULL);
 #endif
       Runtime::mpi_rank_table->handle_mpi_rank_exchange(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_rep_launch(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ControlReplicationManager::handle_launch(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_rep_delete(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ControlReplicationManager::handle_delete(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -17026,6 +17069,47 @@ namespace Legion {
         remote_contexts.find(context_uid);
 #ifdef DEBUG_LEGION
       assert(finder != remote_contexts.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_control_replication_manager(
+               ControlReplicationID repl_id, ControlReplicationManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock repl_lock(control_replication_lock);
+#ifdef DEBUG_LEGION
+      assert(control_replication_managers.find(repl_id) ==
+             control_replication_managers.end());
+#endif
+      control_replication_managers[repl_id] = manager;
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::unregister_control_replication_manager(
+                                  ControlReplicationID repl_id, bool reclaim_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock repl_lock(control_replication_lock);
+      std::map<ControlReplicationID,ControlReplicationManager*>::iterator
+        finder = control_replication_managers.find(repl_id);
+#ifdef DEBUG_LEGION
+      assert(finder != control_replication_managers.end());
+#endif
+      control_replication_managers.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    ControlReplicationManager* Runtime::find_control_replication_manager(
+                                                   ControlReplicationID repl_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock repl_lock(control_replication_lock,1,false/*exclusive*/);
+      std::map<ControlReplicationID,ControlReplicationManager*>::const_iterator
+        finder = control_replication_managers.find(repl_id);
+#ifdef DEBUG_LEGION
+      assert(finder != control_replication_managers.end());
 #endif
       return finder->second;
     }
@@ -19790,6 +19874,16 @@ namespace Legion {
         case LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID:
           {
             PhiView::handle_deferred_view_registration(args);
+            break;
+          }
+        case LG_CONTROL_REP_LAUNCH_TASK_ID:
+          {
+            ControlReplicationManager::handle_launch(args);
+            break;
+          }
+        case LG_CONTROL_REP_DELETE_TASK_ID:
+          {
+            ControlReplicationManager::handle_delete(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:
