@@ -669,9 +669,11 @@ function drawLayout() {
   var names = namesGroup.append("text");
 
   var thickness = state.thickness;
+  var xCalculator = function(d) { return (d.depth + 1) * 15; };
+
   names.attr("text-anchor", "start")
     .attr("class", "processor")
-    .attr("x", function(d) { return (d.depth + 1) * 15; })
+    .attr("x", xCalculator)
     .attr("y", lineLevelCalculator)
     .attr("visibility", function(elem) {
       return (elem.visible) ? "visible" : "hidden"  
@@ -682,17 +684,20 @@ function drawLayout() {
     });
 
   names.each(function(d) {
-    var text = d3.select(this);
+    var elem = d3.select(this);
+    var text = d.text;
     var tokens = d.text.split(" to ");
     if (tokens.length == 1)
-      text.text(d.text);
+      elem.append("tspan").text(d.text);
     else {
       var source = tokens[0];
       var target = tokens[1].replace(" Channel", "");
-      text.text(source)
-        .attr({x : 0, dy : -10});
-      text.text("==> " + target)
-        .attr({x : 0, dy : 10});
+      elem.append("tspan").text(source)
+        .attr("x", xCalculator)
+        .attr("dy", -10);
+      elem.append("tspan").text("==> " + target)
+        .attr("x", xCalculator)
+        .attr("dy", 10);
     }
   });
   names.on({
