@@ -65,6 +65,23 @@ namespace LegionRuntime {
                                ID::IDType dst_id, size_t ib_size, off_t ib_offset);
     };
 
+    struct RemoteIBFreeRequestAsync {
+      struct RequestArgs {
+        Memory memory;
+        off_t ib_offset;
+        size_t ib_size;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_IB_FREE_REQUEST_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, Memory tgt_mem,
+                               off_t ib_offset, size_t ib_size);
+    };
+
     void find_shortest_path(Memory src_mem, Memory dst_mem, std::vector<Memory>& path);
 
     struct RemoteCopyArgs : public BaseMedium {

@@ -64,6 +64,7 @@ namespace LegionRuntime {
     typedef Realm::CoreReservationParameters CoreReservationParameters;
 
     Logger::Category log_dma("dma");
+    Logger::Category log_ib_alloc("ib_alloc");
     extern Logger::Category log_new_dma;
     Logger::Category log_aio("aio");
 #ifdef EVENT_GRAPH_TRACE
@@ -92,6 +93,35 @@ namespace LegionRuntime {
     typedef std::vector<IBInfo> IBVec;
     typedef std::map<InstPair, IBVec> IBByInst;
     typedef std::map<MemPair, OASByInst *> OASByMem;
+
+    class IBAllocRequest {
+    public:
+      IBAllocRequest(gasnet_node_t _owner, void* _req, int _idx,
+                     ID::IDType _src_inst_id, ID::IDType _dst_inst_id,
+                     size_t _ib_size)
+        : owner(_owner), req(_req), idx(_idx), src_inst_id(_src_inst_id),
+          dst_inst_id(_dst_inst_id), ib_size(_ib_size) {ib_offset = -1;}
+    public:
+      gasnet_node_t owner;
+      void* req;
+      int idx;
+      ID::IDType src_inst_id, dst_inst_id;
+      size_t ib_size;
+      off_t ib_offset;
+    };
+
+    class PendingIBQueue {
+    public:
+      PendingIBQueue();
+
+      void enqueue_request(Memory tgt_mem, IBAllocRequest* req);
+
+      void dequeue_request(Memory tgt_mem);
+
+    protected:
+      GASNetHSL queue_mutex;
+      std::map<Memory, std::queue<IBAllocRequest*> *> queues;
+    };
 
     class DmaRequest;
 
@@ -325,6 +355,84 @@ namespace LegionRuntime {
       Waiter waiter;
     };
 
+    static PendingIBQueue *ib_req_queue = 0;
+
+    PendingIBQueue::PendingIBQueue() {}
+
+    void PendingIBQueue::enqueue_request(Memory tgt_mem, IBAllocRequest* req)
+    {
+      AutoHSLLock al(queue_mutex);
+      assert(ID(tgt_mem).memory.owner_node == gasnet_mynode());
+      // If we can allocate in target memory, no need to pend the request
+      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+      if (ib_offset >= 0) {
+        if (req->owner == gasnet_mynode()) {
+          // local ib alloc request
+          CopyRequest* cr = (CopyRequest*) req->req;
+          RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
+          RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(req->dst_inst_id);
+          InstPair inst_pair(src_impl->me, dst_impl->me);
+          cr->handle_ib_response(req->idx, inst_pair, req->ib_size, ib_offset);
+        } else {
+          // remote ib alloc request
+          RemoteIBAllocResponseAsync::send_request(req->owner, req->req, req->idx,
+              req->src_inst_id, req->dst_inst_id, req->ib_size, ib_offset); 
+        }
+        // Remember to free IBAllocRequest
+        delete req;
+
+        return;
+      }
+      log_ib_alloc.info() << "IBAllocRequest (" << req->src_inst_id << "," 
+        << req->dst_inst_id << "): no enough space in memory" << tgt_mem;
+      std::map<Memory, std::queue<IBAllocRequest*> *>::iterator it = queues.find(tgt_mem);
+      if (it == queues.end()) {
+        std::queue<IBAllocRequest*> *q = new std::queue<IBAllocRequest*>;
+        q->push(req);
+        queues[tgt_mem] = q;
+      } else {
+        it->second->push(req);
+      }
+    }
+
+    void PendingIBQueue::dequeue_request(Memory tgt_mem)
+    {
+      AutoHSLLock al(queue_mutex);
+      assert(ID(tgt_mem).memory.owner_node == gasnet_mynode());
+      std::map<Memory, std::queue<IBAllocRequest*> *>::iterator it = queues.find(tgt_mem);
+      // no pending ib requests
+      if (it == queues.end()) return;
+      while (!it->second->empty()) {
+        IBAllocRequest* req = it->second->front();
+        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+        if (ib_offset < 0) break;
+        //printf("req: src_inst_id(%llx) dst_inst_id(%llx) ib_size(%lu) idx(%d)\n", req->src_inst_id, req->dst_inst_id, req->ib_size, req->idx);
+        // deal with the completed ib alloc request
+        log_ib_alloc.info() << "IBAllocRequest (" << req->src_inst_id << "," 
+          << req->dst_inst_id << "): completed!";
+        if (req->owner == gasnet_mynode()) {
+          // local ib alloc request
+          CopyRequest* cr = (CopyRequest*) req->req;
+          RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
+          RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(req->dst_inst_id);
+          InstPair inst_pair(src_impl->me, dst_impl->me);
+          cr->handle_ib_response(req->idx, inst_pair, req->ib_size, ib_offset);
+        } else {
+          // remote ib alloc request
+          RemoteIBAllocResponseAsync::send_request(req->owner, req->req, req->idx,
+              req->src_inst_id, req->dst_inst_id, req->ib_size, ib_offset); 
+        }
+        it->second->pop();
+        // Remember to free IBAllocRequest
+        delete req;
+      }
+      // if queue is empty, delete from list
+      if(it->second->empty()) {
+	delete it->second;
+	queues.erase(it);
+      }
+    }
+
     DmaRequestQueue::DmaRequestQueue(Realm::CoreReservationSet& crs)
       : queue_condvar(queue_mutex)
       , core_rsrv("DMA request queue", crs, CoreReservationParameters())
@@ -538,6 +646,22 @@ namespace LegionRuntime {
       for (it = path.begin(); it != path.end(); it++) {
         destroy_xfer_des(*it);
       }
+      // free intermediate buffers
+      {
+        AutoHSLLock al(ib_mutex);
+        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          IBVec& ib_vec = ib_by_inst[it->first];
+          for (IBVec::iterator it2 = ib_vec.begin(); it2 != ib_vec.end(); it2++) {
+            if(ID(it2->memory).memory.owner_node == gasnet_mynode()) {
+              get_runtime()->get_memory_impl(it2->memory)->free_bytes(it2->offset, it2->size);
+              ib_req_queue->dequeue_request(it2->memory);
+            } else {
+              RemoteIBFreeRequestAsync::send_request(ID(it2->memory).memory.owner_node,
+                  it2->memory, it2->offset, it2->size);
+            }
+          }
+        }
+      }
       delete ib_req;
       //</NEWDMA>
       delete oas_by_inst;
@@ -644,9 +768,10 @@ namespace LegionRuntime {
     /*static*/ void RemoteIBAllocRequestAsync::handle_request(RequestArgs args)
     {
       assert(ID(args.memory).memory.owner_node == gasnet_mynode());
-      off_t offset = get_runtime()->get_memory_impl(args.memory)->alloc_bytes(args.size);
-      assert(offset >= 0);
-      RemoteIBAllocResponseAsync::send_request(args.node, args.req, args.idx, args.src_inst_id, args.dst_inst_id, args.size, offset); 
+      IBAllocRequest* ib_req
+          = new IBAllocRequest(args.node, args.req, args.idx,
+                               args.src_inst_id, args.dst_inst_id, args.size);
+      ib_req_queue->enqueue_request(args.memory, ib_req);
     }
 
     /*static*/ void RemoteIBAllocRequestAsync::send_request(gasnet_node_t target, Memory tgt_mem, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size)
@@ -688,6 +813,28 @@ namespace LegionRuntime {
       Message::request(target, args);
     }
 
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class RemoteIBFreeRequestAsync
+    //
+
+    /*static*/ void RemoteIBFreeRequestAsync::handle_request(RequestArgs args)
+    {
+      assert(ID(args.memory).memory.owner_node == gasnet_mynode());
+      get_runtime()->get_memory_impl(args.memory)->free_bytes(args.ib_offset, args.ib_size);
+      ib_req_queue->dequeue_request(args.memory);
+    }
+
+    /*static*/ void RemoteIBFreeRequestAsync::send_request(gasnet_node_t target, Memory tgt_mem, off_t ib_offset, size_t ib_size)
+    {
+      RequestArgs args;
+      args.memory = tgt_mem;
+      args.ib_offset = ib_offset;
+      args.ib_size = ib_size;
+      Message::request(target, args);
+    }
+
+
 #define IB_MAX_SIZE (128 * 1024 * 1024)
 
     void CopyRequest::alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx)
@@ -719,11 +866,13 @@ namespace LegionRuntime {
         ib_size = domain_size * ib_elmnt_size;
       else
         ib_size = IB_MAX_SIZE;
+      //printf("alloc_ib: src_inst_id(%llx) dst_inst_id(%llx) idx(%d) size(%lu)\n", inst_pair.first.id, inst_pair.second.id, idx, ib_size);
       if (ID(tgt_mem).memory.owner_node == gasnet_mynode()) {
         // create local intermediate buffer
-        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
-        assert(ib_offset >= 0);
-        handle_ib_response(idx, inst_pair, ib_size, ib_offset);
+        IBAllocRequest* ib_req
+          = new IBAllocRequest(gasnet_mynode(), this, idx, inst_pair.first.id,
+                               inst_pair.second.id, ib_size);
+        ib_req_queue->enqueue_request(tgt_mem, ib_req);
       } else {
         // create remote intermediate buffer
         RemoteIBAllocRequestAsync::send_request(ID(tgt_mem).memory.owner_node, tgt_mem, this, idx, inst_pair.first.id, inst_pair.second.id, ib_size);
@@ -5438,11 +5587,13 @@ namespace LegionRuntime {
     {
       //log_dma.add_stream(&std::cerr, Logger::Category::LEVEL_DEBUG, false, false);
       start_channel_manager(count, max_nr, crs);
+      ib_req_queue = new PendingIBQueue();
     }
 
     void stop_dma_system(void)
     {
       stop_channel_manager();
+      delete ib_req_queue;
     }
   };
 };
@@ -5633,7 +5784,7 @@ namespace Realm {
     {
       if(redop_id == 0) {
 	// not a reduction, so sort fields by src/dst mem pairs
-        log_new_dma.info("Performing copy op");
+        //log_new_dma.info("Performing copy op");
 
 	OASByMem oas_by_mem;
 

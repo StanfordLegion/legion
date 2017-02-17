@@ -604,10 +604,10 @@ namespace LegionRuntime{
         }
         // If src_buf is intermediate buffer,
         // we need to free the buffer
-        if (src_buf.is_ib) {
-          get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(
-              src_buf.alloc_offset, src_buf.buf_size);
-        }
+        //if (src_buf.is_ib) {
+        //  get_runtime()->get_memory_impl(src_buf.memory)->free_bytes(
+        //      src_buf.alloc_offset, src_buf.buf_size);
+        //}
         pthread_mutex_destroy(&xd_lock);
         pthread_mutex_destroy(&update_read_lock);
         pthread_mutex_destroy(&update_write_lock);
