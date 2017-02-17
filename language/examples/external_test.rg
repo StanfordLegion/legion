@@ -89,10 +89,10 @@ terra get_raw_ptr(pr : c.legion_physical_region_t[1],
   return [&float](p)
 end
 
-__demand(__external)
-task aos_test(r : region(ispace(int2d), fs))
-where reads writes(r)
+task aos_test_child(r : region(ispace(int2d), fs))
+where reads(r)
 do
+  c.printf("=== child task of aos_test ===\n")
   var p1 = get_raw_ptr(__physical(r._0), __fields(r._0))
   var p2 = get_raw_ptr(__physical(r._1), __fields(r._1))
   var p3 = get_raw_ptr(__physical(r._2), __fields(r._2))
@@ -103,12 +103,29 @@ do
   c.printf("\n")
 end
 
+__demand(__external)
+task aos_test(r : region(ispace(int2d), fs))
+where reads writes(r)
+do
+  var p1 = get_raw_ptr(__physical(r._0), __fields(r._0))
+  var p2 = get_raw_ptr(__physical(r._1), __fields(r._1))
+  var p3 = get_raw_ptr(__physical(r._2), __fields(r._2))
+  c.printf("=== aos_test ===\n")
+  c.printf("%p %p %p\n", p1, p2, p3)
+  for i = 0, 27 do
+    c.printf("%.0f ", p1[i])
+  end
+  c.printf("\n")
+  aos_test_child(r)
+end
+
 task soa_test(r : region(ispace(int2d), fs))
 where reads writes(r)
 do
   var p1 = get_raw_ptr(__physical(r._0), __fields(r._0))
   var p2 = get_raw_ptr(__physical(r._1), __fields(r._1))
   var p3 = get_raw_ptr(__physical(r._2), __fields(r._2))
+  c.printf("=== soa_test ===\n")
   c.printf("%p %p %p\n", p1, p2, p3)
   for i = 0, 27 do
     c.printf("%.0f ", p1[i])
