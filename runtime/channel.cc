@@ -240,6 +240,9 @@ namespace LegionRuntime {
               new_req->dst_off = dst_start;
               new_req->nbytes = req_size;
               new_req->nlines = 1;
+              log_request.info("[1D] guid(%llx) src_off(%lld) dst_off(%lld)"
+                               " nbytes(%zu) offset_idx(%u)",
+                               guid, src_start, dst_start, req_size, offset_idx);
               reqs[idx++] = new_req;
               nbytes -= req_size;
               src_start += req_size;

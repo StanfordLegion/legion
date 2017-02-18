@@ -423,8 +423,8 @@ namespace LegionRuntime{
           }
         }
         can_perform_2d = false;
-        if ((order == XferOrder::SRC_FIFO && src_strides[1][0] == extents[0])
-          ||(order == XferOrder::DST_FIFO && dst_strides[1][0] == extents[0]))
+        if (((order == XferOrder::SRC_FIFO || order == XferOrder::ANY_ORDER) && src_strides[1][0] == extents[0])
+          ||((order == XferOrder::DST_FIFO || order == XferOrder::ANY_ORDER) && dst_strides[1][0] == extents[0]))
           can_perform_2d = (dim > 1);
         //printf("extents: %lld %lld %lld\n", extents[0], extents[1], extents[2]);
         //printf("src_str: %lld %lld %lld\n", src_strides[0][0], src_strides[1][0], src_strides[2][0]);
