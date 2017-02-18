@@ -1631,7 +1631,7 @@ namespace Legion {
       void clear(void);
       const InstanceSet& get_instances(void);
     public:
-      void pack_info(Serializer &rez);
+      void pack_info(Serializer &rez) const;
       void unpack_info(Deserializer &derez, Runtime *runtime,
                        std::set<RtEvent> &ready_events);
       static void handle_deferred_reference(const void *args);

@@ -1375,7 +1375,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RestrictInfo::pack_info(Serializer &rez)
+    void RestrictInfo::pack_info(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(restrictions.size());

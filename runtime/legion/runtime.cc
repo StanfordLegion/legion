@@ -5832,12 +5832,27 @@ namespace Legion {
             }
           case SEND_CONTROL_REP_LAUNCH:
             {
-              runtime->handle_control_rep_launch(derez);
+              runtime->handle_control_rep_launch(derez, remote_address_space);
               break;
             }
           case SEND_CONTROL_REP_DELETE:
             {
               runtime->handle_control_rep_delete(derez);
+              break;
+            }
+          case SEND_CONTROL_REP_POST_MAPPED:
+            {
+              runtime->handle_control_rep_post_mapped(derez);
+              break;
+            }
+          case SEND_CONTROL_REP_TRIGGER_COMPLETE:
+            {
+              runtime->handle_control_rep_trigger_complete(derez);
+              break;
+            }
+          case SEND_CONTROL_REP_TRIGGER_COMMIT:
+            {
+              runtime->handle_control_rep_trigger_commit(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -8239,7 +8254,7 @@ namespace Legion {
         distributed_collectable_lock(Reservation::create_reservation()),
         gc_epoch_lock(Reservation::create_reservation()), gc_epoch_counter(0),
         context_lock(Reservation::create_reservation()),
-        control_replication_lock(Reservation::create_reservation()),
+        shard_lock(Reservation::create_reservation()),
         random_lock(Reservation::create_reservation()),
         individual_task_lock(Reservation::create_reservation()), 
         point_task_lock(Reservation::create_reservation()),
@@ -8762,8 +8777,8 @@ namespace Legion {
       gc_epoch_lock = Reservation::NO_RESERVATION;
       context_lock.destroy_reservation();
       context_lock = Reservation::NO_RESERVATION;
-      control_replication_lock.destroy_reservation();
-      control_replication_lock = Reservation::NO_RESERVATION;
+      shard_lock.destroy_reservation();
+      shard_lock = Reservation::NO_RESERVATION;
 #ifdef DEBUG_LEGION
       outstanding_task_lock.destroy_reservation();
       outstanding_task_lock = Reservation::NO_RESERVATION;
@@ -13882,6 +13897,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_rep_post_mapped(AddressSpaceID target, 
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONTROL_REP_POST_MAPPED,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_rep_trigger_complete(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_CONTROL_REP_TRIGGER_COMPLETE, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_rep_trigger_commit(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_CONTROL_REP_TRIGGER_COMMIT,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_shutdown_notification(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14891,17 +14934,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_rep_launch(Deserializer &derez)
+    void Runtime::handle_control_rep_launch(Deserializer &derez, 
+                                            AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      ControlReplicationManager::handle_launch(derez, this);
+      ShardManager::handle_launch(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_control_rep_delete(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ControlReplicationManager::handle_delete(derez, this);
+      ShardManager::handle_delete(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_rep_post_mapped(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_post_mapped(derez, this);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_rep_trigger_complete(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_trigger_complete(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_rep_trigger_commit(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_trigger_commit(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -17074,42 +17139,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::register_control_replication_manager(
-               ControlReplicationID repl_id, ControlReplicationManager *manager)
+    void Runtime::register_shard_manager(ControlReplicationID repl_id, 
+                                         ShardManager *manager)
     //--------------------------------------------------------------------------
     {
-      AutoLock repl_lock(control_replication_lock);
+      AutoLock s_lock(shard_lock);
 #ifdef DEBUG_LEGION
-      assert(control_replication_managers.find(repl_id) ==
-             control_replication_managers.end());
+      assert(shard_managers.find(repl_id) == shard_managers.end());
 #endif
-      control_replication_managers[repl_id] = manager;
+      shard_managers[repl_id] = manager;
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::unregister_control_replication_manager(
+    void Runtime::unregister_shard_manager(
                                   ControlReplicationID repl_id, bool reclaim_id)
     //--------------------------------------------------------------------------
     {
-      AutoLock repl_lock(control_replication_lock);
-      std::map<ControlReplicationID,ControlReplicationManager*>::iterator
-        finder = control_replication_managers.find(repl_id);
+      AutoLock s_lock(shard_lock);
+      std::map<ControlReplicationID,ShardManager*>::iterator
+        finder = shard_managers.find(repl_id);
 #ifdef DEBUG_LEGION
-      assert(finder != control_replication_managers.end());
+      assert(finder != shard_managers.end());
 #endif
-      control_replication_managers.erase(finder);
+      shard_managers.erase(finder);
     }
 
     //--------------------------------------------------------------------------
-    ControlReplicationManager* Runtime::find_control_replication_manager(
-                                                   ControlReplicationID repl_id)
+    ShardManager* Runtime::find_shard_manager(ControlReplicationID repl_id)
     //--------------------------------------------------------------------------
     {
-      AutoLock repl_lock(control_replication_lock,1,false/*exclusive*/);
-      std::map<ControlReplicationID,ControlReplicationManager*>::const_iterator
-        finder = control_replication_managers.find(repl_id);
+      AutoLock s_lock(shard_lock,1,false/*exclusive*/);
+      std::map<ControlReplicationID,ShardManager*>::const_iterator
+        finder = shard_managers.find(repl_id);
 #ifdef DEBUG_LEGION
-      assert(finder != control_replication_managers.end());
+      assert(finder != shard_managers.end());
 #endif
       return finder->second;
     }
@@ -19876,14 +19939,19 @@ namespace Legion {
             PhiView::handle_deferred_view_registration(args);
             break;
           }
+        case LG_CONTROL_REP_CLONE_TASK_ID:
+          {
+            ShardManager::handle_clone(args);
+            break;
+          }
         case LG_CONTROL_REP_LAUNCH_TASK_ID:
           {
-            ControlReplicationManager::handle_launch(args);
+            ShardManager::handle_launch(args);
             break;
           }
         case LG_CONTROL_REP_DELETE_TASK_ID:
           {
-            ControlReplicationManager::handle_delete(args);
+            ShardManager::handle_delete(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

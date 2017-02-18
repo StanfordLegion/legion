@@ -1297,7 +1297,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskOp::pack_restrict_infos(Serializer &rez,
-                                     std::vector<RestrictInfo> &infos)
+                                     const std::vector<RestrictInfo> &infos)
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
@@ -2295,9 +2295,8 @@ namespace Legion {
       selected_variant = 0;
       task_priority = 0;
       perform_postmap = false;
-      control_replicate = false;
       execution_context = NULL;
-      replication_manager = NULL;
+      shard_manager = NULL;
       leaf_cached = false;
       inner_cached = false;
       has_virtual_instances_result = false;
@@ -2312,6 +2311,7 @@ namespace Legion {
       deactivate_task();
       target_processors.clear();
       physical_instances.clear();
+      control_replication_map.clear();
       virtual_mapped.clear();
       no_access_regions.clear();
       map_applied_conditions.clear();
@@ -2319,9 +2319,23 @@ namespace Legion {
       copy_profiling_requests.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
         delete execution_context;
-      if ((replication_manager != NULL) && 
-          replication_manager->broadcast_delete())
-        delete replication_manager;
+      if ((shard_manager != NULL) && shard_manager->broadcast_delete())
+        delete shard_manager;
+      if (!remote_instances.empty())
+      {
+        UniqueID local_uid = get_unique_id();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(local_uid);
+        }
+        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          runtime->send_remote_context_free(it->first, rez);
+        }
+        remote_instances.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2354,7 +2368,7 @@ namespace Legion {
     bool SingleTask::is_control_replicated(void) const
     //--------------------------------------------------------------------------
     {
-      return control_replicate;
+      return !control_replication_map.empty();
     }
 
     //--------------------------------------------------------------------------
@@ -2394,6 +2408,24 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void SingleTask::clone_single_from(SingleTask *rhs)
+    //--------------------------------------------------------------------------
+    {
+      this->clone_task_op_from(rhs, this->target_proc, 
+                               false/*stealable*/, true/*duplicate*/);
+      this->virtual_mapped = rhs->virtual_mapped;
+      this->no_access_regions = rhs->no_access_regions;
+      this->target_processors = rhs->target_processors;
+      this->physical_instances = rhs->physical_instances;
+      // no need to copy the control replication map
+      this->selected_variant  = rhs->selected_variant;
+      this->task_priority     = rhs->task_priority;
+      this->shard_manager     = rhs->shard_manager;
+      // For now don't copy anything else below here
+      // In the future we may need to copy the profiling requests
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::pack_single_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -2404,7 +2436,6 @@ namespace Legion {
       {
         rez.serialize(selected_variant);
         rez.serialize(task_priority);
-        rez.serialize(control_replicate);
         rez.serialize<size_t>(target_processors.size());
         for (unsigned idx = 0; idx < target_processors.size(); idx++)
           rez.serialize(target_processors[idx]);
@@ -2437,7 +2468,6 @@ namespace Legion {
       {
         derez.deserialize(selected_variant);
         derez.deserialize(task_priority);
-        derez.deserialize(control_replicate);
         size_t num_target_processors;
         derez.deserialize(num_target_processors);
         target_processors.resize(num_target_processors);
@@ -2478,6 +2508,28 @@ namespace Legion {
           derez.deserialize(task_profiling_requests[idx]);
       }
     } 
+
+    //--------------------------------------------------------------------------
+    void SingleTask::send_remote_context(AddressSpaceID remote_instance,
+                                         RemoteTask *remote_ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_instance != runtime->address_space);
+#endif
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_ctx);
+        execution_context->pack_remote_context(rez, remote_instance);
+      }
+      runtime->send_remote_context_response(remote_instance, rez);
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(remote_instances.find(remote_instance) == remote_instances.end());
+#endif
+      remote_instances[remote_instance] = remote_ctx;
+    }
 
     //--------------------------------------------------------------------------
     void SingleTask::trigger_mapping(void)
@@ -2630,7 +2682,6 @@ namespace Legion {
       output.postmap_task = false;
       output.task_priority = 0;
       output.postmap_task = false;
-      output.control_replicate = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2764,7 +2815,8 @@ namespace Legion {
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
               }
-              else if (output.control_replicate && IS_READ_ONLY(regions[idx]))
+              else if (!output.control_replication_map.empty() && 
+                        IS_READ_ONLY(regions[idx]))
               {
                 // Make sure we flush Realm's buffers here
                 for (int i = 0; i < 20; i++)
@@ -2997,7 +3049,8 @@ namespace Legion {
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
               }
-              else if (output.control_replicate && !IS_READ_ONLY(regions[idx]))
+              else if (!output.control_replication_map.empty() && 
+                        !IS_READ_ONLY(regions[idx]))
               {
                 // Make sure we flush Realm's buffers here
                 for (int i = 0; i < 20; i++)
@@ -3125,7 +3178,8 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       // If we're doing control replication then we need a replicated task
-      if (output.control_replicate && !variant_impl->is_replicable())
+      if (!output.control_replication_map.empty() && 
+          !variant_impl->is_replicable())
       {
         log_run.error("Invalid mapper output from invocation of '%s' on "
                       "mapper %s. Mapper failed to pick a replicable "
@@ -3145,7 +3199,7 @@ namespace Legion {
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;
       perform_postmap = output.postmap_task;
-      control_replicate = output.control_replicate;
+      control_replication_map = output.control_replication_map;
     }
 
     //--------------------------------------------------------------------------
@@ -3724,35 +3778,35 @@ namespace Legion {
       // TODO: ask the runtime to allocate a control replication context
       const ControlReplicationID repl_context = 1;
 #ifdef DEBUG_LEGION
-      assert(!target_processors.empty());
+      assert(!control_replication_map.empty());
 #endif
-      // Sort the processors by their IDs to get procs grouped together by node
-      std::sort(target_processors.begin(), target_processors.end());  
-      // Count how many total nodes there are and processors for each node
-      std::vector<AddressSpaceID> address_spaces;
-      std::vector<unsigned> address_space_counts;
-      std::vector<unsigned> address_space_starts;
-      for (unsigned idx = 0; idx < target_processors.size(); idx++)
+      // Construct a vector to create an indexable order of the address spaces
+      std::set<AddressSpaceID> spaces_set;
+      for (std::map<ShardID,Processor>::const_iterator it = 
+            control_replication_map.begin(); it != 
+            control_replication_map.end(); it++)
+        spaces_set.insert(it->second.address_space());
+      std::vector<AddressSpaceID> address_spaces(spaces_set.begin(),
+                                                 spaces_set.end());
+      if (spaces_set.find(runtime->address_space) == spaces_set.end())
       {
-        AddressSpaceID current = target_processors[idx].address_space();
-        if ((idx == 0) || (address_spaces.back() != current))
-        {
-          address_spaces.push_back(current);
-          address_space_counts.push_back(1);
-          address_space_starts.push_back(idx);
-        }
-        else
-          address_space_counts.back() += 1;
+        log_run.error("ERROR: Control replication of task %s (UID %lld) "
+                      "failed because the mapper did not map at least "
+                      "one shard onto the original target processor.",
+                      get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
 #ifdef DEBUG_LEGION
-      assert(replication_manager == NULL);
+      assert(shard_manager == NULL);
 #endif
       // Now make the control replication manager which will use a 
       // tree broadcast to spread out across the nodes
-      replication_manager = 
-        new ControlReplicationManager(runtime, repl_context, 0/*idx*/);
-      replication_manager->launch(this, target_processors, address_spaces, 
-                                  address_space_counts, address_space_starts);
+      shard_manager = new ShardManager(runtime, repl_context, 
+                                       0/*idx*/, runtime->address_space, this);
+      shard_manager->launch(address_spaces, control_replication_map);
     }
 
     //--------------------------------------------------------------------------
@@ -3764,7 +3818,7 @@ namespace Legion {
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == no_access_regions.size());
 #endif 
-      if (control_replicate)
+      if (is_control_replicated())
       {
         control_replicate_task();
         return;
@@ -3817,23 +3871,7 @@ namespace Legion {
       // mappings which require a physical context
       {
         if (!variant->is_leaf() || has_virtual_instances())
-        {
-          if (is_shard_task())
-          {
-            // This is the path for shard tasks that are part
-            // of a control replicated execution 
-          }
-          else
-          {
-            InnerContext *inner_ctx = new InnerContext(runtime, this, 
-                variant->is_inner(), regions, parent_req_indexes, 
-                virtual_mapped, unique_op_id);
-            if (mapper == NULL)
-              mapper = runtime->find_mapper(current_proc, map_id);
-            inner_ctx->configure_context(mapper);
-            execution_context = inner_ctx;
-          }
-        }
+          execution_context = initialize_inner_execution_context(variant);
         else
           execution_context = new LeafContext(runtime, this);
         // Add a reference to our execution context
@@ -4110,6 +4148,19 @@ namespace Legion {
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
     } 
+
+    //--------------------------------------------------------------------------
+    InnerContext* SingleTask::initialize_inner_execution_context(VariantImpl *v)
+    //--------------------------------------------------------------------------
+    {
+      InnerContext *inner_ctx = new InnerContext(runtime, this, 
+          v->is_inner(), regions, parent_req_indexes, 
+          virtual_mapped, unique_op_id);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      inner_ctx->configure_context(mapper);
+      return inner_ctx;
+    }
 
     /////////////////////////////////////////////////////////////
     // Multi Task 
@@ -4593,21 +4644,6 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, DEACTIVATE_INDIVIDUAL_CALL);
       deactivate_single();
-      if (!remote_instances.empty())
-      {
-        UniqueID local_uid = get_unique_id();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(local_uid);
-        }
-        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-        {
-          runtime->send_remote_context_free(it->first, rez);
-        }
-        remote_instances.clear();
-      }
       if (future_store != NULL)
       {
         legion_free(FUTURE_RESULT_ALLOC, future_store, future_size);
@@ -5168,29 +5204,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return INDIVIDUAL_TASK_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::send_remote_context(AddressSpaceID remote_instance,
-                                             RemoteTask *remote_ctx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(remote_instance != runtime->address_space);
-#endif
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(remote_ctx);
-        execution_context->pack_remote_context(rez, remote_instance);
-      }
-      runtime->send_remote_context_response(remote_instance, rez);
-      AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(remote_instances.find(remote_instance) == remote_instances.end());
-#endif
-      remote_instances[remote_instance] = remote_ctx;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndividualTask::trigger_task_complete(void)
@@ -5498,6 +5512,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::pack_as_shard_task(Serializer &rez,AddressSpace target)
+    //--------------------------------------------------------------------------
+    {
+      pack_single_task(rez, target);
+      // We know we are mapped so pack the version infos and restrictions
+      pack_version_infos(rez, version_infos, virtual_mapped);
+      pack_restrict_infos(rez, restrict_infos);
+      // Finally pack our context information
+      rez.serialize(remote_owner_uid);
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::perform_inlining(void)
     //--------------------------------------------------------------------------
     {
@@ -5716,23 +5742,8 @@ namespace Legion {
             this->slice_owner->get_unique_op_id(),
             this->get_unique_op_id());
       deactivate_single();
-      restrict_postconditions.clear();
-      if (!remote_instances.empty())
-      {
-        UniqueID local_uid = get_unique_id();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(local_uid);
-        }
-        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-        {
-          runtime->send_remote_context_free(it->first, rez);
-        }
-        remote_instances.clear();
-      }
       version_infos.clear();
+      restrict_postconditions.clear();
       runtime->free_point_task(this);
     }
 
@@ -6059,28 +6070,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::send_remote_context(AddressSpaceID remote_instance,
-                                        RemoteTask *remote_ctx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(remote_instance != runtime->address_space);
-#endif
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(remote_ctx);
-        execution_context->pack_remote_context(rez, remote_instance);
-      }
-      runtime->send_remote_context_response(remote_instance, rez);
-      AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(remote_instances.find(remote_instance) == remote_instances.end());
-#endif
-      remote_instances[remote_instance] = remote_ctx;
-    }
-
-    //--------------------------------------------------------------------------
     void PointTask::trigger_task_complete(void)
     //--------------------------------------------------------------------------
     {
@@ -6183,6 +6172,18 @@ namespace Legion {
       LegionSpy::log_event_dependence(completion_event, point_termination);
 #endif
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::pack_as_shard_task(Serializer &rez, AddressSpace target)
+    //--------------------------------------------------------------------------
+    {
+      pack_single_task(rez, target);
+      // We know we are mapped so pack the version infos and restrictions
+      pack_version_infos(rez, version_infos, virtual_mapped);
+      pack_restrict_infos(rez, *get_restrict_infos());
+      // Finally pack our context information
+      rez.serialize(slice_owner->get_remote_owner_uid());
     }
 
     //--------------------------------------------------------------------------
@@ -6295,10 +6296,14 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShardTask::ShardTask(Runtime *rt, ControlReplicationManager *man,ShardID id)
+    ShardTask::ShardTask(Runtime *rt, ShardManager *man,
+                         ShardID id, Processor proc)
       : SingleTask(rt), manager(man), shard_id(id)
     //--------------------------------------------------------------------------
     {
+      target_proc = proc;
+      current_proc = proc;
+      activate_single();
     }
     
     //--------------------------------------------------------------------------
@@ -6314,6 +6319,7 @@ namespace Legion {
     ShardTask::~ShardTask(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_single();
     }
 
     //--------------------------------------------------------------------------
@@ -6389,6 +6395,209 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardTask::has_restrictions(unsigned idx, LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < restrict_infos.size());
+#endif
+      // We know that if there are any restrictions they directly apply
+      return restrict_infos[idx].has_restrictions();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardTask::can_early_complete(ApUserEvent &chain_event)
+    //--------------------------------------------------------------------------
+    {
+      // no point for early completion for shard tasks
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ShardTask::get_task_completion(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_completion_event();
+    }
+
+    //--------------------------------------------------------------------------
+    TaskOp::TaskKind ShardTask::get_task_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return SHARD_TASK_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::trigger_task_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // First invoke the method on the shard manager 
+      manager->trigger_task_complete(true/*local*/);
+      // Then do the normal clean-up operations
+      // Remove profiling our guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
+      // Release any restrictions we might have had
+      if (execution_context->has_restrictions())
+        execution_context->release_restrictions();
+      // Invalidate any context that we had so that the child
+      // operations can begin committing
+      execution_context->invalidate_region_tree_contexts();
+      // See if we need to trigger that our children are complete
+      const bool need_commit = execution_context->attempt_children_commit();
+      // Mark that this operation is complete
+      complete_operation();
+      if (need_commit)
+        trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::trigger_task_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      // First invoke the method on the shard manager
+      manager->trigger_task_commit(true/*local*/);
+      // Commit this operation
+      // Dont' deactivate ourselves, the shard manager will do that for us
+      commit_operation(false/*deactivate*/, profiling_reported);
+      // If we still have to report profiling information then we must
+      // block here to avoid a race with the shard manager deactivating
+      // us before we are done with this object
+      if (profiling_reported.exists() && !profiling_reported.has_triggered())
+        profiling_reported.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::perform_physical_traversal(unsigned idx,
+                                      RegionTreeContext ctx, InstanceSet &valid)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardTask::pack_task(Serializer &rez, Processor target)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardTask::unpack_task(Deserializer &derez, Processor current,
+                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::pack_as_shard_task(Serializer &rez, AddressSpace target)
+    //--------------------------------------------------------------------------
+    {
+      pack_single_task(rez, target);
+      // We know we are mapped so pack the version infos and restrictions
+      pack_version_infos(rez, version_infos, virtual_mapped);
+      pack_restrict_infos(rez, restrict_infos);
+      // Finally pack our context information
+      rez.serialize(remote_owner_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardTask::unpack_shard_task(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> ready_events; 
+      unpack_single_task(derez, ready_events);
+      unpack_version_infos(derez, version_infos, ready_events);
+      unpack_restrict_infos(derez, restrict_infos, ready_events);
+      derez.deserialize(remote_owner_uid);
+      // Figure out our parent context
+      parent_ctx = runtime->find_context(remote_owner_uid);
+      // Set our parent task
+      parent_task = parent_ctx->get_task();
+      if (!ready_events.empty())
+        return Runtime::merge_events(ready_events);
+      else
+        return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::perform_inlining(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::handle_future(const void *res, size_t res_size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+      manager->handle_future(res, res_size, owned);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::handle_post_mapped(RtEvent mapped_precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!mapped_precondition.has_triggered())
+      {
+        SingleTask::DeferredPostMappedArgs args;
+        args.task = this;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                         this, mapped_precondition);
+        return;
+      }
+      manager->handle_post_mapped(true/*local*/);
+      if (Runtime::legion_spy_enabled)
+        execution_context->log_created_requirements();
+      // Now we can complete this shard task
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::handle_misspeculation(void)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: figure out how misspeculation works with control replication
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext* ShardTask::initialize_inner_execution_context(VariantImpl *v)
+    //--------------------------------------------------------------------------
+    {
+      ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
+          v->is_inner(), regions, parent_req_indexes,
+          virtual_mapped, unique_op_id, manager);
+      if (mapper == NULL)
+        mapper->runtime->find_mapper(current_proc, map_id);
+      repl_ctx->configure_context(mapper);
+      // The replicate contexts all need to sync up to exchange resources 
+      repl_ctx->exchange_resources();
+      return repl_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::return_privilege_state(ResourceTracker *target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+#endif
+      execution_context->return_privilege_state(target);
     }
 
     /////////////////////////////////////////////////////////////
@@ -9052,22 +9261,27 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Control Replication Manager 
+    // Shard Manager 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ControlReplicationManager::ControlReplicationManager(Runtime *rt,
-        ControlReplicationID id, unsigned index)
-      : runtime(rt), repl_id(id), address_space_index(index)
+    ShardManager::ShardManager(Runtime *rt, ControlReplicationID id, 
+                    unsigned index, AddressSpaceID owner, SingleTask *original)
+      : runtime(rt), repl_id(id), address_space_index(index),owner_space(owner), 
+        original_task(original),manager_lock(Reservation::create_reservation()),
+        local_mapping_complete(0), remote_mapping_complete(0),
+        trigger_local_complete(0), trigger_remote_complete(0),
+        trigger_local_commit(0), trigger_remote_commit(0), 
+        remote_constituents(0), first_future(true)
     //--------------------------------------------------------------------------
     {
-      runtime->register_control_replication_manager(repl_id, this);
+      runtime->register_shard_manager(repl_id, this);
     }
 
     //--------------------------------------------------------------------------
-    ControlReplicationManager::ControlReplicationManager(
-                                           const ControlReplicationManager &rhs)
-      : runtime(NULL), repl_id(0), address_space_index(0)
+    ShardManager::ShardManager(const ShardManager &rhs)
+      : runtime(NULL), repl_id(0), address_space_index(0), 
+        owner_space(0), original_task(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9075,22 +9289,23 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    ControlReplicationManager::~ControlReplicationManager(void)
+    ShardManager::~ShardManager(void)
     //--------------------------------------------------------------------------
     { 
       // We can delete our shard tasks
-      for (std::vector<ShardTask*>::const_iterator it = shard_tasks.begin();
-            it != shard_tasks.end(); it++)
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
         delete (*it);
-      shard_tasks.clear();
+      local_shards.clear();
       // Finally unregister ourselves with the runtime
-      const bool free_index = (address_space_index == 0);
-      runtime->unregister_control_replication_manager(repl_id, free_index);
+      const bool free_index = (owner_space == runtime->address_space);
+      runtime->unregister_shard_manager(repl_id, free_index);
+      manager_lock.destroy_reservation();
+      manager_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
-    ControlReplicationManager& ControlReplicationManager::operator=(
-                                           const ControlReplicationManager &rhs)
+    ShardManager& ShardManager::operator=(const ShardManager &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9099,46 +9314,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ControlReplicationManager::launch(SingleTask *task, 
-                                      const std::vector<Processor> &procs,
-                                      const std::vector<AddressSpaceID> &spaces,
-                                      const std::vector<unsigned> &space_counts,
-                                      const std::vector<unsigned> &space_starts)
+    void ShardManager::launch(const std::vector<AddressSpaceID> &spaces,
+                              const std::map<ShardID,Processor> &mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(address_space_index == 0); // should only be called on the owner
+      assert(original_task != NULL); // should only be called on the owner
 #endif
-      replicated_procs = procs;
       address_spaces = spaces;
-      address_space_counts = space_counts;
-      address_space_starts = space_starts;
+      shard_mapping = mapping;
       // Make our local shards
-      shard_tasks.resize(address_space_counts[0]);
-      for (unsigned idx = 0; idx < address_space_counts[0]; idx++)
-      {
-        shard_tasks[idx] = new ShardTask(runtime, this, 
-            address_space_starts[0] + idx);
-        // Clone the necessary meta-data 
-        shard_tasks[idx]->clone_single_from(task);
-      }
+      create_shards();
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+        (*it)->clone_single_from(original_task);
       // Recursively spawn any other tasks across the machine
       if (address_spaces.size() > 1)
       {
         RtUserEvent ready_event = Runtime::create_rt_user_event();
-        broadcast_launch(ready_event, ready_event, task);
+        broadcast_launch(ready_event, ready_event, original_task);
         // Spawn a task to launch the tasks when ready
-        ControlReplicationLaunchArgs args;
+        ShardManagerLaunchArgs args;
         args.manager = this;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
-                                         task, ready_event);
+                                         original_task, ready_event);
       }
       else
         launch_shards();
     }
 
     //--------------------------------------------------------------------------
-    void ControlReplicationManager::unpack_launch(Deserializer &derez)
+    void ShardManager::unpack_launch(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       RtEvent ready_event;
@@ -9148,42 +9354,61 @@ namespace Legion {
       // Unpack our local information
       size_t num_procs;
       derez.deserialize(num_procs);
-      replicated_procs.resize(num_procs);
       for (unsigned idx = 0; idx < num_procs; idx++)
-        derez.deserialize(replicated_procs[idx]);
+      {
+        ShardID shard_id;
+        derez.deserialize(shard_id);
+        derez.deserialize(shard_mapping[shard_id]);
+      }
       size_t num_spaces;
       derez.deserialize(num_spaces);
       address_spaces.resize(num_spaces);
-      address_space_counts.resize(num_spaces);
-      address_space_starts.resize(num_spaces);
       for (unsigned idx = 0; idx < num_spaces; idx++)
         derez.deserialize(address_spaces[idx]);
-      for (unsigned idx = 0; idx < num_spaces; idx++)
-        derez.deserialize(address_space_counts[idx]);
-      for (unsigned idx = 0; idx < num_spaces; idx++)
-        derez.deserialize(address_space_starts[idx]);
-      // TODO: Unpack our first shard here
-      ShardTask *first_shard = new ShardTask(runtime, this,
-          address_space_starts[address_space_index]);
-
-      // Broadcast any the launch to the next nodes
+      // Unpack our first shard here
+      create_shards();
+      ShardTask *first_shard = local_shards[0];
+      RtEvent shard_ready = first_shard->unpack_shard_task(derez);
+      // Check to see if this shard is ready or not
+      // If not build a continuation to avoid blocking the virtual channel
+      if (!shard_ready.has_triggered())
+      {
+        ShardManagerCloneArgs args;
+        args.manager = this;
+        args.ready_event = ready_event;
+        args.to_trigger = to_trigger;
+        args.first_shard = first_shard;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                         first_shard, shard_ready);
+      }
+      else
+        clone_and_launch(ready_event, to_trigger, first_shard);
+    }
+      
+    //--------------------------------------------------------------------------
+    void ShardManager::clone_and_launch(RtEvent ready_event,
+                                 RtUserEvent to_trigger, ShardTask *first_shard)
+    //--------------------------------------------------------------------------
+    {
+      // Broadcast the launch to the next nodes
       broadcast_launch(ready_event, to_trigger, first_shard);
       // Clone points for all our local shards
-      shard_tasks.resize(address_space_counts[address_space_index]);
-      shard_tasks[0] = first_shard;
-      for (unsigned idx = 1; idx < 
-            address_space_counts[address_space_index]; idx++)
+      if (local_shards.size() > 1)
       {
-        shard_tasks[idx] = new ShardTask(runtime, this,
-            address_space_starts[address_space_index] + idx);
-        // Clone the necessary meta-data
-        shard_tasks[idx]->clone_single_from(first_shard);
+        for (std::vector<ShardTask*>::const_iterator it = 
+              local_shards.begin(); it != local_shards.end(); it++)
+        {
+          if ((*it) == first_shard)
+            continue;
+          // Clone the necessary meta-data
+          (*it)->clone_single_from(first_shard);
+        }
       }
       // Perform our launches
       if (!ready_event.has_triggered())
       {
         // Spawn a task to launch the tasks when ready
-        ControlReplicationLaunchArgs args;
+        ShardManagerLaunchArgs args;
         args.manager = this;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                          first_shard, ready_event);
@@ -9193,16 +9418,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ControlReplicationManager::launch_shards(void) const
+    void ShardManager::create_shards(void)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<ShardTask*>::const_iterator it = shard_tasks.begin();
-            it != shard_tasks.end(); it++)
-        (*it)->launch_task();
+      // Iterate through and find the shards that we have locally 
+      for (std::map<ShardID,Processor>::const_iterator it = 
+            shard_mapping.begin(); it != shard_mapping.end(); it++)
+      {
+        AddressSpaceID space = it->second.address_space();
+        if (space != runtime->address_space)
+          continue;
+        local_shards.push_back(
+            new ShardTask(runtime, this, it->first, it->second) );
+      }
+#ifdef DEBUG_LEGION
+      assert(!local_shards.empty()); // better have made some shards
+#endif
     }
 
     //--------------------------------------------------------------------------
-    void ControlReplicationManager::broadcast_launch(RtEvent ready_event,
+    void ShardManager::launch_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        // If it is a leaf and has no virtual instances then we can mark
+        // it mapped right now, otherwise wait for the call back
+        if ((*it)->is_leaf() && !(*it)->has_virtual_instances())
+          (*it)->complete_mapping();
+        // Speculation can always be resolved here
+        (*it)->resolve_speculation();
+        // Then launch the task for execution
+        (*it)->launch_task();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::broadcast_launch(RtEvent ready_event,
                              RtUserEvent to_trigger, SingleTask *to_clone) const
     //--------------------------------------------------------------------------
     {
@@ -9217,6 +9470,8 @@ namespace Legion {
         unsigned index = phase_offset + idx - 1;
         if (index >= address_spaces.size())
           break;
+        // Update the number of remote constituents
+        remote_constituents++;
         RtUserEvent done = Runtime::create_rt_user_event();
         Serializer rez;
         {
@@ -9226,28 +9481,18 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(ready_event);
           rez.serialize(done);
-          rez.serialize<size_t>(replicated_procs.size());
-          for (std::vector<Processor>::const_iterator it = 
-                replicated_procs.begin(); it != replicated_procs.end(); it++)
-            rez.serialize(*it); 
-#ifdef DEBUG_LEGION
-          assert(address_spaces.size() == address_space_counts.size());
-          assert(address_spaces.size() == address_space_starts.size());
-#endif
+          rez.serialize<size_t>(shard_mapping.size());
+          for (std::map<ShardID,Processor>::const_iterator it = 
+                shard_mapping.begin(); it != shard_mapping.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
           rez.serialize<size_t>(address_spaces.size());
           for (std::vector<AddressSpaceID>::const_iterator it = 
                 address_spaces.begin(); it != address_spaces.end(); it++)
-            rez.serialize(*it);
-          for (std::vector<unsigned>::const_iterator it = 
-                address_space_counts.begin(); it != 
-                address_space_counts.end(); it++)
-            rez.serialize(*it);
-          for (std::vector<unsigned>::const_iterator it = 
-                address_space_starts.begin(); it !=
-                address_space_starts.end(); it++)
-            rez.serialize(*it);
-          // TODO: Package up the task to clone
-
+            rez.serialize(*it);   
+          to_clone->pack_as_shard_task(rez, address_spaces[index]); 
         }
         // Send the message
         runtime->send_control_rep_launch(address_spaces[index], rez);
@@ -9261,7 +9506,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ControlReplicationManager::broadcast_delete(RtUserEvent to_trigger)
+    bool ShardManager::broadcast_delete(RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
       // Send messages to any constituents
@@ -9286,7 +9531,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         // Launch a task to perform the deletion when it is ready
-        ControlReplicationDeleteArgs args;
+        ShardManagerDeleteArgs args;
         args.manager = this;
         RtEvent precondition = 
          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL, 
@@ -9304,40 +9549,179 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ControlReplicationManager::handle_launch(const void *args)
+    void ShardManager::handle_post_mapped(bool local)
     //--------------------------------------------------------------------------
     {
-      const ControlReplicationLaunchArgs *largs = 
-        (const ControlReplicationLaunchArgs*)args;
+      bool notify = false;   
+      {
+        AutoLock m_lock(manager_lock);
+        if (local)
+        {
+          local_mapping_complete++;
+#ifdef DEBUG_LEGION
+          assert(local_mapping_complete <= local_shards.size());
+#endif
+        }
+        else
+        {
+          remote_mapping_complete++;
+#ifdef DEBUG_LEGION
+          assert(remote_mapping_complete <= remote_constituents);
+#endif
+        }
+        notify = (local_mapping_complete == local_shards.size()) &&
+                 (remote_mapping_complete == remote_constituents);
+      }
+      if (notify)
+      {
+        if (original_task == NULL)
+        {
+          Serializer rez;
+          rez.serialize(repl_id);
+          runtime->send_control_rep_post_mapped(owner_space, rez);
+        }
+        else
+          original_task->handle_post_mapped(RtEvent::NO_RT_EVENT);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_future(const void *res,size_t res_size,bool owned)
+    //--------------------------------------------------------------------------
+    {
+      bool notify = false;
+      {
+        AutoLock m_lock(manager_lock);
+        notify = first_future;
+        first_future = false;
+      }
+      if (notify && (original_task != NULL))
+        original_task->handle_future(res, res_size, owned);
+      else if (owned) // if we own it and don't use it we need to free it
+        free(const_cast<void*>(res));
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::trigger_task_complete(bool local)
+    //--------------------------------------------------------------------------
+    {
+      bool notify = false;
+      {
+        AutoLock m_lock(manager_lock);
+        if (local)
+        {
+          trigger_local_complete++;
+#ifdef DEBUG_LEGION
+          assert(trigger_local_complete <= local_shards.size());
+#endif
+        }
+        else
+        {
+          trigger_remote_complete++;
+#ifdef DEBUG_LEGION
+          assert(trigger_remote_complete <= remote_constituents);
+#endif
+        }
+        notify = (trigger_local_complete == local_shards.size()) &&
+                 (trigger_remote_complete == remote_constituents);
+      }
+      if (notify)
+      {
+        if (original_task == NULL)
+        {
+          Serializer rez;
+          rez.serialize(repl_id);
+          runtime->send_control_rep_trigger_complete(owner_space, rez);
+        }
+        else
+        {
+          // Return the privileges first if this isn't the top-level task
+          if (!original_task->is_top_level_task())
+            local_shards[0]->return_privilege_state(
+                              original_task->get_context());
+          original_task->trigger_task_complete();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::trigger_task_commit(bool local)
+    //--------------------------------------------------------------------------
+    {
+      bool notify = false;
+      {
+        AutoLock m_lock(manager_lock);
+        if (local)
+        {
+          trigger_local_commit++;
+#ifdef DEBUG_LEGION
+          assert(trigger_local_commit <= local_shards.size());
+#endif
+        }
+        else
+        {
+          trigger_remote_commit++;
+#ifdef DEBUG_LEGION
+          assert(trigger_remote_commit <= remote_constituents);
+#endif
+        }
+        notify = (trigger_local_commit == local_shards.size()) &&
+                 (trigger_remote_commit == remote_constituents);
+      }
+      if (notify)
+      {
+        if (original_task == NULL)
+        {
+          Serializer rez;
+          rez.serialize(repl_id);
+          runtime->send_control_rep_trigger_commit(owner_space, rez);
+        }
+        else
+          original_task->trigger_task_commit();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_clone(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ShardManagerCloneArgs *cargs = (const ShardManagerCloneArgs*)args;
+      cargs->manager->clone_and_launch(cargs->ready_event, cargs->to_trigger,
+                                       cargs->first_shard);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_launch(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ShardManagerLaunchArgs *largs = (const ShardManagerLaunchArgs*)args;
       largs->manager->launch_shards();
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ControlReplicationManager::handle_delete(const void *args)
+    /*static*/ void ShardManager::handle_delete(const void *args)
     //--------------------------------------------------------------------------
     {
-      const ControlReplicationDeleteArgs *dargs = 
-        (const ControlReplicationDeleteArgs*)args;
+      const ShardManagerDeleteArgs *dargs = (const ShardManagerDeleteArgs*)args;
       delete dargs->manager;
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ControlReplicationManager::handle_launch(
-                                          Deserializer &derez, Runtime *runtime)
+    /*static*/ void ShardManager::handle_launch(Deserializer &derez, 
+                                        Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       ControlReplicationID repl_id;
       derez.deserialize(repl_id);
-      unsigned index;
+      int index;
       derez.deserialize(index);
-      ControlReplicationManager *manager = 
-        new ControlReplicationManager(runtime, repl_id, index);
+      ShardManager *manager = new ShardManager(runtime, repl_id, index, source);
       manager->unpack_launch(derez);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ControlReplicationManager::handle_delete(
+    /*static*/ void ShardManager::handle_delete(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -9346,10 +9730,42 @@ namespace Legion {
       derez.deserialize(repl_id);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      ControlReplicationManager *manager = 
-        runtime->find_control_replication_manager(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
       if (manager->broadcast_delete(to_trigger))
         delete manager;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_post_mapped(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_post_mapped(false/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trigger_complete(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->trigger_task_complete(false/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trigger_commit(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->trigger_task_commit(false/*local*/);
     }
 
   }; // namespace Internal 

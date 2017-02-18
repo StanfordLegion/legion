@@ -462,7 +462,7 @@ namespace Legion {
         ProfilingRequest                            copy_prof_requests;
         TaskPriority                                task_priority;  // = 0
         bool                                        postmap_task; // = false
-        bool                                        control_replicate;// = false
+        std::map<ShardID,Processor>                 control_replication_map;
       };
       //------------------------------------------------------------------------
       virtual void map_task(const MapperContext      ctx,
@@ -1760,6 +1760,15 @@ namespace Legion {
 
       void retrieve_name(MapperContext ctx, LogicalPartition handle,
                                    const char *&result);
+    public:
+      //------------------------------------------------------------------------
+      // Methods for MPI interoperability
+      //------------------------------------------------------------------------
+      const std::map<int/*rank*/,AddressSpace>& 
+                                    find_forward_MPI_mapping(MapperContext ctx); 
+
+      const std::map<AddressSpace,int/*rank*/>&
+                                    find_reverse_MPI_mapping(MapperContext ctx);
     public:
       //------------------------------------------------------------------------
       // Support for packing tunable values

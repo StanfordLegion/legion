@@ -516,6 +516,11 @@ namespace Legion {
                          const char *&result);
       void retrieve_name(MappingCallInfo *ctx, LogicalPartition handle,
                          const char *&result);
+    public:
+      const std::map<int,AddressSpace>& find_forward_MPI_mapping(
+                         MappingCallInfo *ctx);
+      const std::map<AddressSpace,int>& find_reverse_MPI_mapping(
+                         MappingCallInfo *ctx);
     protected:
       // Both these must be called while holding the lock
       MappingCallInfo* allocate_call_info(MappingCallKind kind, 

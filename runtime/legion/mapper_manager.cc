@@ -2838,6 +2838,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::map<int,AddressSpace>& MapperManager::find_forward_MPI_mapping(
+                                                           MappingCallInfo *ctx)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->find_forward_MPI_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<AddressSpace,int>& MapperManager::find_reverse_MPI_mapping(
+                                                           MappingCallInfo *ctx)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->find_reverse_MPI_mapping();
+    }
+
+    //--------------------------------------------------------------------------
     MappingCallInfo* MapperManager::allocate_call_info(MappingCallKind kind,
                                                   Operation *op, bool need_lock)
     //--------------------------------------------------------------------------

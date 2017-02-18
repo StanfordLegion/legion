@@ -1089,6 +1089,22 @@ namespace Legion {
       ctx->manager->retrieve_name(ctx, handle, result);
     }
 
+    //--------------------------------------------------------------------------
+    const std::map<int,AddressSpace>& MapperRuntime::find_forward_MPI_mapping(
+                                                              MapperContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_forward_MPI_mapping(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    const std::map<AddressSpace,int>& MapperRuntime::find_reverse_MPI_mapping(
+                                                              MapperContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_reverse_MPI_mapping(ctx);
+    }
+
   }; // namespace Mapping
 }; // namespace Legion
 

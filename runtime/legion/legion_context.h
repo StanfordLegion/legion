@@ -1072,7 +1072,7 @@ namespace Legion {
                        const std::vector<RegionRequirement> &reqs,
                        const std::vector<unsigned> &parent_indexes,
                        const std::vector<bool> &virt_mapped,
-                       UniqueID context_uid);
+                       UniqueID context_uid, ShardManager *manager);
       ReplicateContext(const ReplicateContext &rhs);
       virtual ~ReplicateContext(void);
     public:
@@ -1251,6 +1251,10 @@ namespace Legion {
                                                           const Future &f);
       virtual void find_collective_contributions(DynamicCollective dc,
                                        std::vector<Future> &contributions);
+    public:
+      void exchange_resources(void);
+    public:
+      ShardManager *const shard_manager;
     };
 
     /**

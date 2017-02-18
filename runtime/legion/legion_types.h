@@ -311,6 +311,7 @@ namespace Legion {
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
+      LG_CONTROL_REP_CLONE_TASK_ID,
       LG_CONTROL_REP_LAUNCH_TASK_ID,
       LG_CONTROL_REP_DELETE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
@@ -408,7 +409,8 @@ namespace Legion {
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
-        "Control Replication Spawn",                              \
+        "Control Replication Clone",                              \
+        "Control Replication Launch",                             \
         "Control Replciation Delete",                             \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
@@ -663,6 +665,9 @@ namespace Legion {
       SEND_MPI_RANK_EXCHANGE,
       SEND_CONTROL_REP_LAUNCH,
       SEND_CONTROL_REP_DELETE,
+      SEND_CONTROL_REP_POST_MAPPED,
+      SEND_CONTROL_REP_TRIGGER_COMPLETE,
+      SEND_CONTROL_REP_TRIGGER_COMMIT,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -786,6 +791,9 @@ namespace Legion {
         "Send MPI Rank Exchange",                                     \
         "Send Control Replication Launch",                            \
         "Send Control Replication Delete",                            \
+        "Send Control Replication Post Mapped",                       \
+        "Send Control Replication Trigger Complete",                  \
+        "Send Control Replication Trigger Commit",                    \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1187,7 +1195,7 @@ namespace Legion {
     class SliceTask;
     class RemoteTask;
     class MinimalPoint;
-    class ControlReplicationManager;
+    class ShardManager;
 
     // legion_context.h
     /**

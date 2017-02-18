@@ -6678,15 +6678,16 @@ namespace Legion {
                                    const std::vector<RegionRequirement> &reqs,
                                    const std::vector<unsigned> &parent_indexes,
                                    const std::vector<bool> &virt_mapped,
-                                   UniqueID ctx_uid)
-      : InnerContext(rt, owner, full, reqs, parent_indexes, virt_mapped,ctx_uid)
+                                   UniqueID ctx_uid, ShardManager *manager)
+      : InnerContext(rt, owner, full, reqs, parent_indexes, 
+                     virt_mapped, ctx_uid), shard_manager(manager)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplicateContext::ReplicateContext(const ReplicateContext &rhs)
-      : InnerContext(*this)
+      : InnerContext(*this), shard_manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
