@@ -12,7 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- invalid_external_task.rg:33: dereference in an external task
+-- fails-with:
+-- invalid_external_task.rg:34: dereference in an external task
 --     e._0 = 0
 --     ^
 
