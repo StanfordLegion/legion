@@ -36,6 +36,7 @@ function context:new_local_scope(must_epoch)
     expected_return_type = self.expected_return_type,
     fixup_nodes = self.fixup_nodes,
     must_epoch = must_epoch,
+    external = self.external,
   }
   setmetatable(cx, context)
   return cx
@@ -50,6 +51,7 @@ function context:new_task_scope(expected_return_type)
     expected_return_type = {expected_return_type},
     fixup_nodes = terralib.newlist(),
     must_epoch = false,
+    external = false,
   }
   setmetatable(cx, context)
   return cx
@@ -77,6 +79,14 @@ end
 function context:set_return_type(t)
   assert(self.expected_return_type)
   self.expected_return_type[1] = t
+end
+
+function context:get_external()
+  return self.external
+end
+
+function context:set_external(external)
+  self.external = external
 end
 
 function type_check.region_field(cx, node, region, prefix_path, value_type)
@@ -2807,6 +2817,10 @@ function type_check.expr_deref(cx, node)
     report.error(node, "dereference of non-pointer type " .. tostring(value_type))
   end
 
+  if cx:get_external() then
+    report.error(node, "dereference in an external task")
+  end
+
   local expr_type = std.ref(value_type)
 
   return ast.typed.expr.Deref {
@@ -3558,6 +3572,7 @@ end
 function type_check.top_task(cx, node)
   local return_type = node.return_type
   local cx = cx:new_task_scope(return_type)
+  cx:set_external(node.prototype:getexternal())
 
   local mapping = {}
   local params = node.params:map(

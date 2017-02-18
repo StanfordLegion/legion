@@ -8401,9 +8401,6 @@ end
 
 function codegen.top(cx, node)
   if node:is(ast.typed.top.Task) then
-    if node.annotations.external:is(ast.annotation.Demand) then
-      node.prototype:setexternal(true)
-    end
     if not (node.annotations.cuda:is(ast.annotation.Demand) and
             cudahelper.check_cuda_available())
     then
