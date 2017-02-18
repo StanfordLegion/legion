@@ -52,6 +52,7 @@ local language = {
     "__cuda",
     "__delete",
     "__demand",
+    "__external",
     "__fields",
     "__forbid",
     "__inline",

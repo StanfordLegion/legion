@@ -8154,7 +8154,9 @@ function codegen.top_task(cx, node)
         physical_regions_by_field_path[field_path:hash()] = physical_region
       end
 
-      if not task:get_config_options().inner and flag ~= std.no_access_flag then
+      if not task:get_config_options().inner and
+         not task:getexternal() and
+         flag ~= std.no_access_flag then
         local pr_actions, pr_base_pointers, pr_strides = unpack(data.zip(unpack(
           data.zip(field_paths, field_types):map(
             function(field)
