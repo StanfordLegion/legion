@@ -1318,7 +1318,6 @@ namespace Legion {
       // TODO: some criticality analysis to assign priorities
       output.task_priority = 0;
       output.postmap_task = false;
-      output.control_replicate = true;
       // A special case for the top-level task
       // Try to control replicate this task if possible
       if ((total_nodes > 1) && task.get_depth() == 0)
@@ -1327,8 +1326,33 @@ namespace Legion {
         {
           // Place on replicate on each node by default
           assert(remote_cpus.size() == total_nodes);
-          output.target_procs = remote_cpus;
-          output.control_replicate = true;
+          // Check to see if we're interoperating with MPI
+          const std::map<AddressSpace,int/*rank*/> &mpi_interop_mapping = 
+            runtime->find_reverse_MPI_mapping(ctx);
+          if (!mpi_interop_mapping.empty())
+          {
+            // If we're interoperating with MPI make the shards align with ranks
+            assert(mpi_interop_mapping.size() == total_nodes);
+            for (std::vector<Processor>::const_iterator it = 
+                  remote_cpus.begin(); it != remote_cpus.end(); it++)
+            {
+              AddressSpace space = it->address_space();
+              std::map<AddressSpace,int>::const_iterator finder = 
+                mpi_interop_mapping.find(space);
+              assert(finder != mpi_interop_mapping.end());
+              output.control_replication_map[finder->second] = *it;
+            }
+          }
+          else
+          {
+            // Otherwise we can just assign shards based on address space
+            for (std::vector<Processor>::const_iterator it = 
+                  remote_cpus.begin(); it != remote_cpus.end(); it++)
+            {
+              AddressSpace space = it->address_space();
+              output.control_replication_map[space] = *it;
+            }
+          }
           // We're done since we know that the top-level task has no regions
           assert(task.regions.empty());
           return;
