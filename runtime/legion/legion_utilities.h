@@ -188,6 +188,51 @@ namespace Legion {
       }
     } 
 
+    //--------------------------------------------------------------------------
+    static inline bool configure_collective_settings(const int participants,
+                                                     const int local_space,
+                                                     int &collective_radix,
+                                                     int &collective_log_radix,
+                                                     int &collective_stages,
+                                                     int &participating_spaces)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_radix > 0);
+#endif
+      const int MultiplyDeBruijnBitPosition[32] = 
+      {
+        0, 9, 1, 10, 13, 21, 2, 29, 11, 14, 16, 18, 22, 25, 3, 30,
+          8, 12, 20, 28, 15, 17, 24, 7, 19, 27, 23, 6, 26, 5, 4, 31
+      };
+      // First adjust the radix based on the number of nodes if necessary
+      if (collective_radix > participants)
+        collective_radix = participants;
+      // Adjust the radix to the next smallest power of 2
+      uint32_t radix_copy = collective_radix;
+      for (int i = 0; i < 5; i++)
+        radix_copy |= radix_copy >> (1 << i);
+      collective_log_radix = 
+        MultiplyDeBruijnBitPosition[(uint32_t)(radix_copy * 0x07C4ACDDU) >> 27];
+      if (collective_radix != (1 << collective_log_radix))
+        collective_radix = (1 << collective_log_radix);
+
+      // Compute the number of stages
+      uint32_t node_copy = participants;
+      for (int i = 0; i < 5; i++)
+        node_copy |= node_copy >> (1 << i);
+      // Now we have it log 2
+      int log_nodes = 
+        MultiplyDeBruijnBitPosition[(uint32_t)(node_copy * 0x07C4ACDDU) >> 27];
+      collective_stages = log_nodes / collective_log_radix;
+      participating_spaces = (1 << (collective_stages * collective_log_radix));
+#ifdef DEBUG_LEGION
+      assert((participating_spaces % collective_radix) == 0);
+#endif
+      const bool participant = (local_space < participating_spaces);
+      return participant;
+    }
+
     /////////////////////////////////////////////////////////////
     // AutoLock 
     /////////////////////////////////////////////////////////////

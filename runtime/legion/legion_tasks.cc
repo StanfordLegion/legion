@@ -6586,7 +6586,7 @@ namespace Legion {
         mapper->runtime->find_mapper(current_proc, map_id);
       repl_ctx->configure_context(mapper);
       // The replicate contexts all need to sync up to exchange resources 
-      repl_ctx->exchange_resources();
+      repl_ctx->exchange_common_resources();
       return repl_ctx;
     }
 
@@ -9272,7 +9272,9 @@ namespace Legion {
         local_mapping_complete(0), remote_mapping_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
         trigger_local_commit(0), trigger_remote_commit(0), 
-        remote_constituents(0), first_future(true)
+        remote_constituents(0), first_future(true), 
+        collective_radix(Runtime::legion_collective_radix), 
+        barrier_receiving_stage(-1)
     //--------------------------------------------------------------------------
     {
       runtime->register_shard_manager(repl_id, this);
@@ -9323,6 +9325,15 @@ namespace Legion {
 #endif
       address_spaces = spaces;
       shard_mapping = mapping;
+      // Configure our collective settings based on the number of spaces
+      collective_participant = configure_collective_settings(
+                                    address_spaces.size(),
+                                    address_space_index,
+                                    collective_radix,
+                                    collective_log_radix,
+                                    collective_stages,
+                                    collective_participating_spaces);
+      barrier_exchange_notifications.resize(collective_stages, 1);
       // Make our local shards
       create_shards();
       for (std::vector<ShardTask*>::const_iterator it = 
@@ -9365,6 +9376,15 @@ namespace Legion {
       address_spaces.resize(num_spaces);
       for (unsigned idx = 0; idx < num_spaces; idx++)
         derez.deserialize(address_spaces[idx]);
+      // Configure our collective settings based on the number of spaces
+      collective_participant = configure_collective_settings(
+                                    address_spaces.size(),
+                                    address_space_index,
+                                    collective_radix,
+                                    collective_log_radix,
+                                    collective_stages,
+                                    collective_participating_spaces);
+      barrier_exchange_notifications.resize(collective_stages, 1);
       // Unpack our first shard here
       create_shards();
       ShardTask *first_shard = local_shards[0];
@@ -9456,7 +9476,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardManager::broadcast_launch(RtEvent ready_event,
-                             RtUserEvent to_trigger, SingleTask *to_clone) const
+                                   RtUserEvent to_trigger, SingleTask *to_clone)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9545,6 +9565,319 @@ namespace Legion {
         if (to_trigger.exists())
           Runtime::trigger_event(to_trigger);
         return true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::exchange_dependence_barriers(size_t window_size,
+                                   std::vector<RtBarrier> &application_barriers,
+                                   std::vector<RtBarrier> &internal_barriers)
+    //--------------------------------------------------------------------------
+    {
+      bool perform_local = false;
+      RtEvent wait_on;
+      {
+        AutoLock m_lock(manager_lock);
+        if (!barriers_exchanged.exists()) // see if this is the first one
+        {
+          perform_local = true;
+          barrier_window_size = window_size;
+          barriers_exchanged = Runtime::create_rt_user_event();
+        }
+        else if (barrier_window_size != window_size)
+        {
+          log_run.error("ERROR: Context configurations for a control "
+                        "replicated task have different window sizes "
+                        "of %ld and %ld", window_size, barrier_window_size);
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+        wait_on = barriers_exchanged;
+      }
+      if (perform_local)
+      {
+        // Make our local barriers and fill in the local data structure
+        const unsigned num_spaces = address_spaces.size();
+        const unsigned barriers_per_space = 
+          (barrier_window_size + num_spaces - 1) / num_spaces; // round up
+        const unsigned num_local_barriers = barriers_per_space * num_spaces;
+        application_barrier_infos.resize(num_local_barriers);
+        internal_barrier_infos.resize(num_local_barriers);
+        const unsigned num_shards = shard_mapping.size();
+        for (unsigned idx = 0; idx < num_local_barriers; idx++)
+          application_barrier_infos[idx] = BarrierInfo(address_space_index, idx,
+              RtBarrier(Realm::Barrier::create_barrier(num_shards)));
+        for (unsigned idx = 0; idx < num_local_barriers; idx++)
+          internal_barrier_infos[idx] = BarrierInfo(address_space_index, idx,
+              RtBarrier(Realm::Barrier::create_barrier(num_shards)));
+        if (address_spaces.size() > 1)
+        {
+          if (collective_participant)
+          {
+            // We are a participating node
+            // See if we are waiting for an initial notification
+            // if not we can just send our message now
+            if ((int(address_spaces.size()) == collective_participating_spaces) 
+                || (address_space_index >= 
+                    (address_spaces.size() - collective_participating_spaces)))
+              send_barrier_exchange(0);
+          }
+          else
+          {
+            // We are not a participating node
+            // so we just send our barriers to one node
+            send_barrier_exchange(-1);
+          }
+        }
+        else // Now we are done so we can just trigger the barriers
+          Runtime::trigger_event(barriers_exchanged);
+      }
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+      finalize_barrier_exchange(application_barriers, internal_barriers);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_barrier_exchange(int stage)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(repl_id);
+        rez.serialize(stage);
+        rez.serialize(barrier_window_size);
+        // No need to hold the lock yet, our current stage is protecting us
+#ifdef DEBUG_LEGION
+        assert(application_barrier_infos.size() == 
+                internal_barrier_infos.size());
+#endif
+        rez.serialize<size_t>(application_barrier_infos.size());
+        for (std::vector<BarrierInfo>::const_iterator it = 
+              application_barrier_infos.begin(); it !=
+              application_barrier_infos.end(); it++)
+          rez.serialize(*it);
+        for (std::vector<BarrierInfo>::const_iterator it = 
+              internal_barrier_infos.begin(); it !=
+              internal_barrier_infos.end(); it++)
+          rez.serialize(*it);
+      }
+      if (stage == -1)
+      {
+        if (collective_participant)
+        {
+          unsigned idx = address_space_index + collective_participating_spaces;
+#ifdef DEBUG_LEGION
+          assert(idx < address_spaces.size());
+#endif
+          const AddressSpaceID target = address_spaces[idx];
+          runtime->send_control_rep_barrier_exchange(target, rez);
+        }
+        else
+        {
+          const AddressSpaceID target = address_spaces[
+            address_space_index % collective_participating_spaces];
+          runtime->send_control_rep_barrier_exchange(target, rez);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(stage >= 0);
+#endif
+        for (int r = 1; r < collective_radix; r++)
+        {
+          const int index = address_space_index ^ 
+            (r << (stage * collective_log_radix));
+#ifdef DEBUG_LEGION
+          assert(index < collective_participating_spaces);
+#endif
+          runtime->send_control_rep_barrier_exchange(address_spaces[index],rez);
+        }
+        // Now that we've sent everything for this stage, we can bump the
+        // receiving stage up and check to see if we have to send the next stage
+        const bool send_next = increment_barrier_receiving_stage(stage);
+        if (send_next)
+          send_barrier_exchange(stage+1);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardManager::increment_barrier_receiving_stage(int sent_stage)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_participant);
+#endif
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(sent_stage == (barrier_receiving_stage+1));
+#endif
+      // See if we have any pending information for these stages
+      std::map<int,std::vector<BarrierInfo> >::iterator finder = 
+        pending_application_barrier_infos.find(sent_stage);
+      if (finder != pending_application_barrier_infos.end())
+      {
+        application_barrier_infos.insert(application_barrier_infos.end(),
+            finder->second.begin(), finder->second.end());
+        pending_application_barrier_infos.erase(finder);
+      }
+      finder = pending_internal_barrier_infos.find(sent_stage);
+      if (finder != pending_internal_barrier_infos.end())
+      {
+        internal_barrier_infos.insert(internal_barrier_infos.end(),
+            finder->second.begin(), finder->second.end());
+        pending_internal_barrier_infos.erase(finder);
+      }
+      barrier_receiving_stage = sent_stage;
+      return (barrier_exchange_notifications[sent_stage] == collective_radix);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::process_barrier_exchange(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      int stage;
+      derez.deserialize(stage);
+#ifdef DEBUG_LEGION
+      assert(collective_participant || (stage == -1));
+#endif
+      size_t remote_window_size;
+      derez.deserialize(remote_window_size);
+      if (remote_window_size != barrier_window_size)
+      {
+        log_run.error("ERROR: Context configurations for a control "
+                      "replicated task have different window sizes "
+                      "of %ld and %ld", remote_window_size,barrier_window_size);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      bool send_next = unpack_barrier_exchange(stage, derez);
+      if (stage == -1)
+      {
+#ifdef DEBUG_LEGION
+        assert(send_next);
+#endif
+        if (collective_participant)
+          send_barrier_exchange(0);
+        else
+          Runtime::trigger_event(barriers_exchanged);
+        return;
+      }
+      if (send_next)
+      {
+        const int next_stage = stage + 1;
+        if (next_stage == collective_stages)
+        {
+          // We are done
+          Runtime::trigger_event(barriers_exchanged);
+          // See if we need to send a message back to a non-participating node
+          if ((int(address_spaces.size()) > collective_participating_spaces) &&
+              (address_space_index < 
+               int(address_spaces.size() - collective_participating_spaces)))
+            send_barrier_exchange(-1);
+        }
+        else // Send the next stage
+          send_barrier_exchange(next_stage);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardManager::unpack_barrier_exchange(int stage, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(stage >= -1);
+#endif
+      size_t num_barriers;
+      derez.deserialize(num_barriers);
+      AutoLock m_lock(manager_lock);
+      // Check to see if we are the right stage or not
+      if (barrier_receiving_stage == stage)
+      {
+#ifdef DEBUG_LEGION
+        assert(application_barrier_infos.size() == 
+                internal_barrier_infos.size());
+#endif
+        // Receiving the right stage, put it straight in the data structure
+        const unsigned offset = application_barrier_infos.size();
+        application_barrier_infos.resize(offset + num_barriers);
+        for (unsigned idx = 0; idx < num_barriers; idx++)
+          derez.deserialize(application_barrier_infos[offset+idx]);
+        internal_barrier_infos.resize(offset + num_barriers);
+        for (unsigned idx = 0; idx < num_barriers; idx++)
+          derez.deserialize(internal_barrier_infos[offset+idx]);
+        // Special case if we are stage -1
+        if (stage == -1)
+          return true;
+        barrier_exchange_notifications[stage]++;
+        return (barrier_exchange_notifications[stage] == collective_radix);
+      }
+      else
+      {
+        // Not at the right stage yet so we have to buffer it
+        std::vector<BarrierInfo> &pending_application_infos = 
+          pending_application_barrier_infos[stage];
+        std::vector<BarrierInfo> &pending_internal_infos = 
+          pending_internal_barrier_infos[stage];
+#ifdef DEBUG_LEGION
+        assert(pending_application_infos.size() == 
+                pending_internal_infos.size());
+#endif
+        const unsigned offset = pending_application_infos.size();
+        pending_application_infos.resize(offset + num_barriers);
+        for (unsigned idx = 0; idx < num_barriers; idx++)
+          derez.deserialize(pending_application_infos[offset+idx]);
+        pending_internal_infos.resize(offset + num_barriers);
+        for (unsigned idx = 0; idx < num_barriers; idx++)
+          derez.deserialize(pending_internal_infos[offset+idx]);
+#ifdef DEBUG_LEGION
+        assert(stage >= 0);
+#endif
+        barrier_exchange_notifications[stage]++;
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::finalize_barrier_exchange(
+                                   std::vector<RtBarrier> &application_barriers,
+                                   std::vector<RtBarrier> &internal_barriers)
+    //--------------------------------------------------------------------------
+    {
+      application_barriers.resize(application_barrier_infos.size(), 
+                                  RtBarrier::NO_RT_BARRIER);
+      for (std::vector<BarrierInfo>::const_iterator it = 
+            application_barrier_infos.begin(); it != 
+            application_barrier_infos.end(); it++)
+      {
+        // This will stripe the barriers from different nodes across
+        // the vector which will round robin barriers across operations
+        const unsigned index = 
+          it->index * address_spaces.size() + it->address_index;
+#ifdef DEBUG_LEGION
+        assert(index < application_barriers.size());
+        assert(!application_barriers[index].exists());
+#endif
+        application_barriers[index] = it->bar;
+      }
+      internal_barriers.resize(internal_barrier_infos.size(),
+                               RtBarrier::NO_RT_BARRIER);
+      for (std::vector<BarrierInfo>::const_iterator it = 
+            internal_barrier_infos.begin(); it != 
+            internal_barrier_infos.end(); it++)
+      {
+        const unsigned index = 
+          it->index * address_spaces.size() + it->address_index;
+#ifdef DEBUG_LEGION
+        assert(index < internal_barriers.size());
+        assert(!internal_barriers[index].exists());
+#endif
+        internal_barriers[index] = it->bar;
       }
     }
 
@@ -9766,6 +10099,18 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->trigger_task_commit(false/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_barrier_exchange(Deserializer &derez,
+                                                          Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->process_barrier_exchange(derez);
     }
 
   }; // namespace Internal 

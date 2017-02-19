@@ -668,6 +668,7 @@ namespace Legion {
       SEND_CONTROL_REP_POST_MAPPED,
       SEND_CONTROL_REP_TRIGGER_COMPLETE,
       SEND_CONTROL_REP_TRIGGER_COMMIT,
+      SEND_CONTROL_REP_BARRIER_EXCHANGE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -794,6 +795,7 @@ namespace Legion {
         "Send Control Replication Post Mapped",                       \
         "Send Control Replication Trigger Complete",                  \
         "Send Control Replication Trigger Commit",                    \
+        "Send Control Replication Barrier Exchange",                  \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };

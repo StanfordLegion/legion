@@ -6674,20 +6674,20 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplicateContext::ReplicateContext(Runtime *rt, TaskOp *owner, bool full,
+    ReplicateContext::ReplicateContext(Runtime *rt, ShardTask *owner, bool full,
                                    const std::vector<RegionRequirement> &reqs,
                                    const std::vector<unsigned> &parent_indexes,
                                    const std::vector<bool> &virt_mapped,
                                    UniqueID ctx_uid, ShardManager *manager)
-      : InnerContext(rt, owner, full, reqs, parent_indexes, 
-                     virt_mapped, ctx_uid), shard_manager(manager)
+      : InnerContext(rt, owner, full, reqs, parent_indexes, virt_mapped, 
+                     ctx_uid), owner_shard(owner), shard_manager(manager)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReplicateContext::ReplicateContext(const ReplicateContext &rhs)
-      : InnerContext(*this), shard_manager(NULL)
+      : InnerContext(*this), owner_shard(NULL), shard_manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6721,6 +6721,16 @@ namespace Legion {
 
 
       return op_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::exchange_common_resources(void)
+    //--------------------------------------------------------------------------
+    {
+      // Exchange the barriers across all the shards
+      const size_t window_size = context_configuration.max_window_size;
+      shard_manager->exchange_dependence_barriers(window_size,
+                              application_barriers, internal_barriers);
     }
 
     /////////////////////////////////////////////////////////////

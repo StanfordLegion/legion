@@ -2081,6 +2081,8 @@ namespace Legion {
                                              Serializer &rez);
       void send_control_rep_trigger_commit(AddressSpaceID target,
                                            Serializer &rez);
+      void send_control_rep_barrier_exchange(AddressSpaceID target,
+                                             Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2253,6 +2255,7 @@ namespace Legion {
       void handle_control_rep_post_mapped(Deserializer &derez);
       void handle_control_rep_trigger_complete(Deserializer &derez);
       void handle_control_rep_trigger_commit(Deserializer &derez);
+      void handle_control_rep_barrier_exchange(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -2577,8 +2580,6 @@ namespace Legion {
       static void init_mpi_sync(const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-    protected:
-      static void configure_collective_settings(int total_spaces);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call

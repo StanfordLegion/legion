@@ -1756,8 +1756,8 @@ namespace Legion {
       if (participating)
       {
         stage_notifications.resize(Runtime::legion_collective_stages, 1);
-	// Special case: if we expect a stage -1 message from a non-participating
-	//  space, we'll count that as part of stage 0
+	// Special case: if we expect a stage -1 message from a 
+        // non-participating space, we'll count that as part of stage 0
 	if ((Runtime::legion_collective_stages > 0) &&
 	    (runtime->address_space <
 	     (runtime->total_address_spaces -
@@ -5853,6 +5853,11 @@ namespace Legion {
           case SEND_CONTROL_REP_TRIGGER_COMMIT:
             {
               runtime->handle_control_rep_trigger_commit(derez);
+              break;
+            }
+          case SEND_CONTROL_REP_BARRIER_EXCHANGE:
+            {
+              runtime->handle_control_rep_barrier_exchange(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -13925,6 +13930,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_rep_barrier_exchange(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_CONTROL_REP_BARRIER_EXCHANGE, 
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_shutdown_notification(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14967,6 +14982,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_trigger_commit(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_rep_barrier_exchange(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_barrier_exchange(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -19357,7 +19379,12 @@ namespace Legion {
                                                   0/*same across nodes*/);
       // Configure our collective settings
       if (address_spaces.size() > 1)
-        configure_collective_settings(address_spaces.size());
+        configure_collective_settings(address_spaces.size(), 
+                                      local_rt->address_space,
+                                      legion_collective_radix,
+                                      legion_collective_log_radix,
+                                      legion_collective_stages,
+                                      legion_collective_participating_spaces);
       // If we have an MPI rank, then build the maps
       // We'll initialize the mappers after the tables are built
       if (Runtime::mpi_rank >= 0)
@@ -20041,46 +20068,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_run.debug() << "MPI sync task";
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::configure_collective_settings(int total_spaces)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(legion_collective_radix > 0);
-#endif
-      const int MultiplyDeBruijnBitPosition[32] = 
-      {
-        0, 9, 1, 10, 13, 21, 2, 29, 11, 14, 16, 18, 22, 25, 3, 30,
-          8, 12, 20, 28, 15, 17, 24, 7, 19, 27, 23, 6, 26, 5, 4, 31
-      };
-      // First adjust the radix based on the number of nodes if necessary
-      if (legion_collective_radix > total_spaces)
-        legion_collective_radix = total_spaces;
-      // Adjust the radix to the next smallest power of 2
-      uint32_t radix_copy = legion_collective_radix;
-      for (int i = 0; i < 5; i++)
-        radix_copy |= radix_copy >> (1 << i);
-      int legion_collective_log_radix = 
-        MultiplyDeBruijnBitPosition[(uint32_t)(radix_copy * 0x07C4ACDDU) >> 27];
-      if (legion_collective_radix != (1 << legion_collective_log_radix))
-        legion_collective_radix = (1 << legion_collective_log_radix);
-
-      // Compute the number of stages
-      uint32_t node_copy = total_spaces;
-      for (int i = 0; i < 5; i++)
-        node_copy |= node_copy >> (1 << i);
-      // Now we have it log 2
-      int log_nodes = 
-        MultiplyDeBruijnBitPosition[(uint32_t)(node_copy * 0x07C4ACDDU) >> 27];
-      legion_collective_stages = log_nodes / legion_collective_log_radix;;
-      legion_collective_participating_spaces = 
-        (1 << (legion_collective_stages * legion_collective_log_radix));
-#ifdef DEBUG_LEGION
-      assert(
-       (legion_collective_participating_spaces % legion_collective_radix) == 0);
-#endif
     }
 
     //--------------------------------------------------------------------------

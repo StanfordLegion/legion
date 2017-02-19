@@ -1199,6 +1199,17 @@ namespace Legion {
         ShardManager *manager;
       };
     public:
+      struct BarrierInfo {
+      public:
+        BarrierInfo(void) : address_index(0), index(0) { }
+        BarrierInfo(unsigned a, unsigned i, RtBarrier b)
+          : address_index(a), index(i), bar(b) { }
+      public:
+        unsigned address_index;
+        unsigned index;
+        RtBarrier bar;
+      };
+    public:
       ShardManager(Runtime *rt, ControlReplicationID repl_id,
                    unsigned address_space_index, AddressSpaceID owner_space,
                    SingleTask *original = NULL);
@@ -1216,9 +1227,20 @@ namespace Legion {
       void launch_shards(void) const;
     public:
       void broadcast_launch(RtEvent start, RtUserEvent to_trigger,
-                            SingleTask *to_clone) const;
+                            SingleTask *to_clone);
       bool broadcast_delete(
               RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+    public:
+      void exchange_dependence_barriers(size_t window_size,
+                                std::vector<RtBarrier> &application_barriers,
+                                std::vector<RtBarrier> &internal_barriers);
+      void send_barrier_exchange(int stage);
+      bool increment_barrier_receiving_stage(int previous_stage);
+      void process_barrier_exchange(Deserializer &derez);
+      bool unpack_barrier_exchange(int stage, Deserializer &derez);
+      void finalize_barrier_exchange(
+                                std::vector<RtBarrier> &appilcation_barriers,
+                                std::vector<RtBarrier> &internal_barriers);
     public:
       void handle_post_mapped(bool local);
       void handle_future(const void *res, size_t res_size, bool owned);
@@ -1235,6 +1257,7 @@ namespace Legion {
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
+      static void handle_barrier_exchange(Deserializer &derez, Runtime *rt);
     public:
       Runtime *const runtime;
       const ControlReplicationID repl_id;
@@ -1258,8 +1281,24 @@ namespace Legion {
       unsigned    local_mapping_complete, remote_mapping_complete;
       unsigned    trigger_local_complete, trigger_remote_complete;
       unsigned    trigger_local_commit,   trigger_remote_commit;
-      mutable unsigned    remote_constituents;
+      unsigned    remote_constituents;
       bool        first_future;
+    protected:
+      int collective_radix;
+      int collective_log_radix;
+      int collective_stages;
+      int collective_participating_spaces;
+      bool collective_participant;
+    protected:
+      // Barrier exchange data structures
+      RtUserEvent                             barriers_exchanged;
+      size_t                                  barrier_window_size;
+      int                                     barrier_receiving_stage;
+      std::vector<BarrierInfo>                application_barrier_infos;
+      std::vector<BarrierInfo>                internal_barrier_infos;
+      std::map<int,std::vector<BarrierInfo> > pending_application_barrier_infos;
+      std::map<int,std::vector<BarrierInfo> > pending_internal_barrier_infos;
+      std::vector<int>                        barrier_exchange_notifications;
     };
 
   }; // namespace Internal 
