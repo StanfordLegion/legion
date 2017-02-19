@@ -2970,6 +2970,12 @@ namespace Legion {
       static inline bool get_barrier_result(ApBarrier bar, void *result,
                                             size_t result_size);
     public:
+      static inline RtBarrier get_previous_phase(const RtBarrier &bar);
+      static inline void phase_barrier_arrive(const RtBarrier &bar,
+                unsigned cnt, RtEvent precondition = RtEvent::NO_RT_EVENT,
+                const void *reduce_value = NULL, size_t reduce_value_size = 0);
+      static inline void advance_barrier(RtBarrier &bar);
+    public:
       static inline ApEvent acquire_ap_reservation(Reservation r,bool exclusive,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
       static inline RtEvent acquire_rt_reservation(Reservation r,bool exclusive,
@@ -3476,6 +3482,31 @@ namespace Legion {
     {
       Realm::Barrier copy = bar;
       return copy.get_result(result, result_size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline RtBarrier Runtime::get_previous_phase(const RtBarrier &b)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = b;
+      return RtBarrier(copy.get_previous_phase());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::phase_barrier_arrive(const RtBarrier &bar,
+           unsigned count, RtEvent precondition, const void *value, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar;
+      copy.arrive(count, precondition, value, size); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::advance_barrier(RtBarrier &bar)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar;
+      bar = RtBarrier(copy.advance_barrier());
     }
 
     //--------------------------------------------------------------------------

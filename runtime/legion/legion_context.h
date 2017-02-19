@@ -315,6 +315,7 @@ namespace Legion {
       // these calls to notify the parent context.
       virtual unsigned register_new_child_operation(Operation *op,
                const std::vector<StaticDependence> *dependences) = 0;
+      virtual void register_new_internal_operation(InternalOp *op) = 0;
       virtual unsigned register_new_close_operation(CloseOp *op) = 0;
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
                                            RtEvent op_precondition) = 0;
@@ -871,6 +872,7 @@ namespace Legion {
       // these calls to notify the parent context.
       virtual unsigned register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
+      virtual void register_new_internal_operation(InternalOp *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
                                            RtEvent op_precondition);
@@ -1246,6 +1248,7 @@ namespace Legion {
     public:
       virtual unsigned register_new_child_operation(Operation *op,
                             const std::vector<StaticDependence> *dependences);
+      virtual void register_new_internal_operation(InternalOp *op);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -1265,6 +1268,7 @@ namespace Legion {
       // control replicaiton context
       std::vector<RtBarrier>  application_barriers;
       std::vector<RtBarrier>  internal_barriers;
+      unsigned next_ap_bar_index, next_int_bar_index;
     };
 
     /**
@@ -1554,6 +1558,7 @@ namespace Legion {
       // these calls to notify the parent context.
       virtual unsigned register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
+      virtual void register_new_internal_operation(InternalOp *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
                                            RtEvent op_precondition);
@@ -1850,6 +1855,7 @@ namespace Legion {
       // these calls to notify the parent context.
       virtual unsigned register_new_child_operation(Operation *op,
                 const std::vector<StaticDependence> *dependences);
+      virtual void register_new_internal_operation(InternalOp *op);
       virtual unsigned register_new_close_operation(CloseOp *op);
       virtual void add_to_dependence_queue(Operation *op, bool has_lock,
                                            RtEvent op_precondition);

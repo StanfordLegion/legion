@@ -4759,6 +4759,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::register_new_internal_operation(InternalOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
     unsigned InnerContext::register_new_close_operation(CloseOp *op)
     //--------------------------------------------------------------------------
     {
@@ -6680,7 +6687,8 @@ namespace Legion {
                                    const std::vector<bool> &virt_mapped,
                                    UniqueID ctx_uid, ShardManager *manager)
       : InnerContext(rt, owner, full, reqs, parent_indexes, virt_mapped, 
-                     ctx_uid), owner_shard(owner), shard_manager(manager)
+          ctx_uid), owner_shard(owner), shard_manager(manager),
+        next_ap_bar_index(0), next_int_bar_index(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -6718,9 +6726,38 @@ namespace Legion {
       unsigned op_index = 
         InnerContext::register_new_child_operation(op, dependences);
       // Now we have to assign a phase barrier to each operation
-
-
+      // No need for a lock here since we know this the calls are serialized
+      RtBarrier &map_barrier = application_barriers[next_ap_bar_index++];
+      // Reset the index if necessary
+      if (next_ap_bar_index == application_barriers.size())
+        next_ap_bar_index = 0;
+      // Set the replicate mapped event
+      op->set_replicate_mapped_event(Runtime::get_previous_phase(map_barrier));
+      // Arrive on the barrier 
+      Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
+                                    op->get_mapped_event());
+      // Advance the barrier for the next time
+      Runtime::advance_barrier(map_barrier);
       return op_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_new_internal_operation(InternalOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // We have to assign a phase barrier to each operation
+      // No need for a lock here since we know this the calls are serialized
+      RtBarrier &map_barrier = internal_barriers[next_int_bar_index++];
+      // Reset the index if necessary
+      if (next_int_bar_index == internal_barriers.size())
+        next_int_bar_index = 0;
+      // Set the replicate mapped event
+      op->set_replicate_mapped_event(Runtime::get_previous_phase(map_barrier));
+      // Arrive on the barrier 
+      Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
+                                    op->get_mapped_event());
+      // Advance the barrier for the next time
+      Runtime::advance_barrier(map_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -8102,6 +8139,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::register_new_internal_operation(InternalOp *op)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     unsigned LeafContext::register_new_close_operation(CloseOp *op)
     //--------------------------------------------------------------------------
     {
@@ -9251,6 +9295,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->register_new_child_operation(op, dependences);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::register_new_internal_operation(InternalOp *op)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->register_new_internal_operation(op);
     }
 
     //--------------------------------------------------------------------------

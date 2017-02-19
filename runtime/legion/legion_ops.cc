@@ -86,6 +86,7 @@ namespace Legion {
       parent_ctx = NULL;
       need_completion_trigger = true;
       mapped_event = Runtime::create_rt_user_event();
+      replicate_mapped_event = RtEvent::NO_RT_EVENT;
       resolved_event = Runtime::create_rt_user_event();
       completion_event = Runtime::create_ap_user_event();
       if (Runtime::resilient_mode)
@@ -227,6 +228,16 @@ namespace Legion {
       must_epoch = epoch;
       if (do_registration)
         must_epoch->register_subop(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::set_replicate_mapped_event(RtEvent replicate_mapped)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!replicate_mapped_event.exists());
+#endif
+      replicate_mapped_event = replicate_mapped;
     }
 
     //--------------------------------------------------------------------------
@@ -6006,6 +6017,7 @@ namespace Legion {
 #endif
       // We never track internal operations
       initialize_operation(creator->get_context(), false/*track*/);
+      parent_ctx->register_new_internal_operation(this);
 #ifdef DEBUG_LEGION
       assert(creator_req_idx == -1);
       assert(create_op == NULL);
