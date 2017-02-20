@@ -1293,16 +1293,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     StaticDependence::StaticDependence(void)
       : previous_offset(0), previous_req_index(0), current_req_index(0),
-        dependence_type(NO_DEPENDENCE), validates(false)
+        dependence_type(NO_DEPENDENCE), validates(false), shard_only(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     StaticDependence::StaticDependence(unsigned prev, unsigned prev_req,
-                           unsigned current_req, DependenceType dtype, bool val)
+                           unsigned current_req, DependenceType dtype, 
+                           bool val, bool shard)
       : previous_offset(prev), previous_req_index(prev_req),
-        current_req_index(current_req), dependence_type(dtype), validates(val)
+        current_req_index(current_req), dependence_type(dtype), 
+        validates(val), shard_only(shard)
     //--------------------------------------------------------------------------
     {
     }

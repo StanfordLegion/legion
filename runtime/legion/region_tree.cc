@@ -12450,7 +12450,7 @@ namespace Legion {
 #endif
           // Do this after the logging since we 
           // are going to update the iterator
-          if (op->register_dependence(it->op, it->gen))
+          if (op->register_dependence(it->op, it->gen, false/*shard only*/))
           {
 #ifndef LEGION_SPY
             // Prune it from the list
@@ -12483,7 +12483,7 @@ namespace Legion {
 #endif
           // Do this after the logging since we are going
           // to update the iterator
-          if (op->register_dependence(it->op, it->gen))
+          if (op->register_dependence(it->op, it->gen, false/*shard only*/))
           {
 #ifndef LEGION_SPY
             // Prune it from the list
@@ -14524,7 +14524,8 @@ namespace Legion {
                 if (user.op->register_region_dependence(user.idx, it->op, 
                                                         it->gen, it->idx,
                                                         dtype, validate,
-                                                        overlap))
+                                                        overlap,
+                                                        false/*shard only*/))
                 {
 #ifndef LEGION_SPY
                   // Now we can prune it from the list and continue
@@ -14757,7 +14758,8 @@ namespace Legion {
                                                          it->op, it->gen, 
                                                          it->idx, dtype,
                                                          closer.validates,
-                                                         overlap))
+                                                         overlap,
+                                                         false/*shard only*/))
           {
 #ifndef LEGION_SPY
             it = users.erase(it);

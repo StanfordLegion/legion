@@ -932,7 +932,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Operation::register_dependence(Operation *target, 
-                                        GenerationID target_gen)
+                                        GenerationID target_gen,
+                                        bool shard_only_dependence)
     //--------------------------------------------------------------------------
     {
       if (must_epoch != NULL)
@@ -948,7 +949,8 @@ namespace Legion {
           assert(trace != NULL);
 #endif
           if (target_gen < gen)
-            trace->record_dependence(this, target_gen, this, gen);
+            trace->record_dependence(this, target_gen, this, gen, 
+                                     shard_only_dependence);
           return false;
         }
         else
@@ -962,7 +964,8 @@ namespace Legion {
       bool prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
                                                 dependence_tracker.mapping,
-                                                commit_event);
+                                                commit_event, 
+                                                shard_only_dependence);
       if (registered_dependence)
         incoming[target] = target_gen;
       if (tracing)
@@ -970,7 +973,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(trace != NULL);
 #endif
-        trace->record_dependence(target, target_gen, this, gen);
+        trace->record_dependence(target, target_gen, this, gen, 
+                                 shard_only_dependence);
         // Unsound to prune when tracing
         prune = false;
       }
@@ -982,7 +986,8 @@ namespace Legion {
                                           GenerationID target_gen, 
                                           unsigned target_idx,
                                           DependenceType dtype, bool validates,
-                                          const FieldMask &dependent_mask)
+                                          const FieldMask &dependent_mask,
+                                          bool shard_only_dependence)
     //--------------------------------------------------------------------------
     {
       bool do_registration = true;
@@ -1010,7 +1015,8 @@ namespace Legion {
             trace->record_region_dependence(this, target_gen, 
                                             this, gen, target_idx, 
                                             idx, dtype, validates,
-                                            dependent_mask);
+                                            dependent_mask, 
+                                            shard_only_dependence);
           return false;
         }
         else
@@ -1027,7 +1033,8 @@ namespace Legion {
         prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
                                                 dependence_tracker.mapping,
-                                                commit_event);
+                                                commit_event,
+                                                shard_only_dependence);
       }
       if (registered_dependence)
       {
@@ -1044,7 +1051,8 @@ namespace Legion {
         trace->record_region_dependence(target, target_gen, 
                                         this, gen, target_idx, 
                                         idx, dtype, validates,
-                                        dependent_mask);
+                                        dependent_mask,
+                                        shard_only_dependence);
         // Unsound to prune when tracing
         prune = false;
       }
@@ -1056,7 +1064,8 @@ namespace Legion {
                                          Operation *op, GenerationID op_gen,
                                          bool &registered_dependence,
                                          MappingDependenceTracker *tracker,
-                                         RtEvent other_commit_event)
+                                         RtEvent other_commit_event,
+                                         bool shard_only_dependence)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1083,7 +1092,10 @@ namespace Legion {
             outgoing[op] = op_gen;
             // Record that the operation has a mapping dependence
             // on us as long as we haven't mapped
-            tracker->add_mapping_dependence(mapped_event);
+            if (replicate_mapped_event.exists() && !shard_only_dependence)
+              tracker->add_mapping_dependence(replicate_mapped_event);
+            else
+              tracker->add_mapping_dependence(mapped_event);
             tracker->add_resolution_dependence(resolved_event);
             // Record that we have a commit dependence on the
             // registering operation
@@ -1858,7 +1870,8 @@ namespace Legion {
     {
       if (predicate != NULL)
       {
-        register_dependence(predicate, predicate->get_generation());
+        register_dependence(predicate, predicate->get_generation(), 
+                            true/*shard only dependence*/);
         // Now we can remove our predicate reference
         predicate->remove_predicate_reference();
       }
@@ -6052,7 +6065,8 @@ namespace Legion {
                                              int target_idx,
                                              int source_idx, 
                                              DependenceType dtype,
-                                             const FieldMask &dependent_mask)
+                                             const FieldMask &dependent_mask,
+                                             bool shard_only_dependence)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6071,7 +6085,8 @@ namespace Legion {
         return;
       // Otherwise do the registration
       register_region_dependence(0/*idx*/, target, target_gen,
-                               target_idx, dtype, false/*validates*/, overlap);
+                               target_idx, dtype, false/*validates*/, 
+                               overlap, shard_only_dependence);
     }
 
     //--------------------------------------------------------------------------
@@ -9597,7 +9612,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (pred_op != NULL)
-        register_dependence(pred_op, pred_op->get_generation());
+        register_dependence(pred_op, pred_op->get_generation(), 
+                            true/*shard only dependence*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9737,7 +9753,8 @@ namespace Legion {
     {
       for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
             it != previous.end(); it++)
-        register_dependence(*it, (*it)->get_generation());
+        register_dependence(*it, (*it)->get_generation(), 
+                            true/*shard only dependence*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9912,7 +9929,8 @@ namespace Legion {
     {
       for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
             it != previous.end(); it++)
-        register_dependence(*it, (*it)->get_generation());
+        register_dependence(*it, (*it)->get_generation(), 
+                            true/*shard only dependence*/);
     }
 
     //--------------------------------------------------------------------------

@@ -5023,7 +5023,8 @@ namespace Legion {
       {
 #ifdef LEGION_SPY
         // Can't prune when doing legion spy
-        op->register_dependence(current_fence, fence_gen);
+        op->register_dependence(current_fence, fence_gen, 
+                                false/*shard only dependence*/);
         unsigned num_regions = op->get_region_count();
         if (num_regions > 0)
         {
@@ -5042,7 +5043,8 @@ namespace Legion {
         // If we can prune it then go ahead and do so
         // No need to remove the mapping reference because 
         // the fence has already been committed
-        if (op->register_dependence(current_fence, fence_gen))
+        if (op->register_dependence(current_fence, fence_gen, 
+                                    false/*shard only dependence*/))
           current_fence = NULL;
 #endif
       }
@@ -6736,7 +6738,7 @@ namespace Legion {
       // Arrive on the barrier 
       Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
                                     op->get_mapped_event());
-      // Advance the barrier for the next time
+      // Advance the barrier for the next operation 
       Runtime::advance_barrier(map_barrier);
       return op_index;
     }
@@ -6756,7 +6758,7 @@ namespace Legion {
       // Arrive on the barrier 
       Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
                                     op->get_mapped_event());
-      // Advance the barrier for the next time
+      // Advance the barrier for the next operation 
       Runtime::advance_barrier(map_barrier);
     }
 

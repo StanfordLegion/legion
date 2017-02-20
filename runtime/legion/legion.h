@@ -1129,7 +1129,8 @@ namespace Legion {
                        unsigned previous_req_index,
                        unsigned current_req_index,
                        DependenceType dtype,
-                       bool validates = false);
+                       bool validates = false,
+                       bool shard_only = false);
     public:
       inline void add_field(FieldID fid);
     public:
@@ -1145,6 +1146,9 @@ namespace Legion {
       DependenceType                dependence_type;
       // Whether this requirement validates the previous writer
       bool                          validates;
+      // Whether this dependence is a shard-only dependence for 
+      // control replication or it depends on all other copies
+      bool                          shard_only;
       // Fields that have the dependence
       std::set<FieldID>             dependent_fields;
     };

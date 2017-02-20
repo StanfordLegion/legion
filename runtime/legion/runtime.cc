@@ -674,7 +674,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
-        consumer_op->register_dependence(producer_op, op_gen);
+        consumer_op->register_dependence(producer_op,op_gen,true/*shard only*/);
 #ifdef DEBUG_LEGION
       else
         assert(!empty); // better not be empty if it doesn't have an op
