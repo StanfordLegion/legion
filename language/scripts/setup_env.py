@@ -54,6 +54,8 @@ def discover_conduit():
         return 'aries'
     elif platform.node().startswith('excalibur'):
         return 'aries'
+    elif platform.node().startswith('cori'):
+        return 'aries'
     else:
         raise Exception('Please set CONDUIT in your environment')
 
