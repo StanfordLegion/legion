@@ -2284,7 +2284,8 @@ namespace Legion {
           assert(!ref.is_virtual_ref());
 #endif
           ApEvent ready = target_views[idx2]->find_user_precondition(usage, 
-                            term_event, ref.get_valid_fields(), op, idx1, 
+                            term_event, ref.get_valid_fields(), 
+                            op->get_unique_op_id(), idx1, 
                             &info, map_applied_events);
           ref.set_ready_event(ready);
         }
@@ -2311,8 +2312,7 @@ namespace Legion {
           InstanceRef &ref = targets[idx2];
           target_views[idx2]->add_user(usage, term_event, 
                                        ref.get_valid_fields(), 
-                                       op, idx1, runtime->address_space,
-                                       &info, map_applied_events);
+                                       op, idx1, &info, map_applied_events);
           if (restricted_out)
           {
             FieldMask restricted = ref.get_valid_fields() & restricted_fields;
@@ -2639,7 +2639,6 @@ namespace Legion {
             ApEvent ready = (*it)->add_user_fused(src_usage, term_event,
                                                   valid_mask, op, src_index,
                                                   &src_version_info,
-                                                  runtime->address_space,
                                                   map_applied);
             src_targets.add_instance(
                 InstanceRef((*it)->get_manager(), valid_mask, ready));
@@ -15626,7 +15625,6 @@ namespace Legion {
       manager.record_advance_versions(info.traversal_mask, context,
                                     info.version_info, info.map_applied_events);
       PhysicalState *state = get_physical_state(info.version_info);
-      const AddressSpaceID local_space = context->runtime->address_space;
       // Get any restricted fields
       FieldMask restricted_fields;
       InstanceSet restricted_instances;
@@ -15689,8 +15687,9 @@ namespace Legion {
           {
             // Only find the preconditions now 
             ApEvent ready = new_view->find_user_precondition(usage, term_event,
-                                   user_mask, info.op, info.index, 
-                                   &info.version_info, info.map_applied_events);
+                                   user_mask, info.op->get_unique_op_id(), 
+                                   info.index, &info.version_info, 
+                                   info.map_applied_events);
             ref.set_ready_event(ready);
             new_views[idx] = new_view;
           }
@@ -15699,7 +15698,7 @@ namespace Legion {
             // Do the fused find preconditions and add user
             ApEvent ready = new_view->add_user_fused(usage,term_event,user_mask,
                                          info.op, info.index,&info.version_info,
-                                         local_space, info.map_applied_events);
+                                         info.map_applied_events);
             ref.set_ready_event(ready);
           }
           if (!defer_add_users && !!restricted_fields)
@@ -15716,8 +15715,8 @@ namespace Legion {
           {
             InstanceRef &ref = targets[idx]; 
             new_views[idx]->add_user(usage, term_event, ref.get_valid_fields(),
-                                   info.op, info.index, local_space,
-                                   &info.version_info, info.map_applied_events);
+                                     info.op, info.index, &info.version_info, 
+                                     info.map_applied_events);
           }
         }
         if (!reduce_out_views.empty())
@@ -15845,7 +15844,7 @@ namespace Legion {
 #endif
             ApEvent ready = new_views[0]->as_instance_view()->add_user_fused(
                 usage, term_event, ref.get_valid_fields(), info.op, info.index,
-                &info.version_info, local_space, info.map_applied_events);
+                &info.version_info, info.map_applied_events);
             ref.set_ready_event(ready);
             if (!!restricted_fields && !IS_READ_ONLY(info.req))
             {
@@ -15866,8 +15865,9 @@ namespace Legion {
 #endif
               ApEvent ready = 
                 new_views[idx]->as_instance_view()->find_user_precondition(
-                    usage, term_event, ref.get_valid_fields(), info.op, 
-                    info.index, &info.version_info, info.map_applied_events);
+                    usage, term_event, ref.get_valid_fields(), 
+                    info.op->get_unique_op_id(), info.index, 
+                    &info.version_info, info.map_applied_events);
               ref.set_ready_event(ready);
             }
             const bool restricted_out = 
@@ -15877,7 +15877,7 @@ namespace Legion {
               InstanceRef &ref = targets[idx];
               new_views[idx]->as_instance_view()->add_user(usage, term_event,
                        ref.get_valid_fields(), info.op, info.index, 
-                       local_space, &info.version_info,info.map_applied_events);
+                       &info.version_info,info.map_applied_events);
               if (restricted_out)
               {
                 FieldMask restricted = 
@@ -15952,7 +15952,6 @@ namespace Legion {
       // Now go through the list of valid instances and see if we can find
       // one that satisfies the field that we need.
       DeferredView *deferred_view = NULL;
-      const AddressSpaceID local_space = context->runtime->address_space;
       for (LegionMap<LogicalView*,FieldMask>::track_aligned::const_iterator
             it = state->valid_views.begin(); 
             it != state->valid_views.end(); it++)
@@ -15973,7 +15972,7 @@ namespace Legion {
             view->set_descriptor(field_data.back(), field_id);
             // Register ourselves as user of this instance
             ApEvent ready_event = view->add_user_fused(usage, term_event, 
-              user_mask, op, index, &version_info, local_space, applied_events);
+              user_mask, op, index, &version_info, applied_events);
             if (ready_event.exists())
               preconditions.insert(ready_event);
             // We found an actual instance so we are done

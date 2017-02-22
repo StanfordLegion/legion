@@ -206,6 +206,11 @@ namespace Legion {
       virtual void get_split_mask(RegionTreeNode *node, 
                                   const FieldMask &needed_fields,
                                   FieldMask &split) = 0;
+      // Pack from the upper bound node down to the target
+      // Works with VersionInfo::unpack_version_numbers
+      virtual void pack_writing_version_numbers(Serializer &rez) const = 0;
+      // Works with VersionInfo::unpack_upper bound node
+      virtual void pack_upper_bound_node(Serializer &rez) const = 0;
     };
 
     /**
@@ -266,14 +271,15 @@ namespace Legion {
       virtual void get_advance_versions(RegionTreeNode *node, bool base,
                                         const FieldMask &needed_fields,
                                         FieldVersions &field_versions);
+      virtual void pack_writing_version_numbers(Serializer &rez) const;
     public:
       void pack_version_info(Serializer &rez) const;
       void unpack_version_info(Deserializer &derez, Runtime *runtime,
                                std::set<RtEvent> &ready_events);
       void pack_version_numbers(Serializer &rez) const;
       void unpack_version_numbers(Deserializer &derez,RegionTreeForest *forest);
-    protected:
-      void pack_upper_bound_node(Serializer &rez) const;
+    public:
+      virtual void pack_upper_bound_node(Serializer &rez) const;
       void unpack_upper_bound_node(Deserializer &derez, 
                                    RegionTreeForest *forest);
     protected:
@@ -1245,7 +1251,7 @@ namespace Legion {
       FieldMask dirty_mask;
       // Fields which have reductions
       FieldMask reduction_mask;
-      // Note that we make the StateVersions type not local which
+      // Note that we make the StateVersions type is not local which
       // is how we keep the distributed version state tree live
       typedef VersioningSet<VERSION_STATE_TREE_REF,
                             false/*LOCAL*/> StateVersions;

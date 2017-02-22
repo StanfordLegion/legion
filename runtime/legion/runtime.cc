@@ -5567,6 +5567,36 @@ namespace Legion {
               runtime->handle_view_remote_invalidate(derez);
               break;
             }
+          case SEND_INSTANCE_VIEW_COPY_PRECONDITIONS:
+            {
+              runtime->handle_instance_view_copy_preconditions(derez, 
+                                                remote_address_space);
+              break;
+            }
+          case SEND_INSTANCE_VIEW_ADD_COPY:
+            {
+              runtime->handle_instance_view_add_copy(derez, 
+                                                     remote_address_space);
+              break;
+            }
+          case SEND_INSTANCE_VIEW_USER_PRECONDITIONS:
+            {
+              runtime->handle_instance_view_user_preconditions(derez,
+                                                  remote_address_space);
+              break;
+            }
+          case SEND_INSTANCE_VIEW_ADD_USER:
+            {
+              runtime->handle_instance_view_add_user(derez, 
+                                                     remote_address_space);
+              break;
+            }
+          case SEND_INSTANCE_VIEW_ADD_USER_FUSED:
+            {
+              runtime->handle_instance_view_add_user_fused(derez,
+                                                  remote_address_space);
+              break;
+            }
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez, remote_address_space);
@@ -13479,6 +13509,54 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_instance_view_find_copy_preconditions(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_INSTANCE_VIEW_COPY_PRECONDITIONS, 
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_instance_view_add_copy_user(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_INSTANCE_VIEW_ADD_COPY,
+                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_instance_view_find_user_preconditions(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_INSTANCE_VIEW_USER_PRECONDITIONS,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_instance_view_add_user(AddressSpaceID target, 
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_INSTANCE_VIEW_ADD_USER,
+                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_instance_view_add_user_fused(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_INSTANCE_VIEW_ADD_USER_FUSED,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14458,14 +14536,22 @@ namespace Legion {
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
       InstanceView::handle_view_update_request(derez, this, source);
+#else
+      assert(false);
+#endif
     }
     
     //--------------------------------------------------------------------------
     void Runtime::handle_view_update_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
       InstanceView::handle_view_update_response(derez, this);
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -14473,14 +14559,82 @@ namespace Legion {
                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
       InstanceView::handle_view_remote_update(derez, this, source);
+#else
+      assert(false);
+#endif
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_view_remote_invalidate(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
       InstanceView::handle_view_remote_invalidate(derez, this);
+#else
+      assert(false);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_instance_view_copy_preconditions(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      assert(false); 
+#else
+      InstanceView::handle_view_copy_preconditions(derez, this, source);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_instance_view_add_copy(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      assert(false);
+#else
+      InstanceView::handle_view_add_copy(derez, this, source);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_instance_view_user_preconditions(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      assert(false);
+#else
+      InstanceView::handle_view_user_preconditions(derez, this, source);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_instance_view_add_user(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      assert(false);
+#else
+      InstanceView::handle_view_add_user(derez, this, source);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_instance_view_add_user_fused(Deserializer &derez,
+                                                      AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      assert(false);
+#else
+      InstanceView::handle_view_add_user_fused(derez, this, source);
+#endif
     }
 
     //--------------------------------------------------------------------------

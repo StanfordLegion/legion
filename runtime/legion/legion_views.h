@@ -25,6 +25,11 @@
 namespace Legion {
   namespace Internal {
 
+    // Use this macro to enable migration of instance view data
+    // structures across the machine rather than having all analysis
+    // proceed for each instance on the owner node
+    // #define DISTRIBUTED_INSTANCE_VIEWS
+
     /**
      * \class LogicalView 
      * This class is the abstract base class for representing
@@ -146,14 +151,15 @@ namespace Legion {
                                  const AddressSpaceID source,
                                  std::set<RtEvent> &applied_events) = 0;
       virtual ApEvent find_user_precondition(const RegionUsage &user,
-                                           ApEvent term_event,
-                                           const FieldMask &user_mask,
-                                           Operation *op, const unsigned index,
-                                           VersionTracker *version_tracker,
-                                           std::set<RtEvent> &applied_events) = 0;
+                                         ApEvent term_event,
+                                         const FieldMask &user_mask,
+                                         const UniqueID op_id,
+                                         const unsigned index,
+                                         VersionTracker *version_tracker,
+                                         std::set<RtEvent> &applied_events) = 0;
       virtual void add_user(const RegionUsage &user, ApEvent term_event,
-                            const FieldMask &user_mask, Operation *op,
-                            const unsigned index, AddressSpaceID source,
+                            const FieldMask &user_mask, 
+                            Operation *op, const unsigned index, 
                             VersionTracker *version_tracker,
                             std::set<RtEvent> &applied_events) = 0;
       // This is a fused version of the above two methods
@@ -161,6 +167,19 @@ namespace Legion {
                                    ApEvent term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
+                                   VersionTracker *version_tracker,
+                                   std::set<RtEvent> &applied_events,
+                                   bool update_versions = true) = 0;
+      virtual void add_user_base(const RegionUsage &user, ApEvent term_event,
+                                   const FieldMask &user_mask, 
+                                   const UniqueID op_id, const unsigned index, 
+                                   const AddressSpaceID source,
+                                   VersionTracker *version_tracker,
+                                   std::set<RtEvent> &applied_events) = 0;
+      virtual ApEvent add_user_fused_base(const RegionUsage &user,
+                                   ApEvent term_event,
+                                   const FieldMask &user_mask, 
+                                   const UniqueID op_id, const unsigned index,
                                    VersionTracker *version_tracker,
                                    const AddressSpaceID source,
                                    std::set<RtEvent> &applied_events,
@@ -198,6 +217,8 @@ namespace Legion {
     public:
       inline InstanceView* get_instance_subview(const ColorPoint &c) 
         { return get_subview(c)->as_instance_view(); }
+      
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
     public:
       virtual void process_update_request(AddressSpaceID source,
                                RtUserEvent done_event, Deserializer &derez) = 0;
@@ -217,6 +238,19 @@ namespace Legion {
                                             AddressSpaceID source);
       static void handle_view_remote_invalidate(Deserializer &derez,  
                                                 Runtime *rt);
+#else
+    public:
+      static void handle_view_copy_preconditions(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_view_add_copy(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_view_user_preconditions(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_view_add_user(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_view_add_user_fused(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+#endif
     public:
       // The ID of the context that made this view
       // Note this view can escape this context inside a composite
@@ -394,7 +428,8 @@ namespace Legion {
       virtual ApEvent find_user_precondition(const RegionUsage &user,
                                            ApEvent term_event,
                                            const FieldMask &user_mask,
-                                           Operation *op, const unsigned index,
+                                           const UniqueID op_id,
+                                           const unsigned index,
                                            VersionTracker *version_tracker,
                                            std::set<RtEvent> &applied_events);
     protected:
@@ -430,10 +465,16 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events);
     public:
       virtual void add_user(const RegionUsage &user, ApEvent term_event,
-                            const FieldMask &user_mask, Operation *op,
-                            const unsigned index, AddressSpaceID source,
+                            const FieldMask &user_mask, 
+                            Operation *op, const unsigned index,
                             VersionTracker *version_tracker,
                             std::set<RtEvent> &applied_events);
+      virtual void add_user_base(const RegionUsage &user, ApEvent term_event,
+                                   const FieldMask &user_mask, 
+                                   const UniqueID op_id, const unsigned index, 
+                                   const AddressSpaceID source,
+                                   VersionTracker *version_tracker,
+                                   std::set<RtEvent> &applied_events); 
     protected:
       void add_user_above(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
@@ -458,6 +499,13 @@ namespace Legion {
                                    ApEvent term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
+                                   VersionTracker *version_tracker,
+                                   std::set<RtEvent> &applied_events,
+                                   bool update_versions = true);
+      virtual ApEvent add_user_fused_base(const RegionUsage &user,
+                                   ApEvent term_event,
+                                   const FieldMask &user_mask, 
+                                   const UniqueID op_id, const unsigned index,
                                    VersionTracker *version_tracker,
                                    const AddressSpaceID source,
                                    std::set<RtEvent> &applied_events,
@@ -578,7 +626,6 @@ namespace Legion {
                                      const unsigned index,
                                      RegionNode *origin_node);
     public:
-      //void update_versions(const FieldMask &update_mask);
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
     public:
@@ -606,6 +653,7 @@ namespace Legion {
                                                   PhysicalManager *manager,
                                                   MaterializedView *parent,
                                                   UniqueID context_uid);
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
     public:
       void perform_remote_valid_check(const FieldMask &check_mask,
                                       VersionTracker *version_tracker,
@@ -628,7 +676,8 @@ namespace Legion {
                                          AddressSpaceID source,
                                          RegionTreeForest *forest);
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
-                                             RtUserEvent done_event);
+                                             RtUserEvent done_event); 
+#endif
     public:
       InstanceManager *const manager;
       MaterializedView *const parent;
@@ -671,6 +720,7 @@ namespace Legion {
       // resilience or mis-speculation.
       LegionMap<VersionID,FieldMask,
                 PHYSICAL_VERSION_ALLOC>::track_aligned current_versions;
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
     protected:
       // The scheme for tracking whether remote copies of the meta-data
       // are valid is as follows:
@@ -706,6 +756,7 @@ namespace Legion {
       // Remote nodes also have a data structure for deduplicating
       // requests to the logical owner for updates to particular fields
       LegionMap<RtEvent,FieldMask>::aligned remote_update_requests;
+#endif
     protected:
       // Useful for pruning the initial users at cleanup time
       std::set<ApEvent> initial_user_events;
@@ -803,18 +854,32 @@ namespace Legion {
       virtual ApEvent find_user_precondition(const RegionUsage &user,
                                            ApEvent term_event,
                                            const FieldMask &user_mask,
-                                           Operation *op, const unsigned index,
+                                           const UniqueID op_id,
+                                           const unsigned index,
                                            VersionTracker *version_tracker,
                                            std::set<RtEvent> &applied_events);
       virtual void add_user(const RegionUsage &user, ApEvent term_event,
-                            const FieldMask &user_mask, Operation *op,
-                            const unsigned index, AddressSpaceID source,
+                            const FieldMask &user_mask, 
+                            Operation *op, const unsigned index,
                             VersionTracker *version_tracker,
                             std::set<RtEvent> &applied_events);
       // This is a fused version of the above two methods
       virtual ApEvent add_user_fused(const RegionUsage &user,ApEvent term_event,
                                    const FieldMask &user_mask, 
                                    Operation *op, const unsigned index,
+                                   VersionTracker *version_tracker,
+                                   std::set<RtEvent> &applied_events,
+                                   bool update_versions = true);
+      virtual void add_user_base(const RegionUsage &user, ApEvent term_event,
+                                   const FieldMask &user_mask, 
+                                   const UniqueID op_id, const unsigned index, 
+                                   const AddressSpaceID source,
+                                   VersionTracker *version_tracker,
+                                   std::set<RtEvent> &applied_events);
+      virtual ApEvent add_user_fused_base(const RegionUsage &user,
+                                   ApEvent term_event,
+                                   const FieldMask &user_mask, 
+                                   const UniqueID op_id, const unsigned index,
                                    VersionTracker *version_tracker,
                                    const AddressSpaceID source,
                                    std::set<RtEvent> &applied_events,
@@ -858,6 +923,7 @@ namespace Legion {
     public:
       static void handle_send_reduction_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
     public:
       void perform_remote_valid_check(void);
       virtual void process_update_request(AddressSpaceID source,
@@ -870,6 +936,7 @@ namespace Legion {
                                          RegionTreeForest *forest);
       virtual void process_remote_invalidate(const FieldMask &invalid_mask,
                                              RtUserEvent done_event);
+#endif
     public:
       ReductionOpID get_redop(void) const;
     public:
@@ -880,10 +947,12 @@ namespace Legion {
       std::set<ApEvent> outstanding_gc_events;
     protected:
       std::set<ApEvent> initial_user_events; 
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
     protected:
       // the request event for reducers
       // only needed on remote views
       RtEvent remote_request_event; 
+#endif
     };
 
     /**
@@ -1221,6 +1290,8 @@ namespace Legion {
       virtual void get_split_mask(RegionTreeNode *node, 
                                   const FieldMask &needed_fields,
                                   FieldMask &split);
+      virtual void pack_writing_version_numbers(Serializer &rez) const;
+      virtual void pack_upper_bound_node(Serializer &rez) const;
     protected:
       CompositeNode* capture_above(RegionTreeNode *node,
                                    const FieldMask &needed_fields);
@@ -1491,6 +1562,8 @@ namespace Legion {
       virtual void get_split_mask(RegionTreeNode *node, 
                                   const FieldMask &needed_fields,
                                   FieldMask &split);
+      virtual void pack_writing_version_numbers(Serializer &rez) const;
+      virtual void pack_upper_bound_node(Serializer &rez) const;
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,

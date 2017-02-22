@@ -614,6 +614,11 @@ namespace Legion {
       SEND_VIEW_UPDATE_RESPONSE,
       SEND_VIEW_REMOTE_UPDATE,
       SEND_VIEW_REMOTE_INVALIDATE,
+      SEND_INSTANCE_VIEW_COPY_PRECONDITIONS,
+      SEND_INSTANCE_VIEW_ADD_COPY,
+      SEND_INSTANCE_VIEW_USER_PRECONDITIONS,
+      SEND_INSTANCE_VIEW_ADD_USER,
+      SEND_INSTANCE_VIEW_ADD_USER_FUSED,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -741,6 +746,11 @@ namespace Legion {
         "Send View Update Response",                                  \
         "Send View Remote Update",                                    \
         "Send View Remote Invalidate",                                \
+        "Send Instance View Copy Preconditions",                      \
+        "Send Instance View Add Copy",                                \
+        "Send Instance View User Preconditions",                      \
+        "Send Instance View Add User",                                \
+        "Send Instance View Add User Fused",                          \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \

@@ -2013,6 +2013,15 @@ namespace Legion {
       void send_view_update_response(AddressSpaceID target, Serializer &rez);
       void send_view_remote_update(AddressSpaceID target, Serializer &rez);
       void send_view_remote_invalidate(AddressSpaceID target, Serializer &rez);
+      void send_instance_view_find_copy_preconditions(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_instance_view_add_copy_user(AddressSpaceID target, 
+                                            Serializer &rez);
+      void send_instance_view_find_user_preconditions(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_instance_view_add_user(AddressSpaceID target, Serializer &rez);
+      void send_instance_view_add_user_fused(AddressSpaceID target, 
+                                             Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
@@ -2180,6 +2189,16 @@ namespace Legion {
       void handle_view_remote_update(Deserializer &derez,
                                      AddressSpaceID source);
       void handle_view_remote_invalidate(Deserializer &derez);
+      void handle_instance_view_copy_preconditions(Deserializer &derez,
+                                                   AddressSpaceID source);
+      void handle_instance_view_add_copy(Deserializer &derez, 
+                                         AddressSpaceID source);
+      void handle_instance_view_user_preconditions(Deserializer &derez,
+                                                   AddressSpaceID source);
+      void handle_instance_view_add_user(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_instance_view_add_user_fused(Deserializer &derez,
+                                               AddressSpaceID source);
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
