@@ -713,9 +713,16 @@ function drawLayout() {
   var expandableNodes = namesGroup.filter(function(elem) {
     return elem.children.length > 0;
   });
-  var expand_icons = expandableNodes.append("path");
+
+  var expand_group = expandableNodes.append("g");
+
+  var expand_clickable = expand_group.append("circle")
+                          .attr("fill", "transparent")
+                          .attr("stroke", "transparent")
+                          .attr("r", 8);
+  var expand_icons = expand_group.append("path");
   var arc = d3.svg.symbol().type('triangle-down')
-            .size(6);
+            .size(12);
 
 
     //.attr("transform", function(elem) {
@@ -734,10 +741,10 @@ function drawLayout() {
       return (proc.enabled) ? 1 : 0.5;
     });
 
-  expand_icons.each(function(elem) {
+  expand_group.each(function(elem) {
     var path = d3.select(this);
     var x = elem.depth * 15 + 5;
-    var y = lineLevelCalculator(elem) - 2;
+    var y = lineLevelCalculator(elem) - 3;
 
     if (elem.expanded) {
       path.attr("transform", "translate(" + x + ", " + y + ") rotate(0)");
@@ -748,7 +755,7 @@ function drawLayout() {
   });
 
 
-  expand_icons.on({
+  expand_group.on({
     "mouseover": function(d) {
       d3.select(this).style("cursor", "pointer")
     },
