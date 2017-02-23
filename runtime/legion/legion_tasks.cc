@@ -2680,6 +2680,44 @@ namespace Legion {
         // Only one valid choice in this case, ignore everything else
         target_processors.push_back(this->target_proc);
       }
+      // See whether the mapper picked a variant or a generator
+      VariantImpl *variant_impl = NULL;
+      if (output.chosen_variant > 0)
+      {
+        variant_impl = runtime->find_variant_impl(task_id, 
+                                output.chosen_variant, true/*can fail*/);
+      }
+      else
+      {
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper specified an invalid task variant "
+                      "of ID 0 for task %s (ID %lld), but Legion does not yet "
+                      "support task generators.", "map_task", 
+                      mapper->get_mapper_name(), 
+                      get_task_name(), get_unique_id());
+        // TODO: invoke a generator if one exists
+#ifdef DEBUG_LEGION
+        assert(false); 
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (variant_impl == NULL)
+      {
+        // If we couldn't find or make a variant that is bad
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper failed to specify a valid "
+                      "task variant or generator capable of create a variant "
+                      "implementation of task %s (ID %lld).",
+                      "map_task", mapper->get_mapper_name(), get_task_name(),
+                      get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      // Now that we know which variant to use, we can validate it
+      if (!Runtime::unsafe_mapper)
+        validate_variant_selection(mapper, variant_impl, "map_task");
       // fill in virtual_mapped
       virtual_mapped.resize(regions.size(),false);
       // Convert all the outputs into our set of physical instances and
@@ -2924,7 +2962,8 @@ namespace Legion {
               exit(ERROR_INVALID_MAPPER_OUTPUT);
             }
           }
-          if (!regions[idx].is_no_access())
+          if (!regions[idx].is_no_access() &&
+              !variant_impl->is_no_access_region(idx))
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
@@ -3013,45 +3052,7 @@ namespace Legion {
           }
         }
       }
-      early_mapped_regions.clear();
-      // See whether the mapper picked a variant or a generator
-      VariantImpl *variant_impl = NULL;
-      if (output.chosen_variant > 0)
-      {
-        variant_impl = runtime->find_variant_impl(task_id, 
-                                output.chosen_variant, true/*can fail*/);
-      }
-      else
-      {
-        log_run.error("Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. Mapper specified an invalid task variant "
-                      "of ID 0 for task %s (ID %lld), but Legion does not yet "
-                      "support task generators.", "map_task", 
-                      mapper->get_mapper_name(), 
-                      get_task_name(), get_unique_id());
-        // TODO: invoke a generator if one exists
-#ifdef DEBUG_LEGION
-        assert(false); 
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
-      if (variant_impl == NULL)
-      {
-        // If we couldn't find or make a variant that is bad
-        log_run.error("Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. Mapper failed to specify a valid "
-                      "task variant or generator capable of create a variant "
-                      "implementation of task %s (ID %lld).",
-                      "map_task", mapper->get_mapper_name(), get_task_name(),
-                      get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
-      // Now that we know which variant to use, we can validate it
-      if (!Runtime::unsafe_mapper)
-        validate_variant_selection(mapper, variant_impl, "map_task"); 
+      early_mapped_regions.clear(); 
       // Record anything else that needs to be recorded 
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;

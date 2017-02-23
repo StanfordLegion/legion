@@ -396,7 +396,7 @@ typedef enum legion_coherence_property_t {
 typedef enum legion_region_flags_t {
   NO_FLAG         = 0x00000000,
   VERIFIED_FLAG   = 0x00000001,
-  NO_ACCESS_FLAG  = 0x00000002,
+  NO_ACCESS_FLAG  = 0x00000002, // Deprecated, user SpecializedConstraint
   RESTRICTED_FLAG = 0x00000004,
   MUST_PREMAP_FLAG= 0x00000008,
 } legion_region_flags_t;
