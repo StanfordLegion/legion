@@ -269,6 +269,10 @@ namespace Legion {
         legion_index_space_t is_;
         is_.id = is.id;
         is_.tid = is.tid;
+#ifdef DEBUG_LEGION
+        is_.dim = is.dim;
+        is_.type = is.type;
+#endif
         return is_;
       }
 
@@ -278,6 +282,10 @@ namespace Legion {
         IndexSpace is;
         is.id = is_.id;
         is.tid = is_.tid;
+#ifdef DEBUG_LEGION
+        is.dim = is_.dim;
+        is.type = is_.type;
+#endif
         return is;
       }
 
@@ -287,6 +295,10 @@ namespace Legion {
         legion_index_partition_t ip_;
         ip_.id = ip.id;
         ip_.tid = ip.tid;
+#ifdef DEBUG_LEGION
+        ip_.dim = ip.dim;
+        ip_.type = ip.type;
+#endif
         return ip_;
       }
 
@@ -296,6 +308,10 @@ namespace Legion {
         IndexPartition ip;
         ip.id = ip_.id;
         ip.tid = ip_.tid;
+#ifdef DEBUG_LEGION
+        ip.dim = ip_.dim;
+        ip.type = ip_.type;
+#endif
         return ip;
       }
 

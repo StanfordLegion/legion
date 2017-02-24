@@ -69,10 +69,14 @@ namespace Legion {
   // Forward declarations for user level objects
   // legion.h
   class IndexSpace;
+  template<int DIM, typename T> class IndexSpaceT;
   class IndexPartition;
+  template<int DIM, typename T> class IndexPartitionT;
   class FieldSpace;
   class LogicalRegion;
+  template<int DIM, typename T> class LogicalRegionT;
   class LogicalPartition;
+  template<int DIM, typename T> class LogicalPartitionT;
   class IndexAllocator;
   class FieldAllocator;
   class TaskArgument;

@@ -62,7 +62,11 @@ namespace Legion {
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
+#ifdef DEBUG_LEGION
+      IndexSpace(IndexSpaceID id, IndexTreeID tid, int dim, int type);
+#else
       IndexSpace(IndexSpaceID id, IndexTreeID tid);
+#endif
     public:
       IndexSpace(void);
       IndexSpace(const IndexSpace &rhs);
@@ -75,10 +79,36 @@ namespace Legion {
       inline IndexSpaceID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
+      template<int DIM, typename COORD_T>
+      inline operator IndexSpaceT<DIM,COORD_T>(void) const;
     private:
       friend std::ostream& operator<<(std::ostream& os, const IndexSpace& is);
       IndexSpaceID id;
       IndexTreeID tid;
+#ifdef DEBUG_LEGION
+      int dim;
+      int type;
+    public:
+      inline int get_dim(void) const { return dim; }
+      inline int get_type(void) const { return type; }
+#endif
+    };
+
+    /**
+     * \class IndexSpaceT
+     * A templated index space that captures the dimension
+     * and coordinate type of an index space as template
+     * parameters for enhanced type checking and efficiency.
+     */
+    template<int DIM, typename COORD_T>
+    class IndexSpaceT : public IndexSpace {
+    protected:
+      // Only the runtime should be allowed to make these
+      FRIEND_ALL_RUNTIME_CLASSES
+      IndexSpaceT(IndexSpaceID id, IndexTreeID tid);
+    public:
+      IndexSpaceT(void);
+      IndexSpaceT(const IndexSpaceT &rhs);  
     };
 
     /**
@@ -93,7 +123,11 @@ namespace Legion {
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
+#ifdef DEBUG_LEGION
+      IndexPartition(IndexPartitionID id, IndexTreeID tid, int dim, int type);
+#else
       IndexPartition(IndexPartitionID id, IndexTreeID tid);
+#endif
     public:
       IndexPartition(void);
       IndexPartition(const IndexPartition &rhs);
@@ -106,10 +140,37 @@ namespace Legion {
       inline IndexPartitionID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
-    public:
-      friend std::ostream& operator<<(std::ostream& os, const IndexPartition& ip);
+      template<int DIM, typename COORD_T>
+      inline operator IndexPartitionT<DIM,COORD_T>(void) const;
+    private:
+      friend std::ostream& operator<<(std::ostream& os, 
+                                      const IndexPartition& ip);
       IndexPartitionID id;
       IndexTreeID tid;
+#ifdef DEBUG_LEGION
+      int dim;
+      int type;
+    public:
+      inline int get_dim(void) const { return dim; }
+      inline int get_type(void) const { return type; }
+#endif
+    };
+
+    /**
+     * \class IndexPartitionT
+     * A templated index partition that captures the dimension
+     * and coordinate type of an index partition as template
+     * parameters for enhanced type checking and efficiency
+     */
+    template<int DIM, typename COORD_T>
+    class IndexPartitionT : public IndexPartition {
+    protected:
+      // Only the runtime should be allowed to make these
+      FRIEND_ALL_RUNTIME_CLASSES
+      IndexPartitionT(IndexPartitionID id, IndexTreeID tid);
+    public:
+      IndexPartitionT(void);
+      IndexPartitionT(const IndexPartitionT &rhs);
     };
 
     /**
@@ -178,6 +239,13 @@ namespace Legion {
       inline FieldSpace get_field_space(void) const { return field_space; }
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); } 
+      template<int DIM, typename COORD_T>
+      inline operator LogicalRegionT<DIM,COORD_T>(void) const;
+#ifdef DEBUG_LEGION
+    public:
+      inline int get_dim(void) const { return index_space.get_dim(); }
+      inline int get_type(void) const { return index_space.get_type(); }
+#endif
     private:
       friend std::ostream& operator<<(
           std::ostream& os, const LogicalRegion& lr);
@@ -185,6 +253,23 @@ namespace Legion {
       RegionTreeID tree_id;
       IndexSpace index_space;
       FieldSpace field_space;
+    };
+
+    /**
+     * \class LogicalRegion
+     * A templated logical region that captures the dimension
+     * and coordinate type of a logical region as template
+     * parameters for enhanced type checking and efficiency.
+     */
+    template<int DIM, typename COORD_T>
+    class LogicalRegionT : public LogicalRegion {
+    protected:
+      // Only the runtime should be allowed to make these
+      FRIEND_ALL_RUNTIME_CLASSES
+      LogicalRegionT(RegionTreeID tid, IndexSpace index, FieldSpace field);
+    public:
+      LogicalRegionT(void);
+      LogicalRegionT(const LogicalRegionT &rhs);
     };
 
     /**
@@ -223,12 +308,36 @@ namespace Legion {
       inline FieldSpace get_field_space(void) const { return field_space; }
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); }
+      template<int DIM, typename COORD_T>
+      inline operator LogicalPartitionT<DIM,COORD_T>(void) const;
+#ifdef DEBUG_LEGION
+    public:
+      inline int get_dim(void) const { return index_partition.get_dim(); }
+      inline int get_type(void) const { return index_partition.get_type(); }
+#endif
     private:
-      friend std::ostream& operator<<(std::ostream& os, const LogicalPartition& lp);
+      friend std::ostream& operator<<(std::ostream& os, 
+                                      const LogicalPartition& lp);
       // These are private so the user can't just arbitrary change them
       RegionTreeID tree_id;
       IndexPartition index_partition;
       FieldSpace field_space;
+    };
+
+    /**
+     * A templated logical partition that captures the dimension
+     * and coordinate type of an logical partition as template
+     * parameters for enhanced type checking and efficiency
+     */
+    template<int DIM, typename COORD_T>
+    class LogicalPartitionT : public LogicalPartition {
+    protected:
+      // Only the runtime should be allowed to make these
+      FRIEND_ALL_RUNTIME_CLASSES
+      LogicalPartitionT(RegionTreeID tid, IndexPartition pid, FieldSpace field);
+    public:
+      LogicalPartitionT(void);
+      LogicalPartitionT(const LogicalPartitionT &rhs);
     };
 
     //==========================================================================

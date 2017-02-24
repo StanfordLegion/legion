@@ -2488,13 +2488,16 @@ namespace Legion {
                                                 size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id());
+      AutoRuntimeCall call(this); 
 #ifdef DEBUG_LEGION
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(),0,sizeof(coord_t));
       log_index.debug("Creating index space %x in task %s "
                       "(ID %lld) with %zd maximum elements", handle.id, 
                       get_task_name(), get_unique_id(), max_num_elmts); 
+#else
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id());
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
@@ -2513,11 +2516,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id());
 #ifdef DEBUG_LEGION
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(),
+                        domain.get_dim(), sizeof(coord_t));
       log_index.debug("Creating dummy index space %x in task %s (ID %lld) "
                       "for domain", handle.id, get_task_name(),get_unique_id());
+#else
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id());
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
@@ -2533,8 +2540,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(),
+                        domains.begin()->get_dim(), sizeof(coord_t));
+#else
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id());
+#endif
       // First compute the convex hull of all the domains
       Domain hull = *(domains.begin());
 #ifdef DEBUG_LEGION
@@ -2639,12 +2652,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(), 
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating index partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       std::map<DomainPoint,Domain> new_index_spaces; 
       Domain parent_dom = forest->get_index_space_domain(parent);
@@ -2698,12 +2715,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(), 
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating index partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       if (coloring.empty())
       {
@@ -2794,14 +2815,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(), 
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating index partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
       if ((part_kind == DISJOINT_KIND) && Runtime::verify_disjointness)
         runtime->validate_structured_disjointness(pid, coloring);
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
@@ -2822,13 +2847,17 @@ namespace Legion {
                                             bool disjoint, int part_color)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+      AutoRuntimeCall call(this); 
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating index partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       if (coloring.empty())
       {
@@ -2872,12 +2901,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(), 
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating index partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       // Build all the convex hulls
       std::map<DomainPoint,Domain> convex_hulls;
@@ -2911,12 +2944,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating index partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       if (coloring.empty())
       {
@@ -2966,13 +3003,17 @@ namespace Legion {
                                         int part_color)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+      AutoRuntimeCall call(this); 
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating index partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       // Perform the coloring
       std::map<DomainPoint,Domain> new_index_spaces;
@@ -3087,13 +3128,17 @@ namespace Legion {
                                                       int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+      AutoRuntimeCall call(this);  
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating equal partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
@@ -3123,12 +3168,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating weighted partition %d with parent index "
                       "space %x in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
@@ -3158,9 +3207,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating union partition %d with parent index "
                       "space %x in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
@@ -3180,6 +3230,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_INDEX_TREE_MISMATCH);
       }
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
@@ -3212,9 +3265,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating intersection partition %d with parent "
                       "index space %x in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
@@ -3234,6 +3288,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_INDEX_TREE_MISMATCH);
       }
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
@@ -3265,10 +3322,11 @@ namespace Legion {
                                                   int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+      AutoRuntimeCall call(this); 
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating difference partition %d with parent "
                       "index space %x in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
@@ -3290,6 +3348,9 @@ namespace Legion {
         assert(false);
         exit(ERROR_INDEX_TREE_MISMATCH);
       }
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
@@ -3362,12 +3423,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexSpace parent = handle.get_index_space();
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+      IndexSpace parent = handle.get_index_space(); 
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating partition by field in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       ColorPoint part_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
@@ -3416,12 +3481,16 @@ namespace Legion {
                                                     int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         handle.get_tree_id());
+      AutoRuntimeCall call(this); 
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating partition by image in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_tree_id());
 #endif
       ColorPoint part_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
@@ -3470,12 +3539,16 @@ namespace Legion {
                                                   int color, bool allocable)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         handle.get_index_space().get_tree_id());
+      AutoRuntimeCall call(this); 
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_index_space().get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating partition by preimage in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_index_space().get_tree_id());
 #endif
       ColorPoint part_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
@@ -3522,11 +3595,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
 #ifdef DEBUG_LEGION
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(),
+                         parent.get_dim(), parent.get_type());
       log_index.debug("Creating pending partition in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
+#else
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
 #endif
       ColorPoint part_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
