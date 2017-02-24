@@ -256,7 +256,7 @@ namespace Legion {
     };
 
     /**
-     * \class LogicalRegion
+     * \class LogicalRegionT
      * A templated logical region that captures the dimension
      * and coordinate type of a logical region as template
      * parameters for enhanced type checking and efficiency.
@@ -325,6 +325,7 @@ namespace Legion {
     };
 
     /**
+     * \class LogicalPartitionT
      * A templated logical partition that captures the dimension
      * and coordinate type of an logical partition as template
      * parameters for enhanced type checking and efficiency
