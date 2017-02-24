@@ -13,6 +13,9 @@
 using namespace Realm;
 using namespace LegionRuntime::Accessor;
 
+// for Point<DIM> and Rect<DIM>
+using namespace LegionRuntime::Arrays;
+
 Logger log_app("app");
 
 // Task IDs, some IDs are reserved so start at first available number

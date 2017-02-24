@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -45,6 +45,21 @@ local dynamic_branches_assert = std.config["no-dynamic-branches-assert"]
 -- checks flag as the compiler does not use standard runtime
 -- accessors.
 local bounds_checks = std.config["bounds-checks"]
+
+local emergency = std.config["emergency-gc"]
+
+local function manual_gc() end
+
+if emergency then
+  local emergency_threshold = 600 * 1024
+  -- Manually call GC whenever the current heap size exceeds threshold
+  manual_gc = function()
+    if collectgarbage("count") >= emergency_threshold then
+      collectgarbage("collect")
+      collectgarbage("collect")
+    end
+  end
+end
 
 local codegen = {}
 
@@ -409,6 +424,7 @@ end
 local function physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)
   assert(index_type and field_type and field_id and privilege and physical_region)
   local get_accessor = c.legion_physical_region_get_field_accessor_generic
+  local destroy_accessor = c.legion_accessor_generic_destroy
   local accessor_args = terralib.newlist({physical_region})
   if std.is_reduction_op(privilege) then
     get_accessor = c.legion_physical_region_get_accessor_generic
@@ -441,6 +457,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
     local actions = quote
       var accessor = [get_accessor]([accessor_args])
       var [base_pointer] = [get_base](accessor)
+      [destroy_accessor](accessor)
     end
     return actions, base_pointer, terralib.newlist({expected_stride})
   else
@@ -505,6 +522,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
          function(i)
            return quote var [ strides[i] ] = offsets[i-1].offset end
          end)]
+      [destroy_accessor](accessor)
     end
     return actions, base_pointer, strides
   end
@@ -1550,6 +1568,7 @@ end
 
 function rawref:reduce(cx, value, op)
   local ref_expr = self:__ref(cx)
+  local cleanup = make_cleanup_item(cx, ref_expr.value, self.value_type.type)
   local value_expr = value:read(cx)
 
   local ref_type = std.get_field_path(self.value_type.type, self.field_path)
@@ -1580,6 +1599,7 @@ function rawref:reduce(cx, value, op)
     [value_expr.actions];
     [ref_expr.actions];
     [reduce_expr.actions];
+    [cleanup];
     [ref_expr.value] = [reduce_expr.value]
   end
   return expr.just(actions, quote end)
@@ -2042,11 +2062,14 @@ function codegen.expr_index_access(cx, node)
       return values.value(node, expr.just(actions, list), list_type)
     end
   elseif std.is_region(value_type) then
-    local index = codegen.expr(cx, node.index):read(cx)
+    local index = codegen.expr(cx, node.index):read(cx, index_type)
 
     local pointer_type = node.expr_type.pointer_type
     local pointer = index
     if not std.type_eq(index_type, pointer_type) then
+      if std.is_vptr(index_type) then
+        return values.vref(node, pointer, index_type)
+      end
       local point = std.implicit_cast(index_type, pointer_type.index_type, index.value)
       pointer = expr.just(
         index.actions,
@@ -2797,7 +2820,7 @@ function codegen.expr_call(cx, node)
       return values.value(node, expr.just(actions, quote end), terralib.types.unit)
     else
       assert(future_value)
-      return codegen.expr(
+      local value = codegen.expr(
         cx,
         ast.typed.expr.FutureGetResult {
           value = ast.typed.expr.Internal {
@@ -2810,6 +2833,11 @@ function codegen.expr_call(cx, node)
           annotations = node.annotations,
           span = node.span,
         })
+      local actions = quote
+        [value.actions]
+        c.legion_future_destroy(future)
+      end
+      return values.value(node, expr.just(actions, value.value), value_type)
     end
   else
     return values.value(
@@ -3380,7 +3408,6 @@ function codegen.expr_region(cx, node)
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local fs = terralib.newsymbol(c.legion_field_space_t, "fs")
-  local fsa = terralib.newsymbol(c.legion_field_allocator_t, "fsa")
   local pr = terralib.newsymbol(c.legion_physical_region_t, "pr")
 
   local field_paths, field_types = std.flatten_struct_fields(fspace_type)
@@ -3434,14 +3461,15 @@ function codegen.expr_region(cx, node)
     var capacity = [ispace.value]
     var [is] = [ispace.value].impl
     var [fs] = c.legion_field_space_create([cx.runtime], [cx.context])
-    var [fsa] = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
+    var fsa = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
     [data.zip(field_types, field_ids):map(
        function(field)
          local field_type, field_id = unpack(field)
          return `(c.legion_field_allocator_allocate_field(
-                    [fsa], terralib.sizeof([field_type]), [field_id]))
+                    fsa, terralib.sizeof([field_type]), [field_id]))
        end)]
     [fs_naming_actions];
+    c.legion_field_allocator_destroy(fsa)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs])
     var [r] = [region_type]{ impl = [lr] }
   end
@@ -3690,7 +3718,8 @@ function codegen.expr_image(cx, node)
     cx:region(cx:region(region_type).root_region_type).logical_region
 
   local function is_index_type(ty)
-    return std.is_bounded_type(ty) and std.is_index_type(ty.index_type)
+    return (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
+           std.is_index_type(ty)
   end
   local field_paths, field_types =
     std.flatten_struct_fields(region_type:fspace(), is_index_type)
@@ -3746,7 +3775,8 @@ function codegen.expr_preimage(cx, node)
     cx:region(cx:region(region_type).root_region_type).logical_region
 
   local function is_index_type(ty)
-    return std.is_bounded_type(ty) and std.is_index_type(ty.index_type)
+    return (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
+           std.is_index_type(ty)
   end
   local field_paths, field_types =
     std.flatten_struct_fields(region_type:fspace(), is_index_type)
@@ -5675,6 +5705,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
              [cx.runtime], [field_space], [field_ids][i], field_name, false)
          end
        end)]
+    c.legion_field_allocator_destroy(fsa)
   end
 
   return values.value(node, expr.just(actions, field_ids), expr_type)
@@ -7270,6 +7301,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
         [task_args_setup]
         c.legion_argument_map_set_point(
           [argument_map], [point], [task_args], true)
+        [task_args_cleanup]
       end
       c.legion_domain_point_iterator_destroy(it)
     end
@@ -7737,7 +7769,13 @@ function codegen.stat_raw_delete(cx, node)
   end
 end
 
+function codegen.stat_parallelize_with(cx, node)
+  return quote [codegen.block(cx, node.block)] end
+end
+
 function codegen.stat(cx, node)
+  manual_gc()
+
   if node:is(ast.typed.stat.Internal) then
     return codegen.stat_internal(cx, node)
 
@@ -7806,6 +7844,9 @@ function codegen.stat(cx, node)
 
   elseif node:is(ast.typed.stat.RawDelete) then
     return codegen.stat_raw_delete(cx, node)
+
+  elseif node:is(ast.typed.stat.ParallelizeWith) then
+    return codegen.stat_parallelize_with(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -7877,7 +7918,9 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
       var [future] = c.legion_task_get_future([c_task], @[future_i])
       @[future_i] = @[future_i] + 1
       [future_result.actions]
-      return [future_result.value]
+      var result = [future_result.value]
+      c.legion_future_destroy([future])
+      return result
     end
   end
   helper:setinlined(false)
@@ -8111,7 +8154,9 @@ function codegen.top_task(cx, node)
         physical_regions_by_field_path[field_path:hash()] = physical_region
       end
 
-      if not task:get_config_options().inner and flag ~= std.no_access_flag then
+      if not task:get_config_options().inner and
+         not task:getexternal() and
+         flag ~= std.no_access_flag then
         local pr_actions, pr_base_pointers, pr_strides = unpack(data.zip(unpack(
           data.zip(field_paths, field_types):map(
             function(field)
@@ -8335,6 +8380,9 @@ function codegen.top_task(cx, node)
   end
   proto:setname(tostring(task:getname()))
   task:setdefinition(proto)
+
+  if emergency then proto:compile() end
+  manual_gc()
 
   return task
 end

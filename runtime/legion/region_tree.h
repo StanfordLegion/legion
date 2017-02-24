@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -266,12 +266,14 @@ namespace Legion {
                                        FieldMask *filter_mask = NULL,
                                        RegionTreeNode *parent_node = NULL,
               // For computing split masks for projection epochs only
+                                       UniqueID logical_context_uid = 0,
               const LegionMap<ProjectionEpochID,
                               FieldMask>::aligned *advance_epochs = NULL,
                                        bool skip_parent_check = false);
       void advance_version_numbers(Operation *op, unsigned idx,
                                    bool update_parent_state,
                                    bool parent_is_upper_bound,
+                                   UniqueID logical_ctx_uid,
                                    bool dedup_opens, bool dedup_advances, 
                                    ProjectionEpochID open_epoch,
                                    ProjectionEpochID advance_epoch,
@@ -377,13 +379,14 @@ namespace Legion {
                           VersionInfo &dst_version_info, 
                           ApEvent term_event, Operation *op,
                           unsigned src_index, unsigned dst_index,
-                          ApEvent precondition,
+                          ApEvent precondition, PredEvent pred_guard,
                           std::set<RtEvent> &map_applied);
       ApEvent reduce_across(const RegionRequirement &src_req,
                             const RegionRequirement &dst_req,
                             const InstanceSet &src_targets,
                             const InstanceSet &dst_targets,
-                            Operation *op, ApEvent precondition);
+                            Operation *op, ApEvent precondition,
+                            PredEvent predication_guard);
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
@@ -423,16 +426,19 @@ namespace Legion {
                           VersionInfo &version_info,
                           RestrictInfo &restrict_info,
                           InstanceSet &instances, ApEvent precondition,
-                          std::set<RtEvent> &map_applied_events);
+                          std::set<RtEvent> &map_applied_events,
+                          PredEvent true_guard, PredEvent false_guard);
       InstanceManager* create_file_instance(AttachOp *attach_op,
                                             const RegionRequirement &req);
       InstanceRef attach_file(AttachOp *attach_op, unsigned index,
                               const RegionRequirement &req,
                               InstanceManager *file_instance,
-                              VersionInfo &version_info);
+                              VersionInfo &version_info,
+                              std::set<RtEvent> &map_applied_events);
       ApEvent detach_file(const RegionRequirement &req, DetachOp *detach_op,
                           unsigned index, VersionInfo &version_info, 
-                          const InstanceRef &ref);
+                          const InstanceRef &ref, 
+                          std::set<RtEvent> &map_applied_events);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -1343,7 +1349,6 @@ namespace Legion {
                                     const bool advance_root = true);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
-                              bool permit_leave_open,
                               bool read_only_close);
       void siphon_logical_children(LogicalCloser &closer,
                                    LogicalState &state,
@@ -1373,11 +1378,10 @@ namespace Legion {
                                     bool allow_next_child,
                                     const FieldMask *aliased_children,
                                     bool upgrade_next_child, 
-                                    bool permit_leave_open,
                                     bool read_only_close,
+                                    bool overwriting_close,
                                     bool record_close_operations,
                                     bool record_closed_fields,
-                                   LegionDeque<FieldState>::aligned &new_states,
                                     FieldMask &output_mask); 
       void merge_new_field_state(LogicalState &state, 
                                  const FieldState &new_state);
@@ -1426,6 +1430,7 @@ namespace Legion {
                                    std::set<RtEvent> &ready_events,
                                    bool partial_traversal,
                                    bool disjoint_close,
+                                   UniqueID logical_context_uid,
         const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs);
       void advance_version_numbers(ContextID ctx,
                                    AddressSpaceID local_space,
@@ -1434,6 +1439,7 @@ namespace Legion {
                                    InnerContext *parent_ctx,
                                    bool update_parent_state,
                                    bool skip_update_parent,
+                                   UniqueID logical_context_uid,
                                    bool dedup_opens, bool dedup_advances, 
                                    ProjectionEpochID open_epoch,
                                    ProjectionEpochID advance_epoch,
@@ -1451,6 +1457,7 @@ namespace Legion {
       CompositeView* create_composite_instance(ContextID ctx_id,
                                      const FieldMask &closing_mask,
                                      VersionInfo &version_info,
+                                     UniqueID logical_context_uid,
                                      InnerContext *owner_context,
                                      ClosedNode *closed_tree,
                                      std::set<RtEvent> &ready_events,
@@ -1495,6 +1502,7 @@ namespace Legion {
       // Issue copies for fields with the same event preconditions
       void issue_grouped_copies(const TraversalInfo &info,
                                 MaterializedView *dst, bool restrict_out,
+                                PredEvent predicate_guard,
                       LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                 const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
@@ -1591,12 +1599,17 @@ namespace Legion {
       virtual ApEvent issue_copy(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &src_fields,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL) = 0;
+                  ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                  UniqueID fill_uid,
+#endif
+                  RegionTreeNode *intersect = NULL) = 0;
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2) = 0;
@@ -1719,12 +1732,17 @@ namespace Legion {
       virtual ApEvent issue_copy(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &src_fields,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL);
+                  ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                  UniqueID fill_uid,
+#endif
+                  RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2);
@@ -1792,10 +1810,10 @@ namespace Legion {
                          const FieldMask &valid_mask,
                          VersionInfo &version_info,
                          InstanceSet &targets);
-      void register_region(const TraversalInfo &info, InnerContext *context,
-                           RestrictInfo &restrict_info, ApEvent term_event,
-                           const RegionUsage &usage, bool defer_add_users,
-                           InstanceSet &targets);
+      void register_region(const TraversalInfo &info, UniqueID logical_ctx_uid,
+                           InnerContext *context, RestrictInfo &restrict_info, 
+                           ApEvent term_event, const RegionUsage &usage, 
+                           bool defer_add_users, InstanceSet &targets);
       void seed_state(ContextID ctx, ApEvent term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
@@ -1804,7 +1822,8 @@ namespace Legion {
                              const std::vector<LogicalView*> &corresponding,
                              std::set<RtEvent> &applied_events);
       void close_state(const TraversalInfo &info, RegionUsage &usage, 
-                       InnerContext *context, InstanceSet &targets);
+                       UniqueID logical_context_uid, InnerContext *context, 
+                       InstanceSet &targets);
       void find_field_descriptors(ContextID ctx, ApEvent term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
@@ -1815,21 +1834,34 @@ namespace Legion {
                                   std::set<RtEvent> &applied_events);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size, 
-                       InnerContext *context, VersionInfo &version_info,
-                       std::set<RtEvent> &map_applied_events);
+                       UniqueID logical_ctx_uid, InnerContext *context, 
+                       VersionInfo &version_info,
+                       std::set<RtEvent> &map_applied_events,
+                       PredEvent true_guard, PredEvent false_guard
+#ifdef LEGION_SPY
+                       , UniqueID fill_op_uid
+#endif
+                       );
       ApEvent eager_fill_fields(ContextID ctx, Operation *op,
-                              const unsigned index, InnerContext *context,
+                              const unsigned index, 
+                              UniqueID logical_ctx_uid, InnerContext *context,
                               const FieldMask &fill_mask,
                               const void *value, size_t value_size,
                               VersionInfo &version_info, InstanceSet &instances,
-                              ApEvent precondition,
+                              ApEvent precondition, PredEvent true_guard,
                               std::set<RtEvent> &map_applied_events);
       InstanceRef attach_file(ContextID ctx, InnerContext *parent_ctx,
+                           const UniqueID logical_ctx_uid,
                            const FieldMask &attach_mask,
                            const RegionRequirement &req, 
-                           InstanceManager *manager, VersionInfo &version_info);
-      ApEvent detach_file(InnerContext *context, 
-                          VersionInfo &version_info, const InstanceRef &ref);
+                           InstanceManager *manager, 
+                           VersionInfo &version_info,
+                           std::set<RtEvent> &map_applied_events);
+      ApEvent detach_file(ContextID ctx, InnerContext *context, 
+                          const UniqueID logical_ctx_uid,
+                          VersionInfo &version_info, 
+                          const InstanceRef &ref,
+                          std::set<RtEvent> &map_applied_events);
     public:
       virtual InstanceView* find_context_view(PhysicalManager *manager,
                                               InnerContext *context);
@@ -1901,12 +1933,17 @@ namespace Legion {
       virtual ApEvent issue_copy(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &src_fields,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
                   const std::vector<Domain::CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
-                  ApEvent precondition, RegionTreeNode *intersect = NULL);
+                  ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                  UniqueID fill_uid,
+#endif
+                  RegionTreeNode *intersect = NULL);
     public:
       virtual bool are_children_disjoint(const ColorPoint &c1, 
                                          const ColorPoint &c2);

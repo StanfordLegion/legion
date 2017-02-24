@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,8 @@ namespace Legion {
       FUTURE_ALLOC,
       FUTURE_MAP_ALLOC,
       PHYSICAL_REGION_ALLOC,
-      TRACE_ALLOC,
+      STATIC_TRACE_ALLOC,
+      DYNAMIC_TRACE_ALLOC,
       ALLOC_MANAGER_ALLOC,
       ALLOC_INTERNAL_ALLOC,
       TASK_ARGS_ALLOC,
@@ -122,7 +123,6 @@ namespace Legion {
       RUNTIME_GC_EPOCH_ALLOC,
       RUNTIME_FUTURE_ALLOC,
       RUNTIME_REMOTE_ALLOC,
-      TASK_INSTANCE_REGION_ALLOC,
       TASK_INLINE_REGION_ALLOC,
       TASK_TRACES_ALLOC,
       TASK_RESERVATION_ALLOC,
@@ -198,14 +198,14 @@ namespace Legion {
 
 #ifdef TRACE_ALLOCATION
     // forward declaration of runtime
-    class Internal;
+    class Runtime;
 
     // Implementations in runtime.cc
     struct LegionAllocation {
     public:
       static void trace_allocation(AllocationType a, size_t size, int elems=1);
       static void trace_free(AllocationType a, size_t size, int elems=1);
-      static Internal* find_runtime(void);
+      static Runtime* find_runtime(void);
       static void trace_allocation(Runtime *&rt, AllocationType a, 
                                    size_t size, int elems=1);
       static void trace_free(Runtime *&rt, AllocationType a, 

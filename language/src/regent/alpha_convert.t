@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -270,7 +270,8 @@ local function alpha_convert_node(cx)
       }
 
     elseif node:is(ast.specialized.stat.MustEpoch) or
-      node:is(ast.specialized.stat.Block)
+      node:is(ast.specialized.stat.Block) or
+      node:is(ast.specialized.stat.ParallelizeWith)
     then
       cx:push_local_scope()
       local block = continuation(node.block)

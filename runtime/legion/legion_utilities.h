@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,13 +41,6 @@
 #if defined(__AVX__) || defined(__AVX2__)
 #include <immintrin.h>
 #endif
-#endif
-
-#ifdef __MACH__
-#define MASK_FMT "%16.16llx"
-#else
-#include <inttypes.h>
-#define MASK_FMT "%16.16" PRIx64
 #endif
 
 namespace Legion {
@@ -277,7 +270,7 @@ namespace Legion {
       // Make these constructors explicit so we know when
       // we are converting between things
       explicit ColorPoint(Color c)
-        : point(DomainPoint::from_point<1>(Point<1>((c)))), valid(true) { }
+        : point(DomainPoint::from_point<1>(LegionRuntime::Arrays::Point<1>((c)))), valid(true) { }
       explicit ColorPoint(const DomainPoint &p)
         : point(p), valid(true) { }
     public:
@@ -558,6 +551,12 @@ namespace Legion {
     private:
       T numerator;
       T denominator;
+    };
+
+    class BitMaskHelper {
+    public:
+      // Allocates memory that becomes owned by the caller
+      static char* to_string(const uint64_t *bits, int count);
     };
 
     /////////////////////////////////////////////////////////////
@@ -2614,19 +2613,7 @@ namespace Legion {
     inline char* BitMask<T,MAX,SHIFT,MASK>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      char *result = (char*)malloc(8*(MAX+1)*sizeof(char));
-      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
-      {
-        if (idx == (BIT_ELMTS-1))
-          sprintf(result,"" MASK_FMT "",bit_vector[idx]);
-        else
-        {
-          char temp[8*sizeof(T)+1];
-          sprintf(temp,"" MASK_FMT "",bit_vector[idx]);
-          strcat(result,temp);
-        }
-      }
-      return result;
+      return BitMaskHelper::to_string(bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -3337,19 +3324,7 @@ namespace Legion {
     inline char* TLBitMask<T,MAX,SHIFT,MASK>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      char *result = (char*)malloc((MAX+1)*sizeof(char));
-      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
-      {
-        if (idx == (BIT_ELMTS-1))
-          sprintf(result,"" MASK_FMT "",bit_vector[idx]);
-        else
-        {
-          char temp[8*sizeof(T)+1];
-          sprintf(temp,"" MASK_FMT "",bit_vector[idx]);
-          strcat(result,temp);
-        }
-      }
-      return result;
+      return BitMaskHelper::to_string(bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -4021,19 +3996,7 @@ namespace Legion {
     inline char* SSEBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      char *result = (char*)malloc((MAX+1)*sizeof(char));
-      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
-      {
-        if (idx == (BIT_ELMTS-1))
-          sprintf(result,"" MASK_FMT "",bits.bit_vector[idx]);
-        else
-        {
-          char temp[65];
-          sprintf(temp,"" MASK_FMT "",bits.bit_vector[idx]);
-          strcat(result,temp);
-        }
-      }
-      return result;
+      return BitMaskHelper::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -4716,19 +4679,7 @@ namespace Legion {
     inline char* SSETLBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      char *result = (char*)malloc((MAX+1)*sizeof(char));
-      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
-      {
-        if (idx == (BIT_ELMTS-1))
-          sprintf(result,"" MASK_FMT "",bits.bit_vector[idx]);
-        else
-        {
-          char temp[65];
-          sprintf(temp,"" MASK_FMT "",bits.bit_vector[idx]);
-          strcat(result,temp);
-        }
-      }
-      return result;
+      return BitMaskHelper::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -5457,19 +5408,7 @@ namespace Legion {
     inline char* AVXBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      char *result = (char*)malloc((MAX+1)*sizeof(char));
-      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
-      {
-        if (idx == (BIT_ELMTS-1))
-          sprintf(result,"" MASK_FMT "",bits.bit_vector[idx]);
-        else
-        {
-          char temp[65];
-          sprintf(temp,"" MASK_FMT "",bits.bit_vector[idx]);
-          strcat(result,temp);
-        }
-      }
-      return result;
+      return BitMaskHelper::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------
@@ -6249,19 +6188,7 @@ namespace Legion {
     inline char* AVXTLBitMask<MAX>::to_string(void) const
     //-------------------------------------------------------------------------
     {
-      char *result = (char*)malloc((MAX+1)*sizeof(char));
-      for (int idx = (BIT_ELMTS-1); idx >= 0; idx--)
-      {
-        if (idx == (BIT_ELMTS-1))
-          sprintf(result,"" MASK_FMT "",bits.bit_vector[idx]);
-        else
-        {
-          char temp[65];
-          sprintf(temp,"" MASK_FMT "",bits.bit_vector[idx]);
-          strcat(result,temp);
-        }
-      }
-      return result;
+      return BitMaskHelper::to_string(bits.bit_vector, MAX);
     }
 
     //-------------------------------------------------------------------------

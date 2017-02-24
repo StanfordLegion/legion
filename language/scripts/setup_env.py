@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2016 Stanford University
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -53,6 +53,8 @@ def discover_conduit():
     elif platform.node().startswith('daint'):
         return 'aries'
     elif platform.node().startswith('excalibur'):
+        return 'aries'
+    elif platform.node().startswith('cori'):
         return 'aries'
     else:
         raise Exception('Please set CONDUIT in your environment')

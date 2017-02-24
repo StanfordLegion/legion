@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2016 Kitware, Inc.
+# Copyright 2017 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -44,11 +44,18 @@ set(SOVERSION 1)
 set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build" FORCE)
 set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
+add_definitions(-DLEGION_CMAKE)
+
 #https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
 if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
+endif()
+
+if (${CMAKE_BUILD_TYPE} EQUAL "Debug")
+  set(DEBUG_REALM ON)
+  set(DEBUG_LEGION ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -82,6 +89,11 @@ if(Legion_USE_GASNet)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindGASNet.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
+
+  set (GASNETI_BUG1389_WORKAROUND "1")
+  string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
+  set (GASNET_CONDUIT_${CONDUIT} ON)
+
 endif()
 
 #------------------------------------------------------------------------------#
@@ -113,6 +125,9 @@ if(Legion_USE_CUDA)
   install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
+
+  set (USE_CUDA ON)
+
 endif()
 
 #------------------------------------------------------------------------------#
@@ -128,6 +143,24 @@ mark_as_advanced(Legion_MAX_FIELDS)
 # Runtime library targets
 #------------------------------------------------------------------------------#
 add_subdirectory(runtime)
+
+#------------------------------------------------------------------------------#
+# configure header
+#------------------------------------------------------------------------------#
+# Checking for all defines in the CXX Flags
+
+add_definitions(-D__STDC_FORMAT_MACROS)
+set (__STDC_FORMAT_MACROS ON)
+
+string(REPLACE " " ";" FLAGS_LIST ${CMAKE_CXX_FLAGS})
+FOREACH(FLAG ${FLAGS_LIST})
+  string (FIND ${FLAG} "-D" START_STR)
+  if (${START_STR} EQUAL "0")
+  string(REPLACE "-D" "" NEW_DEFINE ${FLAG})
+  set (${NEW_DEFINE} ON)
+  endif()
+endforeach()
+
 
 #------------------------------------------------------------------------------#
 # Build-tree package generation
@@ -176,9 +209,11 @@ export(PACKAGE Legion)
 #------------------------------------------------------------------------------#
 # Examples and Applications
 #------------------------------------------------------------------------------#
+option(Legion_BUILD_APPS "Build Legion sample applications" OFF)
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
-option(Legion_BUILD_EXAMPLE_APPS "Build Legion example applications" OFF)
-if(Legion_BUILD_EXAMPLES OR Legion_BUILD_EXAMPLE_APPS)
+option(Legion_BUILD_TUTORIAL "Build Legion tutorial" OFF)
+option(Legion_BUILD_TESTS "Build Legion tests" OFF)
+if(Legion_BUILD_APPS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   # Make a namespaced alias so in-build examples can use it the same way as if
   # it were imported
   add_library(Legion::Legion ALIAS Legion)
@@ -195,14 +230,28 @@ if(Legion_BUILD_EXAMPLES OR Legion_BUILD_EXAMPLE_APPS)
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
   endif()
 
-  if(Legion_BUILD_EXAMPLES)
-    add_subdirectory(examples)
-    add_subdirectory(tutorial)
-  endif()
-  if(Legion_BUILD_EXAMPLE_APPS)
+  if(Legion_BUILD_APPS)
     add_subdirectory(apps)
   endif()
+  if(Legion_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+  endif()
+  if(Legion_BUILD_TUTORIAL)
+    add_subdirectory(tutorial)
+  endif()
+  if(Legion_BUILD_TESTS)
+    add_subdirectory(test)
+  endif()
 endif()
+
+#------------------------------------------------------------------------------#
+# configure header
+#------------------------------------------------------------------------------#
+
+configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h @ONLY)
+include_directories(${PROJECT_SOURCE_DIR}/runtime)
+install(FILES ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h DESTINATION include)
+
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :

@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -126,7 +126,8 @@ local function check_annotations_node(cx)
       node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary) or
-      node:is(ast.typed.expr.Deref)
+      node:is(ast.typed.expr.Deref) or
+      node:is(ast.typed.expr.ParallelizerConstraint)
     then
       check(cx, node, data.set({}))
 
@@ -161,7 +162,8 @@ local function check_annotations_node(cx)
       node:is(ast.typed.stat.Assignment) or
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
-      node:is(ast.typed.stat.RawDelete)
+      node:is(ast.typed.stat.RawDelete) or
+      node:is(ast.typed.stat.ParallelizeWith)
     then
       check(cx, node, data.set({}))
 
@@ -170,7 +172,7 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({}))
 
     elseif node:is(ast.typed.top.Task) then
-      check(cx, node, data.set({"cuda", "inline", "parallel"}))
+      check(cx, node, data.set({"cuda", "external", "inline", "parallel"}))
 
     -- Miscellaneous:
     elseif node:is(ast.typed.Block) or

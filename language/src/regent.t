@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -52,6 +52,7 @@ local language = {
     "__cuda",
     "__delete",
     "__demand",
+    "__external",
     "__fields",
     "__forbid",
     "__inline",
@@ -63,6 +64,7 @@ local language = {
     "__trace",
     "__unroll",
     "__vectorize",
+    "__parallelize_with",
     "acquire",
     "aliased",
     "allocate_scratch_fields",

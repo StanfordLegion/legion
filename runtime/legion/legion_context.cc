@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -119,7 +119,7 @@ namespace Legion {
                                    const InstanceSet &physical_instances)
     //--------------------------------------------------------------------------
     {
-      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
+      PhysicalRegionImpl *impl = legion_new<PhysicalRegionImpl>(req, 
           ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
           is_leaf_context(), virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
@@ -207,6 +207,7 @@ namespace Legion {
     ptr_t TaskContext::perform_safe_cast(IndexSpace handle, ptr_t pointer)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
       DomainPoint point(pointer.value);
       std::map<IndexSpace,Domain>::const_iterator finder = 
                                               safe_cast_domains.find(handle);
@@ -231,6 +232,7 @@ namespace Legion {
                                               const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
       std::map<IndexSpace,Domain>::const_iterator finder = 
                                               safe_cast_domains.find(handle);
       if (finder != safe_cast_domains.end())
@@ -2026,6 +2028,104 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::execute_task_launch(TaskOp *task, bool index,
+                              LegionTrace *current_trace, bool silence_warnings)
+    //--------------------------------------------------------------------------
+    {
+      // First ask the mapper to set the options for the task
+      const bool inline_task = task->select_task_options();
+      // Now check to see if we're inling the task or just performing
+      // a normal asynchronous task launch
+      if (inline_task)
+      {
+        inline_child_task(task);
+        // After we're done we can deactivate it since we
+        // know that it will never be used again
+        task->deactivate();
+      }
+      else
+      {
+        // Normal task launch, iterate over the context task's
+        // regions and see if we need to unmap any of them
+        std::vector<PhysicalRegion> unmapped_regions;
+        if (!Runtime::unsafe_launch)
+          find_conflicting_regions(task, unmapped_regions);
+        if (!unmapped_regions.empty())
+        {
+          if (Runtime::runtime_warnings && !silence_warnings)
+          {
+            if (index)
+              log_run.warning("WARNING: Runtime is unmapping and remapping "
+                  "physical regions around execute_index_space call in "
+                  "task %s (UID %lld).", get_task_name(), get_unique_id());
+            else
+              log_run.warning("WARNING: Runtime is unmapping and remapping "
+                  "physical regions around execute_task call in "
+                  "task %s (UID %lld).", get_task_name(), get_unique_id());
+          }
+          for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+            unmapped_regions[idx].impl->unmap_region();
+        }
+        // Issue the task call
+        runtime->add_to_dependence_queue(this, executing_processor, task);
+        // Remap any unmapped regions
+        if (!unmapped_regions.empty())
+          remap_unmapped_regions(current_trace, unmapped_regions);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::remap_unmapped_regions(LegionTrace *trace,
+                            const std::vector<PhysicalRegion> &unmapped_regions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!unmapped_regions.empty());
+#endif
+      if ((trace != NULL) && trace->is_static_trace())
+      {
+        log_run.error("Illegal runtime remapping in static trace inside of "
+                      "task %s (UID %lld). Static traces must perfectly "
+                      "manage their physical mappings with no runtime help.",
+                      get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_REMAP_IN_STATIC_TRACE);
+      }
+      if (unmapped_regions.size() == 1)
+      {
+        MapOp *op = runtime->get_available_map_op(true);
+        op->initialize(this, unmapped_regions[0]);
+        ApEvent mapped_event = op->get_completion_event();
+        runtime->add_to_dependence_queue(this, executing_processor, op);
+        if (mapped_event.has_triggered())
+          return;
+        begin_task_wait(true/*from runtime*/);
+        mapped_event.wait();
+        end_task_wait();
+      }
+      else
+      {
+        std::set<ApEvent> mapped_events;
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+        {
+          MapOp *op = runtime->get_available_map_op(true);
+          op->initialize(this, unmapped_regions[idx]);
+          mapped_events.insert(op->get_completion_event());
+          runtime->add_to_dependence_queue(this, executing_processor, op);
+        }
+        // Wait for all the re-mapping operations to complete
+        ApEvent mapped_event = Runtime::merge_events(mapped_events);
+        if (mapped_event.has_triggered())
+          return;
+        begin_task_wait(true/*from runtime*/);
+        mapped_event.wait();
+        end_task_wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::find_enclosing_local_fields(
            LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
     //--------------------------------------------------------------------------
@@ -2106,9 +2206,12 @@ namespace Legion {
     {
       if (!remote_instances.empty())
         invalidate_remote_contexts();
-      for (std::map<TraceID,LegionTrace*>::const_iterator it = traces.begin();
+      for (std::map<TraceID,DynamicTrace*>::const_iterator it = traces.begin();
             it != traces.end(); it++)
-        legion_delete(it->second);
+      {
+        if (it->second->remove_reference())
+          legion_delete(it->second);
+      }
       traces.clear();
       // Clean up any locks and barriers that the user
       // asked us to destroy
@@ -2381,12 +2484,2248 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned InnerContext::register_new_child_operation(Operation *op)
+    IndexSpace InnerContext::create_index_space(RegionTreeForest *forest,
+                                                size_t max_num_elmts)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space %x in task %s "
+                      "(ID %lld) with %zd maximum elements", handle.id, 
+                      get_task_name(), get_unique_id(), max_num_elmts); 
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+
+      Realm::IndexSpace space = 
+                      Realm::IndexSpace::create_index_space(max_num_elmts);
+      forest->create_index_space(handle, Domain(space), 
+                                 UNSTRUCTURED_KIND, MUTABLE);
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space(RegionTreeForest *forest,
+                                                const Domain &domain)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating dummy index space %x in task %s (ID %lld) "
+                      "for domain", handle.id, get_task_name(),get_unique_id());
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+
+      forest->create_index_space(handle, domain, DENSE_ARRAY_KIND, NO_MEMORY);
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space(RegionTreeForest *forest,
+                                                const std::set<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id());
+      // First compute the convex hull of all the domains
+      Domain hull = *(domains.begin());
+#ifdef DEBUG_LEGION
+      if (hull.get_dim() == 0)
+      {
+        log_index.error("Create index space with multiple domains "
+                        "must be created with domains for non-zero "
+                        "dimension in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        assert(false);
+        exit(ERROR_DOMAIN_DIM_MISMATCH);
+      }
+      for (std::set<Domain>::const_iterator it = domains.begin();
+            it != domains.end(); it++)
+      {
+        assert(it->exists());
+        if (hull.get_dim() != it->get_dim())
+        {
+          log_index.error("A set of domains passed to create_index_space "
+                          "must all have the same dimensions in task "
+                          "%s (ID %lld)", get_task_name(), get_unique_id());
+          assert(false);
+          exit(ERROR_DOMAIN_DIM_MISMATCH);
+        }
+      }
+#endif
+      switch (hull.get_dim())
+      {
+        case 1:
+          {
+            LegionRuntime::Arrays::Rect<1> base = hull.get_rect<1>();
+            for (std::set<Domain>::const_iterator it = domains.begin();
+                  it != domains.end(); it++)
+            {
+              LegionRuntime::Arrays::Rect<1> next = it->get_rect<1>();
+              base = base.convex_hull(next);
+            }
+            hull = Domain::from_rect<1>(base);
+            break;
+          }
+        case 2:
+          {
+            LegionRuntime::Arrays::Rect<2> base = hull.get_rect<2>();
+            for (std::set<Domain>::const_iterator it = domains.begin();
+                  it != domains.end(); it++)
+            {
+              LegionRuntime::Arrays::Rect<2> next = it->get_rect<2>();
+              base = base.convex_hull(next);
+            }
+            hull = Domain::from_rect<2>(base);
+            break;
+          }
+        case 3:
+          {
+            LegionRuntime::Arrays::Rect<3> base = hull.get_rect<3>();
+            for (std::set<Domain>::const_iterator it = domains.begin();
+                  it != domains.end(); it++)
+            {
+              LegionRuntime::Arrays::Rect<3> next = it->get_rect<3>();
+              base = base.convex_hull(next);
+            }
+            hull = Domain::from_rect<3>(base);
+            break;
+          }
+        default:
+          assert(false);
+      }
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating dummy index space %x in task %s (ID %lld) for "
+                      "domain", handle.id, get_task_name(), get_unique_id());
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+
+      forest->create_index_space(handle, hull, domains,
+                                 DENSE_ARRAY_KIND, NO_MEMORY);
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_index_space(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Destroying index space %x in task %s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id());
+#endif
+      DeletionOp *op = runtime->get_available_deletion_op(true);
+      op->initialize_index_space_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_index_partition(
+                                  RegionTreeForest *forest, IndexSpace parent,
+                                  const Domain &color_space,
+                                  const PointColoring &coloring,
+                                  PartitionKind part_kind, 
+                                  int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index partition %d with parent index space %x "
+                      "in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      std::map<DomainPoint,Domain> new_index_spaces; 
+      Domain parent_dom = forest->get_index_space_domain(parent);
+      const size_t num_elmts = 
+        parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+      const int first_element =
+        parent_dom.get_index_space().get_valid_mask().get_first_element();
+      for (std::map<DomainPoint,ColoredPoints<ptr_t> >::const_iterator it = 
+            coloring.begin(); it != coloring.end(); it++)
+      {
+        Realm::ElementMask child_mask(num_elmts, first_element);
+        const ColoredPoints<ptr_t> &pcoloring = it->second;
+        for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
+              pit != pcoloring.points.end(); pit++)
+        {
+          child_mask.enable(pit->value,1);
+        }
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator pit = 
+              pcoloring.ranges.begin(); pit != pcoloring.ranges.end(); pit++)
+        {
+          if (pit->second.value >= pit->first.value)
+            child_mask.enable(pit->first.value,
+                (size_t)(pit->second.value - pit->first.value) + 1);
+        }
+        Realm::IndexSpace child_space = 
+          Realm::IndexSpace::create_index_space(
+                          parent_dom.get_index_space(), child_mask, allocable);
+        new_index_spaces[it->first] = Domain(child_space);
+      }
+#ifdef DEBUG_LEGION
+      if ((part_kind == DISJOINT_KIND) && Runtime::verify_disjointness)
+        runtime->validate_unstructured_disjointness(pid, new_index_spaces);
+#endif
+      ColorPoint partition_color;
+      // If we have a valid color, set it now
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        partition_color = ColorPoint(color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     new_index_spaces, color_space, part_kind, 
+                                     allocable ? MUTABLE : NO_MEMORY);
+      register_index_partition_creation(pid);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_index_partition(
+                                              RegionTreeForest *forest,
+                                              IndexSpace parent,
+                                              const Coloring &coloring,
+                                              bool disjoint, int part_color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index partition %d with parent index space %x "
+                      "in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      if (coloring.empty())
+      {
+        log_run.error("Attempt to create index partition with no colors in "
+                      "task %s (ID %lld). Index partitions must have at least "
+                      "one color.", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_EMPTY_INDEX_PARTITION);
+      }
+      LegionRuntime::Arrays::Point<1> lower_bound(coloring.begin()->first);
+      LegionRuntime::Arrays::Point<1> upper_bound(coloring.rbegin()->first);
+      LegionRuntime::Arrays::Rect<1> color_range(lower_bound,upper_bound);
+      Domain color_space = Domain::from_rect<1>(color_range);
+      // Perform the coloring by iterating over all the colors in the
+      // range.  For unspecified colors there is nothing wrong with
+      // making empty index spaces.  We do this so we can save the
+      // color space as a dense 1D domain.
+      std::map<DomainPoint,Domain> new_index_spaces; 
+      Domain parent_dom = forest->get_index_space_domain(parent);
+      const size_t num_elmts = 
+        parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+      const int first_element =
+        parent_dom.get_index_space().get_valid_mask().get_first_element();
+      for (LegionRuntime::Arrays::GenericPointInRectIterator<1>
+	     pir(color_range); pir; pir++)
+      {
+        Realm::ElementMask child_mask(num_elmts, first_element);
+        Color c = pir.p;
+        std::map<Color,ColoredPoints<ptr_t> >::const_iterator finder = 
+          coloring.find(c);
+        // If we had a coloring provided, then fill in all the elements
+        if (finder != coloring.end())
+        {
+          const ColoredPoints<ptr_t> &pcoloring = finder->second;
+          for (std::set<ptr_t>::const_iterator it = pcoloring.points.begin();
+                it != pcoloring.points.end(); it++)
+          {
+            child_mask.enable(it->value,1);
+          }
+          for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+                pcoloring.ranges.begin(); it != pcoloring.ranges.end(); it++)
+          {
+            if (it->second.value >= it->first.value)
+              child_mask.enable(it->first.value,
+                  (size_t)(it->second.value - it->first.value) + 1);
+          }
+        }
+        else
+          continue;
+        // Now make the index space and save the information
+#ifdef ASSUME_UNALLOCABLE
+        Realm::IndexSpace child_space = 
+          Realm::IndexSpace::create_index_space(
+              parent_dom.get_index_space(), child_mask, false/*allocable*/);
+#else
+        Realm::IndexSpace child_space = 
+          Realm::IndexSpace::create_index_space(
+                          parent_dom.get_index_space(), child_mask);
+#endif
+        new_index_spaces[DomainPoint::from_point<1>(
+         LegionRuntime::Arrays::Point<1>(finder->first))] = Domain(child_space);
+      }
+#ifdef DEBUG_LEGION
+      if (disjoint && Runtime::verify_disjointness)
+        runtime->validate_unstructured_disjointness(pid, new_index_spaces);
+#endif 
+      ColorPoint partition_color;
+      // If we have a valid color, set it now
+      if (part_color >= 0)
+        partition_color = ColorPoint(part_color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     new_index_spaces, color_space,
+                                     disjoint ? DISJOINT_KIND : ALIASED_KIND,
+                                     MUTABLE);
+      register_index_partition_creation(pid);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_index_partition(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const DomainPointColoring &coloring,
+                                            PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index partition %d with parent index space %x "
+                      "in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+      if ((part_kind == DISJOINT_KIND) && Runtime::verify_disjointness)
+        runtime->validate_structured_disjointness(pid, coloring);
+#endif
+      ColorPoint partition_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        partition_color = ColorPoint(color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     coloring, color_space, 
+                                     part_kind, NO_MEMORY);
+      register_index_partition_creation(pid);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_index_partition(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const DomainColoring &coloring,
+                                            bool disjoint, int part_color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index partition %d with parent index space %x "
+                      "in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      if (coloring.empty())
+      {
+        log_run.error("Attempt to create index partition with no colors in "
+                      "task %s (ID %lld). Index partitions must have at least "
+                      "one color.", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_EMPTY_INDEX_PARTITION);
+      }
+      ColorPoint partition_color;
+      if (part_color >= 0)
+        partition_color = ColorPoint(part_color);
+      std::map<DomainPoint,Domain> new_subspaces;
+      for (std::map<Color,Domain>::const_iterator it = coloring.begin();
+            it != coloring.end(); it++)
+      {
+        new_subspaces[DomainPoint::from_point<1>(
+            LegionRuntime::Arrays::Point<1>(it->first))] = it->second;
+      }
+#ifdef DEBUG_LEGION
+      if (disjoint && Runtime::verify_disjointness)
+        runtime->validate_structured_disjointness(pid, new_subspaces);
+#endif
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     new_subspaces, color_space,
+                                     disjoint ? DISJOINT_KIND : ALIASED_KIND,
+                                     NO_MEMORY);
+      register_index_partition_creation(pid);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_index_partition(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      const Domain &color_space,
+                                      const MultiDomainPointColoring &coloring,
+                                      PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index partition %d with parent index space %x "
+                      "in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      // Build all the convex hulls
+      std::map<DomainPoint,Domain> convex_hulls;
+      for (std::map<DomainPoint,std::set<Domain> >::const_iterator it = 
+            coloring.begin(); it != coloring.end(); it++)
+      {
+        Domain hull = runtime->construct_convex_hull(it->second);
+        convex_hulls[it->first] = hull;
+      }
+#ifdef DEBUG_LEGION
+      if ((part_kind == DISJOINT_KIND) && Runtime::verify_disjointness)
+        runtime->validate_multi_structured_disjointness(pid, coloring);
+#endif
+      ColorPoint partition_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        partition_color = ColorPoint(color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     convex_hulls, coloring,
+                                     color_space, part_kind, NO_MEMORY);
+      register_index_partition_creation(pid);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_index_partition(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const MultiDomainColoring &coloring,
+                                            bool disjoint, int part_color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index partition %d with parent index space %x "
+                      "in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      if (coloring.empty())
+      {
+        log_run.error("Attempt to create index partition with no colors in "
+                      "task %s (ID %lld). Index partitions must have at least "
+                      "one color.", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_EMPTY_INDEX_PARTITION);
+      }
+      // TODO: Construct the validity of all the domains in the set
+      // Build all the convex hulls
+      std::map<DomainPoint,Domain> convex_hulls;
+      std::map<DomainPoint,std::set<Domain> > color_sets;
+      for (std::map<Color,std::set<Domain> >::const_iterator it = 
+            coloring.begin(); it != coloring.end(); it++)
+      {
+        Domain hull = runtime->construct_convex_hull(it->second);
+	LegionRuntime::Arrays::Point<1> pcolor(it->first);
+        DomainPoint color = DomainPoint::from_point<1>(pcolor);
+        convex_hulls[color] = hull;
+        color_sets[color] = it->second; 
+      }
+#ifdef DEBUG_LEGION
+      if (disjoint && Runtime::verify_disjointness)
+        runtime->validate_multi_structured_disjointness(pid, color_sets);
+#endif
+      ColorPoint partition_color;
+      if (part_color >= 0)
+        partition_color = ColorPoint(part_color);
+      forest->create_index_partition(pid, parent, partition_color, 
+                                     convex_hulls, color_sets,
+                                     color_space,
+                                     disjoint ? DISJOINT_KIND : ALIASED_KIND,
+                                     NO_MEMORY);
+      register_index_partition_creation(pid);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_index_partition(
+                                        RegionTreeForest *forest,
+                                        IndexSpace parent,
+                LegionRuntime::Accessor::RegionAccessor<
+                 LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
+                                        int part_color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index partition %d with parent index space %x "
+                      "in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      // Perform the coloring
+      std::map<DomainPoint,Domain> new_index_spaces;
+      Domain color_space;
+      // Iterate over the parent index space and make the sub-index spaces
+      // for each of the different points in the space
+      LegionRuntime::Accessor::RegionAccessor<
+        LegionRuntime::Accessor::AccessorType::Generic,int> 
+          fa_coloring = field_accessor.typeify<int>();
+      {
+        std::map<Color,Realm::ElementMask> child_masks;
+        Domain parent_dom = forest->get_index_space_domain(parent);
+        size_t parent_elmts = 
+          parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+        for (Domain::DomainPointIterator itr(parent_dom); itr; itr++)
+        {
+          ptr_t cur_ptr = itr.p.get_index();
+          int c;
+          fa_coloring.read_untyped(cur_ptr, &c, sizeof(c));
+          // Ignore all colors less than zero
+          if (c >= 0)
+          {
+            Color color = (Color)c; 
+            std::map<Color,Realm::ElementMask>::iterator finder = 
+              child_masks.find(color);
+            // Haven't made an index space for this color yet
+            if (finder == child_masks.end())
+            {
+              child_masks[color] = Realm::ElementMask(parent_elmts);
+              finder = child_masks.find(color);
+            }
+#ifdef DEBUG_LEGION
+            assert(finder != child_masks.end());
+#endif
+            finder->second.enable(cur_ptr.value);
+          }
+        }
+        // Now make the index spaces and their domains
+        LegionRuntime::Arrays::Point<1> lower_bound(child_masks.begin()->first);
+        LegionRuntime::Arrays::Point<1> upper_bound(child_masks.rbegin()->first);
+        LegionRuntime::Arrays::Rect<1> color_range(lower_bound,upper_bound);
+        color_space = Domain::from_rect<1>(color_range);
+        // Iterate over all the colors in the range from the lower
+        // bound to upper bound so we can store the color space as
+        // a dense array of colors.
+        for (LegionRuntime::Arrays::GenericPointInRectIterator<1>
+	       pir(color_range); pir; pir++)
+        {
+          Color c = pir.p;
+          std::map<Color,Realm::ElementMask>::const_iterator finder = 
+            child_masks.find(c);
+          Realm::IndexSpace child_space;
+          if (finder != child_masks.end())
+          {
+#ifdef ASSUME_UNALLOCABLE
+            child_space = 
+              Realm::IndexSpace::create_index_space(
+                parent_dom.get_index_space(), finder->second, false);
+#else
+            child_space = 
+              Realm::IndexSpace::create_index_space(
+                    parent_dom.get_index_space(), finder->second);
+#endif
+          }
+          else
+          {
+            Realm::ElementMask empty_mask;
+#ifdef ASSUME_UNALLOCABLE
+            child_space = 
+              Realm::IndexSpace::create_index_space(
+                    parent_dom.get_index_space(), empty_mask, false);
+#else
+            child_space = 
+              Realm::IndexSpace::create_index_space(
+                    parent_dom.get_index_space(), empty_mask);
+#endif
+          }
+          new_index_spaces[DomainPoint::from_point<1>(
+              LegionRuntime::Arrays::Point<1>(c))] = Domain(child_space);
+        }
+      }
+      ColorPoint partition_color;
+      if (part_color >= 0)
+        partition_color = ColorPoint(part_color);
+      forest->create_index_partition(pid, parent, partition_color,
+                                     new_index_spaces, color_space,
+                                     DISJOINT_KIND, MUTABLE);
+      register_index_partition_creation(pid);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_index_partition(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Destroying index partition %x in task %s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id());
+#endif
+      DeletionOp *op = runtime->get_available_deletion_op(true);
+      op->initialize_index_part_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_equal_partition(
+                                                      RegionTreeForest *forest,
+                                                      IndexSpace parent,
+                                                      const Domain &color_space,
+                                                      size_t granularity,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating equal partition %d with parent index space %x "
+                      "in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      ColorPoint partition_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        partition_color = ColorPoint(color);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_equal_partition(this, pid, granularity);
+      ApEvent handle_ready = part_op->get_handle_ready();
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space,
+                                       partition_color, DISJOINT_KIND,
+                                       allocable, handle_ready, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_weighted_partition(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      const Domain &color_space,
+                                      const std::map<DomainPoint,int> &weights,
+                                      size_t granularity, 
+                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating weighted partition %d with parent index "
+                      "space %x in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+#endif
+      ColorPoint partition_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        partition_color = ColorPoint(color);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_weighted_partition(this, pid, granularity, weights);
+      ApEvent handle_ready = part_op->get_handle_ready();
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, DISJOINT_KIND,
+                                       allocable, handle_ready, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_union(
+                                          RegionTreeForest *forest,
+                                          IndexSpace parent,
+                                          IndexPartition handle1,
+                                          IndexPartition handle2,
+                                          PartitionKind kind,
+                                          int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating union partition %d with parent index "
+                      "space %x in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+      if (parent.get_tree_id() != handle1.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                        "index tree as IndexSpace %d in create "
+                        "partition by union!", handle1.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+      if (parent.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                        "index tree as IndexSpace %d in create "
+                        "partition by union!", handle2.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        partition_color = ColorPoint(color);
+      Domain color_space;
+      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
+                                          Realm::IndexSpace::ISO_UNION);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_union_partition(this, pid, handle1, handle2);
+      ApEvent handle_ready = part_op->get_handle_ready();
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, kind, allocable, 
+                                       handle_ready, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_intersection(
+                                              RegionTreeForest *forest,
+                                              IndexSpace parent,
+                                              IndexPartition handle1,
+                                              IndexPartition handle2,
+                                              PartitionKind kind,
+                                              int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating intersection partition %d with parent "
+                      "index space %x in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+      if (parent.get_tree_id() != handle1.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                        "index tree as IndexSpace %d in create partition by "
+                        "intersection!", handle1.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+      if (parent.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                        "index tree as IndexSpace %d in create partition by "
+                        "intersection!", handle2.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        partition_color = ColorPoint(color);
+      Domain color_space;
+      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
+                                          Realm::IndexSpace::ISO_INTERSECT);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_intersection_partition(this, pid, handle1, handle2);
+      ApEvent handle_ready = part_op->get_handle_ready();
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, kind, allocable, 
+                                       handle_ready, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_difference(
+                                                  RegionTreeForest *forest,
+                                                  IndexSpace parent,
+                                                  IndexPartition handle1,
+                                                  IndexPartition handle2,
+                                                  PartitionKind kind,
+                                                  int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating difference partition %d with parent "
+                      "index space %x in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+      if (parent.get_tree_id() != handle1.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by difference!",
+                              handle1.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+      if (parent.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by difference!",
+                              handle2.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        partition_color = ColorPoint(color);
+      Domain color_space;
+      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
+                                          Realm::IndexSpace::ISO_SUBTRACT);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_difference_partition(this, pid, handle1, handle2);
+      ApEvent handle_ready = part_op->get_handle_ready();
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, kind, allocable, 
+                                       handle_ready, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::create_cross_product_partition(RegionTreeForest *forest,
+                                                      IndexPartition handle1,
+                                                      IndexPartition handle2,
+                                  std::map<DomainPoint,IndexPartition> &handles,
+                                                      PartitionKind kind,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating cross product partitions in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+      if (handle1.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexPartition %d in create "
+                              "cross product partitions!",
+                              handle1.id, handle2.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      ColorPoint partition_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        partition_color = ColorPoint(color);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      ApEvent handle_ready = part_op->get_handle_ready();
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      std::map<DomainPoint,IndexPartition> local;
+      forest->create_pending_cross_product(handle1, handle2, local, handles,
+                                           kind, partition_color, allocable,
+                                           handle_ready, term_event);
+      part_op->initialize_cross_product(this, handle1, handle2, local);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_field(
+                                              RegionTreeForest *forest,
+                                              LogicalRegion handle,
+                                              LogicalRegion parent_priv,
+                                              FieldID fid,
+                                              const Domain &color_space,
+                                              int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexSpace parent = handle.get_index_space();
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition by field in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ColorPoint part_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        part_color = ColorPoint(color);
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = 
+        runtime->get_available_dependent_partition_op(true);
+      part_op->initialize_by_field(this, pid, handle, 
+                                   parent_priv, color_space, fid);
+      ApEvent term_event = part_op->get_completion_event();
+      ApEvent handle_ready = part_op->get_handle_ready();
+      // Tell the region tree forest about this partition 
+      forest->create_pending_partition(pid, parent, color_space, part_color,
+                                       DISJOINT_KIND, allocable, 
+                                       handle_ready, term_event); 
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_field call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_image(
+                                                    RegionTreeForest *forest,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    const Domain &color_space,
+                                                    PartitionKind part_kind,
+                                                    int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition by image in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ColorPoint part_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        part_color = ColorPoint(color);
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = 
+        runtime->get_available_dependent_partition_op(true);
+      part_op->initialize_by_image(this, pid, projection,
+                                   parent, fid, color_space);
+      ApEvent term_event = part_op->get_completion_event();
+      ApEvent handle_ready = part_op->get_handle_ready();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle, color_space, part_color,
+                                       part_kind, allocable, 
+                                       handle_ready, term_event); 
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_image call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_preimage(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition projection,
+                                                  LogicalRegion handle,
+                                                  LogicalRegion parent,
+                                                  FieldID fid,
+                                                  const Domain &color_space,
+                                                  PartitionKind part_kind,
+                                                  int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_index_space().get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition by preimage in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ColorPoint part_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        part_color = ColorPoint(color);
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = 
+        runtime->get_available_dependent_partition_op(true);
+      part_op->initialize_by_preimage(this, pid, projection, handle,
+                                      parent, fid, color_space);
+      ApEvent term_event = part_op->get_completion_event();
+      ApEvent handle_ready = part_op->get_handle_ready();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle.get_index_space(), 
+                                       color_space, part_color, part_kind,
+                                       allocable, handle_ready, term_event);
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_preimage call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_pending_partition(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                const Domain &color_space, 
+                                                PartitionKind part_kind,
+                                                int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating pending partition in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ColorPoint part_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        part_color = ColorPoint(color);
+      forest->create_pending_partition(pid, parent, color_space, part_color,
+                                       part_kind, allocable, 
+                                       ApEvent::NO_AP_EVENT,
+                                       ApEvent::NO_AP_EVENT, true/*separate*/);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space_union(RegionTreeForest *forest,
+                                                      IndexPartition parent,
+                                                      const DomainPoint &color,
+                                        const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space union in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ApUserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_index_space_union(this, result, handles);
+      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space_union(RegionTreeForest *forest,
+                                                      IndexPartition parent,
+                                                      const DomainPoint &color,
+                                                      IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space union in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ApUserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_index_space_union(this, result, handle);
+      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space_intersection(
+                                                      RegionTreeForest *forest,
+                                                      IndexPartition parent,
+                                                      const DomainPoint &color,
+                                        const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space intersection in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ApUserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_index_space_intersection(this, result, handles);
+      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space_intersection(
+                                                      RegionTreeForest *forest,
+                                                      IndexPartition parent,
+                                                      const DomainPoint &color,
+                                                      IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space intersection in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ApUserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_index_space_intersection(this, result, handle);
+      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::create_index_space_difference(
+                                                    RegionTreeForest *forest,
+                                                    IndexPartition parent,
+                                                    const DomainPoint &color,
+                                                    IndexSpace initial,
+                                        const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space difference in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ApUserEvent handle_ready, domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, color, 
+                                                     handle_ready, 
+                                                     domain_ready);
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_index_space_difference(this, result, initial,handles);
+      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
+      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace InnerContext::create_field_space(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      FieldSpace space(runtime->get_unique_field_space_id());
+#ifdef DEBUG_LEGION
+      log_field.debug("Creating field space %x in task %s (ID %lld)", 
+                      space.id, get_task_name(), get_unique_id());
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_field_space(space.id);
+
+      forest->create_field_space(space);
+      register_field_space_creation(space);
+      return space;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_field_space(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_field.debug("Destroying field space %x in task %s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id());
+#endif
+      DeletionOp *op = runtime->get_available_deletion_op(true);
+      op->initialize_field_space_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID InnerContext::allocate_field(RegionTreeForest *forest,
+                                         FieldSpace space, size_t field_size,
+                                         FieldID fid, bool local,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (fid == AUTO_GENERATE_ID)
+        fid = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+      else if (fid >= MAX_APPLICATION_FIELD_ID)
+      {
+        log_task.error("Task %s (ID %lld) attempted to allocate a field with "
+                       "ID %d which exceeds the MAX_APPLICATION_FIELD_ID bound "
+                       "set in legion_config.h", get_task_name(),
+                       get_unique_id(), fid);
+        assert(false);
+      }
+#endif
+
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_field_creation(space.id, fid, field_size);
+
+      if (local)
+        add_local_field(space, fid, field_size, serdez_id);
+      else
+      {
+        forest->allocate_field(space, field_size, fid, serdez_id);
+        register_field_creation(space, fid);
+      }
+      return fid;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::free_field(FieldSpace space, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      DeletionOp *op = runtime->get_available_deletion_op(true);
+      op->initialize_field_deletion(this, space, fid);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::allocate_fields(RegionTreeForest *forest, 
+                                       FieldSpace space,
+                                       const std::vector<size_t> &sizes,
+                                       std::vector<FieldID> &resulting_fields,
+                                       bool local, CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (resulting_fields.size() < sizes.size())
+        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+      {
+        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+          resulting_fields[idx] = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+        else if (resulting_fields[idx] >= MAX_APPLICATION_FIELD_ID)
+        {
+          log_task.error("Task %s (ID %lld) attempted to allocate a field with "
+                         "ID %d which exceeds the MAX_APPLICATION_FIELD_ID "
+                         "bound set in legion_config.h", get_task_name(),
+                         get_unique_id(), resulting_fields[idx]);
+          assert(false);
+        }
+#endif
+
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_field_creation(space.id, 
+                                        resulting_fields[idx], sizes[idx]);
+      }
+      if (local)
+        add_local_fields(space, resulting_fields, sizes, serdez_id);
+      else
+      {
+        forest->allocate_fields(space, sizes, resulting_fields, serdez_id); 
+        register_field_creations(space, resulting_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::free_fields(FieldSpace space, 
+                                   const std::set<FieldID> &to_free)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      DeletionOp *op = runtime->get_available_deletion_op(true);
+      op->initialize_field_deletions(this, space, to_free);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion InnerContext::create_logical_region(RegionTreeForest *forest,
+                                                      IndexSpace index_space,
+                                                      FieldSpace field_space)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      RegionTreeID tid = runtime->get_unique_region_tree_id();
+      LogicalRegion region(tid, index_space, field_space);
+#ifdef DEBUG_LEGION
+      log_region.debug("Creating logical region in task %s (ID %lld) with "
+                       "index space %x and field space %x in new tree %d",
+                       get_task_name(), get_unique_id(), 
+                       index_space.id, field_space.id, tid);
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_region(index_space.id, field_space.id, tid);
+
+      forest->create_logical_region(region);
+      // Register the creation of a top-level region with the context
+      register_region_creation(region);
+      return region;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_logical_region(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_region.debug("Deleting logical region (%x,%x) in task %s (ID %lld)",
+                       handle.index_space.id, handle.field_space.id, 
+                       get_task_name(), get_unique_id());
+#endif
+      DeletionOp *op = runtime->get_available_deletion_op(true);
+      op->initialize_logical_region_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::destroy_logical_partition(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_region.debug("Deleting logical partition (%x,%x) in task %s "
+                       "(ID %lld)", handle.index_partition.id, 
+                       handle.field_space.id, get_task_name(), get_unique_id());
+#endif
+      DeletionOp *op = runtime->get_available_deletion_op(true);
+      op->initialize_logical_partition_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAllocator InnerContext::create_index_allocator(
+                                    RegionTreeForest *forest, IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return IndexAllocator(handle, forest->get_index_space_allocator(handle));
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator InnerContext::create_field_allocator(
+                                   Legion::Runtime *external, FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return FieldAllocator(handle, this, external);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::execute_task(const TaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+      {
+        if (launcher.predicate_false_future.impl != NULL)
+          return launcher.predicate_false_future;
+        // Otherwise check to see if we have a value
+        FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/,
+          runtime->get_available_distributed_id(true), 
+          runtime->address_space, runtime->address_space);
+        if (launcher.predicate_false_result.get_size() > 0)
+          result->set_result(launcher.predicate_false_result.get_ptr(),
+                             launcher.predicate_false_result.get_size(),
+                             false/*own*/);
+        else
+        {
+          // We need to check to make sure that the task actually
+          // does expect to have a void return type
+          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
+          {
+            log_run.error("Predicated task launch for task %s in parent "
+                          "task %s (UID %lld) has non-void return type "
+                          "but no default value for its future if the task "
+                          "predicate evaluates to false.  Please set either "
+                          "the 'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "TaskLauncher struct.", impl->get_name(), 
+                          get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+        }
+        // Now we can fix the future result
+        result->complete_future();
+        return Future(result);
+      }
+      IndividualTask *task = runtime->get_available_individual_task(true);
+#ifdef DEBUG_LEGION
+      Future result = 
+        task->initialize_task(this, launcher, Runtime::check_privileges);
+      log_task.debug("Registering new single task with unique id %lld "
+                      "and task %s (ID %lld) with high level runtime in "
+                      "addresss space %d",
+                      task->get_unique_id(), task->get_task_name(), 
+                      task->get_unique_id(), runtime->address_space);
+#else
+      Future result = task->initialize_task(this, launcher,
+                                            false/*check privileges*/);
+#endif
+      execute_task_launch(task, false/*index*/, 
+                          current_trace, launcher.silence_warnings);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InnerContext::execute_index_space(
+                                              const IndexTaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      if (launcher.must_parallelism)
+      {
+        // Turn around and use a must epoch launcher
+        MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
+        epoch_launcher.add_index_task(launcher);
+        FutureMap result = execute_must_epoch(epoch_launcher);
+        return result;
+      }
+      AutoRuntimeCall call(this);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+      {
+        FutureMapImpl *result = legion_new<FutureMapImpl>(this, runtime);
+        if (launcher.predicate_false_future.impl != NULL)
+        {
+          ApEvent ready_event = 
+            launcher.predicate_false_future.impl->get_ready_event(); 
+          if (ready_event.has_triggered())
+          {
+            const void *f_result = 
+              launcher.predicate_false_future.impl->get_untyped_result();
+            size_t f_result_size = 
+              launcher.predicate_false_future.impl->get_untyped_size();
+            for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                  itr; itr++)
+            {
+              Future f = result->get_future(itr.p);
+              f.impl->set_result(f_result, f_result_size, false/*own*/);
+            }
+            result->complete_all_futures();
+          }
+          else
+          {
+            // Otherwise launch a task to complete the future map,
+            // add the necessary references to prevent premature
+            // garbage collection by the runtime
+            result->add_reference();
+            launcher.predicate_false_future.impl->add_base_gc_ref(
+                                                FUTURE_HANDLE_REF);
+            Runtime::DeferredFutureMapSetArgs args;
+            args.future_map = result;
+            args.result = launcher.predicate_false_future.impl;
+            args.domain = launcher.launch_domain;
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
+                                        Runtime::protect_event(ready_event));
+          }
+          return FutureMap(result);
+        }
+        if (launcher.predicate_false_result.get_size() == 0)
+        {
+          // Check to make sure the task actually does expect to
+          // have a void return type
+          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
+          {
+            log_run.error("Predicated index task launch for task %s "
+                          "in parent task %s (UID %lld) has non-void "
+                          "return type but no default value for its "
+                          "future if the task predicate evaluates to "
+                          "false.  Please set either the "
+                          "'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "IndexTaskLauncher struct.", impl->get_name(), 
+                          get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+          // Just initialize all the futures
+          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                itr; itr++)
+            result->get_future(itr.p);
+        }
+        else
+        {
+          const void *ptr = launcher.predicate_false_result.get_ptr();
+          size_t ptr_size = launcher.predicate_false_result.get_size();
+          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                itr; itr++)
+          {
+            Future f = result->get_future(itr.p);
+            f.impl->set_result(ptr, ptr_size, false/*own*/);
+          }
+        }
+        result->complete_all_futures();
+        return FutureMap(result);
+      }
+      IndexTask *task = runtime->get_available_index_task(true);
+#ifdef DEBUG_LEGION
+      FutureMap result = 
+        task->initialize_task(this, launcher, Runtime::check_privileges);
+      log_task.debug("Registering new index space task with unique id "
+                     "%lld and task %s (ID %lld) with high level runtime in "
+                     "address space %d",
+                     task->get_unique_id(), task->get_task_name(), 
+                     task->get_unique_id(), runtime->address_space);
+#else
+      FutureMap result = task->initialize_task(this, launcher,
+                                               false/*check privileges*/);
+#endif
+      execute_task_launch(task, true/*index*/, 
+                          current_trace, launcher.silence_warnings);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::execute_index_space(const IndexTaskLauncher &launcher,
+                                             ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      if (launcher.must_parallelism)
+        assert(false); // TODO: add support for this
+      AutoRuntimeCall call(this);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+      {
+        if (launcher.predicate_false_future.impl != NULL)
+          return launcher.predicate_false_future;
+        // Otherwise check to see if we have a value
+        FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/, 
+          runtime->get_available_distributed_id(true), 
+          runtime->address_space, runtime->address_space);
+        if (launcher.predicate_false_result.get_size() > 0)
+          result->set_result(launcher.predicate_false_result.get_ptr(),
+                             launcher.predicate_false_result.get_size(),
+                             false/*own*/);
+        else
+        {
+          // We need to check to make sure that the task actually
+          // does expect to have a void return type
+          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
+          {
+            log_run.error("Predicated index task launch for task %s "
+                          "in parent task %s (UID %lld) has non-void "
+                          "return type but no default value for its "
+                          "future if the task predicate evaluates to "
+                          "false.  Please set either the "
+                          "'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "IndexTaskLauncher struct.", impl->get_name(), 
+                          get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+        }
+        // Now we can fix the future result
+        result->complete_future();
+        return Future(result);
+      }
+      IndexTask *task = runtime->get_available_index_task(true);
+#ifdef DEBUG_LEGION
+      Future result = 
+        task->initialize_task(this, launcher, redop, Runtime::check_privileges);
+      log_task.debug("Registering new index space task with unique id "
+                     "%lld and task %s (ID %lld) with high level runtime in "
+                     "address space %d",
+                     task->get_unique_id(), task->get_task_name(), 
+                     task->get_unique_id(), runtime->address_space);
+#else
+      Future result = task->initialize_task(this, launcher, redop, 
+                                            false/*check privileges*/);
+#endif
+      execute_task_launch(task, true/*index*/, 
+                          current_trace, launcher.silence_warnings);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion InnerContext::map_region(const InlineLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (IS_NO_ACCESS(launcher.requirement))
+        return PhysicalRegion();
+      MapOp *map_op = runtime->get_available_map_op(true);
+#ifdef DEBUG_LEGION
+      PhysicalRegion result = 
+        map_op->initialize(this, launcher, Runtime::check_privileges);
+      log_run.debug("Registering a map operation for region "
+                    "(%x,%x,%x) in task %s (ID %lld)",
+                    launcher.requirement.region.index_space.id, 
+                    launcher.requirement.region.field_space.id, 
+                    launcher.requirement.region.tree_id, 
+                    get_task_name(), get_unique_id());
+#else
+      PhysicalRegion result = map_op->initialize(this, launcher, 
+                                                 false/*check privileges*/);
+#endif
+      bool parent_conflict = false, inline_conflict = false;  
+      const int index = 
+        has_conflicting_regions(map_op, parent_conflict, inline_conflict);
+      if (parent_conflict)
+      {
+        log_run.error("Attempted an inline mapping of region "
+                      "(%x,%x,%x) that conflicts with mapped region " 
+                      "(%x,%x,%x) at index %d of parent task %s "
+                      "(ID %lld) that would ultimately result in "
+                      "deadlock. Instead you receive this error message.",
+                      launcher.requirement.region.index_space.id,
+                      launcher.requirement.region.field_space.id,
+                      launcher.requirement.region.tree_id,
+                      regions[index].region.index_space.id,
+                      regions[index].region.field_space.id,
+                      regions[index].region.tree_id,
+                      index, get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK);
+      }
+      if (inline_conflict)
+      {
+        log_run.error("Attempted an inline mapping of region (%x,%x,%x) "
+                      "that conflicts with previous inline mapping in "
+                      "task %s (ID %lld) that would ultimately result in "
+                      "deadlock.  Instead you receive this error message.",
+                      launcher.requirement.region.index_space.id,
+                      launcher.requirement.region.field_space.id,
+                      launcher.requirement.region.tree_id,
+                      get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
+      }
+      register_inline_mapped_region(result);
+      runtime->add_to_dependence_queue(this, executing_processor, map_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::remap_region(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Check to see if the region is already mapped,
+      // if it is then we are done
+      if (region.impl->is_mapped())
+        return;
+      MapOp *map_op = runtime->get_available_map_op(true);
+      map_op->initialize(this, region);
+      register_inline_mapped_region(region);
+      runtime->add_to_dependence_queue(this, executing_processor, map_op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::unmap_region(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if ((region.impl == NULL) || !region.impl->is_mapped())
+        return;
+      unregister_inline_mapped_region(region);
+      region.impl->unmap_region();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::fill_fields(const FillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      FillOp *fill_op = runtime->get_available_fill_op(true);
+#ifdef DEBUG_LEGION
+      fill_op->initialize(this, launcher, Runtime::check_privileges);
+      log_run.debug("Registering a fill operation in task %s (ID %lld)",
+                     get_task_name(), get_unique_id());
+#else
+      fill_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_fields call in task %s (UID %lld).",
+              get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::fill_fields(const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (launcher.domain.get_volume() == 0)
+      {
+        log_run.warning("Ignoring empty index space fill in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return;
+      }
+      IndexFillOp *fill_op = runtime->get_available_index_fill_op(true);
+#ifdef DEBUG_LEGION
+      fill_op->initialize(this, launcher, Runtime::check_privileges);
+      log_run.debug("Registering an index fill operation in task %s (ID %lld)",
+                     get_task_name(), get_unique_id());
+#else
+      fill_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_fields call in task %s (UID %lld).",
+              get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::issue_copy(const CopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      CopyOp *copy_op = runtime->get_available_copy_op(true);
+#ifdef DEBUG_LEGION
+      copy_op->initialize(this, launcher, Runtime::check_privileges);
+      log_run.debug("Registering a copy operation in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#else
+      copy_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(copy_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_copy_operation call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, copy_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::issue_copy(const IndexCopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (launcher.domain.get_volume() == 0)
+      {
+        log_run.warning("Ignoring empty index space copy in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return;
+      }
+      IndexCopyOp *copy_op = runtime->get_available_index_copy_op(true);
+#ifdef DEBUG_LEGION
+      copy_op->initialize(this, launcher, Runtime::check_privileges);
+      log_run.debug("Registering an index copy operation in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#else
+      copy_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(copy_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_copy_operation call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, copy_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::issue_acquire(const AcquireLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      AcquireOp *acquire_op = runtime->get_available_acquire_op(true);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing an acquire operation in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+      acquire_op->initialize(this, launcher, Runtime::check_privileges);
+#else
+      acquire_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this acquire operation.
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(acquire_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_acquire call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the acquire operation
+      runtime->add_to_dependence_queue(this, executing_processor, acquire_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::issue_release(const ReleaseLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      ReleaseOp *release_op = runtime->get_available_release_op(true);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing a release operation in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+      release_op->initialize(this, launcher, Runtime::check_privileges);
+#else
+      release_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue the release operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(release_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_release call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the release operation
+      runtime->add_to_dependence_queue(this, executing_processor, release_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion InnerContext::attach_resource(const AttachLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      AttachOp *attach_op = runtime->get_available_attach_op(true);
+#ifdef DEBUG_LEGION
+      PhysicalRegion result = 
+        attach_op->initialize(this, launcher, Runtime::check_privileges);
+#else
+      PhysicalRegion result = 
+        attach_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      bool parent_conflict = false, inline_conflict = false;
+      int index = has_conflicting_regions(attach_op, 
+                                          parent_conflict, inline_conflict);
+      if (parent_conflict)
+      {
+        log_run.error("Attempted an attach hdf5 file operation on region " 
+                      "(%x,%x,%x) that conflicts with mapped region " 
+                      "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      launcher.handle.index_space.id, 
+                      launcher.handle.field_space.id, 
+                      launcher.handle.tree_id, 
+                      regions[index].region.index_space.id,
+                      regions[index].region.field_space.id,
+                      regions[index].region.tree_id, index, 
+                      get_task_name(), get_unique_id(), launcher.file_name);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_PARENT_MAPPING_DEADLOCK);
+      }
+      if (inline_conflict)
+      {
+        log_run.error("Attempted an attach hdf5 file operation on region " 
+                      "(%x,%x,%x) that conflicts with previous inline "
+                      "mapping in task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      launcher.handle.index_space.id, 
+                      launcher.handle.field_space.id, 
+                      launcher.handle.tree_id, get_task_name(), 
+                      get_unique_id(), launcher.file_name);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_CONFLICTING_SIBLING_MAPPING_DEADLOCK);
+      }
+      runtime->add_to_dependence_queue(this, executing_processor, attach_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::detach_resource(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      DetachOp *detach_op = runtime->get_available_detach_op(true);
+      detach_op->initialize_detach(this, region);
+      runtime->add_to_dependence_queue(this, executing_processor, detach_op);
+      // If the region is still mapped, then unmap it
+      if (region.impl->is_mapped())
+      {
+        unregister_inline_mapped_region(region);
+        region.impl->unmap_region();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InnerContext::execute_must_epoch(
+                                              const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      MustEpochOp *epoch_op = runtime->get_available_epoch_op(true);
+#ifdef DEBUG_LEGION
+      log_run.debug("Executing a must epoch in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+      FutureMap result = 
+        epoch_op->initialize(this, launcher, Runtime::check_privileges);
+#else
+      FutureMap result = epoch_op->initialize(this, launcher, 
+                                              false/*check privileges*/);
+#endif
+      // Now find all the parent task regions we need to invalidate
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        epoch_op->find_conflicted_regions(unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_release call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Now we can issue the must epoch
+      runtime->add_to_dependence_queue(this, executing_processor, epoch_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::issue_timing_measurement(const TimingLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing a timing measurement in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      TimingOp *timing_op = runtime->get_available_timing_op(true);
+      Future result = timing_op->initialize(this, launcher);
+      runtime->add_to_dependence_queue(this, executing_processor, timing_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::issue_mapping_fence(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      FenceOp *fence_op = runtime->get_available_fence_op(true);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing a mapping fence in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      fence_op->initialize(this, FenceOp::MAPPING_FENCE);
+      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::issue_execution_fence(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      FenceOp *fence_op = runtime->get_available_fence_op(true);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing an execution fence in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      fence_op->initialize(this, FenceOp::EXECUTION_FENCE);
+      runtime->add_to_dependence_queue(this, executing_processor, fence_op);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::complete_frame(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      FrameOp *frame_op = runtime->get_available_frame_op(true);
+#ifdef DEBUG_LEGION
+      log_run.debug("Issuing a frame in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      frame_op->initialize(this);
+      runtime->add_to_dependence_queue(this, executing_processor, frame_op);
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate InnerContext::create_predicate(const Future &f)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (f.impl == NULL)
+      {
+        log_run.error("Illegal predicate creation performed on "
+                      "empty future inside of task %s (ID %lld).",
+                      get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_PREDICATE_FUTURE);
+      }
+      FuturePredOp *pred_op = runtime->get_available_future_pred_op(true);
+      // Hold a reference before initialization
+      Predicate result(pred_op);
+      pred_op->initialize(this, f);
+      runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate InnerContext::predicate_not(const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      NotPredOp *pred_op = runtime->get_available_not_pred_op(true);
+      // Hold a reference before initialization
+      Predicate result(pred_op);
+      pred_op->initialize(this, p);
+      runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate InnerContext::create_predicate(const PredicateLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (launcher.predicates.empty())
+      {
+        log_run.error("Illegal predicate creation performed on a "
+                      "set of empty previous predicates in task %s (ID %lld).",
+                      get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_PREDICATE_FUTURE);
+      }
+      else if (launcher.predicates.size() == 1)
+        return launcher.predicates[0];
+      if (launcher.and_op)
+      {
+        // Check for short circuit cases
+        std::vector<Predicate> actual_predicates;
+        for (std::vector<Predicate>::const_iterator it = 
+              launcher.predicates.begin(); it != 
+              launcher.predicates.end(); it++)
+        {
+          if ((*it) == Predicate::FALSE_PRED)
+            return Predicate::FALSE_PRED;
+          else if ((*it) == Predicate::TRUE_PRED)
+            continue;
+          actual_predicates.push_back(*it);
+        }
+        if (actual_predicates.empty()) // they were all true
+          return Predicate::TRUE_PRED;
+        else if (actual_predicates.size() == 1)
+          return actual_predicates[0];
+        AndPredOp *pred_op = runtime->get_available_and_pred_op(true);
+        // Hold a reference before initialization
+        Predicate result(pred_op);
+        pred_op->initialize(this, actual_predicates);
+        runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+        return result;
+      }
+      else
+      {
+        // Check for short circuit cases
+        std::vector<Predicate> actual_predicates;
+        for (std::vector<Predicate>::const_iterator it = 
+              launcher.predicates.begin(); it != 
+              launcher.predicates.end(); it++)
+        {
+          if ((*it) == Predicate::TRUE_PRED)
+            return Predicate::TRUE_PRED;
+          else if ((*it) == Predicate::FALSE_PRED)
+            continue;
+          actual_predicates.push_back(*it);
+        }
+        if (actual_predicates.empty()) // they were all false
+          return Predicate::FALSE_PRED;
+        else if (actual_predicates.size() == 1)
+          return actual_predicates[0];
+        OrPredOp *pred_op = runtime->get_available_or_pred_op(true);
+        // Hold a reference before initialization
+        Predicate result(pred_op);
+        pred_op->initialize(this, actual_predicates);
+        runtime->add_to_dependence_queue(this, executing_processor, pred_op);
+        return result;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    Future InnerContext::get_predicate_future(const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      if (p == Predicate::TRUE_PRED)
+      {
+        Future result = runtime->help_create_future();
+        const bool value = true;
+        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->complete_future();
+        return result;
+      }
+      else if (p == Predicate::FALSE_PRED)
+      {
+        Future result = runtime->help_create_future();
+        const bool value = false;
+        result.impl->set_result(&value, sizeof(value), false/*owned*/);
+        result.impl->complete_future();
+        return result;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(p.impl != NULL);
+#endif
+        return p.impl->get_future_result(); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned InnerContext::register_new_child_operation(Operation *op,
+                      const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
       // If we are performing a trace mark that the child has a trace
       if (current_trace != NULL)
-        op->set_trace(current_trace, !current_trace->is_fixed());
+        op->set_trace(current_trace, !current_trace->is_fixed(), dependences);
       unsigned result = total_children_count++;
       unsigned outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
@@ -2480,6 +4819,7 @@ namespace Legion {
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
+        outstanding_children[op->get_ctx_index()] = op;
 #endif       
         executing_children.insert(op);
       }
@@ -2593,6 +4933,7 @@ namespace Legion {
         assert(finder != complete_children.end());
         assert(executing_children.find(op) == executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
+        outstanding_children.erase(op->get_ctx_index());
 #endif
         complete_children.erase(finder);
         // See if we need to trigger the all children commited call
@@ -2620,6 +4961,9 @@ namespace Legion {
         executing_children.erase(op);
         executed_children.erase(op);
         complete_children.erase(op);
+#ifdef DEBUG_LEGION
+        outstanding_children.erase(op->get_ctx_index());
+#endif
         int outstanding_count = 
           __sync_add_and_fetch(&outstanding_children_count,-1);
 #ifdef DEBUG_LEGION
@@ -2757,6 +5101,11 @@ namespace Legion {
     void InnerContext::begin_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Beginning a trace in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
       // No need to hold the lock here, this is only ever called
       // by the one thread that is running the task.
       if (current_trace != NULL)
@@ -2769,12 +5118,14 @@ namespace Legion {
 #endif
         exit(ERROR_ILLEGAL_NESTED_TRACE);
       }
-      std::map<TraceID,LegionTrace*>::const_iterator finder = traces.find(tid);
+      std::map<TraceID,DynamicTrace*>::const_iterator finder = traces.find(tid);
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        current_trace = legion_new<LegionTrace>(tid, this);
-        traces[tid] = current_trace;
+        DynamicTrace *dynamic_trace = legion_new<DynamicTrace>(tid, this);
+        dynamic_trace->add_reference();
+        traces[tid] = dynamic_trace;
+        current_trace = dynamic_trace;
       }
       else
       {
@@ -2789,6 +5140,11 @@ namespace Legion {
     void InnerContext::end_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Ending a trace in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
       if (current_trace == NULL)
       {
         log_task.error("Unmatched end trace for ID %d in task %s "
@@ -2799,24 +5155,91 @@ namespace Legion {
 #endif
         exit(ERROR_UNMATCHED_END_TRACE);
       }
+      else if (!current_trace->is_dynamic_trace())
+      {
+        log_task.error("Illegal end trace call on a static trace in "
+                       "task %s (UID %lld)", get_task_name(), get_unique_id());
+      }
       if (current_trace->is_fixed())
       {
         // Already fixed, dump a complete trace op into the stream
         TraceCompleteOp *complete_op = runtime->get_available_trace_op(true);
         complete_op->initialize_complete(this);
-        runtime->add_to_dependence_queue(get_executing_processor(),complete_op);
+        runtime->add_to_dependence_queue(this, executing_processor, complete_op);
       }
       else
       {
         // Not fixed yet, dump a capture trace op into the stream
         TraceCaptureOp *capture_op = runtime->get_available_capture_op(true); 
         capture_op->initialize_capture(this);
-        runtime->add_to_dependence_queue(get_executing_processor(), capture_op);
+        runtime->add_to_dependence_queue(this, executing_processor, capture_op);
         // Mark that the current trace is now fixed
-        current_trace->fix_trace();
+        current_trace->as_dynamic_trace()->fix_trace();
       }
       // We no longer have a trace that we're executing 
       current_trace = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::begin_static_trace(const std::set<RegionTreeID> *trees)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Beginning a static trace in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      // No need to hold the lock here, this is only ever called
+      // by the one thread that is running the task.
+      if (current_trace != NULL)
+      {
+        log_task.error("Illegal nested static trace attempted in "
+                       "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_ILLEGAL_NESTED_TRACE);
+      }
+      // Issue the mapping fence into the analysis
+      runtime->issue_mapping_fence(this);
+      // Then we make a static trace
+      current_trace = legion_new<StaticTrace>(this, trees); 
+      current_trace->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::end_static_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Ending a static trace in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      if (current_trace == NULL)
+      {
+        log_task.error("Unmatched end static trace in task %s "
+                       "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_UNMATCHED_END_TRACE);
+      }
+      else if (current_trace->is_dynamic_trace())
+      {
+        log_task.error("Illegal end static trace call on a dynamic trace in "
+                       "task %s (UID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_UNMATCHED_END_TRACE);
+      }
+      // We're done with this trace
+      if (current_trace->remove_reference())
+        legion_delete(current_trace->as_static_trace());
+      current_trace = NULL;
+      // Now dump a mapping fence into the analysis
+      runtime->issue_mapping_fence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3278,8 +5701,8 @@ namespace Legion {
 #else
       SingleTask *single_task = static_cast<SingleTask*>(owner_task); 
 #endif
-      const LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked&
-        physical_instances = single_task->get_physical_instances();
+      const std::deque<InstanceSet> &physical_instances = 
+        single_task->get_physical_instances();
       const std::vector<bool> &no_access_regions = 
         single_task->get_no_access_regions();
 #ifdef DEBUG_LEGION
@@ -3707,8 +6130,8 @@ namespace Legion {
       }
       // Unmap any of our mapped regions before issuing any close operations
       unmap_all_regions();
-      const LegionDeque<InstanceSet,TASK_INSTANCE_REGION_ALLOC>::tracked&
-        physical_instances = single_task->get_physical_instances();
+      const std::deque<InstanceSet> &physical_instances = 
+        single_task->get_physical_instances();
       // Note that this loop doesn't handle create regions
       // we deal with that case below
       for (unsigned idx = 0; idx < physical_instances.size(); idx++)
@@ -3726,7 +6149,7 @@ namespace Legion {
           PostCloseOp *close_op = 
             runtime->get_available_post_close_op(true);
           close_op->initialize(this, idx, physical_instances[idx]);
-          runtime->add_to_dependence_queue(executing_processor, close_op);
+          runtime->add_to_dependence_queue(this, executing_processor, close_op);
         }
         else
         {
@@ -3734,7 +6157,7 @@ namespace Legion {
           VirtualCloseOp *close_op = 
             runtime->get_available_virtual_close_op(true);
           close_op->initialize(this, idx, regions[idx]);
-          runtime->add_to_dependence_queue(executing_processor, close_op);
+          runtime->add_to_dependence_queue(this, executing_processor, close_op);
         }
       }
       // See if we want to move the rest of this computation onto
@@ -3986,7 +6409,7 @@ namespace Legion {
       unregister_child_operation(child);
       // Check to see if the child is predicated
       // If it is wait for it to resolve
-      if (child->is_predicated())
+      if (child->is_predicated_op())
       {
         // See if the predicate speculates false, if so return false
         // and then we are done.
@@ -4010,7 +6433,7 @@ namespace Legion {
           MapOp *op = runtime->get_available_map_op(true);
           op->initialize(this, physical_regions[idx]);
           wait_events.insert(op->get_completion_event());
-          runtime->add_to_dependence_queue(executing_processor, op);
+          runtime->add_to_dependence_queue(this, executing_processor, op);
         }
         else if (!phy_regions_mapped[idx] && is_region_mapped(idx))
         {
@@ -4710,7 +7133,904 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned LeafContext::register_new_child_operation(Operation *op)
+    IndexSpace LeafContext::create_index_space(RegionTreeForest *forest,
+                                               size_t max_num_elmts)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index space creation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space(RegionTreeForest *forest,
+                                               const Domain &domain)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index space creation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space(RegionTreeForest *forest,
+                                               const std::set<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index space creation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_index_space(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index space deletion performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent, 
+                                            const Domain &color_space,
+                                            const PointColoring &coloring,
+                                            PartitionKind part_kind,
+                                            int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index partition creation performed in leaf task "
+                     "%s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
+                                              IndexSpace parent,
+                                              const Coloring &coloring,
+                                              bool disjoint, int part_color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index partition creation performed in leaf task "
+                     "%s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const DomainPointColoring &coloring,
+                                            PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index partition creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
+                                                 IndexSpace parent,
+                                                 const Domain &color_space,
+                                                 const DomainColoring &coloring,
+                                                 bool disjoint, int part_color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index partition creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      const Domain &color_space,
+                                      const MultiDomainPointColoring &coloring,
+                                      PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index partition creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const MultiDomainColoring &coloring,
+                                            bool disjoint, int part_color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index partition creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
+                                        IndexSpace parent,
+                LegionRuntime::Accessor::RegionAccessor<
+                 LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
+                                        int part_color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index partition creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_index_partition(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index partition deletion performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_equal_partition(RegionTreeForest *forest,
+                                             IndexSpace parent,
+                                             const Domain &color_space,
+                                             size_t granularity,
+                                             int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal equal partition creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_weighted_partition(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      const Domain &color_space,
+                                      const std::map<DomainPoint,int> &weights,
+                                      size_t granularity,
+                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal weighted partition creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_union(
+                                          RegionTreeForest *forest,
+                                          IndexSpace parent,
+                                          IndexPartition handle1,
+                                          IndexPartition handle2,
+                                          PartitionKind kind,
+                                          int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal union partition creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_intersection(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                IndexPartition handle1,
+                                                IndexPartition handle2,
+                                                PartitionKind kind,
+                                                int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal intersection partition creation performed in "
+                     "leaf task %s (ID %lld)", get_task_name(),get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_difference(
+                                                      RegionTreeForest *forest,
+                                                      IndexSpace parent,
+                                                      IndexPartition handle1,
+                                                      IndexPartition handle2,
+                                                      PartitionKind kind,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal difference partition creation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_cross_product_partition(RegionTreeForest *forest,
+                                                     IndexPartition handle1,
+                                                     IndexPartition handle2,
+                                  std::map<DomainPoint,IndexPartition> &handles,
+                                                     PartitionKind kind,
+                                                     int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create cross product partitions performed in "
+                     "leaf task %s (ID %lld)", get_task_name(),get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_field(
+                                                RegionTreeForest *forest,
+                                                LogicalRegion handle,
+                                                LogicalRegion parent_priv,
+                                                FieldID fid,
+                                                const Domain &color_space,
+                                                int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal partition by field performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_image(
+                                              RegionTreeForest *forest,
+                                              IndexSpace handle,
+                                              LogicalPartition projection,
+                                              LogicalRegion parent,
+                                              FieldID fid,
+                                              const Domain &color_space,
+                                              PartitionKind part_kind,
+                                              int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal partition by image performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_preimage(
+                                                RegionTreeForest *forest,
+                                                IndexPartition projection,
+                                                LogicalRegion handle,
+                                                LogicalRegion parent,
+                                                FieldID fid,
+                                                const Domain &color_space,
+                                                PartitionKind part_kind,
+                                                int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal partition by preimage performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_pending_partition(
+                                              RegionTreeForest *forest,
+                                              IndexSpace parent,
+                                              const Domain &color_space,
+                                              PartitionKind part_kind,
+                                              int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create pending partition performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space_union(RegionTreeForest *forest,
+                                                     IndexPartition parent,
+                                                     const DomainPoint &color,
+                                        const std::vector<IndexSpace> &handles) 
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create index space union performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space_union(RegionTreeForest *forest,
+                                                     IndexPartition parent,
+                                                     const DomainPoint &color,
+                                                     IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create index space union performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space_intersection(
+                                                     RegionTreeForest *forest,
+                                                     IndexPartition parent,
+                                                     const DomainPoint &color,
+                                        const std::vector<IndexSpace> &handles) 
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create index space intersection performed in "
+                     "leaf task %s (ID %lld)", get_task_name(),get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space_intersection(
+                                                     RegionTreeForest *forest,
+                                                     IndexPartition parent,
+                                                     const DomainPoint &color,
+                                                     IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create index space intersection performed in "
+                     "leaf task %s (ID %lld)", get_task_name(),get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::create_index_space_difference(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition parent,
+                                                  const DomainPoint &color,
+                                                  IndexSpace initial,
+                                          const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create index space difference performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace LeafContext::create_field_space(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create field space performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return FieldSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_field_space(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal destroy field space performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID LeafContext::allocate_field(RegionTreeForest *forest,
+                                        FieldSpace space, size_t field_size,
+                                        FieldID fid, bool local,
+                                        CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal non-local field allocation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::free_field(FieldSpace space, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal field destruction performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::allocate_fields(RegionTreeForest *forest,
+                                      FieldSpace space,
+                                      const std::vector<size_t> &sizes,
+                                      std::vector<FieldID> &resuling_fields,
+                                      bool local, CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal non-local field allocation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::free_fields(FieldSpace space, 
+                                  const std::set<FieldID> &to_free)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal field destruction performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion LeafContext::create_logical_region(RegionTreeForest *forest,
+                                                     IndexSpace index_space,
+                                                     FieldSpace field_space)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal region creation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_logical_region(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal region destruction performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::destroy_logical_partition(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal partition destruction performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAllocator LeafContext::create_index_allocator(RegionTreeForest *forest,
+                                                       IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create index allocation requested in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexAllocator(handle, forest->get_index_space_allocator(handle));
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator LeafContext::create_field_allocator(
+                                   Legion::Runtime *external, FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create field allocation requested in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return FieldAllocator(handle, this, external);
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::execute_task(const TaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal execute task call performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap LeafContext::execute_index_space(
+                                              const IndexTaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal execute index space call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::execute_index_space(const IndexTaskLauncher &launcher,
+                                            ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal execute index space call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion LeafContext::map_region(const InlineLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal map_region operation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return PhysicalRegion();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::remap_region(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal remap operation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::unmap_region(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal unmap operation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::fill_fields(const FillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal fill operation call performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::fill_fields(const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index fill operation call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::issue_copy(const CopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal copy operation call performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::issue_copy(const IndexCopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal index copy operation call performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::issue_acquire(const AcquireLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal acquire operation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::issue_release(const ReleaseLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal release operation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion LeafContext::attach_resource(const AttachLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal attach resource operation performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return PhysicalRegion();
+    }
+    
+    //--------------------------------------------------------------------------
+    void LeafContext::detach_resource(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal detach resource operation performed in leaf "
+                      "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap LeafContext::execute_must_epoch(const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal Legion execute must epoch call in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return FutureMap();
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::issue_timing_measurement(const TimingLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal timing measurement operation in leaf task %s"
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::issue_mapping_fence(void)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal legion mapping fence call in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::issue_execution_fence(void)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal Legion execution fence call in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::complete_frame(void)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal Legion complete frame call in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate LeafContext::create_predicate(const Future &f)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal predicate creation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return Predicate();
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate LeafContext::predicate_not(const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal NOT predicate creation in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return Predicate();
+    }
+    
+    //--------------------------------------------------------------------------
+    Predicate LeafContext::create_predicate(const PredicateLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal predicate creation performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return Predicate();
+    }
+
+    //--------------------------------------------------------------------------
+    Future LeafContext::get_predicate_future(const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal get predicate future performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned LeafContext::register_new_child_operation(Operation *op,
+                    const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -4786,14 +8106,48 @@ namespace Legion {
     void LeafContext::begin_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
+      log_task.error("Illegal Legion begin trace call in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
       assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::end_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
+      log_task.error("Illegal Legion end trace call in leaf task %s (ID %lld)",
+                     get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
       assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::begin_static_trace(const std::set<RegionTreeID> *managed)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal Legion begin static trace call in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::end_static_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal Legion end static trace call in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
     }
 
     //--------------------------------------------------------------------------
@@ -5242,10 +8596,597 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned InlineContext::register_new_child_operation(Operation *op)
+    IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
+                                                 size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
-      return enclosing->register_new_child_operation(op);
+      return enclosing->create_index_space(forest, max_num_elmts);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
+                                                 const Domain &domain)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space(forest, domain);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
+                                                const std::set<Domain> &domains)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space(forest, domains);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::destroy_index_space(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->destroy_index_space(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_index_partition(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent, 
+                                            const Domain &color_space,
+                                            const PointColoring &coloring,
+                                            PartitionKind part_kind,
+                                            int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_partition(forest, parent, color_space,
+                                     coloring, part_kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_index_partition(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Coloring &coloring,
+                                            bool disjoint, int part_color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_partition(forest, parent, coloring,
+                                               disjoint, part_color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_index_partition(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const DomainPointColoring &coloring,
+                                            PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_partition(forest, parent, color_space,
+                                               coloring, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_index_partition(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            const Domain &color_space,
+                                            const DomainColoring &coloring,
+                                            bool disjoint, int part_color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_partition(forest, parent, color_space,
+                                               coloring, disjoint, part_color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_index_partition(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      const Domain &color_space,
+                                      const MultiDomainPointColoring &coloring,
+                                      PartitionKind part_kind, int color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_partition(forest, parent, color_space,
+                                               coloring, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_index_partition(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      const Domain &color_space,
+                                      const MultiDomainColoring &coloring,
+                                      bool disjoint, int part_color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_partition(forest, parent, color_space,
+                                               coloring, disjoint, part_color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_index_partition(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                LegionRuntime::Accessor::RegionAccessor<
+                 LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
+                                      int part_color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_partition(forest, parent, 
+                                               field_accessor, part_color);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::destroy_index_partition(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->destroy_index_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_equal_partition(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                const Domain &color_space,
+                                                size_t granularity,
+                                                int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_equal_partition(forest, parent, color_space,
+                                               granularity, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_weighted_partition(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      const Domain &color_space,
+                                      const std::map<DomainPoint,int> &weights,
+                                      size_t granularity,
+                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_weighted_partition(forest, parent, color_space,
+                                        weights, granularity, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_union(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      IndexPartition handle1,
+                                      IndexPartition handle2,
+                                      PartitionKind kind,
+                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_union(forest, parent, handle1,
+                                          handle2, kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_intersection(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      IndexPartition handle1,
+                                      IndexPartition handle2,
+                                      PartitionKind kind,
+                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_intersection(forest, parent,
+                                handle1, handle2, kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_difference(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      IndexPartition handle1,
+                                      IndexPartition handle2,
+                                      PartitionKind kind,
+                                      int color, bool allocable)   
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_difference(forest, parent,
+                                handle1, handle2, kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::create_cross_product_partition(RegionTreeForest *forest,
+                                                       IndexPartition handle1,
+                                                       IndexPartition handle2,
+                                  std::map<DomainPoint,IndexPartition> &handles,
+                                                       PartitionKind kind,
+                                                       int color,bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_cross_product_partition(forest, handle1, handle2,
+                                               handles, kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_field(
+                                                      RegionTreeForest *forest,
+                                                      LogicalRegion handle,
+                                                      LogicalRegion parent_priv,
+                                                      FieldID fid,
+                                                      const Domain &color_space,
+                                                      int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_field(forest, handle, parent_priv,
+                                          fid, color_space, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_image(
+                                                    RegionTreeForest *forest,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    const Domain &color_space,
+                                                    PartitionKind part_kind,
+                                                    int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_image(forest, handle, projection,
+                      parent, fid, color_space, part_kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_preimage(
+                                                    RegionTreeForest *forest,
+                                                    IndexPartition projection,
+                                                    LogicalRegion handle,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    const Domain &color_space,
+                                                    PartitionKind part_kind,
+                                                    int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_preimage(forest, projection, handle,
+                         parent, fid, color_space, part_kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_pending_partition(
+                                                    RegionTreeForest *forest,
+                                                    IndexSpace parent,
+                                                    const Domain &color_space,
+                                                    PartitionKind part_kind,
+                                                    int color, bool allocable)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_pending_partition(forest, parent, color_space,
+                                                 part_kind, color, allocable);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space_union(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition parent,
+                                                  const DomainPoint &color,
+                                        const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space_union(forest, parent, color,handles);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space_union(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition parent,
+                                                  const DomainPoint &color,
+                                                  IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space_union(forest, parent, color, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space_intersection(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition parent,
+                                                  const DomainPoint &color,
+                                        const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space_intersection(forest, parent, 
+                                                        color, handles);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space_intersection(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition parent,
+                                                  const DomainPoint &color,
+                                                  IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space_intersection(forest, parent, 
+                                                        color, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::create_index_space_difference(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition parent,
+                                                  const DomainPoint &color,
+                                                  IndexSpace initial,
+                                        const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_space_difference(forest, parent, color,
+                                                      initial, handles);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace InlineContext::create_field_space(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_field_space(forest);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::destroy_field_space(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->destroy_field_space(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID InlineContext::allocate_field(RegionTreeForest *forest,
+                                          FieldSpace space, size_t field_size,
+                                          FieldID fid, bool local,
+                                          CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->allocate_field(forest, space, field_size, 
+                                       fid, local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::free_field(FieldSpace space, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->free_field(space, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::allocate_fields(RegionTreeForest *forest,
+                                        FieldSpace space,
+                                        const std::vector<size_t> &sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        bool local, CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->allocate_fields(forest, space, sizes, resulting_fields,
+                                 local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::free_fields(FieldSpace space, 
+                                    const std::set<FieldID> &to_free)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->free_fields(space, to_free);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion InlineContext::create_logical_region(RegionTreeForest *forest,
+                                                       IndexSpace index_space,
+                                                       FieldSpace field_space)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_logical_region(forest, index_space, field_space);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::destroy_logical_region(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->destroy_logical_region(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::destroy_logical_partition(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->destroy_logical_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAllocator InlineContext::create_index_allocator(
+                                    RegionTreeForest *forest, IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_index_allocator(forest, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator InlineContext::create_field_allocator(
+                                   Legion::Runtime *external, FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_field_allocator(external, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InlineContext::execute_task(const TaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->execute_task(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InlineContext::execute_index_space(
+                                              const IndexTaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->execute_index_space(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InlineContext::execute_index_space(const IndexTaskLauncher &launcher,
+                                              ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->execute_index_space(launcher, redop);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion InlineContext::map_region(const InlineLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->map_region(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::remap_region(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->remap_region(region);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::unmap_region(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->unmap_region(region);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::fill_fields(const FillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->fill_fields(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::fill_fields(const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->fill_fields(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::issue_copy(const CopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->issue_copy(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::issue_copy(const IndexCopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->issue_copy(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::issue_acquire(const AcquireLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->issue_acquire(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::issue_release(const ReleaseLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->issue_release(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion InlineContext::attach_resource(
+                                                 const AttachLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->attach_resource(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::detach_resource(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->detach_resource(region);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap InlineContext::execute_must_epoch(
+                                              const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->execute_must_epoch(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InlineContext::issue_timing_measurement(
+                                                 const TimingLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->issue_timing_measurement(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::issue_mapping_fence(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->issue_mapping_fence();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::issue_execution_fence(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->issue_execution_fence();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::complete_frame(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->complete_frame();
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate InlineContext::create_predicate(const Future &f)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_predicate(f);
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate InlineContext::predicate_not(const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->predicate_not(p);
+    }
+
+    //--------------------------------------------------------------------------
+    Predicate InlineContext::create_predicate(const PredicateLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_predicate(launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InlineContext::get_predicate_future(const Predicate &p)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_predicate_future(p);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned InlineContext::register_new_child_operation(Operation *op,
+                      const std::vector<StaticDependence> *dependences)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->register_new_child_operation(op, dependences);
     }
 
     //--------------------------------------------------------------------------
@@ -5324,6 +9265,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->end_trace(tid);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::begin_static_trace(const std::set<RegionTreeID> *trees)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->begin_static_trace(trees);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::end_static_trace(void)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->end_static_trace();
     }
 
     //--------------------------------------------------------------------------

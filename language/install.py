@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2016 Stanford University
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -268,7 +268,7 @@ def driver():
         default = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1',
         help = 'Build Legion with CUDA.')
     parser.add_argument(
-        '--hdf', dest = 'hdf', action = 'store_true', required = False,
+        '--hdf5', '--hdf', dest = 'hdf', action = 'store_true', required = False,
         default = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1',
         help = 'Build Legion with HDF.')
     parser.add_argument(

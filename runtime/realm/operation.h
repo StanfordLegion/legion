@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,6 +53,10 @@ namespace Realm {
     // returns true if its able to perform the cancellation (or if nothing can be done)
     // returns false if a subclass wants to try some other means to cancel an operation
     virtual bool attempt_cancellation(int error_code, const void *reason_data, size_t reason_size);
+
+    // a common reason for cancellation is a poisoned precondition - this helper takes care
+    //  of recording the error code and marking the operation as (unsuccessfully) finished
+    virtual void handle_poisoned_precondition(Event pre);
 
     bool cancellation_requested(void) const;
 

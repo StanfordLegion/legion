@@ -1,13 +1,43 @@
 var constants = {
-  margin_left: 300,
+  margin_left: 310,
   margin_right: 50,
   margin_bottom: 50,
+  margin_top: 50,
   min_feature_width: 3,
   min_gap_width: 1,
+  stats_height: 100,
+  stats_levels: 4,
+  elem_separation: 2,
+  line_colors: ["limegreen", "crimson", "goldenrod", "sienna", "orangered",
+                "palevioletred", "olivedrab", "cornflowerblue"]
 }
+
+// Contains the children for each stats file
+var stats_files = {};
 
 var state = {};
 var mouseX = 0;
+var statsline = d3.svg.line()
+    .interpolate("step-after")
+    .x(function(d) { return state.x(+d.time); })
+    .y(function(d) { return state.y(+d.count); });
+var timeBisector = d3.bisector(function(d) { return d.time; }).left;
+// const num_colors = 20;
+// var color = d3.scale.linear()
+//   .domain([0, num_colors])
+//   .range(["green", "blue", "red", "yellow"]);
+
+String.prototype.hashCode = function() {
+  var hash = 0;
+  if (this.length == 0) return hash;
+  for (i = 0; i < this.length; i++) {
+    var c = this.charCodeAt(i);
+    var b = this.charCodeAt(c % this.length);
+    hash = ((hash<<5)-hash)^c^b;
+    hash = hash & hash; 
+  }
+  return Math.abs(hash);
+}
 
 function parseURLParameters() {
   var match,
@@ -19,6 +49,9 @@ function parseURLParameters() {
   var urlParams = {};
   while (match = search.exec(query))
     urlParams[decode(match[1])] = decode(match[2]);
+
+  if ("collapseAll" in urlParams)
+    state.collapseAll = (urlParams["collapseAll"].toLowerCase() === "true");
 
   if ("resolution" in urlParams)
     state.resolution = Math.max(1, parseFloat(urlParams["resolution"]));
@@ -72,8 +105,7 @@ function mouseMoveHandlerWhenDown() {
   if (p[0] >= mouseX) {
     select_block.attr("x", mouseX);
     select_text.attr("x", mouseX + (p[0] - mouseX) / 2);
-  }
-  else {
+  } else {
     select_block.attr("x", p[0]);
     select_text.attr("x", p[0] + (mouseX - p[0]) / 2);
   }
@@ -144,8 +176,80 @@ function mouseDownHandler() {
   $(document).off("keydown");
 }
 
+function getLineColor(elem) {
+  var kind = elem.text.split(" ")[2];
+  const colorMap = {
+    "(CPU)": "steelblue",
+    "(GPU)": "olivedrab",
+    "(Utility)": "crimson",
+    "(I/O)": "orangered"
+  };
+  return colorMap[kind];
+}
+
+
+
+function drawStats() {
+  // TODO: Add to state
+  var windowStart = $("#timeline").scrollLeft();
+  var windowEnd = windowStart + $("#timeline").width();
+  var start_time = convertToTime(state, windowStart);
+  var end_time = convertToTime(state, windowEnd);
+  var filteredStatsData = [];
+  for (var i = 0; i < state.flattenedLayoutData.length; i++) {
+    var elem = state.flattenedLayoutData[i];
+    if (elem.type == "stats" && elem.enabled && elem.loaded && elem.visible) {
+      filteredStatsData.push(filterStatsData(elem));
+    }
+  }
+
+  state.x = d3.scale.linear().range([0, convertToPos(state, end_time)]);
+  state.x.domain([0, end_time]);
+  state.timelineSvg.selectAll("path").remove();
+  var paths = state.timelineSvg.selectAll("path")
+    .data(filteredStatsData);
+
+  var focus = state.timelineSvg.select("g.focus");
+  paths.enter().append("path")
+    .attr("class", "line")
+    .attr("d", function (d) { return statsline(d.data); })
+    .attr("base_y", lineLevelCalculator)
+    .attr("transform",
+      function(d) {
+        var y = lineLevelCalculator(d);
+        return "translate(0," + y + ")"
+    })
+    .attr("stroke", getLineColor)
+    .on("mouseover", function() { 
+        var focus = state.timelineSvg.append("g")
+          .attr("class", "focus")
+          .style("display", null);
+
+        var text = focus.append("text")
+          .attr("x", 7)
+          .attr("y", -4.5)
+          .attr("class", "desc")
+          .attr("dy", ".35em");
+
+        focus.append("circle")
+        .attr("fill", "none")
+        .attr("stroke", "black")
+        .attr("r", 4.5);
+
+        var rect = focus.insert("rect", "text")
+            .style("fill", "#222")
+            .style("opacity", "0.7");
+    })
+    .on("mouseout", function() {
+      state.timelineSvg.select("g.focus").remove();
+    })
+    .on("mousemove", mousemove); 
+
+  var paths = state.timelineSvg.selectAll("path.line");
+}
+
+
 function mouseUpHandler() {
-  console.log("rangeZoom: " + state.rangeZoom);
   var p = d3.mouse(this);
   var select_block = state.timelineSvg.select("rect.select-block");
   var select_text = state.timelineSvg.select("text.select-block");
@@ -155,11 +259,10 @@ function mouseUpHandler() {
   if (state.rangeZoom && selectWidth > 10) {
     var x = select_block.attr("x");
     state.zoomHistory.push({zoom: prevZoom, start: $("#timeline").scrollLeft()});
-    showLoaderIcon();
     adjustZoom(svgWidth / selectWidth, false);
     $("#timeline").scrollLeft(x / prevZoom * state.zoom);
-    hideLoaderIcon();
   }
+
   state.timelineSvg.selectAll("rect.select-block").remove();
   state.timelineSvg.selectAll("text.select-block").remove();
   mouseX = 0;
@@ -188,11 +291,13 @@ function drawLoaderIcon() {
   loaderGroup.append("path")
     .attr({
       opacity: 0.2,
+      stroke: "steelblue",
       fill: "#000",
       d: "M20.201,5.169c-8.254,0-14.946,6.692-14.946,14.946c0,8.255,6.692,14.946,14.946,14.946s14.946-6.691,14.946-14.946C35.146,11.861,28.455,5.169,20.201,5.169z M20.201,31.749c-6.425,0-11.634-5.208-11.634-11.634c0-6.425,5.209-11.634,11.634-11.634c6.425,0,11.633,5.209,11.633,11.634C31.834,26.541,26.626,31.749,20.201,31.749z"
     });
   var path = loaderGroup.append("path")
     .attr({
+      stroke: "steelblue",
       fill: "#000",
       d: "M26.013,10.047l1.654-2.866c-2.198-1.272-4.743-2.012-7.466-2.012h0v3.312h0C22.32,8.481,24.301,9.057,26.013,10.047z"
     });
@@ -209,11 +314,15 @@ function drawLoaderIcon() {
 }
 
 function showLoaderIcon() {
+  state.numLoading++;
   state.loaderSvg.select("g").attr("visibility", "visible");
 }
 
 function hideLoaderIcon() {
-  state.loaderSvg.select("g").attr("visibility", "hidden");
+  state.numLoading--;
+  if (state.numLoading == 0) {
+    state.loaderSvg.select("g").attr("visibility", "hidden");
+  }
 }
 
 function getMouseOver() {
@@ -238,20 +347,20 @@ function getMouseOver() {
 
     var text = descView.append("text")
       .attr("x", x)
-      .attr("y", state.levelMap[d.level].y * state.thickness - 5)
+      .attr("y", d.level * state.thickness - 5)
       .attr("text-anchor", anchor)
       .attr("class", "desc")
       .text(unescape(escape(title)));
 
-		var bbox = text.node().getBBox();
-		var padding = 2;
-		var rect = descView.insert("rect", "text")
-				.attr("x", bbox.x - padding)
-				.attr("y", bbox.y - padding)
-				.attr("width", bbox.width + (padding*2))
-				.attr("height", bbox.height + (padding*2))
-				.style("fill", "#222")
-				.style("opacity", "0.7");
+    var bbox = text.node().getBBox();
+    var padding = 2;
+    var rect = descView.insert("rect", "text")
+        .attr("x", bbox.x - padding)
+        .attr("y", bbox.y - padding)
+        .attr("width", bbox.width + (padding*2))
+        .attr("height", bbox.height + (padding*2))
+        .style("fill", "#222")
+        .style("opacity", "0.7");
   };
 }
 
@@ -260,20 +369,153 @@ var currentPos;
 var nextPos;
 var searchRegex = null;
 
+function flattenLayout() {
+  state.flattenedLayoutData = [];
+
+  function appendElem(elem) {
+    state.flattenedLayoutData.push(elem);
+    elem.children.forEach(appendElem);
+  }
+  state.layoutData.forEach(appendElem);
+}
+
+function getProcessors(stats_name) {
+  // returns processors for a given node
+  var stats_regex = /(node )?(\d+) \((\w+)\)/;
+  var stats_match = stats_regex.exec(stats_name);
+  var matched_procs = [];
+
+  if (stats_match) {
+    var stats_node_id = parseInt(stats_match[2], 10);
+    var stats_proc_type = stats_match[3];
+    state.processors.forEach(function(proc) {
+      var proc_regex = /(\w+) Processor 0x1d([a-fA-f0-9]{4})/;
+      var proc_match = proc_regex.exec(proc.processor);
+      if (proc_match) {
+        var proc_type = proc_match[1];
+        var proc_node_id = parseInt(proc_match[2], 16);
+        if ((proc_node_id == stats_node_id)   &&
+            (proc_type    == stats_proc_type)) {
+          matched_procs.push(proc);
+        }
+      }
+    });
+  }
+  return matched_procs;
+}
+
+
+// This function gets a particular timelineElement. It will also handle
+// creating the children for expand commands
+function getElement(depth, text, type, num_levels, loader, 
+                    tsv, children, enabled, visible) {
+  // Create child elements. Child elements will be enabled, but they will be
+  // invisible and unloaded. They will be loaded in when expanded
+  var child_elements = [];
+  if (children != undefined) {
+    children.forEach(function(child) {
+      var stats_name = "node " + child;
+      var child_element = getElement(depth + 1, stats_name, "stats", 
+                                     num_levels, loader,
+                                     "tsv/" + child + "_stats.tsv",
+                                     stats_files[child], true, false);
+      child_elements.push(child_element);
+    });
+  }
+
+  // Stats graphs will have processors as their children as well.
+  if (type == "stats") {
+    // get the children for the stats view 
+    var proc_children = getProcessors(text); 
+    proc_children.forEach(function(proc_child) {
+      var child_element = getElement(depth + 1, proc_child.processor, "proc", 
+                                     proc_child.height, load_proc_timeline,
+                                     proc_child.tsv, undefined, true, false);
+      child_elements.push(child_element);
+    });
+  }
+
+  // Now that we've gotten the parts, let's build the element and return it
+  var element = {
+    depth: depth,
+    enabled: enabled,
+    expanded: false,
+    loaded: false,
+    loader: loader,
+    num_levels: num_levels,
+    children: child_elements,
+    text: text,
+    type: type,
+    tsv: tsv,
+    visible: visible
+  };
+  return element;
+}
+
+
+function calculateLayout() {
+
+  // First element in the layout will be the all_stats. All first-level
+  // elements will start off not enabled, and will be uncollapsed later
+  // programmatically
+  var num_nodes = Object.keys(stats_files).length;
+  if (num_nodes > 1) {
+    var proc_kinds = stats_files["all"];
+    proc_kinds.forEach(function(kind) {
+      var stats_name = "node " + kind;
+      var kind_element = getElement(0, stats_name, "stats", 
+                                     constants.stats_levels, load_stats,
+                                     "tsv/" + kind + "_stats.tsv",
+                                     stats_files[kind], false, true);
+      state.layoutData.push(kind_element);
+    });
+  }
+  
+  var seen_nodes = {};
+  state.processors.forEach(function(proc) {
+    // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
+    var proc_regex = /Processor 0x1d([a-fA-f0-9]{4})/;
+    var proc_match = proc_regex.exec(proc.processor);
+    // if there's only one node, then per-node graphs are redundant
+    if (proc_match) {
+      var node_id = parseInt(proc_match[1], 16);
+      if (!(node_id in seen_nodes)) {
+        seen_nodes[node_id] = 1;
+        var proc_kinds = stats_files[node_id];
+
+        proc_kinds.forEach(function(kind) {
+          var stats_name = "node " + kind;
+          var kind_element = getElement(0, stats_name, "stats", 
+                                         constants.stats_levels, load_stats,
+                                         "tsv/" + kind + "_stats.tsv",
+                                         stats_files[kind], false, true);
+          state.layoutData.push(kind_element);
+        });
+      }
+    } else {
+      state.layoutData.push(getElement(0, proc.processor, "proc", 
+                                       proc.height, load_proc_timeline,
+                                       proc.tsv, undefined, false, true));
+    }
+  });
+}
+
 function drawTimeline() {
+  showLoaderIcon()
+
   updateURL(state.zoom, state.scale);
   var timelineGroup = state.timelineSvg.select("g#timeline");
   timelineGroup.selectAll("rect").remove();
   var timeline = timelineGroup.selectAll("rect")
-    .data(state.dataToDraw, function(d) { return d.id; });
+    .data(state.dataToDraw, function(d) { return d.proc + "-" + d.id; });
   var mouseOver = getMouseOver();
 
   timeline.enter().append("rect");
 
   timeline
-    .attr("id", function(d) { return "block-" + d.id; })
+    .attr("id", function(d) { return "block-" + d.proc + "-" + d.id; })
     .attr("x", function(d) { return convertToPos(state, d.start); })
-    .attr("y", function(d) { return state.levelMap[d.level].y * state.thickness; })
+    .attr("y", timelineLevelCalculator)
     .style("fill", function(d) {
       if (!state.searchEnabled ||
           searchRegex[currentPos].exec(d.title) == null)
@@ -287,112 +529,242 @@ function drawTimeline() {
     .attr("stroke-width", "0.5")
     .attr("height", state.thickness)
     .style("opacity", function(d) {
-      if (!state.searchEnabled ||
-          searchRegex[currentPos].exec(d.title) != null)
+      if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) != null) {
         return d.opacity;
+      }
       else return 0.05;
     })
     .on("mouseout", function(d, i) { 
       state.timelineSvg.selectAll("#desc").remove();
     });
 
+  drawStats();
   timeline.on("mouseover", mouseOver);
   timeline.exit().remove();
+  hideLoaderIcon();
 }
 
 function redraw() {
-  filterAndMergeBlocks(state);
-  drawTimeline();
-
-  // TODO: put these in state
-  var processorSvg = d3.select("#processors").select("svg");
-  var names = processorSvg.selectAll("text");
-
-  names.
-    attr("y", function(d) { 
-      return state.levelMap[d.level].y * state.thickness + state.thickness;
-    })
-    .style("opacity", function(d) {
-      return (state.levelMap[d.level].enabled) ? 1 : 0.1
-    });
-
-  var timelineGroup = state.timelineSvg.select("g#timeline");
-  var lines = state.timelineSvg.select("g#lines").selectAll("line");
-
-  var thickness = state.thickness;
-  lines
-    .attr("y1", function(d) { return state.levelMap[d.level].y * thickness + thickness; })
-    .attr("y2", function(d) { return state.levelMap[d.level].y * thickness + thickness; })
-    .style("opacity", function(d) {
-      return (state.levelMap[d.level].enabled) ? 1 : 0.1
-    });
+  if (state.numLoading == 0) {
+    calculateBases();
+    filterAndMergeBlocks(state);
+    constants.max_level = calculateVisibileLevels();
+    recalculateHeight();
+    drawTimeline();
+    drawLayout();
+  }
 }
 
-// This handler is called when you collapse/uncollapse a row in the
-// timeline
-function collapseHandler(d) {
-  if (d.enabled) {
-    for (var i = d.levelStart; i <= d.level; ++i) {
-      state.levelMap[i].enabled = false;
+function calculateVisibileLevels() {
+  var levels = 0;
+  state.flattenedLayoutData.forEach(function(elem) {
+    if (elem.visible) {
+      if (elem.enabled) {
+        levels += elem.num_levels;
+      }
+      levels += constants.elem_separation;
     }
-    for (var i = d.levelStart; i < state.levelMap.length; ++i) {
-      state.levelMap[i].y -= d.height;
+  });
+  return levels;
+}
+
+function calculateBases() {
+  var base = 0;
+  state.flattenedLayoutData.forEach(function(elem) {
+    elem.base = base;
+    if (elem.visible) {
+      if (elem.enabled) {
+        base += elem.num_levels;
+      }
+      base += constants.elem_separation;
     }
+  });
+}
+
+function expandHandler(elem, index) {
+  elem.expanded = !elem.expanded;
+
+  if (elem.expanded) {
+    function expandChild(child) {
+      child.visible = true;
+      //child.enabled = true;
+      if(!child.loaded) {
+        showLoaderIcon();
+        child.loader(child); // will redraw the timeline once loaded
+      } else if (child.expanded) {
+        child.children.forEach(expandChild);
+      }
+    }
+    elem.children.forEach(expandChild);
   } else {
-    for (var i = d.levelStart; i <= d.level; ++i) {
-      state.levelMap[i].enabled = true;
+    function collapseChildren(child) {
+      child.visible = false;
+      // child.expanded = false;
+      // child.enabled = false;
+      child.children.forEach(collapseChildren);
     }
-    for (var i = d.levelStart; i < state.levelMap.length; ++i) {
-      state.levelMap[i].y += d.height;
-    }
+    elem.children.forEach(collapseChildren);
   }
-  d.enabled = !d.enabled;
-  // redraw the timeline
   redraw();
 }
 
-function drawProcessors() {
-  var data = state.processors;
+
+
+// This handler is called when you collapse/uncollapse a row in the
+// timeline
+function collapseHandler(d, index) {
+  d.enabled = !d.enabled;
+
+  if (!d.loaded) {
+    // should always be expanding here
+    showLoaderIcon();
+    var elem = state.flattenedLayoutData[index];
+    elem.loader(elem); // will redraw the timeline once loaded
+  } else {
+    // if collapsing, unexpand
+    // if (!d.enabled && d.expanded) {
+    //   expandHandler(d, index);
+    // } else {
+      // redraw the timeline
+      redraw();
+    //}
+  }
+}
+
+function lineLevelCalculator(timelineElement) {
+  var level = timelineElement.base + 1;
+  if (timelineElement.enabled) {
+    level += timelineElement.num_levels;
+  }
+  return constants.margin_top + level * state.thickness;
+};
+
+function statsLevelCalculator(timelineElement) {
+  var level = timelineElement.base;
+  if (timelineElement.enabled) {
+    level += timelineElement.num_levels;
+  }
+  return constants.margin_top + level * state.thickness;
+};
+
+
+function timelineLevelCalculator(timelineEvent) {  
+  return constants.margin_top + timelineEvent.level * state.thickness;
+};
+
+function drawLayout() {
+  
+  d3.select("#processors").select("svg").remove();
+  state.timelineSvg.select("g#lines").remove();
+
+  var data = state.flattenedLayoutData;
   var svg = d3.select("#processors").append("svg")
     .attr("width", constants.margin_left)
     .attr("height", state.height);
 
-  var names = svg.selectAll(".processors")
+  var namesGroup = svg.selectAll(".processors")
     .data(data)
-    .enter().append("text");
+    .enter().append("g");
+
+  var names = namesGroup.append("text");
 
   var thickness = state.thickness;
+  var xCalculator = function(d) { return (d.depth + 1) * 15; };
+
   names.attr("text-anchor", "start")
     .attr("class", "processor")
-    .attr("x", 0)
-    .attr("y", function(d) { 
-      return state.levelMap[d.level].y * thickness + thickness;
+    .attr("x", xCalculator)
+    .attr("y", lineLevelCalculator)
+    .attr("visibility", function(elem) {
+      return (elem.visible) ? "visible" : "hidden"  
     })
-    .style("fill", "#000000");
+    .style("fill", "#000000")
+    .style("opacity", function(proc) {
+      return (proc.enabled) ? 1 : 0.5;
+    });
 
   names.each(function(d) {
-    var text = d3.select(this);
-    var tokens = d.processor.split(" to ");
+    var elem = d3.select(this);
+    var text = d.text;
+    var tokens = d.text.split(" to ");
     if (tokens.length == 1)
-      text.append("tspan").text(d.processor);
+      elem.append("tspan").text(d.text);
     else {
       var source = tokens[0];
       var target = tokens[1].replace(" Channel", "");
-      text.append("tspan").text(source)
-        .attr({x : 0, dy : -10});
-      text.append("tspan").text("==> " + target)
-        .attr({x : 0, dy : 10});
+      elem.append("tspan").text(source)
+        .attr("x", xCalculator)
+        .attr("dy", -10);
+      elem.append("tspan").text("==> " + target)
+        .attr("x", xCalculator)
+        .attr("dy", 10);
     }
-    text.on({
-      "mouseover": function(d) {
-        d3.select(this).style("cursor", "pointer")
-      },
-      "mouseout": function(d) {
-        d3.select(this).style("cursor", "default")
-      },
-      "click": collapseHandler
-    });
   });
+  names.on({
+    "mouseover": function(d) {
+      d3.select(this).style("cursor", "pointer")
+    },
+    "mouseout": function(d) {
+      d3.select(this).style("cursor", "default")
+    },
+    "click": collapseHandler
+  });
+
+  var expandableNodes = namesGroup.filter(function(elem) {
+    return elem.children.length > 0;
+  });
+
+  var expand_group = expandableNodes.append("g");
+
+  var expand_clickable = expand_group.append("circle")
+                          .attr("fill", "transparent")
+                          .attr("stroke", "transparent")
+                          .attr("r", 8);
+  var expand_icons = expand_group.append("path");
+  var arc = d3.svg.symbol().type('triangle-down')
+            .size(12);
+
+
+    //.attr("transform", function(elem) {
+    //  var x = constants.margin_left - 10;
+    //  var y = lineLevelCalculator(elem);
+    //  return "translate(" + x + ","  + y + ")";
+    //})
+  expand_icons.attr("class", "processor")
+    .attr("d", arc)
+    .attr("visibility", function(elem) {
+      return (elem.visible) ? "visible" : "hidden"  
+    })
+    .style("fill", "#000000")
+    .style("stroke", "#000000")
+    .style("opacity", function(proc) {
+      return (proc.enabled) ? 1 : 0.5;
+    });
+
+  expand_group.each(function(elem) {
+    var path = d3.select(this);
+    var x = elem.depth * 15 + 5;
+    var y = lineLevelCalculator(elem) - 3;
+
+    if (elem.expanded) {
+      path.attr("transform", "translate(" + x + ", " + y + ") rotate(0)");
+    } else {
+      path.attr("transform", "translate(" + x + ", " + y + ") rotate(30)");
+    }
+ 
+  });
+
+
+  expand_group.on({
+    "mouseover": function(d) {
+      d3.select(this).style("cursor", "pointer")
+    },
+    "mouseout": function(d) {
+      d3.select(this).style("cursor", "default")
+    },
+    "click": expandHandler
+  });
+
 
   var lines = state.timelineSvg
     .append("g")
@@ -403,11 +775,17 @@ function drawProcessors() {
     .data(data)
     .enter().append("line")
     .attr("x1", 0)
-    .attr("y1", function(d) { return d.level * thickness + thickness; })
+    .attr("y1", lineLevelCalculator)
     .attr("x2", state.zoom * state.width)
-    .attr("y2", function(d) { return d.level * thickness + thickness; })
+    .attr("y2", lineLevelCalculator)
+    .attr("visibility", function(elem) {
+      return (elem.visible) ? "visible" : "hidden"  
+    })
     .style("stroke", "#000000")
-    .style("stroke-width", "1px");
+    .style("stroke-width", "2px")
+    .style("opacity", function(proc) {
+      return (proc.enabled) ? 1 : 0.5;
+    });
 }
 
 function drawHelpBox() {
@@ -567,6 +945,7 @@ function updateURL() {
   var url = window.location.href.split('?')[0];
   url += "?start=" + start_time;
   url += "&end=" + end_time;
+  url += "&collapseAll=" + state.collapseAll;
   url += "&resolution=" + state.resolution;
   if (state.searchEnabled)
     url += "&search=" + searchRegex[currentPos].source;
@@ -601,23 +980,31 @@ function adjustZoom(newZoom, scroll) {
   }
 }
 
-function adjustThickness(newThickness) {
-  state.thickness = newThickness;
-  state.height = state.thickness * constants.max_level;
+function recalculateHeight() {
+  // adjust the height based on the new thickness and max level
+  state.height = constants.margin_top + constants.margin_bottom +
+                 (state.thickness * constants.max_level);
+  var stats_height = constants.stats_levels * state.thickness;
+  state.y = d3.scale.linear().range([stats_height, 0]);
+  state.y.domain([0, 1]);
+
   d3.select("#processors").select("svg").remove();
   var svg = d3.select("#timeline").select("svg");
-  var timelineGroup = svg.select("g#timeline");
-  //timelineGroup.selectAll("rect").remove();
+  svg.attr("width", state.zoom * state.width)
+     .attr("height", state.height);
   var lines = state.timelineSvg.select("g#lines");
   lines.remove();
 
-  svg.attr("width", state.zoom * state.width)
-     .attr("height", state.height);
-  //var filteredData = filterAndMergeBlocks(profilingData, zoom, scale);
-  drawTimeline();
-  drawProcessors();
   svg.selectAll("#desc").remove();
   svg.selectAll("g.locator").remove();
+
+}
+
+function adjustThickness(newThickness) {
+  state.thickness = newThickness;
+  recalculateHeight();
+  drawTimeline();
+  drawLayout();
 }
 
 function suppressdefault(e) {
@@ -690,7 +1077,7 @@ function defaultKeydown(e) {
     setKeyHandler(makeModalKeyHandler(['enter', 'esc'], function(key) {
       if (key == 'enter') {
         var re = $("input.search-box").val();
-        console.log("Search Expression: " + re);
+        //console.log("Search Expression: " + re);
         if (re.trim() != "") {
           if (searchRegex == null) {
             searchRegex = new Array(sizeHistory);
@@ -727,7 +1114,6 @@ function defaultKeydown(e) {
     return false;
   }
 
-  showLoaderIcon();
   if (commandType == Command.zix) {
     var inc = 4.0;
     adjustZoom(state.zoom + inc, true);
@@ -749,7 +1135,7 @@ function defaultKeydown(e) {
   else if (commandType == Command.zoy)
     adjustThickness(state.thickness / 2);
   else if (commandType == Command.zry) {
-    state.height = $(window).height() - margin_bottom;
+    state.height = $(window).height() - constants.margin_bottom - constants.margin_top;
     state.thickness = state.height / constants.max_level;
     adjustThickness(state.thickness);
   }
@@ -781,7 +1167,6 @@ function defaultKeydown(e) {
       }
     }
   }
-  hideLoaderIcon();
   return false;
 }
 
@@ -793,8 +1178,10 @@ function defaultKeyUp(e) {
   return true;
 }
 
-function load_timeline() { 
-  d3.tsv('legion_prof_data.tsv',
+function load_proc_timeline(proc) {
+  var proc_name = proc.text;
+  state.processorData[proc_name] = {};
+  d3.tsv(proc.tsv,
     function(d, i) {
         var level = +d.level;
         var start = +d.start;
@@ -814,49 +1201,63 @@ function load_timeline() {
         }
     },
     function(data) {
-      var timelineGroup = state.timelineSvg.append("g")
-          .attr("id", "timeline");
-
       // split profiling items by which level they're on
       for(var i = 0; i < data.length; i++) {
         var d = data[i];
-        if (d.level in state.profilingData) {
-          state.profilingData[d.level].push(d);
+        if (d.level in state.processorData[proc_name]) {
+          state.processorData[proc_name][d.level].push(d);
         } else {
-          state.profilingData[d.level] = [d];
+          state.processorData[proc_name][d.level] = [d];
         }
       }
+      proc.loaded = true;
+      hideLoaderIcon();
+      redraw();
+    }
+  );
+}
 
-      $("#timeline").scrollLeft(0);
-      parseURLParameters();
+function initTimelineElements() {
+  var timelineGroup = state.timelineSvg.append("g")
+      .attr("id", "timeline");
 
-      filterAndMergeBlocks(state);
-      drawTimeline();
+  $("#timeline").scrollLeft(0);
+  parseURLParameters();
 
-      var windowCenterY = $(window).height() / 2;
-      $(window).scroll(function() {
-          $("#loader-icon").css("top", $(window).scrollTop() + windowCenterY);
-      });
-
-      // set scroll callback
-      var timer = null;
-      $("#timeline").scroll(function() {
-          showLoaderIcon();
-          if (timer !== null) {
-            clearTimeout(timer);
-          }
-          timer = setTimeout(function() {
-            filterAndMergeBlocks(state);
-            drawTimeline();
-            hideLoaderIcon();
-          }, 100);
-      });
-      turnOnMouseHandlers();
+  var windowCenterY = $(window).height() / 2;
+  $(window).scroll(function() {
+      $("#loader-icon").css("top", $(window).scrollTop() + windowCenterY);
   });
-};
+
+  // set scroll callback
+  var timer = null;
+  $("#timeline").scroll(function() {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(function() {
+        filterAndMergeBlocks(state);
+        drawTimeline();
+      }, 100);
+  });
+  if (!state.collapseAll) {
+    // initially load in all the cpu processors and the "all stats"
+    var stats_regex = /node/;
+    for (var i = 0; i < state.flattenedLayoutData.length; i++) {
+      var timelineElement = state.flattenedLayoutData[i];
+      if (timelineElement.type == "stats" && 
+          stats_regex.exec(timelineElement.text) &&
+          timelineElement.depth == 0) {
+        collapseHandler(timelineElement, i);
+      }
+    }
+  }
+  turnOnMouseHandlers();
+}
+
 
 function load_ops_and_timeline() {
-  d3.tsv("legion_prof_ops.tsv", 
+  d3.tsv("legion_prof_ops.tsv", // TODO: move to tsv folder
     function(d) {
       return d;
     },
@@ -864,47 +1265,228 @@ function load_ops_and_timeline() {
       data.forEach(function(d) {
         state.operations[parseInt(d.op_id)] = d.operation;      
       });
-      // load_timeline depends on the ops to be loaded
-      load_timeline();
+      // initTimelineElements depends on the ops to be loaded
+      initTimelineElements();
     }
   );
 }
 
-function load_procs() {
+function load_procs(callback) {
   d3.tsv('legion_prof_processor.tsv',
     function(d) {
       return {
-        level: +d.level,
-        processor: d.processor
+        processor: d.processor,
+        height: +d.levels,
+        tsv: d.tsv
       };
     },
     function(data) {
-      // TODO: Do this in legion_prof.py
-      data.sort(function(a,b) {return a.level - b.level});
-      var nextStart = 0;
+      var prevEnd = 0;
+      var base = 0;
       data.forEach(function(proc) {
-        proc.levelStart = nextStart;
-        proc.currentStart = nextStart;
-        proc.height = proc.level - proc.levelStart;
-        proc.enabled = true;
-        nextStart = proc.level + 1;
+        proc.enabled = false;
+        proc.loaded = false;
+        proc.base = base;
+
+        base += 2;
       });
-      for (var level = 0; level < nextStart; level++) {
-        state.levelMap[level] = {
-          y: level,
-          enabled: true
-        };
-      }
+      //console.log(data);
       state.processors = data;
-      drawProcessors();
+      calculateLayout();
+
+      // flatten the layout and get the new calculated max num levels
+      flattenLayout();
+      calculateBases();
+      drawLayout();
+      callback();
+
+      //stats_counter = stats_files.length; // TODO: use ES6 Promises
+      //stats_files.forEach(function(stats_filename) {
+      //  load_stats(stats_filename, callback);
+      //});
+    }
+  );
+}
+
+function getMinElement(arr, mapF) {
+    if (arr.length === undefined || arr.length == 0) {
+        throw "invalid array: " + arr;
+    }
+    var minElement = arr[0];
+    if (mapF === undefined) {
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] < minElement) {
+                minElement = arr[i];
+            }
+        }
+    } else {
+        minValue = mapF(minElement);
+        for (var i = 1; i < arr.length; i++) {
+            var elem = arr[i];
+            var value = mapF(elem);
+            if (value < minValue) {
+                minElement = elem;
+                minValue = value;
+            }
+        }
+    }
+    return minElement;
+}
+
+function filterStatsData(timelineElem) {
+  var data = state.statsData[timelineElem.tsv]; // TODO: attach to object
+  var windowStart = $("#timeline").scrollLeft();
+  var windowEnd = windowStart + $("#timeline").width();
+  var start_time = convertToTime(state, windowStart - 100);
+  var end_time = convertToTime(state, windowEnd + 100);
+
+  var startIndex = timeBisector(data, start_time);
+  var endIndex = timeBisector(data, end_time);
+
+  startIndex = Math.max(0, startIndex - 1);
+  endIndex = Math.min(data.length, endIndex + 2);
+  var length = endIndex - startIndex;
+  var newData = Array();
+  // we will average points together if they are too close together
+  var resolution = 1; // 3 pixel resolution
+  var elem = {time: 0, count: 0};
+  var startTime = data[startIndex].time;
+  var startX = convertToPos(state, startTime);
+
+  for (var i = startIndex; i < endIndex - 1; i++) {
+    var endTime = data[i+1].time;
+    elem.count += data[i].count * (endTime - data[i].time);
+    //elem.time += data[i].time;
+    var endX = convertToPos(state, endTime);
+    if ((endX - startX) >= resolution || i == (endIndex - 2)) {
+      var totalTime = endTime - startTime;
+      elem.count /= totalTime;
+      //avgElem.time /= windowSize;
+      elem.time = startTime;
+      newData.push(elem);
+      elem = {time: 0, count: 0};
+      startX = endX;
+      startTime = endTime;
+    }
+  }
+
+  return {
+    text: timelineElem.text,
+    base: timelineElem.base,
+    num_levels: timelineElem.num_levels,
+    data: newData
+  };
+}
+
+function mousemove(timelineElem) {
+  var data = timelineElem.data;
+  var focus = state.timelineSvg.select("g.focus");
+  var px = d3.mouse(this)[0],
+      py = d3.mouse(this)[1],
+      xMin = state.x.invert(px-3), // search within a 3 pixel radius
+      xMax = state.x.invert(px+3),
+      i = timeBisector(data, state.x.invert(px)),
+      iMin = Math.min(i-1, timeBisector(data, xMin)),
+      iMax = Math.max(i+1, timeBisector(data, xMax));
+
+  // search window
+  var start = Math.max(0, iMin-1);
+  var end = Math.min(iMax+1, data.length);
+  var searchWindow = []; // (end - start) * 2 - 1; // FIXME: CORRECT WAY TO PREALLOCATE?
+
+  for (var i = start; i < end-1; i++) {
+    searchWindow.push(data[i]);
+    var newPoint = {time: data[i].time, count: data[i+1].count}
+    searchWindow.push(newPoint);
+  }
+  searchWindow.push(data[end-1]);
+
+  // get the closest point within the 3 pixel radius
+  var d = getMinElement(searchWindow, function(elem) { 
+      var dx = px - state.x(elem.time);
+      var dy = py - state.y(elem.count);
+      return dx*dx + dy*dy;
+  });
+
+  var dist = Math.abs(px-state.x(d.time));;
+
+  // if the distance is too far away, just pick the current mouse position
+  if (dist > 6) {
+    d = {time: state.x.invert(px), count: state.y.invert(py)};
+  }
+
+  // offset for this particular line grapgh
+  var base_y = +this.getAttribute("base_y");
+
+  var cx = state.x(d.time);
+  var cy = state.y(d.count) + base_y;
+  focus.attr("transform", "translate(" + cx + "," + cy + ")");
+  var text = focus.select("text");
+  text.text((d.count * 100).toFixed(2) + "% utilization" )
+
+  var bbox = text.node().getBBox();
+  var padding = 2;
+  var rect = focus.select("rect", "text")
+      .attr("x", bbox.x - padding)
+      .attr("y", bbox.y - padding)
+      .attr("width", bbox.width + (padding*2))
+      .attr("height", bbox.height + (padding*2));
+
+}
+
+var maxVal;
+
+// Get the data
+function load_stats(elem) {
+  var stats_file = elem.tsv;
+
+  // exit early if we already loaded it
+  if(state.statsData[stats_file]) {
+    elem.loaded = true;
+    hideLoaderIcon();
+    redraw();
+    return;
+  }
+
+  d3.tsv(stats_file,
+    function(d) {
+        return {
+          time:  +d.time,
+          count: +d.count
+        };
+    },
+    function(error, data) {
+      state.statsData[stats_file] = data;
+
+      // state.statsData = filterStatsData(data);
+      // Scale the range of the data
+      //state.x.domain(d3.extent(data, function(d) { return d.time; }));
+      //state.y.domain([0, 1]);
+      //state.y.domain([0, d3.max(data, function(d) { return d.count; })]);
+
+      // Loop through each symbol / key
+      //state.timelineSvg.append("path")
+      //  .attr("class", "line")
+      //  .attr("id", function(d) { return stats_file; })
+      //  .attr("d", statsline(state.statsData)); 
+
+      //var focus = state.timelineSvg.select("g.focus");
+
+      //state.timelineSvg.select("path.line")
+      //  .on("mouseover", function() { focus.style("display", null); })
+      //  .on("mouseout", function() { focus.style("display", "none"); })
+      //  .on("mousemove", mousemove);
+      //console.log("loaded", stats_file);
+
+      elem.loaded = true;
       hideLoaderIcon();
+      redraw();
     }
   );
 }
 
 function load_data() {
-  load_ops_and_timeline();
-  load_procs();
+  load_procs(load_ops_and_timeline);
 }
 
 function initializeState() {
@@ -914,15 +1496,28 @@ function initializeState() {
   state.scale = state.width / (constants.end - constants.start);
   state.zoom = 1.0;
   state.zoomHistory = Array();
-  state.levelMap = Array();
+  state.numLoading = 0;
+
+  state.layoutData = [];
+  state.flattenedLayoutData = [];
+
   state.profilingData = {};
+  state.processorData = {};
+  state.statsData = [];
+
   state.operations = {};
-  state.thickness = Math.max(state.height / constants.max_level, 20);
+  state.thickness = 20; //Math.max(state.height / constants.max_level, 20);
   state.baseThickness = state.height / constants.max_level;
   state.height = constants.max_level * state.thickness;
   state.resolution = 10; // time (in us) of the smallest feature we want to load
   state.searchEnabled = false;
-  state.rangeZoom = true
+  state.rangeZoom = true;
+  state.collapseAll = false;
+
+  // TODO: change this
+  state.x = d3.scale.linear().range([0, state.width]);
+  state.y = d3.scale.linear().range([constants.stats_levels * state.thickness, 0]);
+  state.y.domain([0, 1]);
 
   setKeyHandler(defaultKeydown);
   $(document).on("keyup", defaultKeyUp);
@@ -934,18 +1529,35 @@ function initializeState() {
   state.loaderSvg = d3.select("#loader-icon").append("svg")
     .attr("width", "40px")
     .attr("height", "40px");
+
   drawLoaderIcon();
   load_data();
 }
 
-function main() {
+function load_stats_json(callback) {
+  $.getJSON("json/stats.json", function(json) {
+    stats_files = json;
+    callback();
+  });
+}
+
+// Loads constants such as max_level, start/end time, and number of levels
+// of a stats view
+function load_scale_json(callback) {
   $.getJSON("json/scale.json", function(json) {
     $.each(json, function(key, val) {
-      console.log("setting " + key + " to " + val);
       constants[key] = val;
     });
-  }).done(initializeState);
-  // TODO: Error messages
+    load_stats_json(callback);
+  });
+}
+
+function load_jsons(callback) {
+  load_scale_json(callback);
+}
+
+function main() {
+  load_jsons(initializeState);
 }
 
 main();

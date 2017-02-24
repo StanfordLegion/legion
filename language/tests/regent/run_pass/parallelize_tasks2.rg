@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ __demand(__parallel)
 task init(r : region(ispace(int3d), fs))
 where reads writes(r)
 do
-  for e in r do e.f = c.drand48() end
+  for e in r do e.f = 0.3 * (e.x + 1) + 0.3 * (e.y + 1) + 0.4 (e.z + 1) end
   for e in r do e.g = 0 end
   for e in r do e.h = 0 end
 end

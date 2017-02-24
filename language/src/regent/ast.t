@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -79,7 +79,7 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
+ast.annotation:leaf("Set", {"cuda", "external", "inline", "parallel", "spmd", "trace",
                             "vectorize"},
                     false, true)
 
@@ -87,6 +87,7 @@ function ast.default_annotations()
   local allow = ast.annotation.Allow { value = false }
   return ast.annotation.Set {
     cuda = allow,
+    external = allow,
     inline = allow,
     parallel = allow,
     spmd = allow,
@@ -242,6 +243,7 @@ ast.unspecialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.unspecialized.stat:leaf("Expr", {"expr"})
 ast.unspecialized.stat:leaf("Escape", {"expr"})
 ast.unspecialized.stat:leaf("RawDelete", {"value"})
+ast.unspecialized.stat:leaf("ParallelizeWith", {"hints", "block"})
 
 ast.unspecialized:inner("top", {"annotations"})
 ast.unspecialized.top:leaf("Task", {"name", "params", "return_type_expr",
@@ -357,6 +359,7 @@ ast.specialized.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.specialized.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.specialized.stat:leaf("Expr", {"expr"})
 ast.specialized.stat:leaf("RawDelete", {"value"})
+ast.specialized.stat:leaf("ParallelizeWith", {"hints", "block"})
 
 ast.specialized:inner("top", {"annotations"})
 ast.specialized.top:leaf("Task", {"name", "params", "return_type",
@@ -439,6 +442,7 @@ ast.typed.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.typed.expr:leaf("Deref", {"value"})
 ast.typed.expr:leaf("Future", {"value"})
 ast.typed.expr:leaf("FutureGetResult", {"value"})
+ast.typed.expr:leaf("ParallelizerConstraint", {"lhs", "op", "rhs"})
 
 ast.typed:leaf("Block", {"stats"})
 
@@ -469,6 +473,7 @@ ast.typed.stat:leaf("Assignment", {"lhs", "rhs"})
 ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs"})
 ast.typed.stat:leaf("Expr", {"expr"})
 ast.typed.stat:leaf("RawDelete", {"value"})
+ast.typed.stat:leaf("ParallelizeWith", {"hints", "block"})
 ast.typed.stat:leaf("BeginTrace", {"trace_id"})
 ast.typed.stat:leaf("EndTrace", {"trace_id"})
 ast.typed.stat:leaf("MapRegions", {"region_types"})

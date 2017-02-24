@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -55,6 +55,7 @@ local default_options = {
   ["layout-constraints"] = true,
   ["trace"] = true,
   ["validate"] = true,
+  ["emergency-gc"] = false,
 
   -- Need this here to make the logger happy.
   ["log"] = "",

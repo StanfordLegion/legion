@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -147,6 +147,14 @@ end
 
 function base.task:getcuda()
   return self.cuda
+end
+
+function base.task:setexternal(external)
+  self.external = external
+end
+
+function base.task:getexternal()
+  return self.external
 end
 
 function base.task:setinline(inline)
@@ -408,6 +416,7 @@ do
       ast = false,
       definition = false,
       cuda = false,
+      external = false,
       inline = false,
       cudakernels = false,
       param_symbols = false,

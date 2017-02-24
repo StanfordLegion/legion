@@ -1,4 +1,4 @@
-# Copyright 2015 Stanford University, NVIDIA Corporation
+# Copyright 2017 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 GPU_ARCH ?= fermi
 #GPU_ARCH ?= kepler
 #GPU_ARCH ?= k20
+#GPU_ARCH ?= pascal
 
 # if CUDA is not set, but CUDATOOLKIT_HOME is, use that
 ifdef CUDATOOLKIT_HOME
@@ -35,6 +36,8 @@ ifdef GASNET_ROOT
 GASNET ?= $(GASNET_ROOT)
 endif
 
+# For backwards compatibility
+SHARED_LOWLEVEL ?= 0
 # generate libraries for Legion and Realm
 SLIB_LEGION     := liblegion.a
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
@@ -105,6 +108,16 @@ LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
+CXX=CC
+F90=ftn
+# Cray's magic wrappers automatically provide LAPACK goodness?
+LAPACK_LIBS=
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+CONDUIT=aries
+LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
+endif
+ifeq ($(findstring cori,$(shell uname -n)),cori)
 CXX=CC
 F90=ftn
 # Cray's magic wrappers automatically provide LAPACK goodness?
@@ -218,6 +231,10 @@ ifeq ($(strip $(GPU_ARCH)),k20)
 NVCC_FLAGS	+= -arch=compute_35 -code=sm_35
 NVCC_FLAGS	+= -DK20_ARCH
 endif
+ifeq ($(strip $(GPU_ARCH)),pascal)
+NVCC_FLAGS	+= -arch=compute_60 -code=sm_60
+NVCC_FLAGS	+= -DPASCAL_ARCH
+endif
 NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
 endif
 
@@ -287,7 +304,7 @@ ifeq ($(strip $(USE_HDF)), 1)
   LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
 endif
 
-SKIP_MACHINES= titan% daint% excalibur%
+SKIP_MACHINES= titan% daint% excalibur% cori%
 #Extra options for MPI support in GASNet
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
@@ -318,9 +335,6 @@ CC_FLAGS        += -Wall -Wno-strict-overflow
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
 endif
-
-# fix for some systems that need this for printf formatting macros
-CC_FLAGS	+= -D__STDC_FORMAT_MACROS
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
 
@@ -434,7 +448,7 @@ HIGH_RUNTIME_OBJS:=$(HIGH_RUNTIME_SRC:.cc=.o)
 MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.o)
 ASM_OBJS	:= $(ASM_SRC:.S=.o)
 # Only compile the gpu objects if we need to 
-ifeq ($(strip $(SHARED_LOWLEVEL)),0)
+ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_OBJS	:= $(GEN_GPU_SRC:.cu=.o)
 GPU_RUNTIME_OBJS:= $(GPU_RUNTIME_SRC:.cu=.o)
 else

@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -344,7 +344,8 @@ namespace Realm {
 			 enclosing.id, enclosing.gen);
 #endif
 
-    if(!wait_on.has_triggered()) {
+    bool poisoned = false;
+    if(!wait_on.has_triggered_faultaware(poisoned)) {
       // deferred trigger
       log_event.info() << "deferring user event trigger: event=" << *this << " wait_on=" << wait_on;
       if(Config::event_loop_detection_limit > 0) {
@@ -360,8 +361,9 @@ namespace Realm {
       return;
     }
 
-    log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on;
-    GenEventImpl::trigger(*this, false /*!poisoned*/);
+    log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on
+		     << (poisoned ? " (poisoned)" : "");
+    GenEventImpl::trigger(*this, poisoned);
   }
 
   void UserEvent::cancel(void) const
@@ -1233,7 +1235,7 @@ namespace Realm {
 	assert(num_poisoned_generations <= new_poisoned_count);
 	if(num_poisoned_generations > 0)
 	  assert(memcmp(poisoned_generations, new_poisoned_generations, 
-			new_poisoned_count * sizeof(gen_t)) == 0);
+			num_poisoned_generations * sizeof(gen_t)) == 0);
       } else {
 	// we shouldn't have any local ones either
 	assert(num_poisoned_generations == 0);

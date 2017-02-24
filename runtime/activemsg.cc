@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -134,7 +134,7 @@ public:
 public:
   virtual void copy_data(void *dest) = 0;
   virtual void *get_contig_pointer(void) { assert(false); return 0; }
-  virtual int get_payload_mode(void) { assert(false); return PAYLOAD_NONE; }
+  virtual int get_payload_mode(void) { return PAYLOAD_KEEP; }
 };
 
 class ContiguousPayload : public PayloadSource {

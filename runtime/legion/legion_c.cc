@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University
+/* Copyright 2017 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,9 @@ typedef CObjectWrapper::Generic Generic;
 typedef CObjectWrapper::SOA SOA;
 typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
 typedef CObjectWrapper::AccessorArray AccessorArray;
+
+// for Point<DIM>, Rect<DIM>, Blockify<DIM>
+using namespace LegionRuntime::Arrays;
 
 // -----------------------------------------------------------------------
 // Pointer Operations
@@ -1177,7 +1180,7 @@ PartitionByIntersectionShim::launch(HighLevelRuntime *runtime,
 
   Domain color_space = runtime->get_index_partition_color_space(ctx, handle1);
   TaskArgument targs(&args, sizeof(args));
-  IndexLauncher task(task_id, color_space, targs, ArgumentMap());
+  IndexTaskLauncher task(task_id, color_space, targs, ArgumentMap());
   FutureMap fmap = runtime->execute_index_space(ctx, task);
 
   PointColoring coloring;
@@ -1342,7 +1345,7 @@ PartitionByDifferenceShim::launch(HighLevelRuntime *runtime,
 
   Domain color_space = runtime->get_index_partition_color_space(ctx, handle1);
   TaskArgument targs(&args, sizeof(args));
-  IndexLauncher task(task_id, color_space, targs, ArgumentMap());
+  IndexTaskLauncher task(task_id, color_space, targs, ArgumentMap());
   FutureMap fmap = runtime->execute_index_space(ctx, task);
 
   PointColoring coloring;
@@ -1631,7 +1634,7 @@ PartitionByImageShim::launch(HighLevelRuntime *runtime,
 
   IndexPartition ip;
   if (args.target_dim == 0) {
-    IndexLauncher task(task_id_unstructured, color_space, targs, ArgumentMap());
+    IndexTaskLauncher task(task_id_unstructured, color_space, targs, ArgumentMap());
     task.add_region_requirement(
       RegionRequirement(projection, 0, READ_ONLY, EXCLUSIVE, parent)
       .add_field(fid));
@@ -1648,7 +1651,7 @@ PartitionByImageShim::launch(HighLevelRuntime *runtime,
       part_kind, color, allocable);
   }
   else { // args.target_dim != 0
-    IndexLauncher task(task_id_structured, color_space, targs, ArgumentMap());
+    IndexTaskLauncher task(task_id_structured, color_space, targs, ArgumentMap());
     RegionRequirement req(projection, 0, READ_ONLY, EXCLUSIVE, parent);
     // TODO: If the compiler chooses a weird ordering for field ids of index types,
     //       we're in trouble. Index types better not be field sliced.
@@ -1897,7 +1900,7 @@ PartitionByPreimageShim::launch(HighLevelRuntime *runtime,
       runtime->get_parent_index_space(projection)).dim;
 
   TaskArgument targs(&args, sizeof(args));
-  IndexLauncher task(task_id, color_space, targs, ArgumentMap());
+  IndexTaskLauncher task(task_id, color_space, targs, ArgumentMap());
   RegionRequirement req(parent, READ_ONLY, EXCLUSIVE, parent);
   // TODO: If the compiler chooses a weird ordering for field ids of index types,
   //       we're in trouble. Index types better not be field sliced.
@@ -3437,15 +3440,15 @@ legion_index_launcher_create(
   ArgumentMap *map = CObjectWrapper::unwrap(map_);
   Predicate *pred = CObjectWrapper::unwrap(pred_);
 
-  IndexLauncher *launcher =
-    new IndexLauncher(tid, domain, global_arg, *map, *pred, must, id, tag);
+  IndexTaskLauncher *launcher =
+    new IndexTaskLauncher(tid, domain, global_arg, *map, *pred, must, id, tag);
   return CObjectWrapper::wrap(launcher);
 }
 
 void
 legion_index_launcher_destroy(legion_index_launcher_t launcher_)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   delete launcher;
 }
@@ -3457,7 +3460,7 @@ legion_index_launcher_execute(legion_runtime_t runtime_,
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   FutureMap f = runtime->execute_index_space(ctx, *launcher);
   return CObjectWrapper::wrap(new FutureMap(f));
@@ -3471,7 +3474,7 @@ legion_index_launcher_execute_reduction(legion_runtime_t runtime_,
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   Future f = runtime->execute_index_space(ctx, *launcher, redop);
   return CObjectWrapper::wrap(new Future(f));
@@ -3488,7 +3491,7 @@ legion_index_launcher_add_region_requirement_logical_region(
   legion_mapping_tag_id_t tag /* = 0 */,
   bool verified /* = false*/)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
@@ -3509,7 +3512,7 @@ legion_index_launcher_add_region_requirement_logical_partition(
   legion_mapping_tag_id_t tag /* = 0 */,
   bool verified /* = false*/)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   LogicalPartition handle = CObjectWrapper::unwrap(handle_);
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
@@ -3530,7 +3533,7 @@ legion_index_launcher_add_region_requirement_logical_region_reduction(
   legion_mapping_tag_id_t tag /* = 0 */,
   bool verified /* = false*/)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   LogicalRegion handle = CObjectWrapper::unwrap(handle_);
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
@@ -3551,7 +3554,7 @@ legion_index_launcher_add_region_requirement_logical_partition_reduction(
   legion_mapping_tag_id_t tag /* = 0 */,
   bool verified /* = false*/)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   LogicalPartition handle = CObjectWrapper::unwrap(handle_);
   LogicalRegion parent = CObjectWrapper::unwrap(parent_);
 
@@ -3567,7 +3570,7 @@ legion_index_launcher_add_field(legion_index_launcher_t launcher_,
                                legion_field_id_t fid,
                                bool inst /* = true */)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->add_field(idx, fid, inst);
 }
@@ -3577,7 +3580,7 @@ legion_index_launcher_add_flags(legion_index_launcher_t launcher_,
                                 unsigned idx,
                                 enum legion_region_flags_t flags)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->region_requirements[idx].add_flags(flags);
 }
@@ -3587,7 +3590,7 @@ legion_index_launcher_intersect_flags(legion_index_launcher_t launcher_,
                                       unsigned idx,
                                       enum legion_region_flags_t flags)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
 
   launcher->region_requirements[idx].flags &= flags;
 }
@@ -3600,7 +3603,7 @@ legion_index_launcher_add_index_requirement(
   legion_index_space_t parent_,
   bool verified /* = false*/)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
 
@@ -3614,7 +3617,7 @@ void
 legion_index_launcher_add_future(legion_index_launcher_t launcher_,
                                  legion_future_t future_)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   Future *future = CObjectWrapper::unwrap(future_);
 
   launcher->add_future(*future);
@@ -3624,7 +3627,7 @@ void
 legion_index_launcher_add_wait_barrier(legion_index_launcher_t launcher_,
                                       legion_phase_barrier_t bar_)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_wait_barrier(bar);
@@ -3634,7 +3637,7 @@ void
 legion_index_launcher_add_arrival_barrier(legion_index_launcher_t launcher_,
                                          legion_phase_barrier_t bar_)
 {
-  IndexLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   PhaseBarrier bar = CObjectWrapper::unwrap(bar_);
 
   launcher->add_arrival_barrier(bar);
@@ -4181,7 +4184,7 @@ legion_must_epoch_launcher_add_index_task(
 {
   MustEpochLauncher *launcher = CObjectWrapper::unwrap(launcher_);
   {
-    IndexLauncher *handle = CObjectWrapper::unwrap(handle_);
+    IndexTaskLauncher *handle = CObjectWrapper::unwrap(handle_);
     launcher->add_index_task(*handle);
   }
 

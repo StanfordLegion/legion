@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University
+/* Copyright 2017 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,9 @@
 #include "legion.h"
 using namespace Legion;
 using namespace LegionRuntime::Accessor;
+
+// for Point<DIM> and Rect<DIM>
+using namespace LegionRuntime::Arrays;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,

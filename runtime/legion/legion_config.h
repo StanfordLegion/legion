@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -362,6 +362,7 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_IMPLICIT_MAPPING = 160,
   ERROR_INNER_TASK_VIOLATION = 161,
   ERROR_REQUEST_FOR_EMPTY_FUTURE = 162,
+  ERROR_ILLEGAL_REMAP_IN_STATIC_TRACE = 163,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -395,7 +396,7 @@ typedef enum legion_coherence_property_t {
 typedef enum legion_region_flags_t {
   NO_FLAG         = 0x00000000,
   VERIFIED_FLAG   = 0x00000001,
-  NO_ACCESS_FLAG  = 0x00000002,
+  NO_ACCESS_FLAG  = 0x00000002, // Deprecated, user SpecializedConstraint
   RESTRICTED_FLAG = 0x00000004,
   MUST_PREMAP_FLAG= 0x00000008,
 } legion_region_flags_t;
@@ -419,6 +420,19 @@ typedef enum legion_partition_kind_t {
   ALIASED_KIND,
   COMPUTE_KIND,
 } legion_partition_kind_t;
+
+typedef enum legion_external_resource_t {
+  EXTERNAL_POSIX_FILE,
+  EXTERNAL_HDF5_FILE,
+  EXTERNAL_C_ARRAY,
+  EXTERNAL_FORTRAN_ARRAY,
+} legion_external_resource_t;
+
+typedef enum legion_timing_measurement_t {
+  MEASURE_SECONDS,
+  MEASURE_MICRO_SECONDS,
+  MEASURE_NANO_SECONDS,
+} legion_timing_measurement_t;
 
 typedef enum legion_dependence_type_t {
   NO_DEPENDENCE = 0,

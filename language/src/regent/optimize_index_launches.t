@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -55,10 +55,12 @@ function context:is_loop_variable(variable)
   return self.loop_variables[variable]
 end
 
-local function check_privilege_noninterference(cx, task, region_type,
-                                         other_region_type, mapping)
-  local param_region_type = mapping[region_type]
-  local other_param_region_type = mapping[other_region_type]
+local function check_privilege_noninterference(cx, task, arg,
+                                         other_arg, mapping)
+  local region_type = std.as_read(arg.expr_type)
+  local other_region_type = std.as_read(other_arg.expr_type)
+  local param_region_type = mapping[arg]
+  local other_param_region_type = mapping[other_arg]
   assert(param_region_type and other_param_region_type)
 
   local privileges_by_field_path, coherence_modes_by_field_path =
@@ -90,8 +92,10 @@ local function check_privilege_noninterference(cx, task, region_type,
 end
 
 local function analyze_noninterference_previous(
-    cx, task, region_type, regions_previously_used, mapping)
-  for i, other_region_type in pairs(regions_previously_used) do
+    cx, task, arg, regions_previously_used, mapping)
+  local region_type = std.as_read(arg.expr_type)
+  for i, other_arg in pairs(regions_previously_used) do
+    local other_region_type = std.as_read(other_arg.expr_type)
     local constraint = std.constraint(
       region_type,
       other_region_type,
@@ -99,7 +103,7 @@ local function analyze_noninterference_previous(
 
     if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
       not std.check_constraint(cx, constraint) and
-      not check_privilege_noninterference(cx, task, region_type, other_region_type, mapping)
+      not check_privilege_noninterference(cx, task, arg, other_arg, mapping)
     then
       return false, i
     end
@@ -108,12 +112,13 @@ local function analyze_noninterference_previous(
 end
 
 local function analyze_noninterference_self(
-    cx, task, region_type, partition_type, mapping)
+    cx, task, arg, partition_type, mapping)
+  local region_type = std.as_read(arg.expr_type)
   if partition_type and partition_type:is_disjoint() then
     return true
   end
 
-  local param_region_type = mapping[region_type]
+  local param_region_type = mapping[arg]
   assert(param_region_type)
   local privileges, privilege_field_paths, privilege_field_types,
         privilege_coherence_modes, privilege_flags = std.find_task_privileges(
@@ -325,6 +330,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   loop_cx:add_loop_variable(node.symbol)
 
   local preamble = terralib.newlist()
+  local call_stat
   for i = 1, #node.block.stats - 1 do
     local stat = node.block.stats[i]
     if not stat:is(ast.typed.stat.Var) then
@@ -332,38 +338,62 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       return
     end
     if not analyze_is_side_effect_free(cx, stat) then
-      report_fail(stat, "loop optimization failed: preamble statement is not side-effect free")
-      return
-    end
-
-    for i, symbol in ipairs(stat.symbols) do
-      local value = stat.values[i]
-      if value and not analyze_is_loop_invariant(loop_cx, value) then
-        loop_cx:add_loop_variable(symbol)
+      if not (i == #node.block.stats - 1 and
+              #stat.values == 1 and
+              stat.values[1]:is(ast.typed.expr.Call)) then
+        report_fail(stat, "loop optimization failed: preamble statement is not side-effect free")
+        return
+      else
+        call_stat = stat
       end
     end
 
-    preamble:insert(stat)
+    if call_stat == nil then
+      for i, symbol in ipairs(stat.symbols) do
+        local value = stat.values[i]
+        if value and not analyze_is_loop_invariant(loop_cx, value) then
+          loop_cx:add_loop_variable(symbol)
+        end
+      end
+
+      preamble:insert(stat)
+    end
   end
 
   local body = node.block.stats[#node.block.stats]
   local call
   local reduce_lhs, reduce_op = false, false
-  if body:is(ast.typed.stat.Expr) and
-    body.expr:is(ast.typed.expr.Call)
-  then
-    call = body.expr
-  elseif body:is(ast.typed.stat.Reduce) and
-    #body.lhs == 1 and
-    #body.rhs == 1 and
-    body.rhs[1]:is(ast.typed.expr.Call)
-  then
-    call = body.rhs[1]
-    reduce_lhs = body.lhs[1]
-    reduce_op = body.op
+  if call_stat ~= nil then
+    if body:is(ast.typed.stat.Reduce) and
+      #body.lhs == 1 and
+      #body.rhs == 1 and
+      body.rhs[1]:is(ast.typed.expr.ID) and
+      call_stat.symbols[1] == body.rhs[1].value
+    then
+      call = call_stat.values[1]
+      reduce_lhs = body.lhs[1]
+      reduce_op = body.op
+    else
+      report_fail(call_stat, "loop optimization failed: preamble statement is not side-effect free")
+      return
+    end
   else
-    report_fail(body, "loop optimization failed: body is not a function call")
-    return
+    if body:is(ast.typed.stat.Expr) and
+      body.expr:is(ast.typed.expr.Call)
+    then
+      call = body.expr
+    elseif body:is(ast.typed.stat.Reduce) and
+      #body.lhs == 1 and
+      #body.rhs == 1 and
+      body.rhs[1]:is(ast.typed.expr.Call)
+    then
+      call = body.rhs[1]
+      reduce_lhs = body.lhs[1]
+      reduce_op = body.op
+    else
+      report_fail(body, "loop optimization failed: body is not a function call")
+      return
+    end
   end
 
   local task = call.fn.value
@@ -447,7 +477,10 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     local partition_type
 
     local arg_type = std.as_read(arg.expr_type)
-    mapping[arg_type] = param_types[i]
+    -- XXX: This will break again if arg isn't unique for each argument,
+    --      which can happen when de-duplicating AST nodes.
+    assert(mapping[arg] == nil)
+    mapping[arg] = param_types[i]
     -- Tests for conformance to index launch requirements.
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
       if arg:is(ast.typed.expr.IndexAccess) and
@@ -494,7 +527,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
     if std.is_region(arg_type) then
       do
         local passed, failure_i = analyze_noninterference_previous(
-          cx, task, arg_type, regions_previously_used, mapping)
+          cx, task, arg, regions_previously_used, mapping)
         if not passed then
           report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with argument " .. tostring(failure_i))
           return
@@ -503,7 +536,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
       do
         local passed = analyze_noninterference_self(
-          cx, task, arg_type, partition_type, mapping)
+          cx, task, arg, partition_type, mapping)
         if not passed then
           report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with itself")
           return
@@ -516,7 +549,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
 
     regions_previously_used[i] = nil
     if std.is_region(arg_type) then
-      regions_previously_used[i] = arg_type
+      regions_previously_used[i] = arg
     end
   end
 

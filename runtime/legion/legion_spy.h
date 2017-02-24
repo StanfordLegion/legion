@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -413,6 +413,14 @@ namespace Legion {
         log_spy.print("Point Point %llu %llu", p1, p2);
       }
 
+      static inline void log_index_point(UniqueID index_id, UniqueID point_id,
+                                         const DomainPoint &point)
+      {
+        log_spy.print("Index Point %llu %llu %u %d %d %d", index_id, point_id,
+                      point.dim, (int)point.point_data[0],
+                      (int)point.point_data[1], (int)point.point_data[2]);
+      }
+
       static inline void log_child_operation_index(UniqueID parent_id, 
                                        unsigned index, UniqueID child_id)
       {
@@ -423,6 +431,11 @@ namespace Legion {
                                         unsigned index, UniqueID child_id)
       {
         log_spy.print("Close Index %llu %d %llu", parent_id, index, child_id);
+      }
+
+      static inline void log_predicated_false_op(UniqueID unique_id)
+      {
+        log_spy.print("Predicate False %lld", unique_id);
       }
 
       // Logger calls for mapping dependence analysis 
@@ -744,6 +757,11 @@ namespace Legion {
         log_spy.print("Rt User Event " IDFMT, event.id);
       }
 
+      static inline void log_pred_event(PredEvent event)
+      {
+        log_spy.print("Pred Event " IDFMT, event.id);
+      }
+
       static inline void log_ap_user_event_trigger(ApUserEvent event)
       {
         log_spy.print("Ap User Event Trigger " IDFMT,
@@ -754,6 +772,11 @@ namespace Legion {
       {
         log_spy.print("Rt User Event Trigger " IDFMT,
 		      event.id);
+      }
+
+      static inline void log_pred_event_trigger(PredEvent event)
+      {
+        log_spy.print("Pred Event Trigger " IDFMT, event.id);
       }
 
       static inline void log_operation_events(UniqueID uid,
@@ -794,12 +817,13 @@ namespace Legion {
 
       static inline void log_fill_events(UniqueID op_unique_id,
                                          LogicalRegion handle,
-                                         LgEvent pre, LgEvent post)
+                                         LgEvent pre, LgEvent post,
+                                         UniqueID fill_unique_id)
       {
-        log_spy.print("Fill Events %llu %d %d %d " IDFMT " " IDFMT,
+        log_spy.print("Fill Events %llu %d %d %d " IDFMT " " IDFMT " %llu",
 		      op_unique_id, handle.get_index_space().get_id(),
 		      handle.get_field_space().get_id(), handle.get_tree_id(),
-		      pre.id, post.id);
+		      pre.id, post.id, fill_unique_id);
       }
 
       static inline void log_fill_field(LgEvent post, FieldID fid, IDType dst)

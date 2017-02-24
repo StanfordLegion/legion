@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -509,9 +509,14 @@ namespace Realm {
                             start_event, finish_event, priority);
       get_runtime()->optable.add_local_operation(finish_event, task);
 
-      if (start_event.has_triggered())
-        enqueue_task(task);
-      else
+      bool poisoned = false;
+      if (start_event.has_triggered_faultaware(poisoned)) {
+	if(poisoned) {
+	  log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+	  task->handle_poisoned_precondition(start_event);
+	} else
+	  enqueue_task(task);
+      } else
 	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
     }
 
@@ -526,13 +531,7 @@ namespace Realm {
       if(poisoned) {
 	// cancel the task - this has to work
 	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-#ifndef NDEBUG
-	bool did_cancel =
-#endif
-	  task->attempt_cancellation(Realm::Faults::ERROR_POISONED_PRECONDITION,
-				     &e, sizeof(e));	
-	assert(did_cancel);
-	task->mark_finished(false);
+	task->handle_poisoned_precondition(e);
 	return true;
       }
 
@@ -840,8 +839,13 @@ namespace Realm {
     get_runtime()->optable.add_local_operation(finish_event, task);
 
     // if the start event has already triggered, we can enqueue right away
-    if(start_event.has_triggered()) {
-      enqueue_task(task);
+    bool poisoned = false;
+    if (start_event.has_triggered_faultaware(poisoned)) {
+      if(poisoned) {
+	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+	task->handle_poisoned_precondition(start_event);
+      } else
+	enqueue_task(task);
     } else {
       EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
     }

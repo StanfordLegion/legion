@@ -1,4 +1,4 @@
-/* Copyright 2016 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1628,7 +1628,7 @@ namespace Legion {
                         const RegionTreePath &path, VersionInfo &version_info,
                         std::set<RtEvent> &ready_events, bool partial_traversal,
                         bool disjoint_close, FieldMask *filter_mask,
-                        RegionTreeNode *parent_node,
+                        RegionTreeNode *parent_node, UniqueID logical_ctx_uid,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs,
                         bool skip_parent_check)
     //--------------------------------------------------------------------------
@@ -1667,13 +1667,15 @@ namespace Legion {
                                            user_mask, unversioned_mask,
                                            op, idx, context, version_info, 
                                            ready_events, partial_traversal,
-                                           disjoint_close, advance_epochs);
+                                           disjoint_close, logical_ctx_uid,
+                                           advance_epochs);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::advance_version_numbers(Operation *op, unsigned idx,
                                                 bool update_parent_state,
                                                 bool parent_is_upper_bound,
+                                                UniqueID logical_ctx_uid,
                                                 bool dedup_opens, 
                                                 bool dedup_advances, 
                                                 ProjectionEpochID open_epoch, 
@@ -1694,9 +1696,10 @@ namespace Legion {
       const AddressSpaceID local = runtime->address_space;
       parent->advance_version_numbers(ctx.get_id(), local, path, advance_mask,
                                       context, update_parent_state,
-                                      parent_is_upper_bound, dedup_opens, 
-                                      dedup_advances, open_epoch, advance_epoch,
-                                      dirty_previous, ready_events);
+                                      parent_is_upper_bound, logical_ctx_uid,
+                                      dedup_opens, dedup_advances, open_epoch, 
+                                      advance_epoch, dirty_previous, 
+                                      ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -2154,6 +2157,7 @@ namespace Legion {
       RegionNode *child_node = get_node(req.region);
       FieldMask user_mask = 
         child_node->column_source->get_field_mask(req.privilege_fields);
+      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
       
       RegionUsage usage(req);
 #ifdef DEBUG_LEGION 
@@ -2193,8 +2197,8 @@ namespace Legion {
         // Construct the traversal info
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, local_applied);
-        child_node->register_region(info, context, restrict_info, term_event,
-                                    usage, defer_add_users, targets);
+        child_node->register_region(info, logical_ctx_uid, context, 
+            restrict_info, term_event, usage, defer_add_users, targets);
         
         if (!local_applied.empty())
         {
@@ -2220,8 +2224,8 @@ namespace Legion {
         // Construct the traversal info
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, map_applied);
-        child_node->register_region(info, context, restrict_info, term_event,
-                                    usage, defer_add_users, targets);
+        child_node->register_region(info, logical_ctx_uid, context, 
+            restrict_info, term_event, usage, defer_add_users, targets);
       }
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2375,11 +2379,12 @@ namespace Legion {
 #endif
       TraversalInfo info(ctx.get_id(), op, index, req, 
                          version_info, closing_mask, map_applied);
+      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
       // Always build the composite instance, and then optionally issue
       // update copies to the target instances from the composite instance
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
-                            closing_mask, version_info, context, closed_tree, 
-                            map_applied, projection_epochs);
+                          closing_mask, version_info, logical_ctx_uid, 
+                          context, closed_tree, map_applied, projection_epochs);
       if (targets.empty())
         return;
       PhysicalState *physical_state = NULL;
@@ -2457,6 +2462,7 @@ namespace Legion {
       RegionUsage usage(req);
       TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                          user_mask, map_applied);
+      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
       InnerContext *context = op->find_physical_context(index);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2465,7 +2471,7 @@ namespace Legion {
                                      true/*closing*/, false/*logical*/,
                  FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
-      top_node->close_state(info, usage, context, targets);
+      top_node->close_state(info, usage, logical_ctx_uid, context, targets);
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
                                      top_node, ctx.get_id(), 
@@ -2494,7 +2500,7 @@ namespace Legion {
                                         VersionInfo &dst_version_info, 
                                         ApEvent term_event, Operation *op, 
                                         unsigned src_index, unsigned dst_index,
-                                        ApEvent precondition, 
+                                        ApEvent precondition, PredEvent guard, 
                                         std::set<RtEvent> &map_applied)
     //--------------------------------------------------------------------------
     {
@@ -2619,7 +2625,8 @@ namespace Legion {
               TraversalInfo info(ctx.get_id(), op, src_index, src_req,
                                  dst_version_info, copy_mask, map_applied);
               src_it->first->issue_deferred_copies_across(info, dst_view,
-                  src_it->second, dst_it->second, precondition, result_events);
+                            src_it->second, dst_it->second, precondition, 
+                            guard, result_events);
               src_mask -= copy_mask;
             }
             // If we've handled all the sources, we are done
@@ -2714,7 +2721,7 @@ namespace Legion {
                                                      dst_precondition,
                                                      precondition);
             ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
-                                                     dst_it->second, copy_pre);
+                                       dst_it->second, copy_pre, guard);
             if (copy_post.exists())
               result_events.insert(copy_post);
           }
@@ -2729,7 +2736,8 @@ namespace Legion {
                                             const RegionRequirement &dst_req,
                                             const InstanceSet &src_targets,
                                             const InstanceSet &dst_targets,
-                                            Operation *op, ApEvent precondition)
+                                            Operation *op, ApEvent precondition,
+                                            PredEvent predicate_guard)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REDUCE_ACROSS_CALL);
@@ -2833,7 +2841,8 @@ namespace Legion {
         ApEvent copy_pre = Runtime::merge_events(fold_copy_preconditions);
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_fold, dst_fields_fold, copy_pre, 
-                            NULL/*intersect*/, dst_req.redop, true/*fold*/);
+                            predicate_guard, NULL/*intersect*/, 
+                            dst_req.redop, true/*fold*/);
         if (copy_post.exists())
           result_events.insert(copy_post);
       }
@@ -2843,7 +2852,8 @@ namespace Legion {
         ApEvent copy_pre = Runtime::merge_events(list_copy_preconditions);
         ApEvent copy_post = dst_node->issue_copy(op, 
                             src_fields_list, dst_fields_list, copy_pre, 
-                            NULL/*intersect*/, dst_req.redop, false/*fold*/);
+                            predicate_guard, NULL/*intersect*/, 
+                            dst_req.redop, false/*fold*/);
         if (copy_post.exists())
           result_events.insert(copy_post);
       }
@@ -3181,7 +3191,9 @@ namespace Legion {
                                           RestrictInfo &restrict_info,
                                           InstanceSet &instances, 
                                           ApEvent precondition,
-                                          std::set<RtEvent> &map_applied_events)
+                                          std::set<RtEvent> &map_applied_events,
+                                          PredEvent true_guard, 
+                                          PredEvent false_guard)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
@@ -3193,6 +3205,7 @@ namespace Legion {
       RegionNode *fill_node = get_node(req.region);
       FieldMask fill_mask = 
         fill_node->column_source->get_field_mask(req.privilege_fields);
+      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
       // Check to see if we have any restricted fields that
       // we need to fill eagerly
       if (restrict_info.has_restrictions())
@@ -3204,14 +3217,19 @@ namespace Legion {
         FieldMask eager_fields;
         restrict_info.populate_restrict_fields(eager_fields);
         ApEvent done_event = fill_node->eager_fill_fields(ctx.get_id(), 
-              op, index, context, eager_fields, value, value_size, 
-              version_info, instances, precondition, map_applied_events);
+         op, index, logical_ctx_uid, context, eager_fields, value, value_size,
+         version_info, instances, precondition, true_guard, map_applied_events);
         // Remove these fields from the fill set
         fill_mask -= eager_fields;
         // If we still have fields to fill, do that now
         if (!!fill_mask)
           fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-                                 context, version_info, map_applied_events);
+                                 logical_ctx_uid, context, version_info, 
+                                 map_applied_events, true_guard, false_guard
+#ifdef LEGION_SPY
+                                 , op->get_unique_op_id()
+#endif
+                                 );
         // We know the sync precondition is chained off at least
         // one eager fill so we can return the done event
         return done_event;
@@ -3223,7 +3241,12 @@ namespace Legion {
 #endif
         // Fill in these fields on this node
         fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-                               context, version_info, map_applied_events); 
+                               logical_ctx_uid, context, version_info, 
+                               map_applied_events, true_guard, false_guard
+#ifdef LEGION_SPY
+                               , op->get_unique_op_id()
+#endif
+                               );
         // We didn't actually use the precondition so just return it
         return precondition;
       }
@@ -3247,7 +3270,8 @@ namespace Legion {
                                               unsigned index,
                                               const RegionRequirement &req,
                                               InstanceManager *file_instance,
-                                              VersionInfo &version_info)
+                                              VersionInfo &version_info,
+                                              std::set<RtEvent> &map_applied)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_FILE_CALL);
@@ -3257,10 +3281,12 @@ namespace Legion {
       InnerContext *context = attach_op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
       RegionNode *attach_node = get_node(req.region);
+      UniqueID logical_ctx_uid = attach_op->get_context()->get_context_uid();
       // Perform the attachment
-      return attach_node->attach_file(ctx.get_id(), context, 
+      return attach_node->attach_file(ctx.get_id(), context, logical_ctx_uid,  
                                       file_instance->layout->allocated_fields, 
-                                      req, file_instance, version_info);
+                                      req, file_instance, 
+                                      version_info, map_applied);
     }
 
     //--------------------------------------------------------------------------
@@ -3268,7 +3294,8 @@ namespace Legion {
                                           DetachOp *detach_op,
                                           unsigned index,
                                           VersionInfo &version_info,
-                                          const InstanceRef &ref)
+                                          const InstanceRef &ref,
+                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_FILE_CALL);
@@ -3276,9 +3303,12 @@ namespace Legion {
       assert(req.handle_type == SINGULAR);
 #endif
       InnerContext *context = detach_op->find_physical_context(index);
+      RegionTreeContext ctx = context->get_context();
       RegionNode *detach_node = get_node(req.region);
+      UniqueID logical_ctx_uid = detach_op->get_context()->get_context_uid();
       // Perform the detachment
-      return detach_node->detach_file(context, version_info, ref);
+      return detach_node->detach_file(ctx.get_id(), context, logical_ctx_uid, 
+                                      version_info, ref, map_applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -4711,24 +4741,24 @@ namespace Legion {
           }
         case 1:
           {
-            Rect<1> leftr = left.get_rect<1>();
-            Rect<1> rightr = right.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rightr = right.get_rect<1>();
             if (leftr.overlaps(rightr))
               disjoint = false;
             break;
           }
         case 2:
           {
-            Rect<2> leftr = left.get_rect<2>();
-            Rect<2> rightr = right.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rightr = right.get_rect<2>();
             if (leftr.overlaps(rightr))
               disjoint = false;
             break;
           }
         case 3:
           {
-            Rect<3> leftr = left.get_rect<3>();
-            Rect<3> rightr = right.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rightr = right.get_rect<3>();
             if (leftr.overlaps(rightr))
               disjoint = false;
             break;
@@ -5103,9 +5133,9 @@ namespace Legion {
           }
         case 1:
           {
-            Rect<1> leftr = left.get_rect<1>();
-            Rect<1> rightr = right.get_rect<1>();
-            Rect<1> temp = leftr.intersection(rightr);
+            LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rightr = right.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> temp = leftr.intersection(rightr);
             if (temp.volume() > 0)
             {
               non_empty = true;
@@ -5116,9 +5146,9 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> leftr = left.get_rect<2>();
-            Rect<2> rightr = right.get_rect<2>();
-            Rect<2> temp = leftr.intersection(rightr);
+            LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rightr = right.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> temp = leftr.intersection(rightr);
             if (temp.volume() > 0)
             {
               non_empty = true;
@@ -5129,9 +5159,9 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> leftr = left.get_rect<3>();
-            Rect<3> rightr = right.get_rect<3>();
-            Rect<3> temp = leftr.intersection(rightr);
+            LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rightr = right.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> temp = leftr.intersection(rightr);
             if (temp.volume() > 0)
             {
               non_empty = true;
@@ -5219,12 +5249,12 @@ namespace Legion {
         {
           case 1:
             {
-              Rect<1> leftr = left.get_rect<1>();
+              LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<1> right = it->get_rect<1>(); 
+                LegionRuntime::Arrays::Rect<1> right = it->get_rect<1>(); 
                 if ((right.intersection(leftr)) != right)
                 {
                   dominates = false;
@@ -5235,12 +5265,12 @@ namespace Legion {
             }
           case 2:
             {
-              Rect<2> leftr = left.get_rect<2>();
+              LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<2> right = it->get_rect<2>(); 
+                LegionRuntime::Arrays::Rect<2> right = it->get_rect<2>(); 
                 if ((right.intersection(leftr)) != right)
                 {
                   dominates = false;
@@ -5251,12 +5281,12 @@ namespace Legion {
             }
           case 3:
             {
-              Rect<3> leftr = left.get_rect<3>();
+              LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<3> right = it->get_rect<3>(); 
+                LegionRuntime::Arrays::Rect<3> right = it->get_rect<3>(); 
                 if ((right.intersection(leftr)) != right)
                 {
                   dominates = false;
@@ -5283,14 +5313,14 @@ namespace Legion {
               for (std::set<Domain>::const_iterator it = left_set.begin();
                     it != left_set.end(); it++)
               {
-                Rect<1> left_rect = it->get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> left_rect = it->get_rect<1>();
                 intervals.insert(left_rect.lo[0], left_rect.hi[0]);
               }
               dominates = true;
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<1> right_rect = it->get_rect<1>();
+                LegionRuntime::Arrays::Rect<1> right_rect = it->get_rect<1>();
                 if (!intervals.dominates(right_rect.lo[0], right_rect.hi[0]))
                 {
                   dominates = false;
@@ -5305,7 +5335,7 @@ namespace Legion {
               for (std::set<Domain>::const_iterator it = left_set.begin();
                     it != left_set.end(); it++)
               {
-                Rect<2> left_rect = it->get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> left_rect = it->get_rect<2>();
                 if (left_rect.volume() > 0)
                   rectangles.add_rectangle(left_rect.lo[0], left_rect.lo[1],
                                            left_rect.hi[0], left_rect.hi[1]);
@@ -5314,7 +5344,7 @@ namespace Legion {
               for (std::set<Domain>::const_iterator it = right_set.begin();
                     it != right_set.end(); it++)
               {
-                Rect<2> right_rect = it->get_rect<2>();
+                LegionRuntime::Arrays::Rect<2> right_rect = it->get_rect<2>();
                 if (right_rect.volume() > 0 &&
                     !rectangles.covers(right_rect.lo[0], right_rect.lo[1],
                                        right_rect.hi[0], right_rect.hi[1]))
@@ -5332,13 +5362,13 @@ namespace Legion {
               for (std::set<Domain>::const_iterator rit = right_set.begin();
                     (rit != right_set.end()) && dominates; rit++)
               {
-                Rect<3> right_rect = rit->get_rect<3>();
+                LegionRuntime::Arrays::Rect<3> right_rect = rit->get_rect<3>();
                 bool has_dominator = false;
                 // See if any of the rectangles on the left dominate it
                 for (std::set<Domain>::const_iterator lit = left_set.begin();
                       lit != left_set.end(); lit++)
                 {
-                  Rect<3> left_rect = lit->get_rect<3>();
+                  LegionRuntime::Arrays::Rect<3> left_rect = lit->get_rect<3>();
                   if (right_rect.intersection(left_rect) == right_rect)
                   {
                     has_dominator = true;
@@ -6775,7 +6805,7 @@ namespace Legion {
           }
         case 1:
           {
-            Rect<1> rect = dom.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rect = dom.get_rect<1>();
             if (rect.volume() > 0)
               LegionSpy::log_index_space_rect<1>(handle.id,rect.lo.x,rect.hi.x);
             else
@@ -6784,7 +6814,7 @@ namespace Legion {
           }
         case 2:
           {
-            Rect<2> rect = dom.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rect = dom.get_rect<2>();
             if (rect.volume() > 0)
               LegionSpy::log_index_space_rect<2>(handle.id,rect.lo.x,rect.hi.x);
             else
@@ -6793,7 +6823,7 @@ namespace Legion {
           }
         case 3:
           {
-            Rect<3> rect = dom.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rect = dom.get_rect<3>();
             if (rect.volume() > 0)
               LegionSpy::log_index_space_rect<3>(handle.id,rect.lo.x,rect.hi.x);
             else
@@ -10919,8 +10949,6 @@ namespace Legion {
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
            proj_info.projection_domain, are_all_children_disjoint());
-        if (IS_REDUCE(user.usage))
-          proj_info.set_first_reduction();
         merge_new_field_state(state, new_state);
       }
       else if (next_child.is_valid())
@@ -11019,7 +11047,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::close_logical_node(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
-                                            bool permit_leave_open,
                                             bool read_only_close)
     //--------------------------------------------------------------------------
     {
@@ -11043,7 +11070,6 @@ namespace Legion {
           closed_node->record_closed_fields(closing_mask & state.dirty_fields);
       }
       // Recursively traverse any open children and close them as well
-      LegionDeque<FieldState>::aligned new_states;
       for (std::list<FieldState>::iterator it = state.field_states.begin();
             it != state.field_states.end(); /*nothing*/)
       {
@@ -11077,11 +11103,11 @@ namespace Legion {
                                    false/*allow next*/,
                                    NULL/*aliased children*/,
                                    false/*upgrade*/,
-                                   permit_leave_open,
                                    read_only_close,
+                                   false/*overwiting close*/,
                                    false/*record close operations*/,
                                    false/*record closed fields*/,
-                                   new_states, already_open);
+                                   already_open);
         }
         // Remove the state if it is now empty
         if (!it->valid_fields)
@@ -11089,9 +11115,6 @@ namespace Legion {
         else
           it++;
       }
-      // Merge any new field states
-      if (!new_states.empty())
-        merge_new_field_states(state, new_states);
       // We can clear out our dirty fields 
       if (!!state.dirty_fields)
         state.dirty_fields -= closing_mask;
@@ -11138,8 +11161,14 @@ namespace Legion {
       }
       // If we are overwriting then we don't really care about what dirty
       // data is in a given sub-tree since it isn't going to matter
+      // BE CAREFUL: if this is predicated operation then we can't
+      // necessarily assume it will be overwritten, in which case we
+      // need a full close operation
+      // In the future we might consider breaking this out so that we
+      // generate two close operations: a read-only one for the predicate
+      // true case, and normal close operation for the predicate false case
       const bool overwriting = IS_WRITE_ONLY(closer.user.usage) && 
-                                !next_child.is_valid();
+        !next_child.is_valid() && !closer.user.op->is_predicated_op();
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
             state.field_states.begin(); it != 
@@ -11190,11 +11219,11 @@ namespace Legion {
                                          true/*allow next*/,
                                          aliased_children,
                                          needs_upgrade,
-                                         false/*permit leave open*/,
                                          true/*read only close*/,
+                                         false/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
-                                         new_states, already_open);
+                                         already_open);
                 open_below |= already_open;
                 if (needs_upgrade && !!already_open)
                   new_states.push_back(
@@ -11215,11 +11244,11 @@ namespace Legion {
                                        true/*allow next*/,
                                        aliased_children,
                                        false/*needs upgrade*/,
-                                       IS_READ_ONLY(closer.user.usage),
-                                       overwriting/*read only close*/,
+                                       false/*read only close*/,
+                                       overwriting/*overwriting close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
-                                       new_states, open_below);
+                                       open_below);
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
               else
@@ -11320,11 +11349,11 @@ namespace Legion {
                                            true/*allow next*/,
                                            aliased_children,
                                            true/*needs upgrade*/,
-                                           false/*permit leave open*/,
                                            false/*read only close*/,
+                                           false/*overwriting close*/,
                                            record_close_operations,
                                            false/*record closed fields*/,
-                                           new_states, already_open);
+                                           already_open);
                   open_below |= already_open;
                   if (!!already_open)
                   {
@@ -11346,11 +11375,11 @@ namespace Legion {
                                          false/*allow next*/,
                                          NULL/*aliased children*/,
                                          false/*needs upgrade*/,
-                                         false/*permit leave open*/,
-                                         overwriting/*read only close*/,
+                                         false/*read only close*/,
+                                         overwriting/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
-                                         new_states, already_open);
+                                         already_open);
                 open_below |= already_open;
               }
               // Now see if the current field state is still valid
@@ -11388,11 +11417,11 @@ namespace Legion {
                                          false/*allow next child*/,
                                          NULL/*aliased children*/,
                                          false/*needs upgrade*/,
-                                         false/*permit leave open*/,
-                                         overwriting/*read only close*/,
+                                         false/*read only close*/,
+                                         overwriting/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
-                                         new_states, already_open);
+                                         already_open);
 #ifdef DEBUG_LEGION
                 assert(!already_open); // should all be closed now
 #endif
@@ -11441,7 +11470,7 @@ namespace Legion {
                 assert(!!overlap);
 #endif
                 if (overwriting)
-                  closer.record_read_only_close(overlap, true/*projection*/);
+                  closer.record_overwriting_close(overlap, true/*projection*/);
                 else
                 {
                   closer.record_close_operation(overlap, true/*projection*/);
@@ -11459,6 +11488,7 @@ namespace Legion {
               break;
             }
           case OPEN_REDUCE_PROJ:
+          case OPEN_REDUCE_PROJ_DIRTY:
             {
               // If we are reducing at this level we can 
               // leave it open otherwise we need a close
@@ -11472,7 +11502,7 @@ namespace Legion {
                   assert(!!overlap);
 #endif
                   if (overwriting)
-                    closer.record_read_only_close(overlap, true/*projection*/);
+                    closer.record_overwriting_close(overlap,true/*projection*/);
                   else
                   {
                     closer.record_close_operation(overlap, true/*projection*/);
@@ -11563,11 +11593,11 @@ namespace Legion {
                                        no_next_child, false/*allow next*/,
                                        NULL/*aliased children*/,
                                        false/*needs upgrade*/,
-                                       false/*permit leave open*/,
                                        true/*read only close*/,
+                                       false/*overwriting close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
-                                       new_states, already_open);
+                                       already_open);
               open_below |= already_open;
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
@@ -11584,11 +11614,11 @@ namespace Legion {
                                        no_next_child, false/*allow next*/,
                                        NULL/*aliased children*/,
                                        false/*needs upgrade*/,
-                                       false/*permit leave open*/,
                                        false/*read only close*/,
+                                       false/*overwriting close*/,
                                        record_close_operations,
                                        false/*record closed fields*/,
-                                       new_states, already_open);
+                                       already_open);
               open_below |= already_open;
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
@@ -11625,13 +11655,34 @@ namespace Legion {
               // same projection function with the same or smaller
               // size domain as the original index space launch
               if ((it->projection == proj_info.projection) &&
-                  it->projection_domain_dominates(proj_info.projection_domain) 
-                  && !IS_REDUCE(closer.user.usage))
+                  it->projection_domain_dominates(proj_info.projection_domain)) 
               {
-                // Update the domain  
-                it->projection_domain = proj_info.projection_domain;
-                open_below |= (it->valid_fields & current_mask);
-                it++;
+                // If we're a reduction we have to go into a dirty 
+                // reduction mode since we know we're already open below
+                if (IS_REDUCE(closer.user.usage)) 
+                {
+                  // Go to the dirty reduction mode
+                  const FieldMask overlap = it->valid_fields & current_mask;
+                  // Record that some fields are already open
+                  open_below |= overlap;
+                  // Make the new state to add
+                  new_states.push_back(FieldState(closer.user.usage, overlap, 
+                           proj_info.projection, proj_info.projection_domain, 
+                           are_all_children_disjoint(), true/*dirty reduce*/));
+                  // If we are a reduction, we can go straight there
+                  it->valid_fields -= overlap;
+                  if (!it->valid_fields)
+                    it = state.field_states.erase(it);
+                  else
+                    it++;
+                }
+                else
+                {
+                  // Update the domain  
+                  it->projection_domain = proj_info.projection_domain;
+                  open_below |= (it->valid_fields & current_mask);
+                  it++;
+                }
               }
               else
               {
@@ -11678,7 +11729,8 @@ namespace Legion {
               // Can only be here if all children are disjoint
               assert(are_all_children_disjoint());
 #endif
-              if (IS_REDUCE(closer.user.usage))
+              if (IS_REDUCE(closer.user.usage) &&
+                  it->projection_domain_dominates(proj_info.projection_domain))
               {
                 const FieldMask overlap = it->valid_fields & current_mask;
                 // Record that some fields are already open
@@ -11686,7 +11738,7 @@ namespace Legion {
                 // Make the new state to add
                 new_states.push_back(FieldState(closer.user.usage, overlap, 
                          proj_info.projection, proj_info.projection_domain, 
-                         are_all_children_disjoint()));
+                         are_all_children_disjoint(), true/*dirty reduce*/));
                 // If we are a reduction, we can go straight there
                 it->valid_fields -= overlap;
                 if (!it->valid_fields)
@@ -11703,9 +11755,13 @@ namespace Legion {
                 // index spaces without needing a close operation
                 it++;
               }
-              else if (proj_info.projection->depth == 0)
+              else if ((proj_info.projection->depth == 0) && 
+                        !IS_REDUCE(closer.user.usage))
               {
                 // If we are also disjoint shallow we can stay in this mode
+                // Exception: reductions that are larger than the current
+                // domain are bad cause we can't do advances properly for
+                // our projection epoch
                 open_below |= (it->valid_fields & current_mask);
                 it++;
               }
@@ -11734,6 +11790,7 @@ namespace Legion {
               break;
             }
           case OPEN_REDUCE_PROJ:
+          case OPEN_REDUCE_PROJ_DIRTY:
             {
               // Reduce projections of the same kind can always stay open
               // otherwise we need a close operation
@@ -11776,6 +11833,9 @@ namespace Legion {
               }
               else
               {
+                // If this is a dirty reduction, then record it
+                if (it->open_state == OPEN_REDUCE_PROJ_DIRTY)
+                  proj_info.set_dirty_reduction(); 
                 open_below |= (it->valid_fields & current_mask);
                 it++;
               }
@@ -11794,9 +11854,6 @@ namespace Legion {
         new_states.push_back(FieldState(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_domain, 
               are_all_children_disjoint()));
-        // If this is the first projection reduction record it
-        if (IS_REDUCE(closer.user.usage))
-          proj_info.set_first_reduction();
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
@@ -11857,11 +11914,11 @@ namespace Legion {
                                      next_child, false/*allow_next*/,
                                      NULL/*aliased children*/,
                                      false/*needs upgrade*/,
-                                     false/*permit leave open*/,
                                      false/*read only close*/,
+                                     false/*overwriting close*/,
                                      record_close_operations,
                                      true/*record closed fields*/,
-                                     new_states, closed_child_fields);
+                                     closed_child_fields);
             // We only really flushed fields that were actually closed
             flushed_fields |= closed_child_fields;
           }
@@ -11890,11 +11947,10 @@ namespace Legion {
                                             bool allow_next_child,
                                             const FieldMask *aliased_children,
                                             bool upgrade_next_child,
-                                            bool permit_leave_open,
                                             bool read_only_close,
+                                            bool overwriting_close,
                                             bool record_close_operations,
                                             bool record_closed_fields,
-                                   LegionDeque<FieldState>::aligned &new_states,
                                             FieldMask &output_mask)
     //--------------------------------------------------------------------------
     {
@@ -11938,10 +11994,12 @@ namespace Legion {
           }
         }
       }
-      else if (read_only_close)
+      else if (read_only_close || overwriting_close)
       {
         // Read only closes can close specific children without 
         // any issues, so we can selectively filter what we need to close
+        // Overwriting closes are the same as read-only closes, but 
+        // they actually do need to close all the children
         std::vector<ColorPoint> to_delete;
         for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
               state.open_children.begin(); it != 
@@ -11991,25 +12049,26 @@ namespace Legion {
             }
           }
           // Check for child disjointness
-          if (next_child.is_valid() && (it->first != next_child) &&
-              (all_children_disjoint || 
+          if (!overwriting_close && next_child.is_valid() && 
+              (it->first != next_child) && (all_children_disjoint || 
                are_children_disjoint(it->first, next_child)))
             continue;
           // Perform the close operation
           RegionTreeNode *child_node = get_tree_child(it->first);
           child_node->close_logical_node(closer, close_mask, 
-                                         permit_leave_open, true/*read only*/);
+                                         true/*read only*/);
           if (record_close_operations)
-            closer.record_read_only_close(close_mask, false/*projection*/);
+          {
+            if (overwriting_close)
+              closer.record_overwriting_close(close_mask, false/*projection*/);
+            else
+              closer.record_read_only_close(close_mask, false/*projection*/);
+          }
           // Remove the close fields
           it->second -= close_mask;
           removed_fields = true;
           if (!it->second)
             to_delete.push_back(it->first);
-          // If we're allowed to leave this open, add a new
-          // state for the current user
-          if (permit_leave_open)
-            new_states.push_back(FieldState(closer.user,close_mask,it->first));
           if (record_closed_fields)
             output_mask |= close_mask;
         }
@@ -12113,18 +12172,12 @@ namespace Legion {
             // Perform the close operation
             RegionTreeNode *child_node = get_tree_child(it->first);
             child_node->close_logical_node(closer, child_close, 
-                                           permit_leave_open, 
                                            false/*read only close*/);
             // Remove the close fields
             it->second -= child_close;
             removed_fields = true;
             if (!it->second)
               to_delete.push_back(it->first);
-            // If we're allowed to leave this open, add a new
-            // state for the current user
-            if (permit_leave_open)
-              new_states.push_back(FieldState(closer.user, 
-                                              child_close, it->first));
           }
           // Remove the children that can be deleted
           for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
@@ -12633,11 +12686,11 @@ namespace Legion {
                                          next_child, false/*allow next*/,
                                          NULL/*aliased children*/,
                                          false/*upgrade next child*/,
-                                         false/*permit leave open*/,
                                          false/*read only close*/,
+                                         false/*overwriting close*/,
                                          true/*record close operations*/,
                                          true/*record closed fields*/,
-                                         new_states, open_below);
+                                         open_below);
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -12659,11 +12712,11 @@ namespace Legion {
                                          next_child, false/*allow next*/,
                                          NULL/*aliased children*/,
                                          false/*upgrade next child*/,
-                                         false/*permit leave open*/,
                                          false/*read only close*/,
+                                         false/*overwriting close*/,
                                          true/*record close operations*/,
                                          true/*record closed fields*/,
-                                         new_states, open_below);
+                                         open_below);
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);
                 else
@@ -12683,11 +12736,11 @@ namespace Legion {
                                        next_child, false/*allow next*/,
                                        NULL/*aliased children*/,
                                        false/*upgrade next child*/,
-                                       false/*permit leave open*/,
                                        false/*read only close*/,
+                                       false/*overwriting close*/,
                                        true/*record close operations*/,
                                        true/*record closed fields*/,
-                                       new_states, open_below);
+                                       open_below);
               if (!it->valid_fields)
                 it = state.field_states.erase(it);
               else
@@ -12938,6 +12991,7 @@ namespace Legion {
                                                std::set<RtEvent> &ready_events,
                                                bool partial_traversal,
                                                bool disjoint_close,
+                                               UniqueID logical_context_uid,
           const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs)
     //--------------------------------------------------------------------------
     {
@@ -12981,8 +13035,8 @@ namespace Legion {
         // See if we need to compute the split mask first, this happens
         // only for projection epochs
         if (advance_epochs != NULL)
-          manager.compute_advance_split_mask(version_info, parent_ctx,
-                          version_mask, ready_events, *advance_epochs);
+          manager.compute_advance_split_mask(version_info, logical_context_uid,
+                      parent_ctx, version_mask, ready_events, *advance_epochs);
         // Record the path only versions
         const FieldMask &split_mask = version_info.get_split_mask(depth);
         manager.record_path_only_versions(version_mask, split_mask,
@@ -12991,9 +13045,9 @@ namespace Legion {
         // Continue the traversal down the tree
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         child->compute_version_numbers(ctx, path, usage, version_mask,
-                                unversioned_mask, op, idx, parent_ctx, 
-                                version_info, ready_events, partial_traversal,
-                                disjoint_close, advance_epochs);
+                          unversioned_mask, op, idx, parent_ctx, 
+                          version_info, ready_events, partial_traversal,
+                          disjoint_close, logical_context_uid, advance_epochs);
       }
     }
 
@@ -13005,6 +13059,7 @@ namespace Legion {
                                                InnerContext *parent_ctx, 
                                                bool update_parent_state,
                                                bool skip_update_parent,
+                                               UniqueID logical_context_uid,
                                                bool dedup_opens, 
                                                bool dedup_advances, 
                                                ProjectionEpochID open_epoch,
@@ -13031,25 +13086,26 @@ namespace Legion {
           const FieldMask dirty_prev = finder->second & advance_mask;
           if (!!dirty_prev)
           {
-            manager.advance_versions(advance_mask, parent_ctx, 
-                 local_update_parent, local_space, ready_events, 
-                 dedup_opens, open_epoch, dedup_advances, 
-                 advance_epoch, &dirty_prev);
+            manager.advance_versions(advance_mask, logical_context_uid,
+                          parent_ctx, local_update_parent, local_space, 
+                          ready_events, dedup_opens, open_epoch, 
+                          dedup_advances, advance_epoch, &dirty_prev);
             still_need_advance = false;
           }
         }
       }
       if (still_need_advance)
-        manager.advance_versions(advance_mask, parent_ctx, 
-             local_update_parent, local_space, ready_events, 
-             dedup_opens, open_epoch, dedup_advances, advance_epoch);
+        manager.advance_versions(advance_mask, logical_context_uid,
+              parent_ctx, local_update_parent, local_space, ready_events, 
+              dedup_opens, open_epoch, dedup_advances, advance_epoch);
       // Continue the traversal, 
       // wonder if we get tail call recursion optimization
       if (!arrived)
       {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
         child->advance_version_numbers(ctx, local_space, path, advance_mask, 
-                                       parent_ctx, update_parent_state, false,
+                                       parent_ctx, update_parent_state, 
+                                       false/*update*/, logical_context_uid,
                                        dedup_opens, dedup_advances, 
                                        open_epoch, advance_epoch, 
                                        dirty_previous, ready_events);
@@ -13060,6 +13116,7 @@ namespace Legion {
     CompositeView* RegionTreeNode::create_composite_instance(ContextID ctx_id,
                                                 const FieldMask &closing_mask,
                                                 VersionInfo &version_info, 
+                                                UniqueID logical_context_uid,
                                                 InnerContext *owner_ctx,
                                                 ClosedNode *closed_tree,
                                                 std::set<RtEvent> &ready_events,
@@ -13092,13 +13149,14 @@ namespace Legion {
           FieldMask overlap = it->second & closing_mask;
           if (!overlap)
             continue;
-          manager.advance_versions(overlap, owner_ctx, true/*update parent*/,
-                     local_space, ready_events, true/*dedup opens*/, it->first);
+          manager.advance_versions(overlap, logical_context_uid, owner_ctx, 
+                                   true/*update parent*/, local_space, 
+                                   ready_events, true/*dedup opens*/,it->first);
         }
       }
       else // The common case
-        manager.advance_versions(closing_mask, owner_ctx, update_parent_state, 
-                                 local_space, ready_events);
+        manager.advance_versions(closing_mask, logical_context_uid, owner_ctx,
+                                 update_parent_state, local_space,ready_events);
       // Now we can record our advance versions
       manager.record_advance_versions(closing_mask, owner_ctx, 
                                       version_info, ready_events);
@@ -13107,7 +13165,7 @@ namespace Legion {
       // Prepare to make the new view
       DistributedID did = context->runtime->get_available_distributed_id(false);
       // Copy the version info that we need
-      CompositeVersionInfo *view_info = new CompositeVersionInfo();
+      DeferredVersionInfo *view_info = new DeferredVersionInfo();
       version_info.copy_to(*view_info);
       // Make the view
       CompositeView *result = legion_new<CompositeView>(context, did, 
@@ -13392,8 +13450,9 @@ namespace Legion {
           }
         }
         LegionMap<ApEvent,FieldMask>::aligned postconditions;
-        issue_grouped_copies(info, dst, restrict_out, preconditions, 
-            update_mask, src_instances, &info.version_info, postconditions);
+        issue_grouped_copies(info, dst, restrict_out, PredEvent::NO_PRED_EVENT,
+                                     preconditions, update_mask, src_instances, 
+                                     &info.version_info, postconditions);
         // Tell the destination about all of the copies that were done
         for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
               postconditions.begin(); it != postconditions.end(); it++)
@@ -13650,6 +13709,7 @@ namespace Legion {
     void RegionTreeNode::issue_grouped_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
                                               bool restrict_out,
+                                              PredEvent predicate_guard,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                        const FieldMask &update_mask,
            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
@@ -13698,7 +13758,7 @@ namespace Legion {
         // can now issue the copy to the low-level runtime
         ApEvent copy_pre = Runtime::merge_events(pre_set.preconditions);
         ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
-                                       copy_pre, intersect);
+                                       copy_pre, predicate_guard, intersect);
         // Save the copy post in the post conditions
         if (copy_post.exists())
         {
@@ -13833,7 +13893,8 @@ namespace Legion {
 #endif
           // Then we have a reduction to perform
           it->first->perform_reduction(inst_target, copy_mask, &version_info, 
-                                       op, index, map_applied, restrict_out);
+                                       op, index, map_applied, 
+                                       PredEvent::NO_PRED_EVENT, restrict_out);
         }
       }
     }
@@ -14980,7 +15041,8 @@ namespace Legion {
     ApEvent RegionNode::issue_copy(Operation *op,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
-                        ApEvent precondition,RegionTreeNode *intersect/*=NULL*/,
+                        ApEvent precondition, PredEvent predicate_guard,
+                        RegionTreeNode *intersect/*=NULL*/,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
@@ -15001,12 +15063,24 @@ namespace Legion {
           if (dom_pre.exists() && !dom_pre.has_triggered())
             precondition = Runtime::merge_events(precondition, dom_pre);
           std::set<ApEvent> done_events;
-          for (std::set<Domain>::const_iterator it = doms.begin();
-                it != doms.end(); it++)
+          if (predicate_guard.exists())
           {
-            done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
-                                                requests, precondition,
-                                                redop, reduction_fold)));
+            // Have to protect against misspeculation
+            ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                     ApEvent(predicate_guard));
+            for (std::set<Domain>::const_iterator it = doms.begin();
+                  it != doms.end(); it++)
+              done_events.insert(Runtime::ignorefaults(it->copy(
+                      src_fields, dst_fields, requests, pred_pre, 
+                      redop, reduction_fold)));
+          }
+          else
+          {
+            for (std::set<Domain>::const_iterator it = doms.begin();
+                  it != doms.end(); it++)
+              done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
+                                                  requests, precondition,
+                                                  redop, reduction_fold)));
           }
           result = Runtime::merge_events(done_events);
         }
@@ -15016,8 +15090,17 @@ namespace Legion {
           const Domain &dom = row_source->get_domain(dom_pre);
           if (dom_pre.exists() && !dom_pre.has_triggered())
             precondition = Runtime::merge_events(precondition, dom_pre);
-          result = ApEvent(dom.copy(src_fields, dst_fields, requests, 
-                                    precondition, redop, reduction_fold));
+          // Have to protect against misspeculation
+          if (predicate_guard.exists())
+          {
+            ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                     ApEvent(predicate_guard));
+            result = Runtime::ignorefaults(dom.copy(src_fields, dst_fields,
+                                requests, pred_pre, redop, reduction_fold));
+          }
+          else
+            result = ApEvent(dom.copy(src_fields, dst_fields, requests, 
+                                      precondition, redop, reduction_fold));
         }
       }
       else
@@ -15031,12 +15114,24 @@ namespace Legion {
           intersection_doms = &(row_source->get_intersection_domains(
                 intersect->as_partition_node()->row_source));
         std::set<ApEvent> done_events;
-        for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-              it != intersection_doms->end(); it++)
+        if (predicate_guard.exists())
         {
-          done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
-                                              requests, precondition,
-                                              redop, reduction_fold)));
+          // have to protect against misspeculation
+          ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                   ApEvent(predicate_guard));
+          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+                it != intersection_doms->end(); it++)
+            done_events.insert(Runtime::ignorefaults(it->copy(
+                    src_fields, dst_fields, requests, pred_pre, 
+                    redop, reduction_fold)));
+        }
+        else
+        {
+          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+                it != intersection_doms->end(); it++)
+            done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
+                                                requests, precondition,
+                                                redop, reduction_fold)));
         }
         result = Runtime::merge_events(done_events);
       }
@@ -15078,7 +15173,11 @@ namespace Legion {
     ApEvent RegionNode::issue_fill(Operation *op,
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
-                        ApEvent precondition, RegionTreeNode *intersect)
+                        ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                        UniqueID fill_uid,
+#endif
+                        RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
@@ -15098,11 +15197,22 @@ namespace Legion {
           if (dom_pre.exists() && !dom_pre.has_triggered())
             precondition = Runtime::merge_events(precondition, dom_pre);
           std::set<ApEvent> done_events;
-          for (std::set<Domain>::const_iterator it = doms.begin();
-                it != doms.end(); it++)
+          if (predicate_guard.exists())
           {
-            done_events.insert(ApEvent(it->fill(dst_fields, requests, 
-                                        fill_value, fill_size, precondition)));
+            ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                     ApEvent(predicate_guard));
+            // Have to protect against misspeculation
+            for (std::set<Domain>::const_iterator it = doms.begin();
+                  it != doms.end(); it++)
+              done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
+                      requests, fill_value, fill_size, pred_pre)));
+          }
+          else
+          {
+            for (std::set<Domain>::const_iterator it = doms.begin();
+                  it != doms.end(); it++)
+              done_events.insert(ApEvent(it->fill(dst_fields, requests, 
+                                         fill_value, fill_size, precondition)));
           }
           result = Runtime::merge_events(done_events);
         }
@@ -15112,8 +15222,17 @@ namespace Legion {
           const Domain &dom = row_source->get_domain(dom_pre);
           if (dom_pre.exists() && !dom_pre.has_triggered())
             precondition = Runtime::merge_events(precondition, dom_pre);
-          result = ApEvent(dom.fill(dst_fields, requests, 
-                                    fill_value, fill_size, precondition)); 
+          // Have to protect against misspeculation
+          if (predicate_guard.exists())
+          {
+            ApEvent pred_pre = Runtime::merge_events(precondition, 
+                                                     ApEvent(predicate_guard));
+            result = ApEvent(Runtime::ignorefaults(dom.fill(dst_fields, 
+                    requests, fill_value, fill_size, pred_pre)));
+          }
+          else
+            result = ApEvent(dom.fill(dst_fields, requests, 
+                                      fill_value, fill_size, precondition));
         }
       }
       else
@@ -15127,11 +15246,22 @@ namespace Legion {
           intersection_doms = &(row_source->get_intersection_domains(
                 intersect->as_partition_node()->row_source));
         std::set<ApEvent> done_events;
-        for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-              it != intersection_doms->end(); it++)
+        if (predicate_guard.exists())
         {
-          done_events.insert(ApEvent(it->fill(dst_fields, requests,
-                                      fill_value, fill_size, precondition)));
+          ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                   ApEvent(predicate_guard));
+          // Have to protect the against misspeculation
+          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+                it != intersection_doms->end(); it++)
+            done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
+                    requests, fill_value, fill_size, pred_pre)));
+        }
+        else
+        {
+          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
+                it != intersection_doms->end(); it++)
+            done_events.insert(ApEvent(it->fill(dst_fields, requests,
+                                       fill_value, fill_size, precondition)));
         }
         result = Runtime::merge_events(done_events);
       }
@@ -15143,7 +15273,7 @@ namespace Legion {
         result = new_result;
       }
       LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
-                                 precondition, result);
+                                 precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
         LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
                                   dst_fields[idx].inst.id);
@@ -15508,7 +15638,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::register_region(const TraversalInfo &info, 
+    void RegionNode::register_region(const TraversalInfo &info,
+                                     UniqueID logical_ctx_uid,
                                      InnerContext *context,
                                      RestrictInfo &restrict_info,
                                    ApEvent term_event, const RegionUsage &usage,
@@ -15529,7 +15660,7 @@ namespace Legion {
         const bool update_parent_state = 
           !info.version_info.is_upper_bound_node(this);
         const AddressSpaceID local_space = context->runtime->address_space;
-        manager.advance_versions(info.traversal_mask, context,
+        manager.advance_versions(info.traversal_mask, logical_ctx_uid, context,
             update_parent_state, local_space, info.map_applied_events);
       }
       // Sine we're mapping we need to record the advance versions
@@ -15827,7 +15958,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::close_state(const TraversalInfo &info, RegionUsage &usage, 
-                                 InnerContext *context, InstanceSet &targets)
+                                 UniqueID logical_ctx_uid,InnerContext *context, 
+                                 InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
@@ -15839,8 +15971,8 @@ namespace Legion {
       // need to be done would have been issued as part of the 
       // logical analysis or will be done as part of the registration.
       RestrictInfo empty_restrict_info;
-      register_region(info, context, empty_restrict_info, ApEvent::NO_AP_EVENT,
-                      usage, false/*defer add users*/, targets);
+      register_region(info, logical_ctx_uid, context, empty_restrict_info, 
+          ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, targets);
     }
 
     //--------------------------------------------------------------------------
@@ -15917,9 +16049,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
                                  const void *value, size_t value_size,
-                                 InnerContext *context,
+                                 UniqueID logical_ctx_uid,
+                                 InnerContext *inner_context,
                                  VersionInfo &version_info,
-                                 std::set<RtEvent> &map_applied_events)
+                                 std::set<RtEvent> &map_applied_events,
+                                 PredEvent true_guard, PredEvent false_guard
+#ifdef LEGION_SPY
+                                 , UniqueID fill_op_uid
+#endif
+                                 )
     //--------------------------------------------------------------------------
     {
       // A fill is a kind of a write, so we have to do the advance
@@ -15928,35 +16066,73 @@ namespace Legion {
       const bool update_parent_state = 
         !version_info.is_upper_bound_node(this);
       const AddressSpaceID local_space = context->runtime->address_space;
-      manager.advance_versions(fill_mask, context,
+      manager.advance_versions(fill_mask, logical_ctx_uid, inner_context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
-      manager.record_advance_versions(fill_mask, context, 
+      manager.record_advance_versions(fill_mask, inner_context, 
                                       version_info, map_applied_events);
       // Make the fill instance
       DistributedID did = context->runtime->get_available_distributed_id(false);
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
-        legion_new<FillView>(this->context, did, local_space, local_space, 
-                             this, fill_value, true/*register now*/);
+        legion_new<FillView>(context, did, local_space, local_space, 
+                             this, fill_value, true/*register now*/
+#ifdef LEGION_SPY
+                             , fill_op_uid
+#endif
+                             );
       // Now update the physical state
       PhysicalState *state = get_physical_state(version_info);
-      // Invalidate any reduction views
-      if (!(fill_mask * state->reduction_mask))
-        invalidate_reduction_views(state, fill_mask);
-      update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
+      if (true_guard.exists())
+      {
+        // Special path for handling speculative execution of predicated fills
+#ifdef DEBUG_LEGION
+        assert(false_guard.exists());
+#endif
+        // Build a phi view and register that instead
+        DistributedID did = 
+          context->runtime->get_available_distributed_id(false);
+        // Copy the version info that we need
+        DeferredVersionInfo *view_info = new DeferredVersionInfo();
+        version_info.copy_to(*view_info); 
+        PhiView *phi_view = legion_new<PhiView>(context, did, local_space,
+                                                local_space, view_info,
+                                                this, true_guard, false_guard,
+                                                true/*register now*/);
+        // Record the true and false views
+        phi_view->record_true_view(fill_view, fill_mask);
+        LegionMap<LogicalView*,FieldMask>::aligned current_views;
+        find_valid_instance_views(ctx, state, fill_mask, fill_mask,
+                                  version_info, false/*needs space*/, 
+                                  current_views);
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+              current_views.begin(); it != current_views.end(); it++)
+          phi_view->record_false_view(it->first, it->second);
+        // Update the state with the phi view
+        update_valid_views(state, fill_mask, true/*dirty*/, phi_view);
+      }
+      else
+      {
+        // This is the non-predicated path
+        // Invalidate any reduction views
+        if (!(fill_mask * state->reduction_mask))
+          invalidate_reduction_views(state, fill_mask);
+        update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
+      }
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionNode::eager_fill_fields(ContextID ctx, Operation *op,
                                           const unsigned index, 
+                                          UniqueID logical_ctx_uid,
                                           InnerContext *context,
                                           const FieldMask &fill_mask,
                                           const void *value, size_t value_size,
                                           VersionInfo &version_info, 
                                           InstanceSet &instances,
                                           ApEvent sync_precondition,
+                                          PredEvent true_guard,
                                           std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
@@ -15966,7 +16142,7 @@ namespace Legion {
       const bool update_parent_state = 
         !version_info.is_upper_bound_node(this);
       const AddressSpaceID local_space = context->runtime->address_space;
-      manager.advance_versions(fill_mask, context,
+      manager.advance_versions(fill_mask, logical_ctx_uid, context,
           update_parent_state, local_space, map_applied_events);
       // Now record just the advanced versions
       manager.record_advance_versions(fill_mask, context, 
@@ -15991,14 +16167,19 @@ namespace Legion {
         compute_event_sets(fill_mask, preconditions, event_sets);
         // Iterate over the event sets and issue the fill operations on 
         // the different fields
-        for (LegionList<EventSet>::aligned::const_iterator pit = 
+        for (LegionList<EventSet>::aligned::iterator pit = 
               event_sets.begin(); pit != event_sets.end(); pit++)
         {
+          // If we have a predicate guard we add that to the set now
           ApEvent precondition = Runtime::merge_events(pit->preconditions);
           std::vector<Domain::CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);
-          ApEvent fill_event = issue_fill(op, dst_fields, 
-                                          value, value_size, precondition);
+          ApEvent fill_event = issue_fill(op, dst_fields, value, 
+                                          value_size, precondition, true_guard
+#ifdef LEGION_SPY
+                                          , op->get_unique_op_id() 
+#endif
+                                          );
           if (fill_event.exists())
             post_events.insert(fill_event);
         }
@@ -16021,14 +16202,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceRef RegionNode::attach_file(ContextID ctx, InnerContext *parent_ctx, 
+                                        const UniqueID logical_ctx_uid,
                                         const FieldMask &attach_mask,
                                         const RegionRequirement &req,
-                                        InstanceManager *manager,
-                                        VersionInfo &version_info)
+                                        InstanceManager *instance_manager,
+                                        VersionInfo &version_info,
+                                        std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
+      // We're effectively writing to this region by doing the attach
+      // so we need to bump the version numbers
+      VersionManager &manager = get_current_version_manager(ctx);
+      const bool update_parent_state = !version_info.is_upper_bound_node(this);
+      const AddressSpaceID local_space = context->runtime->address_space;
+      manager.advance_versions(attach_mask, logical_ctx_uid, parent_ctx,
+          update_parent_state, local_space, map_applied_events);
       // Wrap it in a view
-      MaterializedView *view = parent_ctx->create_instance_top_view(manager, 
+      MaterializedView *view = 
+        parent_ctx->create_instance_top_view(instance_manager, 
             context->runtime->address_space)->as_materialized_view();
 #ifdef DEBUG_LEGION
       assert(view != NULL);
@@ -16039,12 +16230,15 @@ namespace Legion {
       // we are now making this the only valid copy of the data
       update_valid_views(state, attach_mask, true/*dirty*/, view);
       // Return the resulting instance
-      return InstanceRef(manager, attach_mask, ApUserEvent::NO_AP_EVENT);
+      return InstanceRef(instance_manager,attach_mask,ApUserEvent::NO_AP_EVENT);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionNode::detach_file(InnerContext *context, 
-                              VersionInfo &version_info, const InstanceRef &ref)
+    ApEvent RegionNode::detach_file(ContextID ctx, InnerContext *context, 
+                                    const UniqueID logical_ctx_uid,  
+                                    VersionInfo &version_info, 
+                                    const InstanceRef &ref,
+                                    std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       InstanceView *view = convert_reference(ref, context);
@@ -16052,6 +16246,15 @@ namespace Legion {
       assert(view->is_materialized_view());
 #endif
       MaterializedView *detach_view = view->as_materialized_view();
+      const FieldMask &detach_mask = 
+        detach_view->manager->layout->allocated_fields;
+      // A detach is also effectively a bumb of the version numbers because
+      // we are marking that the data in the logical region is no longer valid
+      VersionManager &manager = get_current_version_manager(ctx);
+      const bool update_parent_state = !version_info.is_upper_bound_node(this);
+      const AddressSpaceID local_space = context->runtime->address_space;
+      manager.advance_versions(detach_mask, logical_ctx_uid, context,
+          update_parent_state, local_space, map_applied_events);
       // First remove this view from the set of valid views
       PhysicalState *state = get_physical_state(version_info);
       filter_valid_views(state, detach_view);
@@ -16817,23 +17020,32 @@ namespace Legion {
     ApEvent PartitionNode::issue_copy(Operation *op,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
-                        ApEvent precondition,RegionTreeNode *intersect/*=NULL*/,
+                        ApEvent precondition, PredEvent predicate_guard,
+                        RegionTreeNode *intersect/*=NULL*/,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
       return parent->issue_copy(op, src_fields, dst_fields, precondition,
-                                intersect, redop, reduction_fold);
+                      predicate_guard, intersect, redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
     ApEvent PartitionNode::issue_fill(Operation *op,
                         const std::vector<Domain::CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
-                        ApEvent precondition, RegionTreeNode *intersect)
+                        ApEvent precondition, PredEvent predicate_guard,
+#ifdef LEGION_SPY
+                        UniqueID fill_uid,
+#endif
+                        RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
       return parent->issue_fill(op, dst_fields, fill_value, fill_size, 
-                                precondition, intersect);
+                                precondition, predicate_guard, 
+#ifdef LEGION_SPY
+                                fill_uid,
+#endif
+                                intersect);
     }
 
     //--------------------------------------------------------------------------

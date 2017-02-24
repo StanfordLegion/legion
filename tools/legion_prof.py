@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2016 Stanford University, NVIDIA Corporation
+# Copyright 2017 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ from __future__ import print_function
 
 import argparse
 import sys, os, shutil
-import string, re, json
+import string, re, json, heapq, time, itertools
 from math import sqrt, log
 from cgi import escape
 from operator import itemgetter
@@ -89,6 +89,14 @@ US_PER_PIXEL = 100
 PIXELS_PER_LEVEL = 40
 # Pixels per tick mark
 PIXELS_PER_TICK = 200
+
+def slugify(filename):
+    # convert spaces to underscores
+    slugified = filename.replace(" ", "_")
+    # remove special characters
+    slugified = slugified.translate(None, "!@#$%^&*(),/?<>\"':;{}[]|/+=`~")
+    return slugified
+
 
 # Helper function for computing nice colors
 def color_helper(step, num_steps):
@@ -479,6 +487,9 @@ class RuntimeCallRange(TimeRange):
 class Processor(object):
     def __init__(self, proc_id, kind):
         self.proc_id = proc_id
+        # PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
+        # owner_node = proc_id[55:40]
+        self.node_id = (proc_id >> 40) & ((1 << 16) - 1)
         self.kind = kind
         self.app_ranges = list()
         self.full_range = None
@@ -562,16 +573,25 @@ class Processor(object):
     def __repr__(self):
         return '%s Processor %s' % (self.kind, hex(self.proc_id))
 
+    def __cmp__(a, b):
+        return cmp(a.proc_id, b.proc_id)
+
+
 class TimePoint(object):
     def __init__(self, time, thing, first):
         self.time = time
         self.thing = thing
         self.first = first
         self.time_key = 2*time + (0 if first is True else 1)
+    def __cmp__(a, b):
+        return cmp(a.time_key, b.time_key)
 
 class Memory(object):
     def __init__(self, mem_id, kind, size):
         self.mem_id = mem_id
+        # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 1
+        # owner_node = mem_id[55:40]
+        self.node_id = (mem_id >> 40) & ((1 << 16) - 1)
         self.kind = kind
         self.total_size = size
         self.instances = set()
@@ -683,6 +703,9 @@ class Memory(object):
     def __repr__(self):
         return '%s Memory %s' % (self.kind, hex(self.mem_id))
 
+    def __cmp__(a, b):
+        return cmp(a.mem_id, b.mem_id)
+
 class Channel(object):
     def __init__(self, src, dst):
         self.src = src
@@ -788,6 +811,9 @@ class Channel(object):
             return 'Fill ' + self.dst.__repr__() + ' Channel'
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
+
+    def __cmp__(a, b):
+        return cmp(a.dst, b.dst)
 
 class WaitInterval(object):
     def __init__(self, start, ready, end):
@@ -2077,6 +2103,148 @@ class State(object):
                 return potential_dir
             i += 1
 
+    def calculate_statistics_data(self, timepoints, max_count, num_points=100000):
+        # we assume that the timepoints are sorted before this step
+
+        # loop through all the timepoints. Get the earliest. If it's first,
+        # add to the count. if it's second, decrement the count. Store the
+        # (time, count) pair.
+
+        # times = list()
+        # counts = list()
+        statistics = list()
+        count = 0
+        last_time = 0
+        increment = 1.0 / float(max_count)
+        for point in timepoints:
+            if point.first:
+                count += increment
+            else:
+                count -= increment
+            if point.time != last_time:
+                statistics.append((point.time, count))
+            last_time = point.time
+        return statistics
+
+        # CODE BELOW USES A BASIC FILTER IN CASE THE SIZE OF THE STATISTICS
+        # IS TOO LARGE
+
+        # # we want to limit to num_points points in the statistics, so only get
+        # # every nth element
+        # n = max(1, int(len(times) / num_points))
+        # statistics = []
+        # # FIXME: get correct count average
+        # for i in range(0, len(times),n):
+        #     sub_times = times[i:i+n]
+        #     sub_counts = counts[i:i+n]
+        #     num_elems = float(len(sub_times))
+        #     avg_time = float(sum(sub_times)) / num_elems
+        #     avg_count = float(sum(sub_counts)) / num_elems
+        #     statistics.append((avg_time, avg_count))
+        # return statistics
+
+    # utilization is 1 for a processor when some event is on the
+    # processor
+    #
+    # adds points where there are one or more events occurring.
+    # removes a point when the count drops to 0.
+    def convert_to_utilization(self, timepoints):
+        proc_utilization = []
+        count = 0
+        for point in timepoints:
+            if point.first:
+                count += 1
+                if count == 1:
+                    proc_utilization.append(point)
+            else:
+                count -= 1
+                if count == 0:
+                    proc_utilization.append(point)
+        return proc_utilization
+
+    # group by processor kind per node. Also compute the children relationships
+    def group_node_proc_kind_timepoints(self, timepoints_dict):
+        for proc in self.processors.itervalues():
+            if len(proc.tasks) > 0:
+                # add this processor kind to both all and the node group
+                groups = [str(proc.node_id), "all"]
+                for node in groups:
+                    group = node + " (" + proc.kind + ")"
+                    if group not in timepoints_dict:
+                        timepoints_dict[group] = [proc.time_points]
+                    else:
+                        timepoints_dict[group].append(proc.time_points)
+
+    def group_node_proc_timepoints(self, timepoints_dict):
+        for proc in self.processors.itervalues():
+            if len(proc.tasks) > 0:
+                # add this processor to both all and the node group
+                groups = [str(proc.node_id), "all"]
+                for group in groups:
+                    if group not in timepoints_dict:
+                        timepoints_dict[group] = [proc.time_points]
+                    else:
+                        timepoints_dict[group].append(proc.time_points)
+
+    def get_nodes(self):
+        nodes = {}
+        for proc in self.processors.itervalues():
+            if len(proc.tasks) > 0:
+                nodes[str(proc.node_id)] = 1
+        if (len(nodes) > 1):
+            return ["all"] + sorted(nodes.keys())
+        else:
+            return sorted(nodes.keys())
+
+
+    def emit_statistics_tsv(self, output_dirname):
+        print("emitting statistics")
+
+        # this is a map from node ids to a list of timepoints in that node
+        timepoints_dict = {}
+
+        #self.group_node_proc_timepoints(timepoints_dict)
+        self.group_node_proc_kind_timepoints(timepoints_dict)
+
+        # add in the all group
+        timepoints_dict["all"] = [proc.time_points 
+                                    for proc in self.processors.values()
+                                    if len(proc.tasks) > 0]
+
+        # now we compute the structure of the stats (the parent-child
+        # relationships
+        nodes = self.get_nodes()
+        stats_structure = {node: [] for node in nodes}
+
+        # for each node grouping, add all the subtypes of processors
+        for node in nodes:
+            for kind in processor_kinds.itervalues():
+                group = str(node) + " (" + kind + ")"
+                if group in timepoints_dict:
+                    stats_structure[node].append(group)
+
+        json_file_name = os.path.join(output_dirname, "json", "stats.json")
+
+        with open(json_file_name, "w") as json_file:
+            # json.dump(timepoints_dict.keys(), json_file)
+            json.dump(stats_structure, json_file)
+
+
+        # here we write out the actual tsv stats files
+        for tp_group in timepoints_dict:
+            timepoints = timepoints_dict[tp_group]
+            utilizations = [self.convert_to_utilization(tp)
+                            for tp in timepoints]
+
+            max_count = len(timepoints)
+            statistics = self.calculate_statistics_data(sorted(itertools.chain(*utilizations)), max_count)
+            stats_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_stats.tsv")
+            stats_tsv_file = open(stats_tsv_filename, "w")
+            stats_tsv_file.write("time\tcount\n")
+            for stat_point in statistics:
+                stats_tsv_file.write("%.2f\t%.2f\n" % stat_point)
+            stats_tsv_file.close()
+
     def emit_interactive_visualization(self, output_dirname, show_procs,
                                        show_channels, show_instances, force):
         self.assign_colors()
@@ -2093,6 +2261,9 @@ class State(object):
 
         shutil.copytree(src_directory, output_dirname)
 
+        proc_list = []
+        chan_list = []
+        mem_list = []
         processor_levels = {}
         channel_levels = {}
         memory_levels = {}
@@ -2104,26 +2275,60 @@ class State(object):
         processor_tsv_file_name = os.path.join(output_dirname, "legion_prof_processor.tsv")
         scale_json_file_name = os.path.join(output_dirname, "json", "scale.json")
 
+        data_tsv_header = "level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n"
+
         data_tsv_file = open(data_tsv_file_name, "w")
-        data_tsv_file.write("level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n")
+        data_tsv_file.write(data_tsv_header)
+        tsv_dir = os.path.join(output_dirname, "tsv")
+        os.mkdir(tsv_dir)
         if show_procs:
-            for p,proc in sorted(self.processors.iteritems()):
+            for p,proc in sorted(self.processors.iteritems(), key=lambda x: x[1]):
                 if len(proc.tasks) > 0:
-                    base_level = proc.emit_tsv(data_tsv_file, base_level)
-                    processor_levels[proc] = base_level
+                    proc_name = slugify("Proc_" + str(hex(p)))
+                    proc_tsv_file_name = os.path.join(tsv_dir, proc_name + ".tsv")
+                    proc_tsv_file = open(proc_tsv_file_name, "w")
+                    proc_tsv_file.write(data_tsv_header)
+                    proc_level = proc.emit_tsv(proc_tsv_file, 0)
+                    base_level += proc_level
+                    processor_levels[proc] = {
+                        'levels': proc_level-1, 
+                        'tsv': "tsv/" + proc_name + ".tsv"
+                    }
+                    proc_list.append(proc)
+
                     last_time = max(last_time, proc.full_range.stop_time)
         if show_channels:
-            for c,channel in sorted(self.channels.iteritems()):
-                if len(channel.copies) > 0:
-                    base_level = channel.emit_tsv(data_tsv_file, base_level)
-                    channel_levels[channel] = base_level
-                    last_time = max(last_time, channel.last_time)
+            for c,chan in sorted(self.channels.iteritems(), key=lambda x: x[1]):
+                if len(chan.copies) > 0:
+                    chan_name = slugify(str(c))
+                    chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
+                    chan_tsv_file = open(chan_tsv_file_name, "w")
+                    chan_tsv_file.write(data_tsv_header)
+                    chan_level = chan.emit_tsv(chan_tsv_file, 0)
+                    base_level += chan_level
+                    channel_levels[chan] = {
+                        'levels': chan_level-1, 
+                        'tsv': "tsv/" + chan_name + ".tsv"
+                    }
+                    chan_list.append(chan)
+
+                    last_time = max(last_time, chan.last_time)
         if show_instances:
-            for m,memory in sorted(self.memories.iteritems()):
-                if len(memory.instances) > 0:
-                    base_level = memory.emit_tsv(data_tsv_file, base_level)
-                    memory_levels[memory] = base_level
-                    last_time = max(last_time, memory.last_time)
+            for m,mem in sorted(self.memories.iteritems(), key=lambda x: x[1]):
+                if len(mem.instances) > 0:
+                    mem_name = slugify("Mem_" + str(hex(m)))
+                    mem_tsv_file_name = os.path.join(tsv_dir, mem_name + ".tsv")
+                    mem_tsv_file = open(mem_tsv_file_name, "w")
+                    mem_tsv_file.write(data_tsv_header)
+                    mem_level = mem.emit_tsv(mem_tsv_file, 0)
+                    base_level += mem_level
+                    memory_levels[mem] = {
+                        'levels': mem_level-1, 
+                        'tsv': "tsv/" + mem_name + ".tsv"
+                    }
+                    mem_list.append(mem)
+
+                    last_time = max(last_time, mem.last_time)
         data_tsv_file.close()
 
         ops_file = open(ops_file_name, "w")
@@ -2133,28 +2338,42 @@ class State(object):
         ops_file.close()
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
-        processor_tsv_file.write("level\tprocessor\n")
+        processor_tsv_file.write("processor\ttsv\tlevels\n")
         if show_procs:
-            for proc,level in processor_levels.iteritems():
-                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(proc)))
+            for proc in sorted(proc_list):
+                tsv = processor_levels[proc]['tsv']
+                levels = processor_levels[proc]['levels']
+                processor_tsv_file.write("%s\t%s\t%d\n" % 
+                                (repr(proc), tsv, levels))
         if show_channels:
-            for channel,level in channel_levels.iteritems():
-                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(channel)))
+            for channel in sorted(chan_list):
+                tsv = channel_levels[channel]['tsv']
+                levels = channel_levels[channel]['levels']
+                processor_tsv_file.write("%s\t%s\t%d\n" % 
+                                (repr(channel), tsv, levels))
         if show_instances:
-            for memory,level in memory_levels.iteritems():
-                processor_tsv_file.write("%d\t%s\n" % (level - 1, repr(memory)))
+            for memory in sorted(mem_list):
+                tsv = memory_levels[memory]['tsv']
+                levels = memory_levels[memory]['levels']
+                processor_tsv_file.write("%s\t%s\t%d\n" % 
+                                (repr(memory), tsv, levels))
         processor_tsv_file.close()
+        if not os.path.exists(os.path.join(output_dirname, "json")):
+            os.makedirs(os.path.join(output_dirname, "json"))
+
+        num_stats = self.emit_statistics_tsv(output_dirname)
+        stats_levels = 4
 
         scale_data = {
             'start': 0,
             'end': last_time * 1.01,
+            'stats_levels': stats_levels,
             'max_level': base_level + 1
         }
 
-        if not os.path.exists(os.path.join(output_dirname, "json")):
-            os.makedirs(os.path.join(output_dirname, "json"))
         with open(scale_json_file_name, "w") as scale_json_file:
             json.dump(scale_data, scale_json_file)
+
 
 def main():
     class MyParser(argparse.ArgumentParser):
