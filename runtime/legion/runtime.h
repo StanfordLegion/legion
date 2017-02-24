@@ -1164,6 +1164,8 @@ namespace Legion {
       inline const TaskLayoutConstraintSet& 
         get_layout_constraints(void) const { return layout_constraints; } 
     public:
+      bool is_no_access_region(unsigned idx) const;
+    public:
       ApEvent dispatch_task(Processor target, SingleTask *task, 
           TaskContext *ctx, ApEvent precondition, PredEvent pred,
           int priority, Realm::ProfilingRequestSet &requests);
