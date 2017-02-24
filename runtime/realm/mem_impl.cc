@@ -298,8 +298,8 @@ namespace Realm {
       if(linear.get_dim() == 1) {
 	//log_inst.print() << "dim == 1";
 	LegionRuntime::Arrays::Mapping<1,1> *m = linear.get_mapping<1>();
-	Rect<1> src_lo = m->preimage(Point<1>(0));
-	Rect<1> src_hi = m->preimage(Point<1>(block_size - 1));
+	LegionRuntime::Arrays::Rect<1> src_lo = m->preimage(LegionRuntime::Arrays::Point<1>(0));
+	LegionRuntime::Arrays::Rect<1> src_hi = m->preimage(LegionRuntime::Arrays::Point<1>(block_size - 1));
 	//log_inst.print() << "preimage = " << src_lo.lo.x[0] << ", " << src_hi.hi.x[0];
 
 	ZIndexSpace<1> is;
