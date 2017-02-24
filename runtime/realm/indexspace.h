@@ -1770,6 +1770,25 @@ namespace Realm {
 
 }; // namespace Realm
 
+// specializations of std::less<T> for ZPoint/ZRect/ZIndexSpace<N,T> allow
+//  them to be used in STL containers
+namespace std {
+  template<int N, typename T>
+  struct less<Realm::ZPoint<N,T> > {
+    bool operator()(const Realm::ZPoint<N,T>& p1, const Realm::ZPoint<N,T>& p2) const;
+  };
+
+  template<int N, typename T>
+  struct less<Realm::ZRect<N,T> > {
+    bool operator()(const Realm::ZRect<N,T>& r1, const Realm::ZRect<N,T>& r2) const;
+  };
+
+  template<int N, typename T>
+  struct less<Realm::ZIndexSpace<N,T> > {
+    bool operator()(const Realm::ZIndexSpace<N,T>& is1, const Realm::ZIndexSpace<N,T>& is2) const;
+  };
+};
+
 #include "indexspace.inl"
 
 #endif // ifndef REALM_INDEXSPACE_H

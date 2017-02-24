@@ -1193,3 +1193,36 @@ namespace Realm {
 
 }; // namespace Realm
 
+namespace std {
+  template<int N, typename T>
+  inline bool less<Realm::ZPoint<N,T> >::operator()(const Realm::ZPoint<N,T>& p1,
+						    const Realm::ZPoint<N,T>& p2) const
+  {
+    for(int i = 0; i < N; i++) {
+      if(p1[i] < p2[i]) return true;
+      if(p1[i] > p2[i]) return false;
+    }
+    return false;
+  }
+
+  template<int N, typename T>
+  inline bool less<Realm::ZRect<N,T> >::operator()(const Realm::ZRect<N,T>& r1,
+						   const Realm::ZRect<N,T>& r2) const
+  {
+    if(std::less<Realm::ZPoint<N,T> >()(r1.lo, r2.lo)) return true;
+    if(std::less<Realm::ZPoint<N,T> >()(r2.lo, r1.lo)) return false;
+    if(std::less<Realm::ZPoint<N,T> >()(r1.hi, r2.hi)) return true;
+    if(std::less<Realm::ZPoint<N,T> >()(r2.hi, r1.hi)) return false;
+    return false;
+  }
+
+  template<int N, typename T>
+  inline bool less<Realm::ZIndexSpace<N,T> >::operator()(const Realm::ZIndexSpace<N,T>& is1,
+							 const Realm::ZIndexSpace<N,T>& is2) const
+  {
+    if(std::less<Realm::ZRect<N,T> >()(is1.bounds, is2.bounds)) return true;
+    if(std::less<Realm::ZRect<N,T> >()(is2.bounds, is1.bounds)) return false;
+    return (is1.sparsity < is2.sparsity);
+  }
+
+};
