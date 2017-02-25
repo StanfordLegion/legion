@@ -186,13 +186,8 @@ namespace Legion {
 #endif
           exit(ERROR_INVALID_PARTITION_COLOR);
         }
-#ifdef DEBUG_LEGION
         IndexSpace handle(runtime->get_unique_index_space_id(),
-                          pid.get_tree_id(), pid.get_dim(), pid.get_type());
-#else
-        IndexSpace handle(runtime->get_unique_index_space_id(),
-                          pid.get_tree_id());
-#endif
+                          pid.get_tree_id(), pid.get_type_tag());
         create_node(handle, it->second, new_part, ColorPoint(it->first),
                     parent_node->kind, mode);
 
@@ -317,13 +312,8 @@ namespace Legion {
 #endif
           exit(ERROR_INVALID_PARTITION_COLOR);
         }
-#ifdef DEBUG_LEGION
         IndexSpace handle(runtime->get_unique_index_space_id(),
-                          pid.get_tree_id(), pid.get_dim(), pid.get_type());
-#else
-        IndexSpace handle(runtime->get_unique_index_space_id(),
-                          pid.get_tree_id());
-#endif
+                          pid.get_tree_id(), pid.get_type_tag());
         IndexSpaceNode *child = create_node(handle, it->second, 
                                             new_part, ColorPoint(it->first),
                                             parent_node->kind, mode);
@@ -611,12 +601,8 @@ namespace Legion {
       // We instantiate them with an empty domain that will be filled in later
       for (Domain::DomainPointIterator itr(color_space); itr; itr++)
       {
-#ifdef DEBUG_LEGION
         IndexSpace is(runtime->get_unique_index_space_id(), pid.get_tree_id(),
-                      pid.get_dim(), pid.get_type());
-#else
-        IndexSpace is(runtime->get_unique_index_space_id(), pid.get_tree_id());
-#endif
+                      pid.get_type_tag());
         ColorPoint child_color(itr.p);
         if (create_separate)
         {
@@ -682,14 +668,8 @@ namespace Legion {
         if (!partition_color.is_valid())
           partition_color = ColorPoint(DomainPoint::from_point<1>(
               LegionRuntime::Arrays::Point<1>(child_node->generate_color())));
-#ifdef DEBUG_LEGION
         IndexPartition pid(runtime->get_unique_index_partition_id(),
-                           handle1.get_tree_id(), 
-                           handle1.get_dim(), handle1.get_type());
-#else
-        IndexPartition pid(runtime->get_unique_index_partition_id(),
-                           handle1.get_tree_id());
-#endif
+                           handle1.get_tree_id(), handle1.get_type_tag());
         create_pending_partition(pid, child_node->handle,
                                  source->color_space, partition_color,
                                  kind, allocable, handle_ready, domain_ready);
@@ -7220,15 +7200,8 @@ namespace Legion {
       // If we own the index partition, create a new subspace here
       if (owner_space == local_space)
       {
-#ifdef DEBUG_LEGION
         IndexSpace is(context->runtime->get_unique_index_space_id(),
-                      handle.get_tree_id(), 
-                      handle.get_dim(), handle.get_type());
-#else
-        IndexSpace is(context->runtime->get_unique_index_space_id(),
-                      handle.get_tree_id());
-#endif
-
+                      handle.get_tree_id(), handle.get_type_tag());
         if (Runtime::legion_spy_enabled)
         {
           LegionSpy::log_index_subspace(handle.id, is.id, c.get_point());

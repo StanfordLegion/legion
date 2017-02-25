@@ -295,10 +295,7 @@ namespace Legion {
     {
       id = rhs.id;
       tid = rhs.tid;
-#ifdef DEBUG_LEGION
-      dim = rhs.dim;
-      type = rhs.type;
-#endif
+      type_tag = rhs.type_tag;
       return *this;
     }
 
@@ -311,8 +308,7 @@ namespace Legion {
       if (tid != rhs.tid)
         return false;
 #ifdef DEBUG_LEGION
-      assert(dim == rhs.dim);
-      assert(type == rhs.type);
+      assert(type_tag == rhs.type_tag);
 #endif
       return true;
     }
@@ -353,21 +349,15 @@ namespace Legion {
     inline IndexSpace::operator IndexSpaceT<DIM,T>(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(dim == DIM);
-      assert(sizeof(T) == type);
-#endif
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
       return IndexSpaceT<DIM,T>(id, tid);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T>::IndexSpaceT(IndexSpaceID id, IndexTreeID tid)
-#ifdef DEBUG_LEGION
-      : IndexSpace(id, tid, DIM, sizeof(T))
-#else
-      : IndexSpace(id, tid)
-#endif
+      : IndexSpace(id, tid, 
+          Internal::NT_TemplateHelper::template encode_tag<DIM,T>()) 
     //--------------------------------------------------------------------------
     {
     }
@@ -383,13 +373,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T>::IndexSpaceT(const IndexSpaceT &rhs)
-#ifdef DEBUG_LEGION
-      : IndexSpace(rhs.id, rhs.tid, DIM, sizeof(T))
-#else
-      : IndexSpace(rhs) 
-#endif
+      : IndexSpace(rhs.id, rhs.tid, rhs.type_tag)
     //--------------------------------------------------------------------------
     {
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -398,10 +385,7 @@ namespace Legion {
     {
       id = rhs.id;
       tid = rhs.tid;
-#ifdef DEBUG_LEGION
-      dim = rhs.dim;
-      type = rhs.type;
-#endif
+      type_tag = rhs.type_tag;
       return *this;
     }
     
@@ -414,8 +398,7 @@ namespace Legion {
       if (tid != rhs.tid)
         return false;
 #ifdef DEBUG_LEGION
-      assert(dim == rhs.dim);
-      assert(type == rhs.type);
+      assert(type_tag == rhs.type_tag);
 #endif
       return true;
     }
@@ -456,21 +439,14 @@ namespace Legion {
     inline IndexPartition::operator IndexPartitionT<DIM,T>(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(dim == DIM);
-      assert(sizeof(T) == type);
-#endif
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
       return IndexPartitionT<DIM,T>(id, tid);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(IndexPartitionID id,IndexTreeID tid)
-#ifdef DEBUG_LEGION
-      : IndexPartition(id, tid, DIM, sizeof(T))
-#else
-      : IndexPartition(id, tid)
-#endif
+      : IndexPartition(id, tid,Internal::NT_TemplateHelper::encode_tag<DIM,T>())
     //--------------------------------------------------------------------------
     {
     }
@@ -486,13 +462,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(const IndexPartitionT &rhs)
-#ifdef DEBUG_LEGION
-      : IndexPartition(rhs.id, rhs.tid, DIM, sizeof(T))
-#else
-      : IndexPartition(rhs)
-#endif
+      : IndexPartition(rhs.id, rhs.tid, rhs.type_tag)
     //--------------------------------------------------------------------------
     {
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(rhs.type_tag);
     }
     
     //--------------------------------------------------------------------------
@@ -580,10 +553,8 @@ namespace Legion {
     inline LogicalRegion::operator LogicalRegionT<DIM,T>(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(index_space.get_dim() == DIM);
-      assert(index_space.get_type() == sizeof(T));
-#endif
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                                  index_space.get_type_tag());
       return LogicalRegionT<DIM,T>(tree_id, index_space, field_space);
     }
 
@@ -638,10 +609,8 @@ namespace Legion {
     inline LogicalPartition::operator LogicalPartitionT<DIM,T>(void) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(index_partition.get_dim() == DIM);
-      assert(index_partition.get_type() == sizeof(T));
-#endif
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(
+                                index_partition.get_type_tag());
       return LogicalPartitionT<DIM,T>(tree_id, index_partition, field_space);
     }
 

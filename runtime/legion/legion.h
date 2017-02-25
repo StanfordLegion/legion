@@ -62,11 +62,7 @@ namespace Legion {
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
-#ifdef DEBUG_LEGION
-      IndexSpace(IndexSpaceID id, IndexTreeID tid, int dim, int type);
-#else
-      IndexSpace(IndexSpaceID id, IndexTreeID tid);
-#endif
+      IndexSpace(IndexSpaceID id, IndexTreeID tid, TypeTag tag);
     public:
       IndexSpace(void);
       IndexSpace(const IndexSpace &rhs);
@@ -81,17 +77,12 @@ namespace Legion {
       inline bool exists(void) const { return (id != 0); }
       template<int DIM, typename COORD_T>
       inline operator IndexSpaceT<DIM,COORD_T>(void) const;
+      inline TypeTag get_type_tag(void) const { return type_tag; }
     private:
       friend std::ostream& operator<<(std::ostream& os, const IndexSpace& is);
       IndexSpaceID id;
       IndexTreeID tid;
-#ifdef DEBUG_LEGION
-      int dim;
-      int type;
-    public:
-      inline int get_dim(void) const { return dim; }
-      inline int get_type(void) const { return type; }
-#endif
+      TypeTag type_tag;
     };
 
     /**
@@ -123,11 +114,7 @@ namespace Legion {
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
-#ifdef DEBUG_LEGION
-      IndexPartition(IndexPartitionID id, IndexTreeID tid, int dim, int type);
-#else
-      IndexPartition(IndexPartitionID id, IndexTreeID tid);
-#endif
+      IndexPartition(IndexPartitionID id, IndexTreeID tid, TypeTag tag);
     public:
       IndexPartition(void);
       IndexPartition(const IndexPartition &rhs);
@@ -142,18 +129,13 @@ namespace Legion {
       inline bool exists(void) const { return (id != 0); }
       template<int DIM, typename COORD_T>
       inline operator IndexPartitionT<DIM,COORD_T>(void) const;
+      inline TypeTag get_type_tag(void) const { return type_tag; }
     private:
       friend std::ostream& operator<<(std::ostream& os, 
                                       const IndexPartition& ip);
       IndexPartitionID id;
       IndexTreeID tid;
-#ifdef DEBUG_LEGION
-      int dim;
-      int type;
-    public:
-      inline int get_dim(void) const { return dim; }
-      inline int get_type(void) const { return type; }
-#endif
+      TypeTag type_tag;
     };
 
     /**
@@ -241,11 +223,8 @@ namespace Legion {
       inline bool exists(void) const { return (tree_id != 0); } 
       template<int DIM, typename COORD_T>
       inline operator LogicalRegionT<DIM,COORD_T>(void) const;
-#ifdef DEBUG_LEGION
-    public:
-      inline int get_dim(void) const { return index_space.get_dim(); }
-      inline int get_type(void) const { return index_space.get_type(); }
-#endif
+      inline TypeTag get_type_tag(void) const 
+        { return index_space.get_type_tag(); }
     private:
       friend std::ostream& operator<<(
           std::ostream& os, const LogicalRegion& lr);
@@ -310,11 +289,8 @@ namespace Legion {
       inline bool exists(void) const { return (tree_id != 0); }
       template<int DIM, typename COORD_T>
       inline operator LogicalPartitionT<DIM,COORD_T>(void) const;
-#ifdef DEBUG_LEGION
-    public:
-      inline int get_dim(void) const { return index_partition.get_dim(); }
-      inline int get_type(void) const { return index_partition.get_type(); }
-#endif
+      inline TypeTag get_type_tag(void) const 
+        { return index_partition.get_type_tag(); }
     private:
       friend std::ostream& operator<<(std::ostream& os, 
                                       const LogicalPartition& lp);

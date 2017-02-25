@@ -135,33 +135,22 @@ namespace Legion {
     /*static*/ const IndexSpace IndexSpace::NO_SPACE = IndexSpace();
 
     //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION
-    IndexSpace::IndexSpace(IndexSpaceID _id, IndexTreeID _tid, int d, int t)
-      : id(_id), tid(_tid), dim(d), type(t)
-#else
-    IndexSpace::IndexSpace(IndexSpaceID _id, IndexTreeID _tid)
-      : id(_id), tid(_tid)
-#endif
+    IndexSpace::IndexSpace(IndexSpaceID _id, IndexTreeID _tid, TypeTag _tag)
+      : id(_id), tid(_tid), type_tag(_tag)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexSpace::IndexSpace(void)
-      : id(0), tid(0)
-#ifdef DEBUG_LEGION
-        , dim(-1), type(-1)
-#endif
+      : id(0), tid(0), type_tag(0)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexSpace::IndexSpace(const IndexSpace &rhs)
-      : id(rhs.id), tid(rhs.tid)
-#ifdef DEBUG_LEGION
-        , dim(rhs.dim), type(rhs.type)
-#endif
+      : id(rhs.id), tid(rhs.tid), type_tag(rhs.type_tag)
     //--------------------------------------------------------------------------
     {
     }
@@ -173,34 +162,23 @@ namespace Legion {
     /*static*/ const IndexPartition IndexPartition::NO_PART = IndexPartition();
 
     //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION
-    IndexPartition::IndexPartition(IndexPartitionID _id, IndexTreeID _tid,
-                                   int d, int t)
-      : id(_id), tid(_tid), dim(d), type(t)
-#else
-    IndexPartition::IndexPartition(IndexPartitionID _id, IndexTreeID _tid)
-      : id(_id), tid(_tid)
-#endif
+    IndexPartition::IndexPartition(IndexPartitionID _id, 
+                                   IndexTreeID _tid, TypeTag _tag)
+      : id(_id), tid(_tid), type_tag(_tag)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexPartition::IndexPartition(void)
-      : id(0), tid(0)
-#ifdef DEBUG_LEGION
-        , dim(-1), type(-1)
-#endif
+      : id(0), tid(0), type_tag(0)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexPartition::IndexPartition(const IndexPartition &rhs)
-      : id(rhs.id), tid(rhs.tid)
-#ifdef DEBUG_LEGION
-        , dim(rhs.dim), type(rhs.type)
-#endif
+      : id(rhs.id), tid(rhs.tid), type_tag(rhs.type_tag)
     //--------------------------------------------------------------------------
     {
     }

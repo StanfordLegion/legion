@@ -143,10 +143,7 @@ extern "C" {
   typedef struct legion_index_space_t {
     legion_index_space_id_t id;
     legion_index_tree_id_t tid;
-#ifdef DEBUG_LEGION
-    int                   dim;
-    int                   type;
-#endif
+    legion_type_tag_t type_tag;
   } legion_index_space_t;
 
   /**
@@ -155,10 +152,7 @@ extern "C" {
   typedef struct legion_index_partition_t {
     legion_index_partition_id_t id;
     legion_index_tree_id_t tid;
-#ifdef DEBUG_LEGION
-    int                   dim;
-    int                   type;
-#endif
+    legion_type_tag_t type_tag;
   } legion_index_partition_t;
 
   /**

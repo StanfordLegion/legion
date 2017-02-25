@@ -40,6 +40,7 @@
 // Make sure we have the appropriate defines in place for including realm
 #define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
 #include "realm.h"
+#include "dynamic_templates.h"
 
 namespace BindingLib { class Utility; } // BindingLib namespace
 
@@ -1420,6 +1421,7 @@ namespace Legion {
   typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
   typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
   typedef Realm::ElementMask::Enumerator Enumerator;
+  typedef Realm::DynamicTemplates::TagType TypeTag;
   typedef ::legion_lowlevel_coord_t coord_t;
   typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
   typedef std::map<CustomSerdezID, 
@@ -1492,6 +1494,29 @@ namespace Legion {
   namespace Internal { 
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
+    // These have to match the ones in Realm's partitions.h
+    typedef Realm::DynamicTemplates::IntList<1, 3> DIMCOUNTS;
+    typedef Realm::DynamicTemplates::TypeList<int, long long>::TL DIMTYPES;
+    typedef Realm::DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
+    // Helper for encoding templates
+    struct NT_TemplateHelper : 
+      public Realm::DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> {
+    typedef Realm::DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> SUPER;
+    public:
+      template<int N, typename T>
+      static inline TypeTag encode_tag(void) {
+        return SUPER::template encode_tag<Realm::DynamicTemplates::Int<N>, T>();
+      };
+      template<int N, typename T>
+      static inline void check_type(const TypeTag t) {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        const TypeTag t1 = encode_tag<N,T>();
+#endif
+        assert(t1 == t);
+#endif
+      }
+    };
     // Pull some of the mapper types into the internal space
     typedef Mapping::Mapper Mapper;
     typedef Mapping::PhysicalInstance MappingInstance;
