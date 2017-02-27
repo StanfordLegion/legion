@@ -25,6 +25,7 @@
 #include "lowlevel_config.h"
 #include "arrays.h"
 #include "sparsity.h"
+#include "dynamic_templates.h"
 
 // we need intptr_t - make it if needed
 #if __cplusplus >= 201103L
@@ -41,6 +42,14 @@ typedef ptrdiff_t intptr_t;
 
 namespace Realm {
   typedef ::legion_lowlevel_coord_t coord_t;
+
+  // NOTE: all these interfaces are templated, which means partitions.cc is going
+  //  to have to somehow know which ones to instantiate - this is controlled by the
+  //  following type lists, using a bunch of helper stuff from dynamic_templates.h
+
+  typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
+  typedef DynamicTemplates::TypeList<int, long long>::TL DIMTYPES;
+  typedef DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
 
   class ProfilingRequestSet;
   class CodeDescriptor;
