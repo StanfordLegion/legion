@@ -1494,14 +1494,12 @@ namespace Legion {
   namespace Internal { 
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
-    // These have to match the ones in Realm's partitions.h
-    typedef Realm::DynamicTemplates::IntList<1, 3> DIMCOUNTS;
-    typedef Realm::DynamicTemplates::TypeList<int, long long>::TL DIMTYPES;
-    typedef Realm::DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
-      public Realm::DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> {
-    typedef Realm::DynamicTemplates::ListProduct2<DIMCOUNTS, DIMTYPES> SUPER;
+      public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 
+                                                   Realm::DIMTYPES> {
+    typedef Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 
+                                                  Realm::DIMTYPES> SUPER;
     public:
       template<int N, typename T>
       static inline TypeTag encode_tag(void) {
