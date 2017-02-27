@@ -7141,7 +7141,7 @@ namespace Legion {
       {
         result = true;
         LayoutConstraints *constraints = 
-          runtime->find_layout_constraints(it->first);
+          runtime->find_layout_constraints(it->second);
         if (!constraints->specialized_constraint.is_no_access())
         {
           result = false;
