@@ -1679,13 +1679,22 @@ extern "C" {
                                legion_phase_barrier_t handle);
 
   /**
+   * @see LegionRuntime::HighLevel::PhaseBarrier::alter_arrival_count()
+   */
+  void
+  legion_phase_barrier_alter_arrival_count(legion_runtime_t runtime,
+                                           legion_context_t ctx,
+                                           legion_phase_barrier_t handle,
+                                           int delta);
+
+  /**
    * @see LegionRuntime::HighLevel::PhaseBarrier::arrive()
    */
   void
   legion_phase_barrier_arrive(legion_runtime_t runtime,
                               legion_context_t ctx,
                               legion_phase_barrier_t handle,
-                              size_t count /* = 1 */);
+                              unsigned count /* = 1 */);
 
   /**
    * @see LegionRuntime::HighLevel::PhaseBarrier::wait()
@@ -1725,12 +1734,22 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
-   * @see Legion::PhaseBarrier::destroy_dynamic_collective()
+   * @see Legion::Runtime::destroy_dynamic_collective()
    */
   void
   legion_dynamic_collective_destroy(legion_runtime_t runtime,
                                     legion_context_t ctx,
                                     legion_dynamic_collective_t handle);
+
+  /**
+   * @see LegionRuntime::HighLevel::DynamicCollective::alter_arrival_count()
+   */
+  void
+  legion_dynamic_collective_alter_arrival_count(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_dynamic_collective_t handle,
+    int delta);
 
   /**
    * @see Legion::Runtime::arrive_dynamic_collective()
