@@ -68,6 +68,7 @@ local language = {
     "acquire",
     "aliased",
     "allocate_scratch_fields",
+    "adjust",
     "advance",
     "arrive",
     "await",

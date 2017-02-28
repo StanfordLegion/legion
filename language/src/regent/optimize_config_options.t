@@ -63,6 +63,7 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
       node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
@@ -165,6 +166,7 @@ local function analyze_inner_node(cx)
       return not std.is_ref(node.expr_type)
 
     elseif node:is(ast.typed.expr.RawPhysical) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await)
     then

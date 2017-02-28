@@ -12,15 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_arrive2.rg:24: type mismatch in argument 2: expected int32 but got bool
+--   arrive(x, true)
+--        ^
+
 import "regent"
 
-task main()
-  var x = phase_barrier(2)
-  arrive(x)
-  adjust(x, 1) -- Add one more arriver.
-  arrive(x)
-  arrive(x)
-  x = advance(x)
-  await(x)
+task f()
+  var x = dynamic_collective(int, +, 1)
+  arrive(x, true)
 end
-regentlib.start(main)

@@ -175,6 +175,7 @@ local function alpha_convert_node(cx)
       node:is(ast.specialized.expr.DynamicCollective) or
       node:is(ast.specialized.expr.DynamicCollectiveGetResult) or
       node:is(ast.specialized.expr.Advance) or
+      node:is(ast.specialized.expr.Adjust) or
       node:is(ast.specialized.expr.Arrive) or
       node:is(ast.specialized.expr.Await) or
       node:is(ast.specialized.expr.Copy) or
