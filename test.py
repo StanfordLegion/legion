@@ -56,7 +56,6 @@ legion_cxx_tests = [
 
     # Tests
     ['test/attach_file_mini/attach_file_mini', []],
-    #['test/predspec/predspec', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/223
 ]
 
 legion_hdf_cxx_tests = [
