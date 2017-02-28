@@ -6471,6 +6471,7 @@ namespace Legion {
       return result;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     ApEvent IndexSpaceNode::create_subspaces_by_field(
                         const std::vector<FieldDataDescriptor> &field_data,
@@ -6515,6 +6516,7 @@ namespace Legion {
                                      Runtime::merge_events(precondition,
                                                            dom_precondition)));
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_disjointness_test(

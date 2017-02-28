@@ -34,6 +34,7 @@
 #endif
 
 #include "legion_types.h"
+#include "legion_backwards.h"
 #include "legion_constraint.h"
 
 // temporary helper macro to turn link errors into runtime errors
@@ -3071,7 +3072,7 @@ namespace Legion {
        * Create partition by restriction will make a new partition of a
        * logical region by computing new restriction bounds for each 
        * of the different subregions. All the sub-regions will have
-       * the same 'extent' (e.g. contain the same number of points).
+       * the same 'extent' (e.g. contain the same number of initial points).
        * The particular location of the extent for each sub-region is
        * determined by taking a point in the color space and transforming
        * it by multiplying it by a 'transform' matrix to compute a 

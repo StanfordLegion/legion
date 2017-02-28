@@ -137,6 +137,10 @@ namespace Legion {
   class TaskResult;
   class CObjectWrapper;
 
+  // legion_backwards.h
+  class DomainPoint;
+  class Domain;
+
   // legion_utilities.h
   struct RegionUsage;
   class AutoLock;
@@ -1407,8 +1411,6 @@ namespace Legion {
   typedef LegionRuntime::Accessor::ByteOffset ByteOffset;
   typedef Realm::Runtime RealmRuntime;
   typedef Realm::Machine Machine;
-  typedef Realm::Domain Domain;
-  typedef Realm::DomainPoint DomainPoint;
   typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
   typedef Realm::Memory Memory;
   typedef Realm::Processor Processor;
