@@ -2230,7 +2230,7 @@ function type_check.expr_adjust(cx, node)
   local barrier_type = std.check_read(cx, barrier)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
-  if not (std.validate_implicit_cast(value_type, std.phase_barrier) or
+  if not (std.validate_implicit_cast(barrier_type, std.phase_barrier) or
             std.is_list_of_phase_barriers(barrier_type) or
           std.is_dynamic_collective(barrier_type)) then
     report.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))

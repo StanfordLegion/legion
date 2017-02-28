@@ -473,6 +473,13 @@ function pretty.expr_advance(cx, node)
       "advance(", commas({pretty.expr(cx, node.value)}), ")"})
 end
 
+function pretty.expr_adjust(cx, node)
+  return join({
+      "adjust(",
+      commas({pretty.expr(cx, node.barrier), pretty.expr(cx, node.value)}),
+      ")"})
+end
+
 function pretty.expr_arrive(cx, node)
   return join({
       "arrive(",
@@ -709,6 +716,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Advance) then
     return pretty.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Adjust) then
+    return pretty.expr_adjust(cx, node)
 
   elseif node:is(ast.typed.expr.Arrive) then
     return pretty.expr_arrive(cx, node)
