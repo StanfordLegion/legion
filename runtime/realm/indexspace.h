@@ -1296,6 +1296,7 @@ namespace Realm {
 
   template <int N, typename T = int> struct ZPoint;
   template <int N, typename T = int> struct ZRect;
+  template <int N, int M, typename T = int> struct ZMatrix;
   template <int N, typename T = int> struct ZIndexSpace;
   template <int N, typename T = int> struct ZIndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
@@ -1378,6 +1379,11 @@ namespace Realm {
     ZPointInRectIterator(const ZRect<N,T>& _r, bool _fortran_order = true);
 
     bool step(void);
+  };
+
+  template <int N, int M, typename T>
+  struct ZMatrix {
+    // TODO: Sean needs to implement this
   };
 
   // a FieldDataDescriptor is used to describe field data provided for partitioning
