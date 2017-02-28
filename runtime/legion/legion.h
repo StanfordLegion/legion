@@ -76,8 +76,6 @@ namespace Legion {
       inline IndexSpaceID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
-      template<int DIM, typename COORD_T>
-      inline operator IndexSpaceT<DIM,COORD_T>(void) const;
       inline TypeTag get_type_tag(void) const { return type_tag; }
     private:
       friend std::ostream& operator<<(std::ostream& os, const IndexSpace& is);
@@ -101,6 +99,7 @@ namespace Legion {
     public:
       IndexSpaceT(void);
       IndexSpaceT(const IndexSpaceT &rhs);  
+      explicit IndexSpaceT(const IndexSpace &rhs);
     };
 
     /**
@@ -128,8 +127,6 @@ namespace Legion {
       inline IndexPartitionID get_id(void) const { return id; }
       inline IndexTreeID get_tree_id(void) const { return tid; }
       inline bool exists(void) const { return (id != 0); }
-      template<int DIM, typename COORD_T>
-      inline operator IndexPartitionT<DIM,COORD_T>(void) const;
       inline TypeTag get_type_tag(void) const { return type_tag; }
     private:
       friend std::ostream& operator<<(std::ostream& os, 
@@ -154,6 +151,7 @@ namespace Legion {
     public:
       IndexPartitionT(void);
       IndexPartitionT(const IndexPartitionT &rhs);
+      explicit IndexPartitionT(const IndexPartition &rhs);
     };
 
     /**
@@ -222,8 +220,6 @@ namespace Legion {
       inline FieldSpace get_field_space(void) const { return field_space; }
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); } 
-      template<int DIM, typename COORD_T>
-      inline operator LogicalRegionT<DIM,COORD_T>(void) const;
       inline TypeTag get_type_tag(void) const 
         { return index_space.get_type_tag(); }
     private:
@@ -250,6 +246,7 @@ namespace Legion {
     public:
       LogicalRegionT(void);
       LogicalRegionT(const LogicalRegionT &rhs);
+      explicit LogicalRegionT(const LogicalRegion &rhs);
     };
 
     /**
@@ -288,8 +285,6 @@ namespace Legion {
       inline FieldSpace get_field_space(void) const { return field_space; }
       inline RegionTreeID get_tree_id(void) const { return tree_id; }
       inline bool exists(void) const { return (tree_id != 0); }
-      template<int DIM, typename COORD_T>
-      inline operator LogicalPartitionT<DIM,COORD_T>(void) const;
       inline TypeTag get_type_tag(void) const 
         { return index_partition.get_type_tag(); }
     private:
@@ -316,6 +311,7 @@ namespace Legion {
     public:
       LogicalPartitionT(void);
       LogicalPartitionT(const LogicalPartitionT &rhs);
+      explicit LogicalPartitionT(const LogicalPartition &rhs);
     };
 
     //==========================================================================
