@@ -481,11 +481,12 @@ namespace Legion {
       return Runtime::merge_events(ready_events);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeForest::compute_pending_color_space(IndexSpace parent,
                                                        IndexPartition handle1,
                                                        IndexPartition handle2,
-                                                       Domain &color_space,
+                                                       IndexSpace &color_space,
                                    Realm::IndexSpace::IndexSpaceOperation op)
     //--------------------------------------------------------------------------
     {
@@ -563,10 +564,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_pending_partition(IndexPartition pid,
                                                     IndexSpace parent,
-                                                    const Domain &color_space,
+                                                    IndexSpace color_space,
                                                     ColorPoint partition_color,
                                                     PartitionKind part_kind,
-                                                    bool allocable,
                                                     ApEvent handle_ready,
                                                     ApEvent domain_ready,
                                                     bool create_separate)
@@ -583,12 +583,12 @@ namespace Legion {
         disjointness_event = Runtime::create_rt_user_event();
         partition_node = create_node(pid, parent_node, partition_color,
                                      color_space, disjointness_event,
-                                     allocable ? MUTABLE : NO_MEMORY);
+                                     NO_MEMORY);
       }
       else
         partition_node = create_node(pid, parent_node, partition_color,
                                      color_space, (part_kind == DISJOINT_KIND),
-                                     allocable ? MUTABLE : NO_MEMORY);
+                                     NO_MEMORY);
 
       if (Runtime::legion_spy_enabled)
       {
@@ -615,14 +615,14 @@ namespace Legion {
           ApUserEvent local_domain_ready = Runtime::create_ap_user_event();
           create_node(is, local_handle_ready, local_domain_ready,
                       partition_node, child_color, parent_node->kind, 
-                      allocable ? MUTABLE : NO_MEMORY);
+                      NO_MEMORY);
           partition_node->add_pending_child(child_color, local_handle_ready,
                                             local_domain_ready);
         }
         else
           create_node(is, handle_ready, domain_ready,
                       partition_node, child_color, parent_node->kind, 
-                      allocable ? MUTABLE : NO_MEMORY);
+                      NO_MEMORY);
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
       }
@@ -652,7 +652,6 @@ namespace Legion {
                             std::map<DomainPoint,IndexPartition> &user_handles,
                                                         PartitionKind kind,
                                                         ColorPoint &part_color,
-                                                        bool allocable,
                                                         ApEvent handle_ready,
                                                         ApEvent domain_ready)
     //--------------------------------------------------------------------------
@@ -672,7 +671,7 @@ namespace Legion {
                            handle1.get_tree_id(), handle1.get_type_tag());
         create_pending_partition(pid, child_node->handle,
                                  source->color_space, partition_color,
-                                 kind, allocable, handle_ready, domain_ready);
+                                 kind, handle_ready, domain_ready);
         // Save the handles for ourselves 
         our_handles[itr.p] = pid;
         // If the user requested the handle for this point return it
@@ -872,6 +871,7 @@ namespace Legion {
       }
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_pending_space(IndexPartition parent,

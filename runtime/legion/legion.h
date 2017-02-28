@@ -2665,6 +2665,16 @@ namespace Legion {
       // Index Space Operations
       //------------------------------------------------------------------------
       /**
+       * Create a new top-level index space with a specific bounds
+       * @param ctx the enclosing task context
+       * @param bounds the bounds for the index spaces
+       * @return the handle for the new index space
+       */
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
+                                const Realm::ZRect<DIM,COORD_T> &bounds);
+      /**
+       * @deprecated
        * Create a new unstructured index space
        * @param ctx the enclosing task context
        * @param max_num_elmts maximum number of elements in the index space
@@ -2672,6 +2682,7 @@ namespace Legion {
        */
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       /**
+       * @deprecated
        * Create a new structured index space based on a domain
        * @param ctx the enclosing task context
        * @param domain the domain for the new index space
@@ -2679,6 +2690,7 @@ namespace Legion {
        */
       IndexSpace create_index_space(Context ctx, Domain domain);
       /**
+       * @deprecated
        * Create a new structured index space based on a set of domains
        * @param ctx the enclosing task context
        * @param domains the set of domains
@@ -2695,8 +2707,10 @@ namespace Legion {
     public:
       //------------------------------------------------------------------------
       // Index Partition Operations Based on Coloring
+      // (These are deprecated, use the dependent partitioning calls instead)
       //------------------------------------------------------------------------
       /**
+       * @deprecated
        * Create an index partition from a point coloring
        * @param ctx the enclosing task context
        * @param parent index space being partitioned
@@ -2730,6 +2744,7 @@ namespace Legion {
                                             int part_color = -1);
 
       /**
+       * @deprecated
        * Create an index partition from a domain point coloring
        * @param ctx the enclosing task context
        * @param parent the index space being partitioned
@@ -2763,6 +2778,7 @@ namespace Legion {
                                             int part_color = -1);
 
       /**
+       * @deprecated
        * Create an index partition from a multi-domain point coloring
        * @param ctx the enclosing task context
        * @param parent the index space being partitioned
@@ -2797,6 +2813,7 @@ namespace Legion {
                                             bool disjoint,
                                             int part_color = -1);
       /**
+       * @deprecated
        * Create an index partitioning from a typed mapping.
        * @param ctx the enclosing task context
        * @param parent index space being partitioned
@@ -2810,7 +2827,7 @@ namespace Legion {
 					    int part_color = AUTO_GENERATE_ID);
 
       /**
-       * @deprectated 
+       * @deprecated 
        * @see create_partition_by_field instead
        * Create an index partitioning from an existing field
        * in a physical instance.  This requires that the field
@@ -2840,9 +2857,8 @@ namespace Legion {
       void destroy_index_partition(Context ctx, IndexPartition handle);
     public:
       //------------------------------------------------------------------------
-      // Functional Index Partition Operations
+      // Dependent Partitioning Operations
       //------------------------------------------------------------------------
-
       /**
        * Create 'color_space' index subspaces (one for each point) in a 
        * common partition of the 'parent' index space. By definition the 
@@ -2856,16 +2872,21 @@ namespace Legion {
        * @param color_space space of colors to create 
        * @param granularity the minimum size of the index subspaces
        * @param color optional color paramter for the partition
-       * @param allocable whether dynamic allocation of pointers is permitted
        * @return name of the created index partition
        */
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
-                                            Domain color_space, 
+                                            IndexSpace color_space, 
                                             size_t granularity = 1,
-                                            int color = AUTO_GENERATE_ID,
-                                            bool allocable = false);
+                                            int color = AUTO_GENERATE_ID);
+
+      template<int DIM, typename COORD_T, 
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_equal_partition(Context ctx,
+                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> &color_space,
+                              size_t granularity, int color = AUTO_GENERATE_ID);
 
       /**
+       * TODO: Update weighted partition call
        * Create 'color_space' index subspaces (one for each point) in a 
        * common partition of the 'parent' index space. By definition the 
        * resulting partition will be disjoint. Users must also specify 
@@ -2882,15 +2903,13 @@ namespace Legion {
        * @param weights map from colors to weights
        * @param granularity the minimum size of the index subspaces
        * @param color optional color paramter for the partition
-       * @param allocable whether dynamic allocation of pointers is permitted
        * @return name of the created index partition
        */
       IndexPartition create_weighted_partition(Context ctx, IndexSpace parent,
-                                       Domain color_space,
+                                       IndexSpace color_space,
                                        const std::map<DomainPoint,int> &weights,
                                        size_t granularity = 1,
-                                       int color = AUTO_GENERATE_ID,
-                                       bool allocable = false); 
+                                       int color = AUTO_GENERATE_ID);
 
       /**
        * This function zips a union operation over all the index subspaces
@@ -2914,7 +2933,6 @@ namespace Legion {
        * @param handle2 second index partition
        * @param part_kind indicate the kind of partition
        * @param color the new color for the index partition
-       * @param allocable whether dynamic allocation of pointers is permitted
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_union(Context ctx,
@@ -2922,8 +2940,14 @@ namespace Legion {
                                        IndexPartition handle1,
                                        IndexPartition handle2,
                                        PartitionKind part_kind = COMPUTE_KIND,
-                                       int color = AUTO_GENERATE_ID,
-                                       bool allocable = false);
+                                       int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_union(Context ctx,
+                                    IndexSpaceT<DIM,COORD_T> parent,
+                                    IndexPartitionT<DIM,COORD_T> handle1,
+                                    IndexPartitionT<DIM,COORD_T> handle2,
+                                    PartitionKind part_kind = COMPUTE_KIND,
+                                    int color = AUTO_GENERATE_ID);
 
       /**
        * This function zips an intersection operation over all the index 
@@ -2947,7 +2971,6 @@ namespace Legion {
        * @param handle2 second index partition
        * @param part_kind indicate the kind of partition
        * @param color the new color for the index partition
-       * @param allocable whether dynamic allocation of pointers is permitted
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_intersection(Context ctx,
@@ -2955,8 +2978,15 @@ namespace Legion {
                                         IndexPartition handle1,
                                         IndexPartition handle2,
                                         PartitionKind part_kind = COMPUTE_KIND,
-                                        int color = AUTO_GENERATE_ID,
-                                        bool allocable = false);
+                                        int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_intersections(
+                                    Context ctx,
+                                    IndexSpaceT<DIM,COORD_T> parent,
+                                    IndexPartitionT<DIM,COORD_T> handle1,
+                                    IndexPartitionT<DIM,COORD_T> handle2,
+                                    PartitionKind part_kind = COMPUTE_KIND,
+                                    int color = AUTO_GENERATE_ID);
 
       /**
        * This function zips a set difference operation over all the index 
@@ -2980,7 +3010,6 @@ namespace Legion {
        * @param handle2 second index partition
        * @param part_kind indicate the kind of partition
        * @param color the new color for the index partition
-       * @param allocable whether dynamic allocation of pointers is permitted
        * @return name of the created index partition
        */
       IndexPartition create_partition_by_difference(Context ctx,
@@ -2988,16 +3017,22 @@ namespace Legion {
                                         IndexPartition handle1,
                                         IndexPartition handle2,
                                         PartitionKind part_kind = COMPUTE_KIND,
-                                        int color = AUTO_GENERATE_ID,
-                                        bool allocable = false);
+                                        int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_difference(Context ctx,
+                                      IndexSpaceT<DIM,COORD_T> parent,
+                                      IndexPartitionT<DIM,COORD_T> handle1,
+                                      IndexPartitionT<DIM,COORD_T> handle2,
+                                      PartitionKind part_kind = COMPUTE_KIND,
+                                      int color = AUTO_GENERATE_ID);
 
       /**
        * This performs a cross product between two different index
        * partitions. For every index subspace in the first index 
        * partition the runtime will create a new index partition
-       * of that index space with each of the different index subspaces
-       * in the second index partition. As a result, whole set of new
-       * index partitions will be created. The user can request which
+       * of that index space by intersecting each of the different index 
+       * subspaces in the second index partition. As a result, whole set 
+       * of new index partitions will be created. The user can request which
        * partition names to return by specifying a map of domain points
        * from the color space of the first index partition. If the map
        * is empty, no index partitions will be returned. The user can
@@ -3014,15 +3049,55 @@ namespace Legion {
        * @param handle optional map for new partitions (can be empty)
        * @param part_kind indicate the kinds for the partitions
        * @param color optional color for each of the new partitions
-       * @param allocable whether dynamic allocation of pointers is permitted
        */
       void create_cross_product_partitions(Context ctx,
                                   IndexPartition handle1,
                                   IndexPartition handle2,
                                   std::map<DomainPoint,IndexPartition> &handles,
                                   PartitionKind part_kind = COMPUTE_KIND,
-                                  int color = AUTO_GENERATE_ID,
-                                  bool allocable = false);
+                                  int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, 
+               int COLOR_DIM, typename COLOR_COORD_T>
+      void create_cross_product_partition(Context ctx,
+                                  IndexPartitionT<DIM,COORD_T> handle1,
+                                  IndexPartitionT<DIM,COORD_T> handle2,
+                                  typename std::map<
+                                    Realm::ZPoint<COLOR_DIM,COLOR_COORD_T>,
+                                    IndexPartitionT<DIM,COORD_T> > &handles,
+                                  PartitionKind part_kind = COMPUTE_KIND,
+                                  int color = AUTO_GENERATE_ID);
+
+      /**
+       * Create partition by restriction will make a new partition of a
+       * logical region by computing new restriction bounds for each 
+       * of the different subregions. All the sub-regions will have
+       * the same 'extent' (e.g. contain the same number of points).
+       * The particular location of the extent for each sub-region is
+       * determined by taking a point in the color space and transforming
+       * it by multiplying it by a 'transform' matrix to compute a 
+       * 'delta' for the particular subregion. This 'delta' is then added
+       * to the bounds of the 'extent' rectangle to generate a new bounding
+       * rectangle for the subregion of the given color. The runtime will
+       * also automatically intersect the resulting bounding rectangle with 
+       * the original bounds of the parent region to ensure proper containment.
+       * This may result in empty subregions.
+       * @param ctx the enclosing task context
+       * @param parent the parent index space to be partitioned
+       * @param color_space the color space of the partition
+       * @param transform a matrix transformation to be performed on each color
+       * @param extent the rectangle shape of each of the bounds
+       * @param part_kind the specify the partition kind
+       * @param color optional new color for the index partition
+       * @return a new index partition of the parent index space
+       */
+      template<int DIM, int COLOR_DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_restriction(Context ctx,
+                                IndexSpaceT<DIM,COORD_T> parent,
+                                IndexSpaceT<COLOR_DIM,COORD_T> color_space,
+                                Realm::ZMatrix<DIM,COLOR_DIM,COORD_T> transform,
+                                Realm::ZRect<DIM,COORD_T> extent,
+                                PartitionKind part_kind = COMPUTE_KIND,
+                                int color = AUTO_GENERATE_ID);
 
       /**
        * Create partition by field uses an existing field in a logical
@@ -3047,16 +3122,22 @@ namespace Legion {
        * @param fid the field ID of the logical region containing the coloring
        * @param color_space space of colors for the partition
        * @param color optional new color for the index partition
-       * @param allocable whether dynamic allocation of pointers is permitted
        * @return a new index partition of the index space of the logical region
        */
       IndexPartition create_partition_by_field(Context ctx,
                                                LogicalRegion handle,
                                                LogicalRegion parent,
-                                               FieldID fid,
-                                               const Domain &color_space,
-                                               int color = AUTO_GENERATE_ID,
-                                               bool allocable = false);
+                                               FieldID fid, 
+                                               IndexSpace color_space,
+                                               int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, 
+               int COLOR_DIM, typename COLOR_COORD_T, typename FIELD_TYPE>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_field(Context ctx,
+                          LogicalRegionT<DIM,COORD_T> handle,
+                          LogicalRegionT<DIM,COORD_T> parent,
+                          FieldID fid, // type: ZPoint<COLOR_DIM,COLOR_COORD_T>
+                          IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                          int color = AUTO_GENERATE_ID);
 
       /**
        * Create partition by image creates a new index partition from an
@@ -3085,9 +3166,9 @@ namespace Legion {
        * @param parent the parent region from which privileges are derived
        * @param fid the field ID of the 'projection' logical partition
        *            we are reading which contains ptr_t@handle
+       * @param color_space the index space of potential colors
        * @param part_kind specify the kind of partition
        * @param color optional new color for the index partition
-       * @param allocable whether dynamic allocation of pointers is permitted
        * @return a new index partition of the 'handle' index space
        */
       IndexPartition create_partition_by_image(Context ctx,
@@ -3095,10 +3176,41 @@ namespace Legion {
                                          LogicalPartition projection,
                                          LogicalRegion parent,
                                          FieldID fid,
-                                         const Domain &color_space,
+                                         IndexSpace color_space,
                                          PartitionKind part_kind = COMPUTE_KIND,
-                                         int color = AUTO_GENERATE_ID,
-                                         bool allocable = false);
+                                         int color = AUTO_GENERATE_ID);
+      template<int DIM1, typename COORD_T1, 
+               int DIM2, typename COORD_T2, 
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM2,COORD_T2> create_partition_by_image(Context ctx,
+                              IndexSpaceT<DIM2,COORD_T2> handle,
+                              LogicalPartitionT<DIM1,COORD_T1> projection,
+                              LogicalRegionT<DIM1,COORD_T1> parent,
+                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
+      // Range versions of image
+      IndexPartition create_partition_by_image_range(Context ctx,
+                                         IndexSpace handle,
+                                         LogicalPartition projection,
+                                         LogicalRegion parent,
+                                         FieldID fid,
+                                         IndexSpace color_space,
+                                         PartitionKind part_kind = COMPUTE_KIND,
+                                         int color = AUTO_GENERATE_ID);
+      template<int DIM1, typename COORD_T1, 
+               int DIM2, typename COORD_T2, 
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM2,COORD_T2> create_partition_by_image_range(
+                              Context ctx,
+                              IndexSpaceT<DIM2,COORD_T2> handle,
+                              LogicalPartitionT<DIM1,COORD_T1> projection,
+                              LogicalRegionT<DIM1,COORD_T1> parent,
+                              FieldID fid, // type: ZRect<DIM2,COORD_T2>
+                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
                                                
       /**
        * Create partition by premimage performs the opposite operation
@@ -3124,9 +3236,9 @@ namespace Legion {
        * @param parent the parent region from which privileges are derived
        * @param fid the field ID of the 'handle' logical region containing
        *            the function being evaluated
+       * @param color_space the space of colors for the partition
        * @param part_kind specify the kind of partition
        * @param color optional new color for the index partition
-       * @param allocable wehther dynamic allocation of pointers is permitted
        * @return a new index partition of the index space of 'handle'
        */
       IndexPartition create_partition_by_preimage(Context ctx, 
@@ -3134,15 +3246,45 @@ namespace Legion {
                                         LogicalRegion handle,
                                         LogicalRegion parent,
                                         FieldID fid,
-                                        const Domain &color_space,
+                                        IndexSpace color_space,
                                         PartitionKind part_kind = COMPUTE_KIND,
-                                        int color = AUTO_GENERATE_ID,
-                                        bool allocable = false);
+                                        int color = AUTO_GENERATE_ID);
+      template<int DIM1, typename COORD_T1,
+               int DIM2, typename COORD_T2,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM1,COORD_T1> create_partition_by_preimage(Context ctx,
+                              IndexPartitionT<DIM2,COORD_T2> projection,
+                              LogicalRegionT<DIM1,COORD_T1> handle,
+                              LogicalRegionT<DIM1,COORD_T1> parent,
+                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
+      // Range versions of preimage
+      IndexPartition create_partition_by_preimage_range(Context ctx, 
+                                        IndexPartition projection,
+                                        LogicalRegion handle,
+                                        LogicalRegion parent,
+                                        FieldID fid,
+                                        IndexSpace color_space,
+                                        PartitionKind part_kind = COMPUTE_KIND,
+                                        int color = AUTO_GENERATE_ID);
+      template<int DIM1, typename COORD_T1,
+               int DIM2, typename COORD_T2,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM1,COORD_T1> create_partition_by_preimage_range(
+                              Context ctx,
+                              IndexPartitionT<DIM2,COORD_T2> projection,
+                              LogicalRegionT<DIM1,COORD_T1> handle,
+                              LogicalRegionT<DIM1,COORD_T1> parent,
+                              FieldID fid, // type: ZRect<DIM2,COORD_T2>
+                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
     public:
       //------------------------------------------------------------------------
       // Computed Index Spaces and Partitions 
       //------------------------------------------------------------------------
-
       /**
        * Create a new index partition in which the individual sub-regions
        * will computed by one of the following calls:
@@ -3166,16 +3308,20 @@ namespace Legion {
        * @param color_space the color space for the new partition
        * @param part_kind optionally specify the partition kind
        * @param color optionally assign a color to the partition
-       * @param allocable specify if the sub-regions can allocate
        * @return handle of the new index partition
        */
       IndexPartition create_pending_partition(Context ctx,
                                               IndexSpace parent,
-                                              const Domain &color_space,
+                                              IndexSpace color_space,
                                   PartitionKind part_kind = COMPUTE_KIND, 
-                                  int color = AUTO_GENERATE_ID,
-                                  bool allocable = false);
-
+                                  int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_pending_partition(Context ctx,
+                              IndexSpaceT<DIM,COORD_T> parent,
+                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
       /**
        * Create a new index space by unioning together a bunch of index spaces 
        * from a common index space tree. The resulting index space is assigned
@@ -3194,6 +3340,13 @@ namespace Legion {
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent, 
                                         const DomainPoint &color,
                                         const std::vector<IndexSpace> &handles);
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space_union(Context ctx,
+                                IndexPartitionT<DIM,COORD_T> parent,
+                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
+                                const typename std::vector<
+                                  IndexSpaceT<DIM,COORD_T> > &handles);
 
       /**
        * This method is the same as the one above, except the index
@@ -3209,6 +3362,12 @@ namespace Legion {
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
                                           const DomainPoint &color,
                                           IndexPartition handle);
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space_union(Context ctx,
+                                IndexPartitionT<DIM,COORD_T> parent,
+                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
+                                IndexPartitionT<DIM,COORD_T> handle);
 
       /**
        * Create a new index space by intersecting together a bunch of index
@@ -3229,6 +3388,13 @@ namespace Legion {
                                                  IndexPartition parent,
                                                  const DomainPoint &color,
                                        const std::vector<IndexSpace> &handles);
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space_intersection(Context ctx,
+                                IndexPartitionT<DIM,COORD_T> parent,
+                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
+                                const typename std::vector<
+                                  IndexSpaceT<DIM,COORD_T> > &handles);
 
       /**
        * This method is the same as the one above, except the index
@@ -3246,6 +3412,12 @@ namespace Legion {
                                                  IndexPartition parent,
                                                  const DomainPoint &color,
                                                  IndexPartition handle);
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space_intersection(Context ctx,
+                                IndexPartitionT<DIM,COORD_T> parent,
+                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
+                                IndexPartitionT<DIM,COORD_T> handle);
 
       /**
        * Create a new index space by taking the set difference of
@@ -3272,6 +3444,14 @@ namespace Legion {
                                                const DomainPoint &color,
                                                IndexSpace initial,
                                         const std::vector<IndexSpace> &handles);
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space_difference(Context ctx,
+                                IndexPartitionT<DIM,COORD_T> parent,
+                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
+                                IndexSpaceT<DIM,COORD_T> initial,
+                                const typename std::vector<
+                                  IndexSpaceT<DIM,COORD_T> > &handles);
     public:
       //------------------------------------------------------------------------
       // Index Tree Traversal Operations

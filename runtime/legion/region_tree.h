@@ -107,14 +107,13 @@ namespace Legion {
       void compute_pending_color_space(IndexSpace parent,
                                        IndexPartition handle1,
                                        IndexPartition handle2,
-                                       Domain &color_space,
+                                       IndexSpace &color_space,
                          Realm::IndexSpace::IndexSpaceOperation op);
       void create_pending_partition(IndexPartition pid,
                                     IndexSpace parent,
-                                    const Domain &color_space,
+                                    IndexSpace color_space,
                                     ColorPoint partition_color,
                                     PartitionKind part_kind,
-                                    bool allocable, 
                                     ApEvent handle_ready,
                                     ApEvent domain_ready,
                                     bool create = false);
@@ -124,14 +123,13 @@ namespace Legion {
                   std::map<DomainPoint,IndexPartition> &user_handles,
                                            PartitionKind kind,
                                            ColorPoint &part_color,
-                                           bool allocable,
                                            ApEvent handle_ready,
                                            ApEvent domain_ready);
       ApEvent create_partition_by_field(RegionTreeContext ctx,
                                         Operation *op, unsigned index,
                                         const RegionRequirement &req,
                                         IndexPartition pending,
-                                        const Domain &color_space,
+                                        IndexSpace color_space,
                                         ApEvent term_event,
                                         VersionInfo &version_info,
                                         std::set<RtEvent> &applied_events);
@@ -139,7 +137,7 @@ namespace Legion {
                                       Operation *op, unsigned index,
                                       const RegionRequirement &req,
                                       IndexPartition pending,
-                                      const Domain &color_space,
+                                      IndexSpace color_space,
                                       ApEvent term_event,
                                       VersionInfo &version_info,
                                       std::set<RtEvent> &applied_events);
@@ -148,7 +146,7 @@ namespace Legion {
                                       const RegionRequirement &req,
                                       IndexPartition projection,
                                       IndexPartition pending,
-                                      const Domain &color_space,
+                                      IndexSpace color_space,
                                       ApEvent term_event,
                                       VersionInfo &version_info,
                                       std::set<RtEvent> &applied_events);

@@ -9126,8 +9126,7 @@ namespace Legion {
                                           Context ctx, IndexSpace parent,
                                           const Domain &color_space,
                                           const PointColoring &coloring,
-                                          PartitionKind part_kind,
-                                          int color, bool allocable)
+                                          PartitionKind part_kind, int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9139,7 +9138,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_index_partition(forest, parent, color_space, coloring,
-                                         part_kind, color, allocable);
+                                         part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9562,9 +9561,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_equal_partition(Context ctx, 
                                                    IndexSpace parent,
-                                                   const Domain &color_space,
+                                                   IndexSpace color_space,
                                                    size_t granularity,
-                                                   int color, bool allocable)
+                                                   int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9576,16 +9575,16 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_equal_partition(forest, parent, color_space,
-                                         granularity, color, allocable);
+                                         granularity, color);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_weighted_partition(Context ctx, 
                                                       IndexSpace parent,
-                                                      const Domain &color_space,
+                                                      IndexSpace color_space,
                                        const std::map<DomainPoint,int> &weights,
                                                       size_t granularity,
-                                                      int color, bool allocable)
+                                                      int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9597,7 +9596,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_weighted_partition(forest, parent, color_space,
-                                  weights, granularity, color, allocable);
+                                  weights, granularity, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9606,7 +9605,7 @@ namespace Legion {
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
                                                       PartitionKind kind,
-                                                      int color, bool allocable)
+                                                      int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9618,7 +9617,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_union(forest, parent, handle1, handle2,
-                                            kind, color, allocable);
+                                            kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9627,7 +9626,7 @@ namespace Legion {
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
                                                       PartitionKind kind,
-                                                      int color, bool allocable)
+                                                      int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9640,7 +9639,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_intersection(forest, parent, handle1,
-                                          handle2, kind, color, allocable);
+                                                   handle2, kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9649,7 +9648,7 @@ namespace Legion {
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
                                                       PartitionKind kind,
-                                                      int color, bool allocable)
+                                                      int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9662,7 +9661,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_difference(forest, parent, handle1, 
-                                          handle2, kind, color, allocable);
+                                                 handle2, kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9670,8 +9669,7 @@ namespace Legion {
                                                  IndexPartition handle1,
                                                  IndexPartition handle2,
                                   std::map<DomainPoint,IndexPartition> &handles,
-                                                 PartitionKind kind,
-                                                 int color, bool allocable)
+                                                 PartitionKind kind, int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9684,7 +9682,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       ctx->create_cross_product_partition(forest, handle1, handle2, handles,
-                                          kind, color, allocable);
+                                          kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9692,8 +9690,8 @@ namespace Legion {
                                                       LogicalRegion handle,
                                                       LogicalRegion parent_priv,
                                                       FieldID fid,
-                                                      const Domain &color_space,
-                                                      int color, bool allocable)
+                                                      IndexSpace color_space,
+                                                      int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9705,7 +9703,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_field(forest, handle, parent_priv, fid,
-                                            color_space, color, allocable);
+                                            color_space, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9714,9 +9712,9 @@ namespace Legion {
                                                     LogicalPartition projection,
                                                     LogicalRegion parent,
                                                     FieldID fid,
-                                                    const Domain &color_space,
+                                                    IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color, bool allocable)
+                                                    int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9728,7 +9726,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_image(forest, handle, projection, parent,
-                                fid, color_space, part_kind, color, allocable);
+                                            fid, color_space, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9737,9 +9735,9 @@ namespace Legion {
                                                     LogicalRegion handle,
                                                     LogicalRegion parent,
                                                     FieldID fid,
-                                                    const Domain &color_space,
+                                                    IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color, bool allocable)
+                                                    int color)
     //--------------------------------------------------------------------------
     { 
       if (ctx == DUMMY_CONTEXT)
@@ -9751,15 +9749,15 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_preimage(forest, projection, handle,
-                    parent, fid, color_space, part_kind, color, allocable);
+                              parent, fid, color_space, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx, 
                                                      IndexSpace parent, 
-                                                     const Domain &color_space,
+                                                     IndexSpace color_space,
                                                      PartitionKind part_kind,
-                                                     int color, bool allocable)
+                                                     int color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9771,7 +9769,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_pending_partition(forest, parent, color_space,
-                                           part_kind, color, allocable);
+                                           part_kind, color);
     }
 
     //--------------------------------------------------------------------------

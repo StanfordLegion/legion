@@ -1468,7 +1468,7 @@ namespace Legion {
                                             const Domain &color_space,
                                             const PointColoring &coloring,
                                             PartitionKind part_kind,
-                                            int color, bool allocable);
+                                            int color);
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                             const Coloring &coloring,
                                             bool disjoint,
@@ -1509,63 +1509,57 @@ namespace Legion {
       Domain construct_convex_hull(const std::set<Domain> &domains);
     public:
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space, 
-                                            size_t granuarlity,
-                                            int color, bool allocable);
+                                            IndexSpace color_space, 
+                                            size_t granuarlity, int color);
       IndexPartition create_weighted_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space,
+                                               IndexSpace color_space,
                                       const std::map<DomainPoint,int> &weights,
-                                            size_t granularity, int color,
-                                            bool allocable);
+                                            size_t granularity, int color);
       IndexPartition create_partition_by_union(Context ctx, IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,
-                                               PartitionKind kind,
-                                               int color, bool allocable);
+                                               PartitionKind kind, int color);
       IndexPartition create_partition_by_intersection(Context ctx, 
                                                IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,
-                                               PartitionKind kind,
-                                               int color, bool allocable);
+                                               PartitionKind kind, int color);
       IndexPartition create_partition_by_difference(Context ctx, 
                                                IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,
-                                               PartitionKind kind,
-                                               int color, bool allocable);
+                                               PartitionKind kind, int color);
       void create_cross_product_partition(Context ctx, 
                                           IndexPartition handle1,
                                           IndexPartition handle2,
                               std::map<DomainPoint,IndexPartition> &handles,
-                                          PartitionKind kind,
-                                          int color, bool allocable);
+                                          PartitionKind kind, int color);
       IndexPartition create_partition_by_field(Context ctx, 
                                                LogicalRegion handle,
                                                LogicalRegion parent,
                                                FieldID fid,
-                                               const Domain &color_space,
-                                               int color, bool allocable);
+                                               IndexSpace color_space,
+                                               int color);
       IndexPartition create_partition_by_image(Context ctx,
                                                IndexSpace handle,
                                                LogicalPartition projection,
                                                LogicalRegion parent,
                                                FieldID fid, 
-                                               const Domain &color_space,
+                                               IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               int color, bool allocable);
+                                               int color);
       IndexPartition create_partition_by_preimage(Context ctx,
                                                IndexPartition projection,
                                                LogicalRegion handle,
                                                LogicalRegion parent,
                                                FieldID fid,
-                                               const Domain &color_space,
+                                               IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               int color, bool allocable);
+                                               int color);
       IndexPartition create_pending_partition(Context ctx, IndexSpace parent,
-                                              const Domain &color_space,
+                                              IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              int color, bool allocable);
+                                              int color);
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
                                           const DomainPoint &color, 
                                         const std::vector<IndexSpace> &handles);

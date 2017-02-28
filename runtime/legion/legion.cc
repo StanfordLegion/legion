@@ -2448,7 +2448,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->create_index_partition(ctx, parent, color_space, coloring,
-                                             part_kind, color, allocable);
+                                             part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2536,37 +2536,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_equal_partition(Context ctx, 
                                                       IndexSpace parent,
-                                                      Domain color_space,
+                                                      IndexSpace color_space,
                                                       size_t granularity,
-                                                      int color, bool allocable)
+                                                      int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_equal_partition(ctx, parent, color_space,
-                                             granularity, color, allocable);
+                                             granularity, color);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_weighted_partition(Context ctx,
-                                      IndexSpace parent, Domain color_space,
+                                      IndexSpace parent, IndexSpace color_space,
                                       const std::map<DomainPoint,int> &weights,
-                                      size_t granularity, int color,
-                                      bool allocable)
+                                      size_t granularity, int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_weighted_partition(ctx, parent, color_space, 
-                                                weights, granularity, 
-                                                color, allocable);
+                                                weights, granularity, color);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_union(Context ctx,
                                     IndexSpace parent, IndexPartition handle1,
                                     IndexPartition handle2, PartitionKind kind,
-                                    int color, bool allocable)
+                                    int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_union(ctx, parent, handle1, handle2, 
-                                                kind, color, allocable);
+                                                kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2574,13 +2572,11 @@ namespace Legion {
                                                 Context ctx, IndexSpace parent,
                                                 IndexPartition handle1, 
                                                 IndexPartition handle2,
-                                                PartitionKind kind, int color, 
-                                                bool allocable)
+                                                PartitionKind kind, int color) 
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_intersection(ctx, parent, handle1,
-                                                       handle2, kind,
-                                                       color, allocable);
+                                                       handle2, kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -2588,68 +2584,66 @@ namespace Legion {
                                                 Context ctx, IndexSpace parent,
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
-                                                PartitionKind kind, int color,
-                                                bool allocable)
+                                                PartitionKind kind, int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_difference(ctx, parent, handle1,
-                                                     handle2, kind, color,
-                                                     allocable);
+                                                     handle2, kind, color);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::create_cross_product_partitions(Context ctx,
                                 IndexPartition handle1, IndexPartition handle2,
                                 std::map<DomainPoint,IndexPartition> &handles,
-                                PartitionKind kind, int color, bool allocable)
+                                PartitionKind kind, int color)
     //--------------------------------------------------------------------------
     {
       runtime->create_cross_product_partition(ctx, handle1, handle2, handles,
-                                              kind, color, allocable);
+                                              kind, color);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_field(Context ctx,
                    LogicalRegion handle, LogicalRegion parent, FieldID fid, 
-                   const Domain &color_space, int color, bool allocable)
+                   IndexSpace color_space, int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_field(ctx, handle, parent, fid,
-                                                color_space, color, allocable);
+                                                color_space, color);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_image(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
-                  LogicalRegion parent, FieldID fid, const Domain &color_space,
-                  PartitionKind part_kind, int color, bool allocable)
+                  LogicalRegion parent, FieldID fid, IndexSpace color_space,
+                  PartitionKind part_kind, int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_image(ctx, handle, projection,
                                                 parent, fid, color_space,
-                                                part_kind, color, allocable);
+                                                part_kind, color);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
-                  LogicalRegion parent, FieldID fid, const Domain &color_space,
-                  PartitionKind part_kind, int color, bool allocable)
+                  LogicalRegion parent, FieldID fid, IndexSpace color_space,
+                  PartitionKind part_kind, int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_preimage(ctx, projection, handle,
                                                    parent, fid, color_space,
-                                                   part_kind, color, allocable);
+                                                   part_kind, color);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx,
-                             IndexSpace parent, const Domain &color_space, 
-                             PartitionKind part_kind, int color, bool allocable)
+                             IndexSpace parent, IndexSpace color_space, 
+                             PartitionKind part_kind, int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_pending_partition(ctx, parent, color_space, 
-                                               part_kind, color, allocable);
+                                               part_kind, color);
     }
 
     //--------------------------------------------------------------------------

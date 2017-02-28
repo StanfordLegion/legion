@@ -11207,7 +11207,7 @@ namespace Legion {
     void DependentPartitionOp::initialize_by_field(TaskContext *ctx, 
                                                    IndexPartition pid,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    const Domain &space, FieldID fid)
+                                    IndexSpace space, FieldID fid)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/); 
@@ -11231,7 +11231,7 @@ namespace Legion {
                                                    IndexPartition pid,
                                           LogicalPartition projection,
                                           LogicalRegion parent, FieldID fid, 
-                                          const Domain &space)
+                                          IndexSpace space)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -11254,7 +11254,7 @@ namespace Legion {
     void DependentPartitionOp::initialize_by_preimage(TaskContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, const Domain &space)
+                                    FieldID fid, IndexSpace space)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);

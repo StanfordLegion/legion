@@ -2194,15 +2194,15 @@ namespace Legion {
     public:
       void initialize_by_field(TaskContext *ctx, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
-                               const Domain &color_space, FieldID fid); 
+                               IndexSpace color_space, FieldID fid); 
       void initialize_by_image(TaskContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
-                               const Domain &color_space);
+                               IndexSpace color_space);
       void initialize_by_preimage(TaskContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
-                               const Domain &color_space);
+                               IndexSpace color_space);
       const RegionRequirement& get_requirement(void) const;
       inline ApEvent get_handle_ready(void) const { return handle_ready; }
     public:
@@ -2230,7 +2230,7 @@ namespace Legion {
       VersionInfo version_info;
       RestrictInfo restrict_info;
       IndexPartition partition_handle;
-      Domain color_space;
+      IndexSpace color_space;
       IndexPartition projection; /* for pre-image only*/
       RegionTreePath privilege_path;
       unsigned parent_req_index;
