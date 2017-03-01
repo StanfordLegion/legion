@@ -2887,7 +2887,6 @@ namespace Legion {
       IndexPartitionT<DIM,COORD_T> create_equal_partition(Context ctx,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               size_t granularity, int color = AUTO_GENERATE_ID);
-      
 
       /**
        * This function zips a union operation over all the index subspaces
