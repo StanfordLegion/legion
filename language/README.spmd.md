@@ -36,6 +36,4 @@ being fixed. Test cases are always welcome!
     outside this set causes SPMD to fail
   * There are some known issues with interactions between nested control flow
     and required synchronization for data movement
-  * Synchronization patterns where a copy has two previous consumers which
-    require synchronization (to avoid missing a WAR dependence) currently fail
   * The error messages when something goes wrong are currently poor
