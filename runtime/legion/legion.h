@@ -2869,14 +2869,25 @@ namespace Legion {
        * @return name of the created index partition
        */
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
+                                            const Domain &color_space,
+                                            size_t granularity = 1,
+                                            int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, 
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_equal_partition(Context ctx,
+                              Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                              size_t granularity, int color = AUTO_GENERATE_ID);
+      // Existing color space versions
+      IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
                                             IndexSpace color_space, 
                                             size_t granularity = 1,
                                             int color = AUTO_GENERATE_ID);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_equal_partition(Context ctx,
-                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> &color_space,
+                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               size_t granularity, int color = AUTO_GENERATE_ID);
+      
 
       /**
        * This function zips a union operation over all the index subspaces
@@ -2895,6 +2906,7 @@ namespace Legion {
        * @param parent the parent index space for the new partition
        * @param handle1 first index partition
        * @param handle2 second index partition
+       * @param color_space space of colors to zip over
        * @param part_kind indicate the kind of partition
        * @param color the new color for the index partition
        * @return name of the created index partition
@@ -2903,15 +2915,35 @@ namespace Legion {
                                        IndexSpace parent,
                                        IndexPartition handle1,
                                        IndexPartition handle2,
+                                       const Domain &color_space,
                                        PartitionKind part_kind = COMPUTE_KIND,
                                        int color = AUTO_GENERATE_ID);
-      template<int DIM, typename COORD_T>
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_union(Context ctx,
-                                    IndexSpaceT<DIM,COORD_T> parent,
-                                    IndexPartitionT<DIM,COORD_T> handle1,
-                                    IndexPartitionT<DIM,COORD_T> handle2,
-                                    PartitionKind part_kind = COMPUTE_KIND,
-                                    int color = AUTO_GENERATE_ID);
+                              IndexSpaceT<DIM,COORD_T> parent,
+                              IndexPartitionT<DIM,COORD_T> handle1,
+                              IndexPartitionT<DIM,COORD_T> handle2,
+                              Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
+      // Existing color space versions
+      IndexPartition create_partition_by_union(Context ctx,
+                                       IndexSpace parent,
+                                       IndexPartition handle1,
+                                       IndexPartition handle2,
+                                       IndexSpace color_space,
+                                       PartitionKind part_kind = COMPUTE_KIND,
+                                       int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_union(Context ctx,
+                              IndexSpaceT<DIM,COORD_T> parent,
+                              IndexPartitionT<DIM,COORD_T> handle1,
+                              IndexPartitionT<DIM,COORD_T> handle2,
+                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
 
       /**
        * This function zips an intersection operation over all the index 
@@ -2931,6 +2963,7 @@ namespace Legion {
        * @param parent the parent index space for the new partition
        * @param handle1 first index partition
        * @param handle2 second index partition
+       * @param color_space space of colors to zip over
        * @param part_kind indicate the kind of partition
        * @param color the new color for the index partition
        * @return name of the created index partition
@@ -2939,16 +2972,37 @@ namespace Legion {
                                         IndexSpace parent,
                                         IndexPartition handle1,
                                         IndexPartition handle2,
+                                        const Domain &color_space,
                                         PartitionKind part_kind = COMPUTE_KIND,
                                         int color = AUTO_GENERATE_ID);
-      template<int DIM, typename COORD_T>
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_intersections(
-                                    Context ctx,
-                                    IndexSpaceT<DIM,COORD_T> parent,
-                                    IndexPartitionT<DIM,COORD_T> handle1,
-                                    IndexPartitionT<DIM,COORD_T> handle2,
-                                    PartitionKind part_kind = COMPUTE_KIND,
-                                    int color = AUTO_GENERATE_ID);
+                              Context ctx,
+                              IndexSpaceT<DIM,COORD_T> parent,
+                              IndexPartitionT<DIM,COORD_T> handle1,
+                              IndexPartitionT<DIM,COORD_T> handle2,
+                              Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
+      // Existing color space versions
+      IndexPartition create_partition_by_intersection(Context ctx,
+                                        IndexSpace parent,
+                                        IndexPartition handle1,
+                                        IndexPartition handle2,
+                                        IndexSpace color_space,
+                                        PartitionKind part_kind = COMPUTE_KIND,
+                                        int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_intersections(
+                              Context ctx,
+                              IndexSpaceT<DIM,COORD_T> parent,
+                              IndexPartitionT<DIM,COORD_T> handle1,
+                              IndexPartitionT<DIM,COORD_T> handle2,
+                              IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
 
       /**
        * This function zips a set difference operation over all the index 
@@ -2968,6 +3022,7 @@ namespace Legion {
        * @param parent the parent index space for the new partition
        * @param handle1 first index partition
        * @param handle2 second index partition
+       * @param color_space space of colors to zip over
        * @param part_kind indicate the kind of partition
        * @param color the new color for the index partition
        * @return name of the created index partition
@@ -2976,15 +3031,18 @@ namespace Legion {
                                         IndexSpace parent,
                                         IndexPartition handle1,
                                         IndexPartition handle2,
+                                        const Domain &color_space,
                                         PartitionKind part_kind = COMPUTE_KIND,
                                         int color = AUTO_GENERATE_ID);
-      template<int DIM, typename COORD_T>
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_difference(Context ctx,
-                                      IndexSpaceT<DIM,COORD_T> parent,
-                                      IndexPartitionT<DIM,COORD_T> handle1,
-                                      IndexPartitionT<DIM,COORD_T> handle2,
-                                      PartitionKind part_kind = COMPUTE_KIND,
-                                      int color = AUTO_GENERATE_ID);
+                              IndexSpaceT<DIM,COORD_T> parent,
+                              IndexPartitionT<DIM,COORD_T> handle1,
+                              IndexPartitionT<DIM,COORD_T> handle2,
+                              Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
 
       /**
        * This performs a cross product between two different index
@@ -3051,6 +3109,15 @@ namespace Legion {
       template<int DIM, int COLOR_DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_restriction(Context ctx,
                                 IndexSpaceT<DIM,COORD_T> parent,
+                                Realm::ZRect<COLOR_DIM,COORD_T> color_space,
+                                Realm::ZMatrix<DIM,COLOR_DIM,COORD_T> transform,
+                                Realm::ZRect<DIM,COORD_T> extent,
+                                PartitionKind part_kind = COMPUTE_KIND,
+                                int color = AUTO_GENERATE_ID);
+      // Existing color space version
+      template<int DIM, int COLOR_DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_restriction(Context ctx,
+                                IndexSpaceT<DIM,COORD_T> parent,
                                 IndexSpaceT<COLOR_DIM,COORD_T> color_space,
                                 Realm::ZMatrix<DIM,COLOR_DIM,COORD_T> transform,
                                 Realm::ZRect<DIM,COORD_T> extent,
@@ -3078,6 +3145,21 @@ namespace Legion {
        * @param color optional new color for the index partition
        * @return a new index partition of the index space of the logical region
        */
+      IndexPartition create_partition_by_field(Context ctx,
+                                               LogicalRegion handle,
+                                               LogicalRegion parent,
+                                               FieldID fid, 
+                                               const Domain &color_space,
+                                               int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T, 
+               int COLOR_DIM, typename COLOR_COORD_T, typename FIELD_TYPE>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_field(Context ctx,
+                          LogicalRegionT<DIM,COORD_T> handle,
+                          LogicalRegionT<DIM,COORD_T> parent,
+                          FieldID fid, // type: ZPoint<COLOR_DIM,COLOR_COORD_T>
+                          Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                          int color = AUTO_GENERATE_ID);
+      // Existing color space versions 
       IndexPartition create_partition_by_field(Context ctx,
                                                LogicalRegion handle,
                                                LogicalRegion parent,
@@ -3126,6 +3208,26 @@ namespace Legion {
                                          LogicalPartition projection,
                                          LogicalRegion parent,
                                          FieldID fid,
+                                         const Domain &color_space,
+                                         PartitionKind part_kind = COMPUTE_KIND,
+                                         int color = AUTO_GENERATE_ID);
+      template<int DIM1, typename COORD_T1, 
+               int DIM2, typename COORD_T2, 
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM2,COORD_T2> create_partition_by_image(Context ctx,
+                              IndexSpaceT<DIM2,COORD_T2> handle,
+                              LogicalPartitionT<DIM1,COORD_T1> projection,
+                              LogicalRegionT<DIM1,COORD_T1> parent,
+                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
+      // Existing color space versions 
+      IndexPartition create_partition_by_image(Context ctx,
+                                         IndexSpace handle,
+                                         LogicalPartition projection,
+                                         LogicalRegion parent,
+                                         FieldID fid,
                                          IndexSpace color_space,
                                          PartitionKind part_kind = COMPUTE_KIND,
                                          int color = AUTO_GENERATE_ID);
@@ -3140,7 +3242,28 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               int color = AUTO_GENERATE_ID);
-      // Range versions of image
+      // Range versions of image with immediate color spaces
+      IndexPartition create_partition_by_image_range(Context ctx,
+                                         IndexSpace handle,
+                                         LogicalPartition projection,
+                                         LogicalRegion parent,
+                                         FieldID fid,
+                                         const Domain &color_space,
+                                         PartitionKind part_kind = COMPUTE_KIND,
+                                         int color = AUTO_GENERATE_ID);
+      template<int DIM1, typename COORD_T1, 
+               int DIM2, typename COORD_T2, 
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM2,COORD_T2> create_partition_by_image_range(
+                              Context ctx,
+                              IndexSpaceT<DIM2,COORD_T2> handle,
+                              LogicalPartitionT<DIM1,COORD_T1> projection,
+                              LogicalRegionT<DIM1,COORD_T1> parent,
+                              FieldID fid, // type: ZRect<DIM2,COORD_T2>
+                              Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
+      // Range versions of image with existing color spaces
       IndexPartition create_partition_by_image_range(Context ctx,
                                          IndexSpace handle,
                                          LogicalPartition projection,
@@ -3192,6 +3315,26 @@ namespace Legion {
                                         LogicalRegion handle,
                                         LogicalRegion parent,
                                         FieldID fid,
+                                        const Domain &color_space,
+                                        PartitionKind part_kind = COMPUTE_KIND,
+                                        int color = AUTO_GENERATE_ID);
+      template<int DIM1, typename COORD_T1,
+               int DIM2, typename COORD_T2,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM1,COORD_T1> create_partition_by_preimage(Context ctx,
+                              IndexPartitionT<DIM2,COORD_T2> projection,
+                              LogicalRegionT<DIM1,COORD_T1> handle,
+                              LogicalRegionT<DIM1,COORD_T1> parent,
+                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
+      // Existing color space versions 
+      IndexPartition create_partition_by_preimage(Context ctx, 
+                                        IndexPartition projection,
+                                        LogicalRegion handle,
+                                        LogicalRegion parent,
+                                        FieldID fid,
                                         IndexSpace color_space,
                                         PartitionKind part_kind = COMPUTE_KIND,
                                         int color = AUTO_GENERATE_ID);
@@ -3206,7 +3349,28 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               int color = AUTO_GENERATE_ID);
-      // Range versions of preimage
+      // Range versions of preimage with immediate color spaces
+      IndexPartition create_partition_by_preimage_range(Context ctx, 
+                                        IndexPartition projection,
+                                        LogicalRegion handle,
+                                        LogicalRegion parent,
+                                        FieldID fid,
+                                        const Domain &color_space,
+                                        PartitionKind part_kind = COMPUTE_KIND,
+                                        int color = AUTO_GENERATE_ID);
+      template<int DIM1, typename COORD_T1,
+               int DIM2, typename COORD_T2,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM1,COORD_T1> create_partition_by_preimage_range(
+                              Context ctx,
+                              IndexPartitionT<DIM2,COORD_T2> projection,
+                              LogicalRegionT<DIM1,COORD_T1> handle,
+                              LogicalRegionT<DIM1,COORD_T1> parent,
+                              FieldID fid, // type: ZRect<DIM2,COORD_T2>
+                              Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
+      // Range versions of preimage with existing color spaces
       IndexPartition create_partition_by_preimage_range(Context ctx, 
                                         IndexPartition projection,
                                         LogicalRegion handle,
@@ -3257,6 +3421,19 @@ namespace Legion {
        */
       IndexPartition create_pending_partition(Context ctx,
                                               IndexSpace parent,
+                                              const Domain &color_space,
+                                  PartitionKind part_kind = COMPUTE_KIND, 
+                                  int color = AUTO_GENERATE_ID);
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_pending_partition(Context ctx,
+                              IndexSpaceT<DIM,COORD_T> parent,
+                              Realm::ZRect<COLOR_DIM,COLOR_COORD_T> color_space,
+                              PartitionKind part_kind = COMPUTE_KIND,
+                              int color = AUTO_GENERATE_ID);
+      // Existing color space versions 
+      IndexPartition create_pending_partition(Context ctx,
+                                              IndexSpace parent,
                                               IndexSpace color_space,
                                   PartitionKind part_kind = COMPUTE_KIND, 
                                   int color = AUTO_GENERATE_ID);
@@ -3267,6 +3444,7 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               int color = AUTO_GENERATE_ID);
+
       /**
        * Create a new index space by unioning together a bunch of index spaces 
        * from a common index space tree. The resulting index space is assigned

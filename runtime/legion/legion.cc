@@ -2545,6 +2545,7 @@ namespace Legion {
                                              granularity, color);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_union(Context ctx,
                                     IndexSpace parent, IndexPartition handle1,
@@ -2579,6 +2580,7 @@ namespace Legion {
       return runtime->create_partition_by_difference(ctx, parent, handle1,
                                                      handle2, kind, color);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void Runtime::create_cross_product_partitions(Context ctx,
