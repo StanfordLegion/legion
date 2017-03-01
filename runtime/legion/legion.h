@@ -2875,38 +2875,11 @@ namespace Legion {
                                             IndexSpace color_space, 
                                             size_t granularity = 1,
                                             int color = AUTO_GENERATE_ID);
-
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_equal_partition(Context ctx,
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> &color_space,
                               size_t granularity, int color = AUTO_GENERATE_ID);
-
-      /**
-       * TODO: Update weighted partition call
-       * Create 'color_space' index subspaces (one for each point) in a 
-       * common partition of the 'parent' index space. By definition the 
-       * resulting partition will be disjoint. Users must also specify 
-       * weights for the number of entries to put in each index spaces. 
-       * The size of the 'weights' vector must be of the same as the
-       * volume of the 'color_space' domain. Users can also specify a 
-       * minimum 'granularity' of the size of the index subspaces. The 
-       * 'color' field gives users optional control over the color of the 
-       * created partition. The 'allocable' field indicates if dynamic 
-       * allocation and freeing of pointers is supported on the index subspaces.
-       * @param ctx the enclosing task context
-       * @param parent index space of the partition to be made
-       * @param color_space space of colors to create
-       * @param weights map from colors to weights
-       * @param granularity the minimum size of the index subspaces
-       * @param color optional color paramter for the partition
-       * @return name of the created index partition
-       */
-      IndexPartition create_weighted_partition(Context ctx, IndexSpace parent,
-                                       IndexSpace color_space,
-                                       const std::map<DomainPoint,int> &weights,
-                                       size_t granularity = 1,
-                                       int color = AUTO_GENERATE_ID);
 
       /**
        * This function zips a union operation over all the index subspaces
@@ -3469,6 +3442,11 @@ namespace Legion {
       IndexPartition get_index_partition(IndexSpace parent, Color color);
       IndexPartition get_index_partition(IndexSpace parent, 
                                          const DomainPoint &color);
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> get_index_partition(
+                                  IndexSpaceT<DIM,COORD_T> parent, Color color);
+
       /**
        * Return true if the index space has an index partition
        * with the specified color.
@@ -3482,6 +3460,9 @@ namespace Legion {
       // Context free
       bool has_index_partition(IndexSpace parent,
                                const DomainPoint &color);
+      // Template version
+      template<int DIM, typename COORD_T>
+      bool has_index_partition(IndexSpaceT<DIM,COORD_T> parent, Color color);
 
       /**
        * Return the index subspace of an index partitioning
@@ -3499,6 +3480,12 @@ namespace Legion {
       IndexSpace get_index_subspace(IndexPartition p, Color color);
       IndexSpace get_index_subspace(IndexPartition p,
                                     const DomainPoint &color);
+      // Template version
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexSpaceT<DIM,COORD_T> get_index_subspace(
+                                  IndexPartitionT<DIM,COORD_T> p,
+                                  Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color);
 
       /**
        * Return true if the index partition has an index subspace
@@ -3513,8 +3500,14 @@ namespace Legion {
       // Context free
       bool has_index_subspace(IndexPartition p,
                               const DomainPoint &color);
+      // Template version
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      bool has_index_subspace(IndexPartitionT<DIM,COORD_T> p,
+                              Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color);
 
       /**
+       * @deprecated
        * Return if the given index space is represented by 
        * multiple domains or just a single one. If multiple
        * domains represent the index space then 'get_index_space_domains'
@@ -3528,6 +3521,7 @@ namespace Legion {
       bool has_multiple_domains(IndexSpace handle);
 
       /**
+       * @deprecated
        * Return the domain corresponding to the
        * specified index space if it exists
        * @param ctx enclosing task context
@@ -3539,6 +3533,7 @@ namespace Legion {
       Domain get_index_space_domain(IndexSpace handle);
 
       /**
+       * @deprecated
        * Return the domains that represent the index space.
        * While the previous call only works when there is a
        * single domain for the index space, this call will
@@ -3563,6 +3558,11 @@ namespace Legion {
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
       // Context free
       Domain get_index_partition_color_space(IndexPartition p);
+      // Template version
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexSpaceT<COLOR_DIM,COLOR_COORD_T> 
+             get_index_partition_color_space(IndexPartitionT<DIM,COORD_T> p);
 
       /**
        * Return a set that contains the colors of all
@@ -3604,8 +3604,8 @@ namespace Legion {
       bool is_index_partition_complete(IndexPartition p);
 
       /**
-       * Get an index subspace from a partition with a given
-       * color point.
+       * @deprecated
+       * Get an index subspace from a partition with a given color point.
        * @param ctx enclosing task context
        * @param p parent index partition handle
        * @param color_point point containing color value of index subspace
@@ -3628,6 +3628,11 @@ namespace Legion {
       // Context free
       Color get_index_space_color(IndexSpace handle);
       DomainPoint get_index_space_color_point(IndexSpace handle);
+      // Template version
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      Realm::ZPoint<COLOR_DIM,COLOR_COORD_T>
+            get_index_space_color(IndexSpaceT<DIM,COORD_T> handle);
 
       /**
        * Return the color for the corresponding index partition in
@@ -3652,6 +3657,10 @@ namespace Legion {
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       // Context free
       IndexSpace get_parent_index_space(IndexPartition handle);
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> get_parent_index_space(
+                                      IndexPartitionT<DIM,COORD_T> handle);
 
       /**
        * Returns true if the given index space has a parent partition.
@@ -3673,6 +3682,10 @@ namespace Legion {
       IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
       // Context free
       IndexPartition get_parent_index_partition(IndexSpace handle);
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> get_parent_index_partition(
+                                              IndexSpaceT<DIM,COORD_T> handle);
 
       /**
        * Return the depth in the index space tree of the given index space.
@@ -3718,6 +3731,20 @@ namespace Legion {
        */
       DomainPoint safe_cast(Context ctx, DomainPoint point, 
                             LogicalRegion region);
+      
+      /**
+       * Safe case a domain point down to a target region.  If the point
+       * is not in the target region, then an empty domain point
+       * is returned.
+       * @param ctx enclosing task context
+       * @param point the domain point to be cast
+       * @param region the target logical region
+       * @return the same point if it can be safely cast, otherwise empty
+       */
+      template<int DIM, typename COORD_T>
+      Realm::ZPoint<DIM,COORD_T> safe_cast(Context ctx, 
+                                           Realm::ZPoint<DIM,COORD_T> point,
+                                           LogicalRegionT<DIM,COORD_T> region);
     public:
       //------------------------------------------------------------------------
       // Field Space Operations
@@ -3786,6 +3813,11 @@ namespace Legion {
        */
       LogicalRegion create_logical_region(Context ctx, IndexSpace index, 
                                           FieldSpace fields);
+      // Template version
+      template<int DIM, typename COORD_T>
+      LogicalRegionT<DIM,COORD_T> create_logical_region(Context ctx,
+                                      IndexSpaceT<DIM,COORD_T> index,
+                                      FieldSpace fields);
       /**
        * Destroy a logical region and all of its logical sub-regions.
        * @param ctx enclosing task context
@@ -3817,6 +3849,11 @@ namespace Legion {
       // Context free
       LogicalPartition get_logical_partition(LogicalRegion parent,
                                              IndexPartition handle);
+      // Template version
+      template<int DIM, typename COORD_T>
+      LogicalRegionT<DIM,COORD_T> get_logical_partition(
+                                      LogicalRegionT<DIM,COORD_T> parent,
+                                      IndexPartitionT<DIM,COORD_T> handle);
       
       /**
        * Return the logical partition of the logical region parent with
@@ -3837,6 +3874,11 @@ namespace Legion {
                                                       Color c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       const DomainPoint &c);
+      // Template version
+      template<int DIM, typename COORD_T>
+      LogicalPartitionT<DIM,COORD_T> get_logical_partition_by_color(
+                                        LogicalRegionT<DIM,COORD_T> parent,
+                                        Color c);
 
       /**
        * Return true if the logical region has a logical partition with
@@ -3870,6 +3912,11 @@ namespace Legion {
       LogicalPartition get_logical_partition_by_tree(IndexPartition handle, 
                                                      FieldSpace fspace, 
                                                      RegionTreeID tid);
+      // Template version
+      template<int DIM, typename COORD_T>
+      LogicalPartitionT<DIM,COORD_T> get_logical_partition_by_tree(
+                                      IndexPartitionT<DIM,COORD_T> handle,
+                                      FieldSpace fspace, RegionTreeID tid);
 
       /**
        * Return the logical region instance of the given index space 
@@ -3885,6 +3932,11 @@ namespace Legion {
       // Context free
       LogicalRegion get_logical_subregion(LogicalPartition parent, 
                                           IndexSpace handle);
+      // Template version
+      template<int DIM, typename COORD_T>
+      LogicalRegionT<DIM,COORD_T> get_logical_subregion(
+                                          LogicalPartitionT<DIM,COORD_T> parent,
+                                          IndexSpaceT<DIM,COORD_T> handle);
 
       /**
        * Return the logical region of the logical partition parent with
@@ -3905,6 +3957,12 @@ namespace Legion {
                                                    Color c);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
                                                    const DomainPoint &c);
+      // Template version
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      LogicalRegionT<DIM,COORD_T> get_logical_subregion_by_color(
+                                  LogicalPartitionT<DIM,COORD_T> parent,
+                                  Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color);
 
       /**
        * Return true if the logical partition has a logical region with
@@ -3920,6 +3978,11 @@ namespace Legion {
       // Context free
       bool has_logical_subregion_by_color(LogicalPartition parent,
                                           const DomainPoint &c);
+      // Template version
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      bool has_logical_subregion_by_color(LogicalPartitionT<DIM,COORD_T> parent,
+                                  Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color);
 
       /**
        * Return the logical partition identified by the triple of index
@@ -3938,6 +4001,11 @@ namespace Legion {
       LogicalRegion get_logical_subregion_by_tree(IndexSpace handle, 
                                                   FieldSpace fspace, 
                                                   RegionTreeID tid);
+      // Template version
+      template<int DIM, typename COORD_T>
+      LogicalRegionT<DIM,COORD_T> get_logical_subregion_by_tree(
+                                    IndexSpaceT<DIM,COORD_T> handle,
+                                    FieldSpace space, RegionTreeID tid);
 
       /**
        * Return the color for the logical region corresponding to
@@ -3953,6 +4021,11 @@ namespace Legion {
       // Context free versions
       Color get_logical_region_color(LogicalRegion handle);
       DomainPoint get_logical_region_color_point(LogicalRegion handle);
+      // Template version
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> get_logical_region_color_point(
+                                          LogicalRegionT<DIM,COORD_T> handle);
 
       /**
        * Return the color for the logical partition corresponding to
@@ -3978,6 +4051,10 @@ namespace Legion {
                                               LogicalPartition handle);
       // Context free
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
+      // Template version
+      template<int DIM, typename COORD_T>
+      LogicalRegionT<DIM,COORD_T> get_parent_logical_region(
+                                    LogicalPartitionT<DIM,COORD_T> handle);
 
       /**
        * Return true if the logical region has a parent logical partition.
@@ -3999,6 +4076,10 @@ namespace Legion {
                                                     LogicalRegion handle);
       // Context free
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
+      // Template version
+      template<int DIM, typename COORD_T>
+      LogicalPartitionT<DIM,COORD_T> get_parent_logical_partition(
+                                          LogicalRegionT<DIM,COORD_T> handle);
     public:
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 

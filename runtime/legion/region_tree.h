@@ -88,8 +88,6 @@ namespace Legion {
                                    AddressSpaceID source);
     public:
       ApEvent create_equal_partition(IndexPartition pid, size_t granularity);
-      ApEvent create_weighted_partition(IndexPartition pid, size_t granularity,
-                                      const std::map<DomainPoint,int> &weights);
     public:
       ApEvent create_partition_by_union(IndexPartition pid,
                                         IndexPartition handle1,
@@ -984,8 +982,6 @@ namespace Legion {
       static void handle_pending_child_task(const void *args);
     public:
       ApEvent create_equal_children(size_t granularity);
-      ApEvent create_weighted_children(const std::map<DomainPoint,int> &weights,
-                                       size_t granularity);
       ApEvent create_by_operation(IndexPartNode *left, IndexPartNode *right,
                                   Realm::IndexSpace::IndexSpaceOperation op);
       ApEvent create_by_operation(IndexSpaceNode *left, IndexPartNode *right,

@@ -2546,17 +2546,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_weighted_partition(Context ctx,
-                                      IndexSpace parent, IndexSpace color_space,
-                                      const std::map<DomainPoint,int> &weights,
-                                      size_t granularity, int color)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->create_weighted_partition(ctx, parent, color_space, 
-                                                weights, granularity, color);
-    }
-
-    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_union(Context ctx,
                                     IndexSpace parent, IndexPartition handle1,
                                     IndexPartition handle2, PartitionKind kind,

@@ -10958,22 +10958,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_weighted_partition(TaskContext *ctx, 
-                                                           IndexPartition pid, 
-                                                           size_t granularity,
-                                       const std::map<DomainPoint,int> &weights)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, true/*track*/);
-#ifdef DEBUG_LEGION
-      assert(thunk == NULL);
-#endif
-      thunk = new WeightedPartitionThunk(pid, granularity, weights);
-      if (Runtime::legion_spy_enabled)
-        perform_logging();
-    }
-
-    //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_union_partition(TaskContext *ctx,
                                                         IndexPartition pid,
                                                         IndexPartition h1,
@@ -11491,7 +11475,6 @@ namespace Legion {
     enum PendingPartitionKind
     {
       EQUAL_PARTITION = 0,
-      WEIGHTED_PARTITION,
       UNION_PARTITION,
       INTERSECTION_PARTITION,
       DIFFERENCE_PARTITION,
@@ -11503,15 +11486,6 @@ namespace Legion {
     {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           EQUAL_PARTITION);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::WeightedPartitionThunk::perform_logging(
-                                                         PendingPartitionOp* op)
-    //--------------------------------------------------------------------------
-    {
-      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
-          WEIGHTED_PARTITION);
     }
 
     //--------------------------------------------------------------------------

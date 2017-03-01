@@ -2001,21 +2001,6 @@ namespace Legion {
         IndexPartition pid;
         size_t granularity;
       };
-      class WeightedPartitionThunk : public PendingPartitionThunk {
-      public:
-        WeightedPartitionThunk(IndexPartition id, size_t g, 
-                               const std::map<DomainPoint,int> &w)
-          : pid(id), weights(w), granularity(g) { }
-        virtual ~WeightedPartitionThunk(void) { }
-      public:
-        virtual ApEvent perform(RegionTreeForest *forest)
-        { return forest->create_weighted_partition(pid, granularity, weights); }
-        virtual void perform_logging(PendingPartitionOp* op);
-      protected:
-        IndexPartition pid;
-        std::map<DomainPoint,int> weights;
-        size_t granularity;
-      };
       class UnionPartitionThunk : public PendingPartitionThunk {
       public:
         UnionPartitionThunk(IndexPartition id, 
@@ -2123,9 +2108,6 @@ namespace Legion {
     public:
       void initialize_equal_partition(TaskContext *ctx,
                                       IndexPartition pid, size_t granularity);
-      void initialize_weighted_partition(TaskContext *ctx,
-                                         IndexPartition pid, size_t granularity,
-                                      const std::map<DomainPoint,int> &weights);
       void initialize_union_partition(TaskContext *ctx,
                                       IndexPartition pid, 
                                       IndexPartition handle1,

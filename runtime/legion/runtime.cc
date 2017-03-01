@@ -9579,27 +9579,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::create_weighted_partition(Context ctx, 
-                                                      IndexSpace parent,
-                                                      IndexSpace color_space,
-                                       const std::map<DomainPoint,int> &weights,
-                                                      size_t granularity,
-                                                      int color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-      {
-        log_run.error("Illegal dummy context create weighted partition!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DUMMY_CONTEXT_OPERATION);
-      }
-      return ctx->create_weighted_partition(forest, parent, color_space,
-                                  weights, granularity, color);
-    }
-
-    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_union(Context ctx, 
                                                       IndexSpace parent,
                                                       IndexPartition handle1,

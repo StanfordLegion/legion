@@ -407,16 +407,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_weighted_partition(IndexPartition pid,
-                                                        size_t granularity,
-                                       const std::map<DomainPoint,int> &weights)
-    //--------------------------------------------------------------------------
-    {
-      IndexPartNode *new_part = get_node(pid);
-      return new_part->create_weighted_children(weights, granularity);
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_union(IndexPartition pid,
                                                         IndexPartition handle1,
                                                         IndexPartition handle2)
@@ -7671,54 +7661,6 @@ namespace Legion {
         for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
         {
           ColorPoint is_color(itr.p);
-          IndexSpaceNode *child_node = get_child(is_color);
-#ifdef DEBUG_LEGION
-          assert(subspaces[idx].exists());
-#endif
-          child_node->set_domain(Domain(subspaces[idx]));
-        }
-        return ready_event;
-      }
-      else
-      {
-        // TODO: Implement structured kinds
-        assert(false);
-        return ApEvent::NO_AP_EVENT;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_weighted_children(
-                   const std::map<DomainPoint,int> &weights, size_t granularity)
-    //--------------------------------------------------------------------------
-    {
-      if (parent->kind == UNSTRUCTURED_KIND)
-      {
-        size_t num_subspaces = weights.size();
-        std::vector<int> local_weights(num_subspaces);
-        unsigned idx = 0;
-        for (std::map<DomainPoint,int>::const_iterator it = weights.begin();
-              it != weights.end(); it++, idx++)
-        {
-          local_weights[idx] = it->second;
-        }
-        std::vector<Realm::IndexSpace> subspaces(num_subspaces);
-        ApEvent precondition;
-        const Domain &parent_dom = parent->get_domain(precondition);
-        // Launch the operation down to the low-level runtime
-        ApEvent ready_event(
-          parent_dom.get_index_space().create_weighted_subspaces(num_subspaces,
-                                                             granularity,
-                                                             local_weights,
-                                                             subspaces,
-                                                             (mode & ALLOCABLE),
-                                                             precondition));
-        // Now create each of the sub-spaces
-        idx = 0; 
-        for (std::map<DomainPoint,int>::const_iterator it = weights.begin();
-              it != weights.end(); it++, idx++)
-        {
-          ColorPoint is_color(it->first);
           IndexSpaceNode *child_node = get_child(is_color);
 #ifdef DEBUG_LEGION
           assert(subspaces[idx].exists());

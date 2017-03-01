@@ -1511,10 +1511,6 @@ namespace Legion {
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
                                             IndexSpace color_space, 
                                             size_t granuarlity, int color);
-      IndexPartition create_weighted_partition(Context ctx, IndexSpace parent,
-                                               IndexSpace color_space,
-                                      const std::map<DomainPoint,int> &weights,
-                                            size_t granularity, int color);
       IndexPartition create_partition_by_union(Context ctx, IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,

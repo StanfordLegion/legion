@@ -165,12 +165,6 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity,
                                             int color) = 0;
-      virtual IndexPartition create_weighted_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            IndexSpace color_space,
-                              const std::map<DomainPoint,int> &weights,
-                                            size_t granularity,
-                                            int color) = 0;
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
@@ -725,12 +719,6 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity,
                                             int color);
-      virtual IndexPartition create_weighted_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            IndexSpace color_space,
-                              const std::map<DomainPoint,int> &weights,
-                                            size_t granularity,
-                                            int color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
@@ -1203,12 +1191,6 @@ namespace Legion {
                                             IndexSpace color_space,
                                             size_t granularity,
                                             int color);
-      virtual IndexPartition create_weighted_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            IndexSpace color_space,
-                              const std::map<DomainPoint,int> &weights,
-                                            size_t granularity,
-                                            int color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexPartition handle1,
@@ -1497,12 +1479,6 @@ namespace Legion {
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
                                             IndexSpace parent,
                                             IndexSpace color_space,
-                                            size_t granularity,
-                                            int color);
-      virtual IndexPartition create_weighted_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            IndexSpace color_space,
-                              const std::map<DomainPoint,int> &weights,
                                             size_t granularity,
                                             int color);
       virtual IndexPartition create_partition_by_union(RegionTreeForest *forest,
