@@ -988,6 +988,15 @@ function specialize.expr_advance(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_adjust(cx, node, allow_lists)
+  return ast.specialized.expr.Adjust {
+    barrier = specialize.expr(cx, node.barrier),
+    value = node.value and specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr_arrive(cx, node, allow_lists)
   return ast.specialized.expr.Arrive {
     barrier = specialize.expr(cx, node.barrier),
@@ -1223,6 +1232,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.Advance) then
     return specialize.expr_advance(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.Adjust) then
+    return specialize.expr_adjust(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.Arrive) then
     return specialize.expr_arrive(cx, node, allow_lists)

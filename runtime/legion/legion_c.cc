@@ -2927,10 +2927,21 @@ legion_phase_barrier_destroy(legion_runtime_t runtime_,
 }
 
 void
+legion_phase_barrier_alter_arrival_count(legion_runtime_t runtime_,
+                                         legion_context_t ctx_,
+                                         legion_phase_barrier_t handle_,
+                                         int delta)
+{
+  PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
+
+  handle.alter_arrival_count(delta);
+}
+
+void
 legion_phase_barrier_arrive(legion_runtime_t runtime_,
                             legion_context_t ctx_,
                             legion_phase_barrier_t handle_,
-                            size_t count /* = 1 */)
+                            unsigned count /* = 1 */)
 {
   PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
 
@@ -3006,6 +3017,18 @@ legion_dynamic_collective_arrive(legion_runtime_t runtime_,
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
   runtime->arrive_dynamic_collective(ctx, handle, buffer, size, count);
+}
+
+void
+legion_dynamic_collective_alter_arrival_count(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_dynamic_collective_t handle_,
+  int delta)
+{
+  DynamicCollective handle = CObjectWrapper::unwrap(handle_);
+
+  handle.alter_arrival_count(delta);
 }
 
 void
