@@ -2860,9 +2860,7 @@ namespace Legion {
        * common partition of the 'parent' index space. By definition the 
        * resulting partition will be disjoint. Users can also specify a 
        * minimum 'granularity' for the size of the index subspaces. Users 
-       * can specify an optional color for the index partition. The 
-       * 'allocable' field indicates whether dynamic allocation and 
-       * freeing are supported on the index subspaces.
+       * can specify an optional color for the index partition.
        * @param ctx the enclosing task context
        * @param parent index space of the partition to be made
        * @param color_space space of colors to create 
@@ -2892,9 +2890,7 @@ namespace Legion {
        * (e.g. disjoint or aliased) can be specified with the 'part_kind'
        * argument. This argument can also be used to request that the 
        * runtime compute the kind of partition. The user can assign
-       * a color to the new partition by the 'color' argument. The
-       * 'allocable' argument controls if the new index subspaces
-       * support dynamic allocation and freeing of pointers.
+       * a color to the new partition by the 'color' argument.
        * @param ctx the enclosing task context
        * @param parent the parent index space for the new partition
        * @param handle1 first index partition
@@ -2930,9 +2926,7 @@ namespace Legion {
        * an ancestor. The user can say whether the partition is disjoint
        * or not or ask the runtime to compute the result using the 
        * 'part_kind' argument. The user can assign a color to the new 
-       * partition by the 'color' argument. The 'allocable' argument 
-       * controls if the new index subspaces support dynamic allocation 
-       * and freeing of pointers.
+       * partition by the 'color' argument.
        * @param ctx the enclosing task context
        * @param parent the parent index space for the new partition
        * @param handle1 first index partition
@@ -2968,9 +2962,7 @@ namespace Legion {
        * ancestor. The user can say whether the partition is disjoint or
        * not or ask the runtime to compute the result using the 'part_kind'
        * argument. The user can assign a color to the new partition by
-       * the 'color' argument. The 'allocable' argument controls if the
-       * new index subspaces support dynamic allocation and freeing of 
-       * pointers.
+       * the 'color' argument.
        * index spaces.
        * @param ctx the enclosing task context
        * @param parent the parent index space for the new partition
@@ -3008,9 +3000,7 @@ namespace Legion {
        * argument. The user can also specify a color for the new partitions
        * using the 'color' argument. If a specific color is specified, it
        * must be available for a partition in each of the index subspaces
-       * in the first index partition. The user can specify whether the new 
-       * index partitions support dynamic allocation and freeing of pointers 
-       * with the 'allocable' argument.
+       * in the first index partition.
        * @param ctx the enclosing task context
        * @param handle1 the first index partition
        * @param handle2 the second index partition
@@ -3078,10 +3068,7 @@ namespace Legion {
        * index partition is a partition of the index space of the logical 
        * region over which the operation is performed. By definition
        * this partition is disjoint. The 'color' argument can be used
-       * to specify an optional color for the index partition. The user 
-       * can control whether the index subspaces support dynamic allocation 
-       * and freeing of pointers using the 'allocable' argument. This
-       * operation is illegal to perform on structured index spaces.
+       * to specify an optional color for the index partition.
        * @param ctx the enclosing task context
        * @param handle logical region handle containing the chosen
        *               field and of which a partition will be created
@@ -3119,10 +3106,7 @@ namespace Legion {
        * a corresponding index subspace. The runtime will automatically
        * compute if the resulting partition is disjoint or not. The
        * user can give the new partition a color by specifying the 
-       * 'color' argument. The user can also control whether dynamic
-       * allocation and freeing of pointers is available on the new
-       * index subspaces using the 'allocable' field. This method is
-       * illegal to perform on structured index spaces.
+       * 'color' argument.
        * @param ctx the enclosing task context
        * @param handle the parent index space of the new index partition
        *               and the one in which all the ptr_t contained in
@@ -3192,9 +3176,6 @@ namespace Legion {
        * that its projected pointer belonged to. The runtime will compute
        * if the resulting partition is disjoint. The user can also assign
        * a color to the new index partition with the 'color' argument.
-       * The 'allocable' argument controls whether dynamic pointer allocation
-       * and freeing is supported on the new index subspaces. This
-       * method is illegal to perform on structured index spaces.
        * @param ctx the enclosing task context
        * @param projection the index partition being projected
        * @param handle logical region over which to evaluate the function
