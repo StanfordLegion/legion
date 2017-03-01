@@ -2671,21 +2671,20 @@ namespace Legion {
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
                                 const Realm::ZRect<DIM,COORD_T> &bounds);
       /**
-       * @deprecated
-       * Create a new unstructured index space
-       * @param ctx the enclosing task context
-       * @param max_num_elmts maximum number of elements in the index space
-       * @return the handle for the new index space
-       */
-      IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
-      /**
-       * @deprecated
        * Create a new structured index space based on a domain
        * @param ctx the enclosing task context
        * @param domain the domain for the new index space
        * @return the handle for the new index space
        */
       IndexSpace create_index_space(Context ctx, Domain domain);
+      /**
+       * @deprecated
+       * Create a new index space
+       * @param ctx the enclosing task context
+       * @param max_num_elmts maximum number of elements in the index space
+       * @return the handle for the new index space
+       */
+      IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       /**
        * @deprecated
        * Create a new structured index space based on a set of domains
@@ -2895,8 +2894,7 @@ namespace Legion {
        * runtime compute the kind of partition. The user can assign
        * a color to the new partition by the 'color' argument. The
        * 'allocable' argument controls if the new index subspaces
-       * support dynamic allocation and freeing of pointers. Note that
-       * this call only works for unstructured index spaces.
+       * support dynamic allocation and freeing of pointers.
        * @param ctx the enclosing task context
        * @param parent the parent index space for the new partition
        * @param handle1 first index partition
@@ -2972,7 +2970,7 @@ namespace Legion {
        * argument. The user can assign a color to the new partition by
        * the 'color' argument. The 'allocable' argument controls if the
        * new index subspaces support dynamic allocation and freeing of 
-       * pointers. Note that this call only works for unstructured
+       * pointers.
        * index spaces.
        * @param ctx the enclosing task context
        * @param parent the parent index space for the new partition
@@ -3084,7 +3082,6 @@ namespace Legion {
        * can control whether the index subspaces support dynamic allocation 
        * and freeing of pointers using the 'allocable' argument. This
        * operation is illegal to perform on structured index spaces.
-       * Note that this call only works for unstructured index spaces.
        * @param ctx the enclosing task context
        * @param handle logical region handle containing the chosen
        *               field and of which a partition will be created
@@ -3125,8 +3122,7 @@ namespace Legion {
        * 'color' argument. The user can also control whether dynamic
        * allocation and freeing of pointers is available on the new
        * index subspaces using the 'allocable' field. This method is
-       * illegal to perform on structured index spaces. Note that this
-       * call only works for unstructured index spaces.
+       * illegal to perform on structured index spaces.
        * @param ctx the enclosing task context
        * @param handle the parent index space of the new index partition
        *               and the one in which all the ptr_t contained in
@@ -3199,7 +3195,6 @@ namespace Legion {
        * The 'allocable' argument controls whether dynamic pointer allocation
        * and freeing is supported on the new index subspaces. This
        * method is illegal to perform on structured index spaces.
-       * Note that this call only works for unstructured index spaces.
        * @param ctx the enclosing task context
        * @param projection the index partition being projected
        * @param handle logical region over which to evaluate the function
@@ -3271,8 +3266,7 @@ namespace Legion {
        * the application must assign values to each of the different subspace
        * colors before querying the disjointness or deadlock will likely
        * result (unless a different task is guaranteed to compute any
-       * remaining index subspaces). Note that this call only works for
-       * unstructured index spaces.
+       * remaining index subspaces).
        * @param ctx the enclosing task context
        * @param parent the parent index space for the partition
        * @param color_space the color space for the new partition
@@ -3299,8 +3293,7 @@ namespace Legion {
        * partition. It is illegal to invoke this method with a 'parent' index
        * partition that was not created by a 'create_pending_partition' call.
        * All of the index spaces being unioned together must come from the
-       * same index space tree. Note that this call only works for 
-       * unstructured index spaces.
+       * same index space tree.
        * @param ctx the enclosing task context
        * @param parent the parent index partition 
        * @param color the color to assign the index space to in the parent
@@ -3347,7 +3340,6 @@ namespace Legion {
        * a 'parent' index partition that was not created by a call to 
        * 'create_pending_partition'. All of the index spaces being 
        * intersected together must come from the same index space tree.
-       * Note that this call only works for unstructured index spaces.
        * @param ctx the enclosing task context
        * @param parent the parent index partition
        * @param color the color to assign the index space to in the parent
@@ -3370,8 +3362,7 @@ namespace Legion {
        * This method is the same as the one above, except the index
        * spaces all come from a common partition specified by 'handle'.
        * The resulting index space will be an intersection of all the index
-       * spaces of 'handle'. Note that this call only works for unstructured
-       * index spaces.
+       * spaces of 'handle'.
        * @param ctx the enlcosing task context
        * @param parent the parent index partition
        * @param color the color to assign the index space to in the parent
@@ -3400,8 +3391,7 @@ namespace Legion {
        * differences will be performed, and each of the index spaces in 
        * 'handles' will be subsequently subtracted from the 'initial' index
        * space. All of the index spaces in 'handles' as well as 'initial'
-       * must come from the same index space tree. Note that this call
-       * only works for unstructured index spaces.
+       * must come from the same index space tree.
        * @param ctx the enclosing task context
        * @param parent the parent index partition
        * @param color the color to assign the index space to in the parent
