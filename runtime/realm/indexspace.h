@@ -1296,7 +1296,7 @@ namespace Realm {
 
   template <int N, typename T = int> struct ZPoint;
   template <int N, typename T = int> struct ZRect;
-  template <int N, int M, typename T = int> struct ZMatrix;
+  template <int M, int N, typename T = int> struct ZMatrix;
   template <int N, typename T = int> struct ZIndexSpace;
   template <int N, typename T = int> struct ZIndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
@@ -1315,28 +1315,50 @@ namespace Realm {
   template <int N, typename T>
   struct ZPoint {
     T x, y, z, w;  T rest[N - 4];
+
     ZPoint(void);
+    // copies allow type coercion (assuming the underlying type does)
+    template <typename T2>
+    ZPoint(const ZPoint<N, T2>& copy_from);
+    template <typename T2>
+    ZPoint<N,T>& operator=(const ZPoint<N, T2>& copy_from);
+
     T& operator[](int index);
     const T& operator[](int index) const;
+
+    template <typename T2>
+    T dot(const ZPoint<N, T2>& rhs) const;
   };
 
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const ZPoint<N,T>& p);
 
-  // component-wise operators defined on Point<N,T>
-  template <int N, typename T> bool operator==(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> bool operator!=(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  // component-wise operators defined on Point<N,T> (with optional coercion)
+  template <int N, typename T, typename T2>
+  bool operator==(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  bool operator!=(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
 
-  template <int N, typename T> ZPoint<N,T> operator+(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> ZPoint<N,T>& operator+=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> ZPoint<N,T> operator-(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> ZPoint<N,T>& operator-=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> ZPoint<N,T> operator*(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> ZPoint<N,T>& operator*=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> ZPoint<N,T> operator/(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> ZPoint<N,T>& operator/=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> ZPoint<N,T> operator%(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
-  template <int N, typename T> ZPoint<N,T>& operator%=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T> operator+(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T>& operator+=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T> operator-(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T>& operator-=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T> operator*(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T>& operator*=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T> operator/(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T>& operator/=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T> operator%(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZPoint<N,T>& operator%=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
 
   // a Rect is a pair of points defining the lower and upper bounds of an N-D rectangle
   //  the bounds are INCLUSIVE
@@ -1344,8 +1366,14 @@ namespace Realm {
   template <int N, typename T>
   struct ZRect {
     ZPoint<N,T> lo, hi;
+
     ZRect(void);
     ZRect(const ZPoint<N,T>& _lo, const ZPoint<N,T>& _hi);
+    // copies allow type coercion (assuming the underlying type does)
+    template <typename T2>
+    ZRect(const ZRect<N, T2>& copy_from);
+    template <typename T2>
+    ZRect<N,T>& operator=(const ZRect<N, T2>& copy_from);
 
     bool empty(void) const;
     size_t volume(void) const;
@@ -1368,6 +1396,31 @@ namespace Realm {
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p);
 
+  // rectangles may be displaced by a vector (i.e. point)
+  template <int N, typename T, typename T2>
+  ZRect<N,T> operator+(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZRect<N,T>& operator+=(ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZRect<N,T> operator-(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  ZRect<N,T>& operator-=(ZRect<N,T>& lhs, const ZRect<N,T2>& rhs);
+
+  template <int M, int N, typename T>
+  struct ZMatrix {
+    ZPoint<N,T> rows[M];
+
+    ZMatrix(void);
+    // copies allow type coercion (assuming the underlying type does)
+    template <typename T2>
+    ZMatrix(const ZMatrix<M, N, T2>& copy_from);
+    template <typename T2>
+    ZMatrix<M, N, T>& operator=(const ZMatrix<M, N, T2>& copy_from);
+  };
+
+  template <int M, int N, typename T, typename T2>
+  ZPoint<M, T> operator*(const ZMatrix<M, N, T>& m, const ZPoint<N, T2>& p);
+
   template <int N, typename T>
   class ZPointInRectIterator {
   public:
@@ -1379,11 +1432,6 @@ namespace Realm {
     ZPointInRectIterator(const ZRect<N,T>& _r, bool _fortran_order = true);
 
     bool step(void);
-  };
-
-  template <int N, int M, typename T>
-  struct ZMatrix {
-    // TODO: Sean needs to implement this
   };
 
   // a FieldDataDescriptor is used to describe field data provided for partitioning

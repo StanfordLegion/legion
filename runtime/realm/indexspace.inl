@@ -37,6 +37,23 @@ namespace Realm {
   {}
 
   template <int N, typename T>
+  template <typename T2>
+  inline ZPoint<N,T>::ZPoint(const ZPoint<N,T2>& copy_from)
+  {
+    for(int i = 0; i < N; i++)
+      (&x)[i] = (&copy_from.x)[i];
+  }
+
+  template <int N, typename T>
+  template <typename T2>
+  inline ZPoint<N,T>& ZPoint<N,T>::operator=(const ZPoint<N,T2>& copy_from)
+  {
+    for(int i = 0; i < N; i++)
+      (&x)[i] = (&copy_from.x)[i];
+    return *this;
+  }
+
+  template <int N, typename T>
   inline T& ZPoint<N,T>::operator[](int index)
   {
     return (&x)[index];
@@ -48,14 +65,40 @@ namespace Realm {
     return (&x)[index];
   }
 
+  template <int N, typename T>
+  template <typename T2>
+  inline T ZPoint<N,T>::dot(const ZPoint<N,T2>& rhs) const
+  {
+    T acc = x * rhs.x;
+    for(int i = 1; i < N; i++)
+      acc += (&x)[i] * (&rhs.x)[i];
+    return acc;
+  }
+
   // specializations for N <= 4
   template <typename T>
   struct ZPoint<1,T> {
     T x;
     ZPoint(void) {}
     ZPoint(T _x) : x(_x) {}
+    // copies allow type coercion (assuming the underlying type does)
+    template <typename T2>
+    ZPoint(const ZPoint<1, T2>& copy_from) : x(copy_from.x) {}
+    template <typename T2>
+    ZPoint<1,T>& operator=(const ZPoint<1, T2>& copy_from)
+    {
+      x = copy_from.x;
+      return *this;
+    }
+
     T& operator[](int index) { return (&x)[index]; }
     const T& operator[](int index) const { return (&x)[index]; }
+
+    template <typename T2>
+    T dot(const ZPoint<1, T2>& rhs) const
+    {
+      return (x * rhs.x);
+    }
 
     // special case: for N == 1, we're willing to coerce to T
     operator T(void) const { return x; }
@@ -66,8 +109,26 @@ namespace Realm {
     T x, y;
     ZPoint(void) {}
     ZPoint(T _x, T _y) : x(_x), y(_y) {}
+    // copies allow type coercion (assuming the underlying type does)
+    template <typename T2>
+    ZPoint(const ZPoint<2, T2>& copy_from)
+      : x(copy_from.x), y(copy_from.y) {}
+    template <typename T2>
+    ZPoint<2,T>& operator=(const ZPoint<2,T2>& copy_from)
+    {
+      x = copy_from.x;
+      y = copy_from.y;
+      return *this;
+    }
+
     T& operator[](int index) { return (&x)[index]; }
     const T& operator[](int index) const { return (&x)[index]; }
+
+    template <typename T2>
+    T dot(const ZPoint<2, T2>& rhs) const
+    {
+      return (x * rhs.x) + (y * rhs.y);
+    }
   };
 
   template <typename T>
@@ -75,8 +136,27 @@ namespace Realm {
     T x, y, z;
     ZPoint(void) {}
     ZPoint(T _x, T _y, T _z) : x(_x), y(_y), z(_z) {}
+    // copies allow type coercion (assuming the underlying type does)
+    template <typename T2>
+    ZPoint(const ZPoint<3, T2>& copy_from)
+      : x(copy_from.x), y(copy_from.y), z(copy_from.z) {}
+    template <typename T2>
+    ZPoint<3,T>& operator=(const ZPoint<3,T2>& copy_from)
+    {
+      x = copy_from.x;
+      y = copy_from.y;
+      z = copy_from.z;
+      return *this;
+    }
+
     T& operator[](int index) { return (&x)[index]; }
     const T& operator[](int index) const { return (&x)[index]; }
+
+    template <typename T2>
+    T dot(const ZPoint<3, T2>& rhs) const
+    {
+      return (x * rhs.x) + (y * rhs.y) + (z * rhs.z);
+    }
   };
 
   template <typename T>
@@ -84,8 +164,28 @@ namespace Realm {
     T x, y, z, w;
     ZPoint(void) {}
     ZPoint(T _x, T _y, T _z, T _w) : x(_x), y(_y), z(_z), w(_w) {}
+    // copies allow type coercion (assuming the underlying type does)
+    template <typename T2>
+    ZPoint(const ZPoint<4, T2>& copy_from)
+      : x(copy_from.x), y(copy_from.y), z(copy_from.z), w(copy_from.w) {}
+    template <typename T2>
+    ZPoint<4,T>& operator=(const ZPoint<4,T2>& copy_from)
+    {
+      x = copy_from.x;
+      y = copy_from.y;
+      z = copy_from.z;
+      w = copy_from.w;
+      return *this;
+    }
+
     T& operator[](int index) { return (&x)[index]; }
     const T& operator[](int index) const { return (&x)[index]; }
+
+    template <typename T2>
+    T dot(const ZPoint<4, T2>& rhs) const
+    {
+      return (x * rhs.x) + (y * rhs.y) + (z * rhs.z) + (w * rhs.w);
+    }
   };
 
   template <int N, typename T>
@@ -98,89 +198,94 @@ namespace Realm {
     return os;
   }
 
-  // component-wise operators defined on Point<N,T>
-  template <int N, typename T> 
-  inline bool operator==(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  // component-wise operators defined on Point<N,T> (with optional coercion)
+  template <int N, typename T, typename T2> 
+  inline bool operator==(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) if(lhs[i] != rhs[i]) return false;
     return true;
   }
     
-  template <int N, typename T>
-  inline bool operator!=(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline bool operator!=(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) if(lhs[i] != rhs[i]) return true;
     return false;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T> operator+(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T> operator+(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
     for(int i = 0; i < N; i++) out[i] = lhs[i] + rhs[i];
     return out;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T>& operator+=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T>& operator+=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] += rhs[i];
+    return lhs;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T> operator-(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T> operator-(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
     for(int i = 0; i < N; i++) out[i] = lhs[i] - rhs[i];
     return out;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T>& operator-=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T>& operator-=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] -= rhs[i];
+    return lhs;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T> operator*(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T> operator*(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
     for(int i = 0; i < N; i++) out[i] = lhs[i] * rhs[i];
     return out;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T>& operator*=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T>& operator*=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] *= rhs[i];
+    return lhs;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T> operator/(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T> operator/(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
     for(int i = 0; i < N; i++) out[i] = lhs[i] / rhs[i];
     return out;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T>& operator/=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T>& operator/=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] /= rhs[i];
+    return lhs;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T> operator%(const ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T> operator%(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
     for(int i = 0; i < N; i++) out[i] = lhs[i] % rhs[i];
     return out;
   }
 
-  template <int N, typename T>
-  inline ZPoint<N,T>& operator%=(ZPoint<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZPoint<N,T>& operator%=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] %= rhs[i];
+    return lhs;
   }
 
 
@@ -196,6 +301,21 @@ namespace Realm {
   inline ZRect<N,T>::ZRect(const ZPoint<N,T>& _lo, const ZPoint<N,T>& _hi)
     : lo(_lo), hi(_hi)
   {}
+
+  template <int N, typename T>
+  template <typename T2>
+  inline ZRect<N,T>::ZRect(const ZRect<N, T2>& copy_from)
+    : lo(copy_from.lo), hi(copy_from.hi)
+  {}
+
+  template <int N, typename T>
+  template <typename T2>
+  ZRect<N,T>& ZRect<N,T>::operator=(const ZRect<N, T2>& copy_from)
+  {
+    lo = copy_from.lo;
+    hi = copy_from.hi;
+    return *this;
+  }
 
   template <int N, typename T>
   inline bool ZRect<N,T>::empty(void) const
@@ -286,6 +406,70 @@ namespace Realm {
     return os;
   }
 
+  // rectangles may be displaced by a vector (i.e. point)
+  template <int N, typename T>
+  inline ZRect<N,T> operator+(const ZRect<N,T>& lhs, const ZPoint<N,T>& rhs)
+  {
+    return ZRect<N,T>(lhs.lo + rhs, lhs.hi + rhs);
+  }
+
+  template <int N, typename T, typename T2>
+  inline ZRect<N,T>& operator+=(ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs)
+  {
+    lhs.lo += rhs;
+    lhs.hi += rhs;
+    return lhs;
+  }
+
+  template <int N, typename T>
+  inline ZRect<N,T> operator-(const ZRect<N,T>& lhs, const ZPoint<N,T>& rhs)
+  {
+    return ZRect<N,T>(lhs.lo - rhs, lhs.hi - rhs);
+  }
+
+  template <int N, typename T>
+  inline ZRect<N,T>& operator-=(ZRect<N,T>& lhs, const ZRect<N,T>& rhs)
+  {
+    lhs.lo -= rhs;
+    lhs.hi -= rhs;
+    return lhs;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class ZMatrix<M,N,T>
+
+  template <int M, int N, typename T>
+  inline ZMatrix<M,N,T>::ZMatrix(void)
+  {}
+
+  // copies allow type coercion (assuming the underlying type does)
+  template <int M, int N, typename T>
+  template <typename T2>
+  inline ZMatrix<M,N,T>::ZMatrix(const ZMatrix<M, N, T2>& copy_from)
+  {
+    for(int i = 0; i < M; i++)
+      rows[i] = copy_from[i];
+  }
+  
+  template <int M, int N, typename T>
+  template <typename T2>
+  inline ZMatrix<M, N, T>& ZMatrix<M,N,T>::operator=(const ZMatrix<M, N, T2>& copy_from)
+  {
+    for(int i = 0; i < M; i++)
+      rows[i] = copy_from[i];
+    return *this;
+  }
+
+  template <int M, int N, typename T, typename T2>
+  inline ZPoint<M, T> operator*(const ZMatrix<M, N, T>& m, const ZPoint<N, T2>& p)
+  {
+    ZPoint<M,T> out;
+    for(int j = 0; j < M; j++)
+      out[j] = m.rows[j].dot(p);
+    return out;
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
