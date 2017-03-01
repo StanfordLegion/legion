@@ -4085,7 +4085,12 @@ namespace Legion {
       // Allocator and Argument Map Operations 
       //------------------------------------------------------------------------
       /**
+       * @deprecated
        * Create an index allocator object for a given index space
+       * This method is deprecated becasue index spaces no longer support
+       * dynamic allocation. This will still work only if there is exactly
+       * one allocator made for the index space throughout the duration
+       * of its lifetime.
        * @param ctx enclosing task context
        * @param handle for the index space to create an allocator
        * @return a new index space allocator for the given index space
