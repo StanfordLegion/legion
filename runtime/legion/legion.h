@@ -2662,6 +2662,13 @@ namespace Legion {
       // Index Space Operations
       //------------------------------------------------------------------------
       /**
+       * Create a new structured index space based on a domain
+       * @param ctx the enclosing task context
+       * @param domain the domain for the new index space
+       * @return the handle for the new index space
+       */
+      IndexSpace create_index_space(Context ctx, Domain domain);
+      /**
        * Create a new top-level index space with a specific bounds
        * @param ctx the enclosing task context
        * @param bounds the bounds for the index spaces
@@ -2670,13 +2677,6 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
                                 const Realm::ZRect<DIM,COORD_T> &bounds);
-      /**
-       * Create a new structured index space based on a domain
-       * @param ctx the enclosing task context
-       * @param domain the domain for the new index space
-       * @return the handle for the new index space
-       */
-      IndexSpace create_index_space(Context ctx, Domain domain);
       /**
        * @deprecated
        * Create a new index space
