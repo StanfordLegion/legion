@@ -20,9 +20,6 @@
 
 namespace LegionRuntime {
   namespace LowLevel {
-#ifdef USE_DISK
-    typedef Realm::FileMemory FileMemory;
-#endif
     class FileRequest : public Request {
     public:
       int fd;
@@ -64,13 +61,6 @@ namespace LegionRuntime {
       long submit(Request** requests, long nr);
       void pull();
       long available();
-    private:
-      aio_context_t ctx;
-      long capacity;
-      std::vector<struct iocb*> available_cb;
-      struct iocb* cb;
-      struct iocb** cbs;
-      struct io_event* events;
     };
 
   } // namespace LowLevel

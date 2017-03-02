@@ -124,95 +124,46 @@ namespace LegionRuntime {
     FileChannel::FileChannel(long max_nr, XferDes::XferKind _kind)
     {
       kind = _kind;
-      ctx = 0;
-      capacity = max_nr;
-      int ret = io_setup(max_nr, &ctx);
-      assert(ret >= 0);
-      cb = (struct iocb*) calloc(max_nr, sizeof(struct iocb));
-      cbs = (struct iocb**) calloc(max_nr, sizeof(struct iocb*));
-      events = (struct io_event*) calloc(max_nr, sizeof(struct io_event));
-      switch (kind) {
-        case XferDes::XFER_FILE_READ:
-          for (long i = 0; i < max_nr; i++) {
-            memset(&cb[i], 0, sizeof(cb[i]));
-            cb[i].aio_lio_opcode = IOCB_CMD_PREAD;
-            available_cb.push_back(&cb[i]);
-          }
-          break;
-        case XferDes::XFER_FILE_WRITE:
-          for (long i = 0; i < max_nr; i++) {
-            memset(&cb[i], 0, sizeof(cb[i]));
-            cb[i].aio_lio_opcode = IOCB_CMD_PWRITE;
-            available_cb.push_back(&cb[i]);
-          }
-          break;
-        default:
-          assert(0);
-      }
     }
 
     FileChannel::~FileChannel()
     {
-      io_destroy(ctx);
-      free(cb);
-      free(cbs);
-      free(events);
     }
 
     long FileChannel::submit(Request** requests, long nr)
     {
-      int ns = 0;
-      switch (kind) {
-        case XferDes::XFER_FILE_READ:
-        case XferDes::XFER_FILE_WRITE:
-          while (ns < nr && !available_cb.empty()) {
-            FileRequest* req = (FileRequest*) requests[ns];
-            cbs[ns] = available_cb.back();
-            available_cb.pop_back();
-            cbs[ns]->aio_fildes = req->fd;
-            cbs[ns]->aio_data = (uint64_t) (req);
-            cbs[ns]->aio_buf = (uint64_t) (req->mem_base);
-            cbs[ns]->aio_offset = req->file_off;
-            cbs[ns]->aio_nbytes = req->nbytes;
-            ns++;
-          }
-          break;
-        default:
-          assert(0);
+      AsyncFileIOContext* aio_ctx = AsyncFileIOContext::get_singleton();
+      for (long i = 0; i < nr; i++) {
+        FileRequest* req = (FileRequest*) requests[i];
+        switch (kind) {
+          case XferDes::XFER_FILE_READ:
+            aio_ctx->enqueue_read(req->fd, req->file_off,
+                                  req->nbytes, req->mem_base, req);
+            break;
+          case XferDes::XFER_FILE_WRITE:
+            aio_ctx->enqueue_write(req->fd, req->file_off,
+                                   req->nbytes, req->mem_base, req);
+            break;
+          default:
+            assert(0);
+        }
       }
-      assert(ns == nr);
-      int ret = io_submit(ctx, ns, cbs);
-      if (ret < 0) {
-        perror("io_submit error");
-      }
-      return ret;
+      return nr;
     }
 
     void FileChannel::pull()
     {
-      int nr = io_getevents(ctx, 0, capacity, events, NULL);
-      if (nr < 0)
-        perror("io_getevents error");
-      for (int i = 0; i < nr; i++) {
-        Request* req = (Request*) events[i].data;
-        struct iocb* ret_cb = (struct iocb*) events[i].obj;
-        available_cb.push_back(ret_cb);
-        assert(events[i].res == (int64_t)ret_cb->aio_nbytes);
-        req->xd->notify_request_read_done(req);
-        req->xd->notify_request_write_done(req);
-      }
+      AsyncFileIOContext::get_singleton()->make_progress();
     }
 
     long FileChannel::available()
     {
-      return available_cb.size();
+      return AsyncFileIOContext::get_singleton()->available();
     }
 
-#ifdef USE_DISK
       template class FileXferDes<0>;
       template class FileXferDes<1>;
       template class FileXferDes<2>;
       template class FileXferDes<3>;
-#endif
   } // namespace LowLevel
 } // namespace LegionRuntime

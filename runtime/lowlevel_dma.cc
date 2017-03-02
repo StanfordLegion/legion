@@ -2254,33 +2254,6 @@ namespace LegionRuntime {
       const CustomSerdezUntyped *serdez_op;
     };
     
-    class AsyncFileIOContext {
-    public:
-      AsyncFileIOContext(int _max_depth);
-      ~AsyncFileIOContext(void);
-
-      void enqueue_write(int fd, size_t offset, size_t bytes, const void *buffer);
-      void enqueue_read(int fd, size_t offset, size_t bytes, void *buffer);
-      void enqueue_fence(DmaRequest *req);
-
-      bool empty(void);
-      void make_progress(void);
-
-      class AIOOperation {
-      public:
-	virtual ~AIOOperation(void) {}
-	virtual void launch(void) = 0;
-	virtual bool check_completion(void) = 0;
-	bool completed;
-      };
-
-      int max_depth;
-      std::deque<AIOOperation *> launched_operations, pending_operations;
-      GASNetHSL mutex;
-#ifdef REALM_USE_KERNEL_AIO
-      aio_context_t aio_ctx;
-#endif
-    };
 
     static AsyncFileIOContext *aio_context = 0;
 
@@ -2310,7 +2283,7 @@ namespace LegionRuntime {
     public:
       KernelAIOWrite(aio_context_t aio_ctx,
                      int fd, size_t offset, size_t bytes,
-		     const void *buffer);
+		     const void *buffer, Request* request = NULL);
       virtual void launch(void);
       virtual bool check_completion(void);
 
@@ -2321,7 +2294,7 @@ namespace LegionRuntime {
 
     KernelAIOWrite::KernelAIOWrite(aio_context_t aio_ctx,
 				   int fd, size_t offset, size_t bytes,
-				   const void *buffer)
+				   const void *buffer, Request* request)
     {
       completed = false;
       ctx = aio_ctx;
@@ -2332,6 +2305,7 @@ namespace LegionRuntime {
       cb.aio_buf = (uint64_t)buffer;
       cb.aio_offset = offset;
       cb.aio_nbytes = bytes;
+      req = request;
     }
 
     void KernelAIOWrite::launch(void)
@@ -2355,7 +2329,7 @@ namespace LegionRuntime {
     public:
       KernelAIORead(aio_context_t aio_ctx,
                      int fd, size_t offset, size_t bytes,
-		     void *buffer);
+		     void *buffer, Request* request = NULL);
       virtual void launch(void);
       virtual bool check_completion(void);
 
@@ -2366,7 +2340,7 @@ namespace LegionRuntime {
 
     KernelAIORead::KernelAIORead(aio_context_t aio_ctx,
 				 int fd, size_t offset, size_t bytes,
-				 void *buffer)
+				 void *buffer, Request* request)
     {
       completed = false;
       ctx = aio_ctx;
@@ -2377,6 +2351,7 @@ namespace LegionRuntime {
       cb.aio_buf = (uint64_t)buffer;
       cb.aio_offset = offset;
       cb.aio_nbytes = bytes;
+      req = request;
     }
 
     void KernelAIORead::launch(void)
@@ -2399,7 +2374,7 @@ namespace LegionRuntime {
     class PosixAIOWrite : public AsyncFileIOContext::AIOOperation {
     public:
       PosixAIOWrite(int fd, size_t offset, size_t bytes,
-		    const void *buffer);
+		    const void *buffer, Request* request = NULL);
       virtual void launch(void);
       virtual bool check_completion(void);
 
@@ -2408,7 +2383,7 @@ namespace LegionRuntime {
     };
 
     PosixAIOWrite::PosixAIOWrite(int fd, size_t offset, size_t bytes,
-				 const void *buffer)
+				 const void *buffer, Request* request)
     {
       completed = false;
       memset(&cb, 0, sizeof(cb));
@@ -2416,6 +2391,7 @@ namespace LegionRuntime {
       cb.aio_buf = (void *)buffer;
       cb.aio_offset = offset;
       cb.aio_nbytes = bytes;
+      req = request;
     }
 
     void PosixAIOWrite::launch(void)
@@ -2440,7 +2416,7 @@ namespace LegionRuntime {
     class PosixAIORead : public AsyncFileIOContext::AIOOperation {
     public:
       PosixAIORead(int fd, size_t offset, size_t bytes,
-		   void *buffer);
+		   void *buffer, Request* request = NULL);
       virtual void launch(void);
       virtual bool check_completion(void);
 
@@ -2449,7 +2425,7 @@ namespace LegionRuntime {
     };
 
     PosixAIORead::PosixAIORead(int fd, size_t offset, size_t bytes,
-			       void *buffer)
+			       void *buffer, Request* request)
     {
       completed = false;
       memset(&cb, 0, sizeof(cb));
@@ -2457,6 +2433,7 @@ namespace LegionRuntime {
       cb.aio_buf = buffer;
       cb.aio_offset = offset;
       cb.aio_nbytes = bytes;
+      req = request;
     }
 
     void PosixAIORead::launch(void)
@@ -2546,13 +2523,14 @@ namespace LegionRuntime {
     }
 
     void AsyncFileIOContext::enqueue_write(int fd, size_t offset, 
-					   size_t bytes, const void *buffer)
+					   size_t bytes, const void *buffer,
+                                           Request* req)
     {
 #ifdef REALM_USE_KERNEL_AIO
       KernelAIOWrite *op = new KernelAIOWrite(aio_ctx,
-					      fd, offset, bytes, buffer);
+					      fd, offset, bytes, buffer, req);
 #else
-      PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer);
+      PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer, req);
 #endif
       {
 	AutoHSLLock al(mutex);
@@ -2566,13 +2544,14 @@ namespace LegionRuntime {
     }
 
     void AsyncFileIOContext::enqueue_read(int fd, size_t offset, 
-					  size_t bytes, void *buffer)
+					  size_t bytes, void *buffer,
+                                          Request* req)
     {
 #ifdef REALM_USE_KERNEL_AIO
       KernelAIORead *op = new KernelAIORead(aio_ctx,
-					    fd, offset, bytes, buffer);
+					    fd, offset, bytes, buffer, req);
 #else
-      PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer);
+      PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer, req);
 #endif
       {
 	AutoHSLLock al(mutex);
@@ -2605,6 +2584,12 @@ namespace LegionRuntime {
       return launched_operations.empty();
     }
 
+    long AsyncFileIOContext::available(void)
+    {
+      AutoHSLLock al(mutex);
+      return (max_depth - launched_operations.size());
+    }
+
     void AsyncFileIOContext::make_progress(void)
     {
       AutoHSLLock al(mutex);
@@ -2632,6 +2617,13 @@ namespace LegionRuntime {
 	AIOOperation *op = launched_operations.front();
 	if(!op->check_completion()) break;
 	log_aio.debug("aio op completed: op=%p", op);
+        // <NEW_DMA>
+        if (op->req != NULL) {
+          Request* request = (Request*)(op->req);
+          request->xd->notify_request_read_done(request);
+          request->xd->notify_request_write_done(request);
+        }
+        // </NEW_DMA>
 	delete op;
 	launched_operations.pop_front();
       }
@@ -2644,6 +2636,11 @@ namespace LegionRuntime {
 	op->launch();
 	launched_operations.push_back(op);
       }
+    }
+
+    /*static*/
+    AsyncFileIOContext* AsyncFileIOContext::get_singleton() {
+      return aio_context;
     }
 
     // MemPairCopier from disk memory to cpu memory
@@ -5569,7 +5566,6 @@ namespace LegionRuntime {
     
     void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs)
     {
-      aio_context = new AsyncFileIOContext(256);
       dma_queue = new DmaRequestQueue(crs);
       dma_queue->start_workers(count);
     }
@@ -5579,13 +5575,12 @@ namespace LegionRuntime {
       dma_queue->shutdown_queue();
       delete dma_queue;
       dma_queue = 0;
-      delete aio_context;
-      aio_context = 0;
     }
 
     void start_dma_system(int count, int max_nr, Realm::CoreReservationSet& crs)
     {
       //log_dma.add_stream(&std::cerr, Logger::Category::LEVEL_DEBUG, false, false);
+      aio_context = new AsyncFileIOContext(256);
       start_channel_manager(count, max_nr, crs);
       ib_req_queue = new PendingIBQueue();
     }
@@ -5594,6 +5589,9 @@ namespace LegionRuntime {
     {
       stop_channel_manager();
       delete ib_req_queue;
+      ib_req_queue = 0;
+      delete aio_context;
+      aio_context = 0;
     }
   };
 };

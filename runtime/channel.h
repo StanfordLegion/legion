@@ -59,6 +59,7 @@ namespace LegionRuntime{
     typedef Realm::HDF5::HDF5Memory HDF5Memory;
     typedef Realm::HDF5::HDF5Memory::HDFMetadata HDFMetadata;
 #endif
+    typedef Realm::FileMemory FileMemory;
 
     class Buffer {
     public:

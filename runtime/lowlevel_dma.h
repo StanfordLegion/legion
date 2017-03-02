@@ -25,7 +25,6 @@ namespace Realm {
 
 namespace LegionRuntime {
   namespace LowLevel {
-
     struct RemoteIBAllocRequestAsync {
       struct RequestArgs {
         int node;
@@ -333,6 +332,38 @@ namespace LegionRuntime {
       std::string name;
     };
 
+    class Request;
+    class AsyncFileIOContext {
+    public:
+      AsyncFileIOContext(int _max_depth);
+      ~AsyncFileIOContext(void);
+
+      void enqueue_write(int fd, size_t offset, size_t bytes, const void *buffer, Request* req = NULL);
+      void enqueue_read(int fd, size_t offset, size_t bytes, void *buffer, Request* req = NULL);
+      void enqueue_fence(DmaRequest *req);
+
+      bool empty(void);
+      long available(void);
+      void make_progress(void);
+
+      static AsyncFileIOContext* get_singleton(void);
+
+      class AIOOperation {
+      public:
+	virtual ~AIOOperation(void) {}
+	virtual void launch(void) = 0;
+	virtual bool check_completion(void) = 0;
+	bool completed;
+        void* req;
+      };
+
+      int max_depth;
+      std::deque<AIOOperation *> launched_operations, pending_operations;
+      GASNetHSL mutex;
+#ifdef REALM_USE_KERNEL_AIO
+      aio_context_t aio_ctx;
+#endif
+    };
   };
 };
 
