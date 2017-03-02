@@ -1688,7 +1688,7 @@ namespace LegionRuntime {
         channel_manager = new ChannelManager;
         xferDes_queue->start_worker(count, max_nr, channel_manager);
       }
-
+#ifdef USE_DISK
       FileChannel* ChannelManager::create_file_read_channel(long max_nr) {
         assert(file_read_channel == NULL);
         file_read_channel = new FileChannel(max_nr, XferDes::XFER_FILE_READ);
@@ -1699,7 +1699,7 @@ namespace LegionRuntime {
         file_write_channel = new FileChannel(max_nr, XferDes::XFER_FILE_WRITE);
         return file_write_channel;
       }
-
+#endif
       void XferDesQueue::start_worker(int count, int max_nr, ChannelManager* channel_manager) 
       {
         log_new_dma.info("XferDesQueue: start_workers");
