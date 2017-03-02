@@ -282,6 +282,18 @@ namespace Legion {
         return d;
       }
 
+      template<int DIM, typename T>
+      operator Realm::ZRect<DIM,T>(void) const
+      {
+        assert(DIM == dim);
+        Realm::ZRect<DIM,T> result;
+        for (int i = 0; i < DIM; i++)
+          result.lo[i] = rect_data[i];
+        for (int i = 0; i < DIM; i++)
+          result.hi[i] = rect_data[DIM+i];
+        return result;
+      }
+
       // Only works for structured DomainPoint.
       static Domain from_domain_point(const DomainPoint &p) {
         switch (p.dim) {

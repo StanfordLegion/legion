@@ -124,41 +124,6 @@ namespace Legion {
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                            const std::set<Domain> &domains) = 0;
       virtual void destroy_index_space(IndexSpace handle) = 0;
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent, 
-                                            const Domain &color_space,
-                                            const PointColoring &coloring,
-                                            PartitionKind part_kind,
-                                            int color) = 0;
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Coloring &coloring,
-                                            bool disjoint, int part_color) = 0;
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainPointColoring &coloring,
-                                            PartitionKind kind, int color) = 0;
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainColoring &coloring,
-                                            bool disjoint, int part_color) = 0;
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                      const MultiDomainPointColoring &coloring,
-                                      PartitionKind part_kind, int color) = 0;
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint, int part_color) = 0;
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                              LegionRuntime::Accessor::RegionAccessor<
-                LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                            int part_color) = 0;
       virtual void destroy_index_partition(IndexPartition handle) = 0;
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -678,41 +643,6 @@ namespace Legion {
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const std::set<Domain> &domains);
       virtual void destroy_index_space(IndexSpace handle);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent, 
-                                            const Domain &color_space,
-                                            const PointColoring &coloring,
-                                            PartitionKind part_kind,
-                                            int color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Coloring &coloring,
-                                            bool disjoint, int part_color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainPointColoring &coloring,
-                                            PartitionKind kind, int color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainColoring &coloring,
-                                            bool disjoint, int part_color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                      const MultiDomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint, int part_color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                              LegionRuntime::Accessor::RegionAccessor<
-                LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                            int part_color);
       virtual void destroy_index_partition(IndexPartition handle);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1150,41 +1080,6 @@ namespace Legion {
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const std::set<Domain> &domains);
       virtual void destroy_index_space(IndexSpace handle);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent, 
-                                            const Domain &color_space,
-                                            const PointColoring &coloring,
-                                            PartitionKind part_kind,
-                                            int color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Coloring &coloring,
-                                            bool disjoint, int part_color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainPointColoring &coloring,
-                                            PartitionKind kind, int color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainColoring &coloring,
-                                            bool disjoint, int part_color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                      const MultiDomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint, int part_color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                              LegionRuntime::Accessor::RegionAccessor<
-                LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                            int part_color);
       virtual void destroy_index_partition(IndexPartition handle);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1440,41 +1335,6 @@ namespace Legion {
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const std::set<Domain> &domains);
       virtual void destroy_index_space(IndexSpace handle);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent, 
-                                            const Domain &color_space,
-                                            const PointColoring &coloring,
-                                            PartitionKind part_kind,
-                                            int color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Coloring &coloring,
-                                            bool disjoint, int part_color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainPointColoring &coloring,
-                                            PartitionKind kind, int color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainColoring &coloring,
-                                            bool disjoint, int part_color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                      const MultiDomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint, int part_color);
-      virtual IndexPartition create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                              LegionRuntime::Accessor::RegionAccessor<
-                LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                            int part_color);
       virtual void destroy_index_partition(IndexPartition handle);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
                                             IndexSpace parent,

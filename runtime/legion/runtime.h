@@ -1464,37 +1464,6 @@ namespace Legion {
       // Called from deletion op
       void finalize_index_space_destroy(IndexSpace handle);
     public:
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space,
-                                            const PointColoring &coloring,
-                                            PartitionKind part_kind,
-                                            int color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            const Coloring &coloring,
-                                            bool disjoint,
-                                            int part_color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            Domain color_space,
-                                            const DomainColoring &coloring,
-                                            bool disjoint,
-                                            int part_color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            const Domain &color_space,
-                                       const MultiDomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-                                            Domain color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint, 
-                                            int part_color);
-      IndexPartition create_index_partition(Context ctx, IndexSpace parent,
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                                        int part_color);
       void destroy_index_partition(Context ctx, IndexPartition handle);
       // Called from deletion op
       void finalize_index_partition_destroy(IndexPartition handle);

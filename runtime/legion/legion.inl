@@ -364,7 +364,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T>::IndexSpaceT(const IndexSpaceT &rhs)
-      : IndexSpace(rhs.id, rhs.tid, rhs.type_tag)
+      : IndexSpace(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
     //--------------------------------------------------------------------------
     {
       Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
@@ -373,7 +373,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T>::IndexSpaceT(const IndexSpace &rhs)
-      : IndexSpace(rhs.id, rhs.tid, rhs.type_tag)
+      : IndexSpace(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
     //--------------------------------------------------------------------------
     {
       Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
@@ -453,19 +453,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(const IndexPartitionT &rhs)
-      : IndexPartition(rhs.id, rhs.tid, rhs.type_tag)
+      : IndexPartition(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
     //--------------------------------------------------------------------------
     {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(rhs.type_tag);
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexPartitionT<DIM,T>::IndexPartitionT(const IndexPartition &rhs)
-      : IndexPartition(rhs.id, rhs.tid, rhs.type_tag)
+      : IndexPartition(rhs.get_id(), rhs.get_tree_id(), rhs.get_type_tag())
     //--------------------------------------------------------------------------
     {
-      Internal::NT_TemplateHelper::template check_type<DIM,T>(rhs.type_tag);
+      Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
     }
     
     //--------------------------------------------------------------------------
@@ -570,21 +570,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     LogicalRegionT<DIM,T>::LogicalRegionT(const LogicalRegionT &rhs)
-      : LogicalRegion(rhs.tree_id, rhs.index_space, rhs.field_space)
+      : LogicalRegion(rhs.get_tree_id(), rhs.get_index_space(), 
+                      rhs.get_field_space())
     //--------------------------------------------------------------------------
     {
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                rhs.index_space.get_type_tag());
+                                rhs.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     LogicalRegionT<DIM,T>::LogicalRegionT(const LogicalRegion &rhs)
-      : LogicalRegion(rhs.tree_id, rhs.index_space, rhs.field_space)
+      : LogicalRegion(rhs.get_tree_id(), rhs.get_index_space(), 
+                      rhs.get_field_space())
     //--------------------------------------------------------------------------
     {
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                                rhs.index_space.get_type_tag());
+                                rhs.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
@@ -655,21 +657,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     LogicalPartitionT<DIM,T>::LogicalPartitionT(const LogicalPartitionT &rhs)
-      : LogicalPartition(rhs.tree_id, rhs.index_partition, rhs.field_space)
+      : LogicalPartition(rhs.get_tree_id(), rhs.get_index_partition(), 
+                         rhs.get_field_space())
     //--------------------------------------------------------------------------
     {
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                            rhs.index_partition.get_type_tag());
+                                            rhs.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     LogicalPartitionT<DIM,T>::LogicalPartitionT(const LogicalPartition &rhs)
-      : LogicalPartition(rhs.tree_id, rhs.index_partition, rhs.field_space)
+      : LogicalPartition(rhs.get_tree_id(), rhs.get_index_partition(), 
+                         rhs.get_field_space())
     //--------------------------------------------------------------------------
     {
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
-                            rhs.index_partition.get_type_tag());
+                                            rhs.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
@@ -1870,9 +1874,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
+                                                   Realm::ZRect<DIM,T> bounds)
+    //--------------------------------------------------------------------------
+    {
+      // Make a Realm index space
+      Realm::ZIndexSpace<DIM,T> realm_is(bounds);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     IndexPartition Runtime::create_index_partition(Context ctx,
-        IndexSpace parent, const T& mapping, int part_color /*= AUTO_GENERATE*/)
+      IndexSpace parent, const T& mapping, Color part_color /*= AUTO_GENERATE*/)
     //--------------------------------------------------------------------------
     {
       LegionRuntime::Arrays::Rect<T::IDIM> parent_rect = 
@@ -1949,6 +1965,229 @@ namespace Legion {
       }
 #endif
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_equal_partition(Context ctx,
+                                    IndexSpaceT<DIM,T> parent,
+                                    Realm::ZRect<COLOR_DIM,COLOR_T> color_space,
+                                    size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<COLOR_DIM,COLOR_T> realm_color_space(color_space);
+      return IndexPartitionT<DIM,T>(
+        create_equal_partition_immediate(ctx, parent, &realm_color_space,
+          Internal::NT_TemplateHelper::template encode_tag<COLOR_DIM,COLOR_T>(),
+          granularity, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_equal_partition(Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              size_t granularity, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_equal_partition(ctx,
+                                    IndexSpace(parent), IndexSpace(color_space),
+                                    granularity, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_union(Context ctx,
+                                  IndexSpaceT<DIM,T> parent,
+                                  IndexPartitionT<DIM,T> handle1,
+                                  IndexPartitionT<DIM,T> handle2,
+                                  Realm::ZRect<COLOR_DIM,COLOR_T> color_space,
+                                  PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<COLOR_DIM,COLOR_T> realm_color_space(color_space);
+      return IndexPartitionT<DIM,T>(create_union_partition_immediate(ctx, 
+          parent, handle1, handle2, &realm_color_space, 
+          Internal::NT_TemplateHelper::template encode_tag<COLOR_DIM,COLOR_T>(),
+          part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_union(Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexPartitionT<DIM,T> handle1,
+                              IndexPartitionT<DIM,T> handle2,
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_union(ctx,
+           IndexSpace(parent), IndexPartition(handle1),
+           IndexPartition(handle2), IndexSpace(color_space), part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_intersection(
+                              Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexPartitionT<DIM,T> handle1,
+                              IndexPartitionT<DIM,T> handle2,
+                              Realm::ZRect<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<COLOR_DIM,COLOR_T> realm_color_space(color_space);
+      return IndexPartitionT<DIM,T>(create_intersection_partition_immediate(ctx,
+          parent, handle1, handle2, &realm_color_space, 
+          Internal::NT_TemplateHelper::template encode_tag<COLOR_DIM,COLOR_T>(),
+          part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_intersection(
+                              Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexPartitionT<DIM,T> handle1,
+                              IndexPartitionT<DIM,T> handle2,
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_intersection(ctx,
+           IndexSpace(parent), IndexPartition(handle1),
+           IndexPartition(handle2), IndexSpace(color_space), part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_difference(Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexPartitionT<DIM,T> handle1,
+                              IndexPartitionT<DIM,T> handle2,
+                              Realm::ZRect<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<COLOR_DIM,COLOR_T> realm_color_space(color_space);
+      return IndexPartitionT<DIM,T>(create_difference_partition_immediate(ctx, 
+          parent, handle1, handle2, &realm_color_space, 
+          Internal::NT_TemplateHelper::template encode_tag<COLOR_DIM,COLOR_T>(),
+          part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_difference(Context ctx,
+                              IndexSpaceT<DIM,T> parent,
+                              IndexPartitionT<DIM,T> handle1,
+                              IndexPartitionT<DIM,T> handle2,
+                              IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                              PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_difference(ctx,
+           IndexSpace(parent), IndexPartition(handle1),
+           IndexPartition(handle2), IndexSpace(color_space), part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    Color Runtime::create_cross_product_partition(Context ctx,
+                                      IndexPartitionT<DIM,T> handle1,
+                                      IndexPartitionT<DIM,T> handle2,
+                                      typename std::map<
+                                        IndexSpaceT<DIM,T>,
+                                        IndexPartitionT<DIM,T> > &handles,
+                                      PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      std::map<IndexSpace,IndexPartition> untyped_handles;
+      for (typename std::map<IndexSpaceT<DIM,T>,
+                             IndexPartitionT<DIM,T> >::const_iterator it =
+            handles.begin(); it != handles.end(); it++)
+        untyped_handles[it->first] = IndexPartition::NO_PART;
+      Color result = create_cross_product_partition(ctx, handle1, handle2, 
+                                        untyped_handles, part_kind, color);
+      for (typename std::map<IndexSpaceT<DIM,T>,
+                             IndexPartitionT<DIM,T> >::iterator it =
+            handles.begin(); it != handles.end(); it++)
+      {
+        std::map<IndexSpace,IndexPartition>::const_iterator finder = 
+          untyped_handles.find(it->first);
+#ifdef DEBUG_LEGION
+        assert(finder != untyped_handles.end());
+#endif
+        it->second = IndexPartitionT<DIM,T>(finder->second);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, int COLOR_DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_restriction(Context ctx,
+                                      IndexSpaceT<DIM,T> parent,
+                                      Realm::ZRect<COLOR_DIM,T> color_space,
+                                      Realm::ZMatrix<DIM,COLOR_DIM,T> transform,
+                                      Realm::ZRect<DIM,T> extent,
+                                      PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<COLOR_DIM,T> realm_color_space(color_space);
+      return IndexPartitionT<DIM,T>(create_restricted_partition_immediate(ctx, 
+        parent, &realm_color_space, &transform, &extent,
+        Internal::NTNT_TemplateHelper::template encode_tag<DIM,T,COLOR_DIM,T>(),
+        part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, int COLOR_DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_restriction(Context ctx,
+                                      IndexSpaceT<DIM,T> parent,
+                                      IndexSpaceT<COLOR_DIM,T> color_space,
+                                      Realm::ZMatrix<DIM,COLOR_DIM,T> transform,
+                                      Realm::ZRect<DIM,T> extent,
+                                      PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_restricted_partition(ctx,
+        parent, color_space, &transform, &extent, 
+        Internal::NTNT_TemplateHelper::template encode_tag<DIM,T,COLOR_DIM,T>(),
+        part_kind, color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_field(Context ctx,
+                                    LogicalRegionT<DIM,T> handle,
+                                    LogicalRegionT<DIM,T> parent,
+                                    FieldID fid,
+                                    Realm::ZRect<COLOR_DIM,COLOR_T> color_space,
+                                    Color color)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<COLOR_DIM,T> realm_color_space(color_space);
+      return IndexPartitionT<DIM,T>(create_partition_by_field_immediate(ctx,
+          handle, parent, fid, &realm_color_space, 
+          Internal::NT_TemplateHelper::template encode_tag<COLOR_DIM,COLOR_T>(),
+          color));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_field(Context ctx,
+                                    LogicalRegionT<DIM,T> handle,
+                                    LogicalRegionT<DIM,T> parent,
+                                    FieldID fid,
+                                    IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                    Color color)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_field(ctx,
+            LogicalRegion(handle), LogicalRegion(parent), fid, 
+            IndexSpace(color_space), color));
     }
 
     //--------------------------------------------------------------------------
