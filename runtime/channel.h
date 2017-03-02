@@ -21,10 +21,6 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/syscall.h>
-#ifdef USE_DISK
-#include <linux/aio_abi.h>
-#endif  /*USE_DISK*/
 #include <map>
 #include <vector>
 #include <deque>
@@ -192,27 +188,6 @@ namespace LegionRuntime{
       // whether I am a 1D or 2D transfer
       Dimension dim;
     };
-#ifdef USE_DISK
-    inline int io_setup(unsigned nr, aio_context_t *ctxp)
-    {
-      return syscall(__NR_io_setup, nr, ctxp);
-    }
-
-    inline int io_destroy(aio_context_t ctx)
-    {
-      return syscall(__NR_io_destroy, ctx);
-    }
-
-    inline int io_submit(aio_context_t ctx, long nr, struct iocb **iocbpp)
-    {
-      return syscall(__NR_io_submit, ctx, nr, iocbpp);
-    }
-
-    inline int io_getevents(aio_context_t ctx, long min_nr, long max_nr,
-                            struct io_event *events, struct timespec *timeout)
-    {
-      return syscall(__NR_io_getevents, ctx, min_nr, max_nr, events, timeout);
-    }
 
     class DiskRequest : public Request {
     public:
@@ -223,7 +198,6 @@ namespace LegionRuntime{
       //int64_t src_offset;
       //uint64_t nbytes;
     };
-#endif /*USE_DISK*/
     class MemcpyRequest : public Request {
     public:
       char *src_base, *dst_base;
@@ -754,7 +728,6 @@ namespace LegionRuntime{
       MemoryImpl *dst_mem_impl;
     };
 
-#ifdef USE_DISK
     template<unsigned DIM>
     class DiskXferDes : public XferDes {
     public:
@@ -779,7 +752,6 @@ namespace LegionRuntime{
       DiskRequest* disk_reqs;
       const char *buf_base;
     };
-#endif /*USE_DISK*/
 #ifdef USE_CUDA
     template<unsigned DIM>
     class GPUXferDes : public XferDes {
@@ -931,7 +903,6 @@ namespace LegionRuntime{
       long capacity;
     };
 
-#ifdef USE_DISK
     class DiskChannel : public Channel {
     public:
       DiskChannel(long max_nr, XferDes::XferKind _kind);
@@ -950,7 +921,6 @@ namespace LegionRuntime{
       //std::deque<Copy_2D*>::iterator iter_2d;
       //uint64_t cur_line;
     };
-#endif /*USE_DISK*/
     
 #ifdef USE_CUDA
     class GPUChannel : public Channel {
@@ -988,12 +958,10 @@ namespace LegionRuntime{
         memcpy_channel = NULL;
         gasnet_read_channel = gasnet_write_channel = NULL;
         remote_write_channel = NULL;
-#ifdef USE_DISK
         disk_read_channel = NULL;
         disk_write_channel = NULL;
         file_read_channel = NULL;
         file_write_channel = NULL;
-#endif /*USE_DISK*/
 #ifdef USE_HDF
         hdf_read_channel = NULL;
         hdf_write_channel = NULL;
@@ -1008,12 +976,10 @@ namespace LegionRuntime{
           delete gasnet_write_channel;
         if (remote_write_channel)
           delete remote_write_channel;
-#ifdef USE_DISK
         if (disk_read_channel)
           delete disk_read_channel;
         if (disk_write_channel)
           delete disk_write_channel;
-#endif /*USE_DISK*/
 #ifdef USE_CUDA
         std::map<GPU*, GPUChannel*>::iterator it;
         for (it = gpu_to_fb_channels.begin(); it != gpu_to_fb_channels.end(); it++) {
@@ -1050,7 +1016,6 @@ namespace LegionRuntime{
         remote_write_channel = new RemoteWriteChannel(max_nr);
         return remote_write_channel;
       }
-#ifdef USE_DISK
       DiskChannel* create_disk_read_channel(long max_nr) {
         assert(disk_read_channel == NULL);
         disk_read_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_READ);
@@ -1063,7 +1028,6 @@ namespace LegionRuntime{
       }
       FileChannel* create_file_read_channel(long max_nr);
       FileChannel* create_file_write_channel(long max_nr);
-#endif /*USE_DISK*/
 #ifdef USE_CUDA
       GPUChannel* create_gpu_to_fb_channel(long max_nr, GPU* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
@@ -1106,7 +1070,6 @@ namespace LegionRuntime{
       RemoteWriteChannel* get_remote_write_channel() {
         return remote_write_channel;
       }
-#ifdef USE_DISK
       DiskChannel* get_disk_read_channel() {
         return disk_read_channel;
       }
@@ -1119,7 +1082,6 @@ namespace LegionRuntime{
       FileChannel* get_file_write_channel() {
         return file_write_channel;
       }
-#endif
 #ifdef USE_CUDA
       GPUChannel* get_gpu_to_fb_channel(GPU* gpu) {
         std::map<GPU*, GPUChannel*>::iterator it;
@@ -1158,10 +1120,8 @@ namespace LegionRuntime{
       MemcpyChannel* memcpy_channel;
       GASNetChannel *gasnet_read_channel, *gasnet_write_channel;
       RemoteWriteChannel* remote_write_channel;
-#ifdef USE_DISK
       DiskChannel *disk_read_channel, *disk_write_channel;
       FileChannel *file_read_channel, *file_write_channel;
-#endif
 #ifdef USE_CUDA
       std::map<GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif

@@ -582,7 +582,6 @@ namespace LegionRuntime {
         pthread_mutex_unlock(&xd_lock);
       }
 
-#ifdef USE_DISK
       template<unsigned DIM>
       DiskXferDes<DIM>::DiskXferDes(DmaRequest* _dma_request,
                                     gasnet_node_t _launch_node,
@@ -680,7 +679,6 @@ namespace LegionRuntime {
       {
         fsync(fd);
       }
-#endif /*USE_DISK*/
 #ifdef USE_CUDA
       template<unsigned DIM>
       GPUXferDes<DIM>::GPUXferDes(DmaRequest* _dma_request,
@@ -1292,7 +1290,6 @@ namespace LegionRuntime {
         return capacity;
       }
 
-#ifdef USE_DISK
       DiskChannel::DiskChannel(long max_nr, XferDes::XferKind _kind)
       {
         kind = _kind;
@@ -1380,7 +1377,6 @@ namespace LegionRuntime {
       {
         return available_cb.size();
       }
-#endif /*USE_DISK*/
     
 #ifdef USE_CUDA
       GPUChannel::GPUChannel(GPU* _src_gpu, long max_nr, XferDes::XferKind _kind)
@@ -1688,7 +1684,6 @@ namespace LegionRuntime {
         channel_manager = new ChannelManager;
         xferDes_queue->start_worker(count, max_nr, channel_manager);
       }
-#ifdef USE_DISK
       FileChannel* ChannelManager::create_file_read_channel(long max_nr) {
         assert(file_read_channel == NULL);
         file_read_channel = new FileChannel(max_nr, XferDes::XFER_FILE_READ);
@@ -1699,7 +1694,6 @@ namespace LegionRuntime {
         file_write_channel = new FileChannel(max_nr, XferDes::XFER_FILE_WRITE);
         return file_write_channel;
       }
-#endif
       void XferDesQueue::start_worker(int count, int max_nr, ChannelManager* channel_manager) 
       {
         log_new_dma.info("XferDesQueue: start_workers");
@@ -1721,12 +1715,10 @@ namespace LegionRuntime {
         // dma thread #2: async xfer
         std::vector<Channel*> async_channels, gasnet_channels;
         async_channels.push_back(channel_manager->create_remote_write_channel(max_nr));
-#ifdef USE_DISK
         async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
         async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
         async_channels.push_back(channel_manager->create_file_read_channel(max_nr));
         async_channels.push_back(channel_manager->create_file_write_channel(max_nr));
-#endif
         dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, async_channels);
         gasnet_channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
         gasnet_channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));
@@ -1865,7 +1857,6 @@ namespace LegionRuntime {
                                              _max_req_size, max_nr, _priority,
                                              _order, _complete_fence);
             break;
-#ifdef USE_DISK
           case XferDes::XFER_DISK_READ:
           case XferDes::XFER_DISK_WRITE:
             xd = new DiskXferDes<DIM>(_dma_request, _launch_node,
@@ -1884,7 +1875,6 @@ namespace LegionRuntime {
                                       _max_req_size, max_nr, _priority,
                                       _order, _kind, _complete_fence);
             break;
-#endif
 #ifdef USE_CUDA
           case XferDes::XFER_GPU_FROM_FB:
           case XferDes::XFER_GPU_TO_FB:
@@ -1961,11 +1951,9 @@ namespace LegionRuntime {
       template class RemoteWriteXferDes<1>;
       template class RemoteWriteXferDes<2>;
       template class RemoteWriteXferDes<3>;
-#ifdef USE_DISK
       template class DiskXferDes<1>;
       template class DiskXferDes<2>;
       template class DiskXferDes<3>;
-#endif /*USE_DISK*/
 #ifdef USE_CUDA
       template class GPUXferDes<1>;
       template class GPUXferDes<2>;
