@@ -189,15 +189,6 @@ namespace LegionRuntime{
       Dimension dim;
     };
 
-    class DiskRequest : public Request {
-    public:
-      int fd;
-      char *mem_base;
-      off_t disk_off;
-      //uint64_t dst_buf;
-      //int64_t src_offset;
-      //uint64_t nbytes;
-    };
     class MemcpyRequest : public Request {
     public:
       char *src_base, *dst_base;
@@ -728,30 +719,6 @@ namespace LegionRuntime{
       MemoryImpl *dst_mem_impl;
     };
 
-    template<unsigned DIM>
-    class DiskXferDes : public XferDes {
-    public:
-      DiskXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
-                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
-                  bool mark_started, const Buffer& _src_buf, const Buffer& _dst_buf,
-                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
-                  uint64_t _max_req_size, long max_nr, int _priority,
-                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
-
-      ~DiskXferDes() {
-        free(disk_reqs);
-      }
-
-      long get_requests(Request** requests, long nr);
-      void notify_request_read_done(Request* req);
-      void notify_request_write_done(Request* req);
-      void flush();
-
-    private:
-      int fd;
-      DiskRequest* disk_reqs;
-      const char *buf_base;
-    };
 #ifdef USE_CUDA
     template<unsigned DIM>
     class GPUXferDes : public XferDes {
@@ -902,26 +869,7 @@ namespace LegionRuntime{
     private:
       long capacity;
     };
-
-    class DiskChannel : public Channel {
-    public:
-      DiskChannel(long max_nr, XferDes::XferKind _kind);
-      ~DiskChannel();
-      long submit(Request** requests, long nr);
-      void pull();
-      long available();
-    private:
-      aio_context_t ctx;
-      long capacity;
-      std::vector<struct iocb*> available_cb;
-      struct iocb* cb;
-      struct iocb** cbs;
-      struct io_event* events;
-      //std::deque<Copy_1D*>::iterator iter_1d;
-      //std::deque<Copy_2D*>::iterator iter_2d;
-      //uint64_t cur_line;
-    };
-    
+   
 #ifdef USE_CUDA
     class GPUChannel : public Channel {
     public:
@@ -951,6 +899,7 @@ namespace LegionRuntime{
 #endif
 
     class FileChannel;
+    class DiskChannel;
 
     class ChannelManager {
     public:
@@ -967,35 +916,7 @@ namespace LegionRuntime{
         hdf_write_channel = NULL;
 #endif
       }
-      ~ChannelManager(void) {
-        if (memcpy_channel)
-          delete memcpy_channel;
-        if (gasnet_read_channel)
-          delete gasnet_read_channel;
-        if (gasnet_write_channel)
-          delete gasnet_write_channel;
-        if (remote_write_channel)
-          delete remote_write_channel;
-        if (disk_read_channel)
-          delete disk_read_channel;
-        if (disk_write_channel)
-          delete disk_write_channel;
-#ifdef USE_CUDA
-        std::map<GPU*, GPUChannel*>::iterator it;
-        for (it = gpu_to_fb_channels.begin(); it != gpu_to_fb_channels.end(); it++) {
-          delete it->second;
-        }
-        for (it = gpu_from_fb_channels.begin(); it != gpu_from_fb_channels.end(); it++) {
-          delete it->second;
-        }
-        for (it = gpu_in_fb_channels.begin(); it != gpu_in_fb_channels.end(); it++) {
-          delete it->second;
-        }
-        for (it = gpu_peer_fb_channels.begin(); it != gpu_peer_fb_channels.end(); it++) {
-          delete it->second;
-        }
-#endif
-      }
+      ~ChannelManager(void);
       MemcpyChannel* create_memcpy_channel(long max_nr) {
         assert(memcpy_channel == NULL);
         memcpy_channel = new MemcpyChannel(max_nr);
@@ -1016,16 +937,8 @@ namespace LegionRuntime{
         remote_write_channel = new RemoteWriteChannel(max_nr);
         return remote_write_channel;
       }
-      DiskChannel* create_disk_read_channel(long max_nr) {
-        assert(disk_read_channel == NULL);
-        disk_read_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_READ);
-        return disk_read_channel;
-      }
-      DiskChannel* create_disk_write_channel(long max_nr) {
-        assert(disk_write_channel == NULL);
-        disk_write_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_WRITE);
-        return disk_write_channel;
-      }
+      DiskChannel* create_disk_read_channel(long max_nr);
+      DiskChannel* create_disk_write_channel(long max_nr);
       FileChannel* create_file_read_channel(long max_nr);
       FileChannel* create_file_write_channel(long max_nr);
 #ifdef USE_CUDA

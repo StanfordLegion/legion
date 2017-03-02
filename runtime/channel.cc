@@ -582,103 +582,6 @@ namespace LegionRuntime {
         pthread_mutex_unlock(&xd_lock);
       }
 
-      template<unsigned DIM>
-      DiskXferDes<DIM>::DiskXferDes(DmaRequest* _dma_request,
-                                    gasnet_node_t _launch_node,
-                                    XferDesID _guid,
-                                    XferDesID _pre_xd_guid,
-                                    XferDesID _next_xd_guid,
-                                    bool mark_started,
-                                    const Buffer& _src_buf,
-                                    const Buffer& _dst_buf,
-                                    const Domain& _domain,
-                                    const std::vector<OffsetsAndSize>& _oas_vec,
-                                    uint64_t _max_req_size,
-                                    long max_nr,
-                                    int _priority,
-                                    XferOrder::Type _order,
-                                    XferKind _kind,
-                                    XferDesFence* _complete_fence)
-        : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                  _next_xd_guid, mark_started, _src_buf, _dst_buf,
-                  _domain, _oas_vec, _max_req_size, _priority,
-                  _order, _kind, _complete_fence)
-      {
-        MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
-        MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
-        switch (kind) {
-          case XferDes::XFER_DISK_READ:
-          {
-            channel = channel_manager->get_disk_read_channel();
-            fd = ((Realm::DiskMemory*)src_mem_impl)->fd;
-            buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
-            assert(src_mem_impl->kind == MemoryImpl::MKIND_DISK);
-            break;
-          }
-          case XferDes::XFER_DISK_WRITE:
-          {
-            channel = channel_manager->get_disk_write_channel();
-            fd = ((Realm::DiskMemory*)dst_mem_impl)->fd;
-            buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-            assert(dst_mem_impl->kind == MemoryImpl::MKIND_DISK);
-            break;
-          }
-          default:
-            assert(0);
-        }
-        disk_reqs = (DiskRequest*) calloc(max_nr, sizeof(DiskRequest));
-        for (int i = 0; i < max_nr; i++) {
-          disk_reqs[i].xd = this;
-          disk_reqs[i].fd = fd;
-          enqueue_request(&disk_reqs[i]);
-        }
-      }
-
-      template<unsigned DIM>
-      long DiskXferDes<DIM>::get_requests(Request** requests, long nr)
-      {
-        DiskRequest** reqs = (DiskRequest**) requests;
-        long new_nr = default_get_requests<DIM>(requests, nr);
-        switch (kind) {
-          case XferDes::XFER_DISK_READ:
-          {
-            for (long i = 0; i < new_nr; i++) {
-              reqs[i]->disk_off = src_buf.alloc_offset + reqs[i]->src_off;
-              reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
-            }
-            break;
-          }
-          case XferDes::XFER_DISK_WRITE:
-          {
-            for (long i = 0; i < new_nr; i++) {
-              reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
-              reqs[i]->disk_off = dst_buf.alloc_offset + reqs[i]->dst_off;
-            }
-            break;
-          }
-          default:
-            assert(0);
-        }
-        return new_nr;
-      }
-
-      template<unsigned DIM>
-      void DiskXferDes<DIM>::notify_request_read_done(Request* req)
-      {
-        default_notify_request_read_done(req);
-      }
-
-      template<unsigned DIM>
-      void DiskXferDes<DIM>::notify_request_write_done(Request* req)
-      {
-        default_notify_request_write_done(req);
-      }
-
-      template<unsigned DIM>
-      void DiskXferDes<DIM>::flush()
-      {
-        fsync(fd);
-      }
 #ifdef USE_CUDA
       template<unsigned DIM>
       GPUXferDes<DIM>::GPUXferDes(DmaRequest* _dma_request,
@@ -1289,95 +1192,7 @@ namespace LegionRuntime {
       {
         return capacity;
       }
-
-      DiskChannel::DiskChannel(long max_nr, XferDes::XferKind _kind)
-      {
-        kind = _kind;
-        ctx = 0;
-        capacity = max_nr;
-        int ret = io_setup(max_nr, &ctx);
-        assert(ret >= 0);
-        assert(available_cb.empty());
-        cb = (struct iocb*) calloc(max_nr, sizeof(struct iocb));
-        cbs = (struct iocb**) calloc(max_nr, sizeof(struct iocb*));
-        events = (struct io_event*) calloc(max_nr, sizeof(struct io_event));
-        switch (kind) {
-          case XferDes::XFER_DISK_READ:
-            for (long i = 0; i < max_nr; i++) {
-              memset(&cb[i], 0, sizeof(cb[i]));
-              cb[i].aio_lio_opcode = IOCB_CMD_PREAD;
-              available_cb.push_back(&cb[i]);
-            }
-            break;
-          case XferDes::XFER_DISK_WRITE:
-            for (long i = 0; i < max_nr; i++) {
-              memset(&cb[i], 0, sizeof(cb[i]));
-              cb[i].aio_lio_opcode = IOCB_CMD_PWRITE;
-              available_cb.push_back(&cb[i]);
-            }
-            break;
-          default:
-            assert(0);
-        }
-      }
-
-      DiskChannel::~DiskChannel()
-      {
-        io_destroy(ctx);
-        free(cb);
-        free(cbs);
-        free(events);
-      }
-
-      long DiskChannel::submit(Request** requests, long nr)
-      {
-        int ns = 0;
-        switch (kind) {
-          case XferDes::XFER_DISK_READ:
-          case XferDes::XFER_DISK_WRITE:
-            while (ns < nr && !available_cb.empty()) {
-              DiskRequest* req = (DiskRequest*) requests[ns];
-              cbs[ns] = available_cb.back();
-              available_cb.pop_back();
-              cbs[ns]->aio_fildes = req->fd;
-              cbs[ns]->aio_data = (uint64_t) (req);
-              cbs[ns]->aio_buf = (uint64_t) (req->mem_base);
-              cbs[ns]->aio_offset = req->disk_off;
-              cbs[ns]->aio_nbytes = req->nbytes;
-              ns++;
-            }
-            break;
-          default:
-            assert(0);
-        }
-        assert(ns == nr);
-        int ret = io_submit(ctx, ns, cbs);
-        if (ret < 0) {
-          perror("io_submit error");
-        }
-        return ret;
-      }
-
-      void DiskChannel::pull()
-      {
-        int nr = io_getevents(ctx, 0, capacity, events, NULL);
-        if (nr < 0)
-          perror("io_getevents error");
-        for (int i = 0; i < nr; i++) {
-          Request* req = (Request*) events[i].data;
-          struct iocb* ret_cb = (struct iocb*) events[i].obj;
-          available_cb.push_back(ret_cb);
-          assert(events[i].res == (int64_t)ret_cb->aio_nbytes);
-          req->xd->notify_request_read_done(req);
-          req->xd->notify_request_write_done(req);
-        }
-      }
-
-      long DiskChannel::available()
-      {
-        return available_cb.size();
-      }
-    
+   
 #ifdef USE_CUDA
       GPUChannel::GPUChannel(GPU* _src_gpu, long max_nr, XferDes::XferKind _kind)
       {
@@ -1672,6 +1487,40 @@ namespace LegionRuntime {
       {
         return channel_manager;
       }
+
+      ChannelManager::~ChannelManager(void) {
+        if (memcpy_channel)
+          delete memcpy_channel;
+        if (gasnet_read_channel)
+          delete gasnet_read_channel;
+        if (gasnet_write_channel)
+          delete gasnet_write_channel;
+        if (remote_write_channel)
+          delete remote_write_channel;
+        if (file_read_channel)
+          delete file_read_channel;
+        if (file_write_channel)
+          delete file_write_channel;
+        if (disk_read_channel)
+          delete disk_read_channel;
+        if (disk_write_channel)
+          delete disk_write_channel;
+#ifdef USE_CUDA
+        std::map<GPU*, GPUChannel*>::iterator it;
+        for (it = gpu_to_fb_channels.begin(); it != gpu_to_fb_channels.end(); it++) {
+          delete it->second;
+        }
+        for (it = gpu_from_fb_channels.begin(); it != gpu_from_fb_channels.end(); it++) {
+          delete it->second;
+        }
+        for (it = gpu_in_fb_channels.begin(); it != gpu_in_fb_channels.end(); it++) {
+          delete it->second;
+        }
+        for (it = gpu_peer_fb_channels.begin(); it != gpu_peer_fb_channels.end(); it++) {
+          delete it->second;
+        }
+#endif
+      }
 #ifdef USE_CUDA
       void register_gpu_in_dma_systems(GPU* gpu)
       {
@@ -1694,6 +1543,17 @@ namespace LegionRuntime {
         file_write_channel = new FileChannel(max_nr, XferDes::XFER_FILE_WRITE);
         return file_write_channel;
       }
+      DiskChannel* ChannelManager::create_disk_read_channel(long max_nr) {
+        assert(disk_read_channel == NULL);
+        disk_read_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_READ);
+        return disk_read_channel;
+      }
+      DiskChannel* ChannelManager::create_disk_write_channel(long max_nr) {
+        assert(disk_write_channel == NULL);
+        disk_write_channel = new DiskChannel(max_nr, XferDes::XFER_DISK_WRITE);
+        return disk_write_channel;
+      }
+
       void XferDesQueue::start_worker(int count, int max_nr, ChannelManager* channel_manager) 
       {
         log_new_dma.info("XferDesQueue: start_workers");
@@ -1951,9 +1811,6 @@ namespace LegionRuntime {
       template class RemoteWriteXferDes<1>;
       template class RemoteWriteXferDes<2>;
       template class RemoteWriteXferDes<3>;
-      template class DiskXferDes<1>;
-      template class DiskXferDes<2>;
-      template class DiskXferDes<3>;
 #ifdef USE_CUDA
       template class GPUXferDes<1>;
       template class GPUXferDes<2>;

@@ -121,6 +121,104 @@ namespace LegionRuntime {
       fsync(fd);
     }
 
+    template<unsigned DIM>
+    DiskXferDes<DIM>::DiskXferDes(DmaRequest* _dma_request,
+                                  gasnet_node_t _launch_node,
+                                  XferDesID _guid,
+                                  XferDesID _pre_xd_guid,
+                                  XferDesID _next_xd_guid,
+                                  bool mark_started,
+                                  const Buffer& _src_buf,
+                                  const Buffer& _dst_buf,
+                                  const Domain& _domain,
+                                  const std::vector<OffsetsAndSize>& _oas_vec,
+                                  uint64_t _max_req_size,
+                                  long max_nr,
+                                  int _priority,
+                                  XferOrder::Type _order,
+                                  XferKind _kind,
+                                  XferDesFence* _complete_fence)
+      : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
+                _next_xd_guid, mark_started, _src_buf, _dst_buf,
+                _domain, _oas_vec, _max_req_size, _priority,
+                _order, _kind, _complete_fence)
+    {
+      MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
+      MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
+      switch (kind) {
+        case XferDes::XFER_DISK_READ:
+        {
+          channel = get_channel_manager()->get_disk_read_channel();
+          fd = ((Realm::DiskMemory*)src_mem_impl)->fd;
+          buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
+          assert(src_mem_impl->kind == MemoryImpl::MKIND_DISK);
+          break;
+        }
+        case XferDes::XFER_DISK_WRITE:
+        {
+          channel = get_channel_manager()->get_disk_write_channel();
+          fd = ((Realm::DiskMemory*)dst_mem_impl)->fd;
+          buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
+          assert(dst_mem_impl->kind == MemoryImpl::MKIND_DISK);
+          break;
+        }
+        default:
+          assert(0);
+      }
+      disk_reqs = (DiskRequest*) calloc(max_nr, sizeof(DiskRequest));
+      for (int i = 0; i < max_nr; i++) {
+        disk_reqs[i].xd = this;
+        disk_reqs[i].fd = fd;
+        enqueue_request(&disk_reqs[i]);
+      }
+    }
+
+    template<unsigned DIM>
+    long DiskXferDes<DIM>::get_requests(Request** requests, long nr)
+    {
+      DiskRequest** reqs = (DiskRequest**) requests;
+      long new_nr = default_get_requests<DIM>(requests, nr);
+      switch (kind) {
+        case XferDes::XFER_DISK_READ:
+        {
+          for (long i = 0; i < new_nr; i++) {
+            reqs[i]->disk_off = src_buf.alloc_offset + reqs[i]->src_off;
+            reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
+          }
+          break;
+        }
+        case XferDes::XFER_DISK_WRITE:
+        {
+          for (long i = 0; i < new_nr; i++) {
+            reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
+            reqs[i]->disk_off = dst_buf.alloc_offset + reqs[i]->dst_off;
+          }
+          break;
+        }
+        default:
+          assert(0);
+      }
+      return new_nr;
+    }
+
+    template<unsigned DIM>
+    void DiskXferDes<DIM>::notify_request_read_done(Request* req)
+    {
+      default_notify_request_read_done(req);
+    }
+
+    template<unsigned DIM>
+    void DiskXferDes<DIM>::notify_request_write_done(Request* req)
+    {
+      default_notify_request_write_done(req);
+    }
+
+    template<unsigned DIM>
+    void DiskXferDes<DIM>::flush()
+    {
+      fsync(fd);
+    }
+
     FileChannel::FileChannel(long max_nr, XferDes::XferKind _kind)
     {
       kind = _kind;
@@ -161,9 +259,53 @@ namespace LegionRuntime {
       return AsyncFileIOContext::get_singleton()->available();
     }
 
-      template class FileXferDes<0>;
-      template class FileXferDes<1>;
-      template class FileXferDes<2>;
-      template class FileXferDes<3>;
+    DiskChannel::DiskChannel(long max_nr, XferDes::XferKind _kind)
+    {
+      kind = _kind;
+    }
+
+    DiskChannel::~DiskChannel()
+    {
+    }
+
+    long DiskChannel::submit(Request** requests, long nr)
+    {
+      AsyncFileIOContext* aio_ctx = AsyncFileIOContext::get_singleton();
+      for (long i = 0; i < nr; i++) {
+        DiskRequest* req = (DiskRequest*) requests[i];
+        switch (kind) {
+          case XferDes::XFER_DISK_READ:
+            aio_ctx->enqueue_read(req->fd, req->disk_off,
+                                  req->nbytes, req->mem_base, req);
+            break;
+          case XferDes::XFER_DISK_WRITE:
+            aio_ctx->enqueue_write(req->fd, req->disk_off,
+                                   req->nbytes, req->mem_base, req);
+            break;
+          default:
+            assert(0);
+        }
+      }
+      return nr;
+    }
+
+    void DiskChannel::pull()
+    {
+      AsyncFileIOContext::get_singleton()->make_progress();
+    }
+
+    long DiskChannel::available()
+    {
+      return AsyncFileIOContext::get_singleton()->available();
+    }
+
+    template class FileXferDes<0>;
+    template class FileXferDes<1>;
+    template class FileXferDes<2>;
+    template class FileXferDes<3>;
+    template class DiskXferDes<0>;
+    template class DiskXferDes<1>;
+    template class DiskXferDes<2>;
+    template class DiskXferDes<3>;
   } // namespace LowLevel
 } // namespace LegionRuntime

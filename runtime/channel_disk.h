@@ -26,6 +26,12 @@ namespace LegionRuntime {
       char *mem_base;
       off_t file_off;
     };
+    class DiskRequest : public Request {
+    public:
+      int fd;
+      char *mem_base;
+      off_t disk_off;
+    };
 
     template<unsigned DIM>
     class FileXferDes : public XferDes {
@@ -54,10 +60,44 @@ namespace LegionRuntime {
       const char *buf_base;
     };
 
+    template<unsigned DIM>
+    class DiskXferDes : public XferDes {
+    public:
+      DiskXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+                  bool mark_started, const Buffer& _src_buf, const Buffer& _dst_buf,
+                  const Domain& _domain, const std::vector<OffsetsAndSize>& _oas_vec,
+                  uint64_t _max_req_size, long max_nr, int _priority,
+                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
+
+      ~DiskXferDes() {
+        free(disk_reqs);
+      }
+
+      long get_requests(Request** requests, long nr);
+      void notify_request_read_done(Request* req);
+      void notify_request_write_done(Request* req);
+      void flush();
+
+    private:
+      int fd;
+      DiskRequest* disk_reqs;
+      const char *buf_base;
+    };
+
     class FileChannel : public Channel {
     public:
       FileChannel(long max_nr, XferDes::XferKind _kind);
       ~FileChannel();
+      long submit(Request** requests, long nr);
+      void pull();
+      long available();
+    };
+
+    class DiskChannel : public Channel {
+    public:
+      DiskChannel(long max_nr, XferDes::XferKind _kind);
+      ~DiskChannel();
       long submit(Request** requests, long nr);
       void pull();
       long available();
