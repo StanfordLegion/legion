@@ -282,6 +282,13 @@ ifeq ($(strip $(USE_GASNET)),1)
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
+  ifeq ($(strip $(CONDUIT)),psm)
+    INC_FLAGS 	+= -I$(GASNET)/include/psm-conduit
+    CC_FLAGS	+= -DGASNET_CONDUIT_PSM
+    LEGION_LD_FLAGS	+= -lgasnet-psm-par -lpsm2
+    # GASNet needs MPI for interop support
+    USE_MPI	= 1
+  endif
   ifeq ($(strip $(CONDUIT)),mpi)
     INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_MPI
