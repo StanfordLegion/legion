@@ -2165,7 +2165,9 @@ namespace Legion {
       enum PartOpKind {
         BY_FIELD,
         BY_IMAGE,
+        BY_IMAGE_RANGE,
         BY_PREIMAGE,
+        BY_PREIMAGE_RANGE, 
       };
     public:
       DependentPartitionOp(Runtime *rt);
@@ -2181,7 +2183,15 @@ namespace Legion {
                                LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                IndexSpace color_space);
+      void initialize_by_image_range(TaskContext *ctx, IndexPartition pid,
+                               LogicalPartition projection,
+                               LogicalRegion parent, FieldID fid,
+                               IndexSpace color_space);
       void initialize_by_preimage(TaskContext *ctx, IndexPartition pid,
+                               IndexPartition projection, LogicalRegion handle,
+                               LogicalRegion parent, FieldID fid,
+                               IndexSpace color_space);
+      void initialize_by_preimage_range(TaskContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                IndexSpace color_space);

@@ -11235,6 +11235,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DependentPartitionOp::initialize_by_image_range(TaskContext *ctx, 
+                                                         IndexPartition pid,
+                                                LogicalPartition projection,
+                                                LogicalRegion parent, 
+                                                FieldID fid, IndexSpace space)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      partition_kind = BY_IMAGE_RANGE;
+      // Projection region requirement since we need the whole sub-tree
+      requirement = RegionRequirement(projection, 0/*id*/, READ_ONLY,
+                                      EXCLUSIVE, parent);
+      requirement.add_field(fid);
+      partition_handle = pid;
+      color_space = space;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_dependent_partition_operation(
+            parent_ctx->get_unique_id(),
+            unique_op_id,
+            partition_handle.id,
+            partition_kind);
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_preimage(TaskContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
@@ -11243,6 +11267,30 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       partition_kind = BY_PREIMAGE;
+      // Projection region requirement since we need the whole sub-tree
+      requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
+                                      EXCLUSIVE, parent);
+      requirement.add_field(fid);
+      partition_handle = pid;
+      color_space = space;
+      projection = proj;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_dependent_partition_operation(
+            parent_ctx->get_unique_id(),
+            unique_op_id,
+            partition_handle.id,
+            partition_kind);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::initialize_by_preimage_range(TaskContext *ctx,
+                                    IndexPartition pid, IndexPartition proj,
+                                    LogicalRegion handle, LogicalRegion parent,
+                                    FieldID fid, IndexSpace space)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      partition_kind = BY_PREIMAGE_RANGE;
       // Projection region requirement since we need the whole sub-tree
       requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
                                       EXCLUSIVE, parent);
@@ -11351,6 +11399,14 @@ namespace Legion {
                 completion_event, version_info, map_applied_conditions);
             break;
           }
+        case BY_IMAGE_RANGE:
+          {
+            ready_event = 
+              runtime->forest->create_partition_by_image_range(physical_ctx,
+                  this, 0/*idx*/, requirement, partition_handle, color_space,
+                  completion_event, version_info, map_applied_conditions);
+            break;
+          }
         case BY_PREIMAGE:
           {
             ready_event = 
@@ -11358,6 +11414,15 @@ namespace Legion {
                 this, 0/*idx*/, requirement, projection, partition_handle,
                 color_space, completion_event, version_info, 
                 map_applied_conditions);
+            break;
+          }
+        case BY_PREIMAGE_RANGE:
+          {
+            ready_event = 
+              runtime->forest->create_partition_by_preimage_range(physical_ctx,
+                  this, 0/*idx*/, requirement, projection, partition_handle,
+                  color_space, completion_event, version_info,
+                  map_applied_conditions);
             break;
           }
         default:

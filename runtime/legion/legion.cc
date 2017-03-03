@@ -3284,13 +3284,12 @@ namespace Legion {
       runtime->destroy_index_partition(ctx, handle);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_equal_partition(Context ctx, 
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       size_t granularity,
-                                                      int color)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_equal_partition(ctx, parent, color_space,
@@ -3302,7 +3301,7 @@ namespace Legion {
                                     IndexSpace parent, IndexPartition handle1,
                                     IndexPartition handle2, 
                                     IndexSpace color_space, PartitionKind kind,
-                                    int color)
+                                    Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_union(ctx, parent, handle1, handle2, 
@@ -3315,7 +3314,7 @@ namespace Legion {
                                                 IndexPartition handle1, 
                                                 IndexPartition handle2,
                                                 IndexSpace color_space,
-                                                PartitionKind kind, int color) 
+                                                PartitionKind kind, Color color) 
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_intersection(ctx, parent, handle1,
@@ -3329,7 +3328,7 @@ namespace Legion {
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
                                                 IndexSpace color_space,
-                                                PartitionKind kind, int color)
+                                                PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_difference(ctx, parent, handle1,
@@ -3338,34 +3337,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::create_cross_product_partitions(Context ctx,
+    Color Runtime::create_cross_product_partitions(Context ctx,
                                 IndexPartition handle1, IndexPartition handle2,
                                 std::map<IndexSpace,IndexPartition> &handles,
-                                PartitionKind kind, int color)
+                                PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
-      runtime->create_cross_product_partition(ctx, handle1, handle2, handles,
-                                              kind, color);
+      return runtime->create_cross_product_partition(ctx, handle1, handle2, 
+                                                     handles, kind, color);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::create_restricted_partition(Context ctx,
-                                              IndexSpace parent, 
-                                              IndexSpace color_space,
-                                              const void *transform,
-                                              const void *extent, 
-                                              TypeTag type_tag,
-                                              PartitionKind part_kind,
-                                              Color color)
+    IndexPartition Runtime::create_restricted_partition(Context ctx,
+                                                        IndexSpace parent, 
+                                                        IndexSpace color_space,
+                                                        const void *transform,
+                                                        const void *extent, 
+                                                        TypeTag type_tag,
+                                                        PartitionKind part_kind,
+                                                        Color color)
     //--------------------------------------------------------------------------
     {
-
+      return runtime->create_restricted_partition(ctx, parent, color_space,
+                            transform, extent, type_tag, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_field(Context ctx,
                    LogicalRegion handle, LogicalRegion parent, FieldID fid, 
-                   IndexSpace color_space, int color)
+                   IndexSpace color_space, Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_field(ctx, handle, parent, fid,
@@ -3376,7 +3376,7 @@ namespace Legion {
     IndexPartition Runtime::create_partition_by_image(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, int color)
+                  PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_image(ctx, handle, projection,
@@ -3385,10 +3385,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_image_range(Context ctx,
+                  IndexSpace handle, LogicalPartition projection,
+                  LogicalRegion parent, FieldID fid, IndexSpace color_space,
+                  PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_image_range(ctx, handle, projection,
+                                                      parent, fid, color_space,
+                                                      part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, int color)
+                  PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_preimage(ctx, projection, handle,
@@ -3397,15 +3409,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_preimage_range(Context ctx,
+                  IndexPartition projection, LogicalRegion handle,
+                  LogicalRegion parent, FieldID fid, IndexSpace color_space,
+                  PartitionKind part_kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_partition_by_preimage_range(ctx, projection,handle,
+                                                       parent, fid, color_space,
+                                                       part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx,
                              IndexSpace parent, IndexSpace color_space, 
-                             PartitionKind part_kind, int color)
+                             PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_pending_partition(ctx, parent, color_space, 
                                                part_kind, color);
     }
-#endif
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union(Context ctx,

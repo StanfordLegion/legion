@@ -98,11 +98,6 @@ namespace Legion {
                                               IndexPartition source,
                       std::map<DomainPoint,IndexPartition> &handles);
     public:
-      void compute_pending_color_space(IndexSpace parent,
-                                       IndexPartition handle1,
-                                       IndexPartition handle2,
-                                       IndexSpace &color_space,
-                         Realm::IndexSpace::IndexSpaceOperation op);
       void create_pending_partition(IndexPartition pid,
                                     IndexSpace parent,
                                     IndexSpace color_space,
@@ -135,7 +130,24 @@ namespace Legion {
                                       ApEvent term_event,
                                       VersionInfo &version_info,
                                       std::set<RtEvent> &applied_events);
+      ApEvent create_partition_by_image_range(RegionTreeContext ctx,
+                                      Operation *op, unsigned index,
+                                      const RegionRequirement &req,
+                                      IndexPartition pending,
+                                      IndexSpace color_space,
+                                      ApEvent term_event,
+                                      VersionInfo &version_info,
+                                      std::set<RtEvent> &applied_events);
       ApEvent create_partition_by_preimage(RegionTreeContext ctx,
+                                      Operation *op, unsigned index,
+                                      const RegionRequirement &req,
+                                      IndexPartition projection,
+                                      IndexPartition pending,
+                                      IndexSpace color_space,
+                                      ApEvent term_event,
+                                      VersionInfo &version_info,
+                                      std::set<RtEvent> &applied_events);
+      ApEvent create_partition_by_preimage_range(RegionTreeContext ctx,
                                       Operation *op, unsigned index,
                                       const RegionRequirement &req,
                                       IndexPartition projection,

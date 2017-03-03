@@ -9385,7 +9385,7 @@ namespace Legion {
                                                    IndexSpace parent,
                                                    IndexSpace color_space,
                                                    size_t granularity,
-                                                   int color)
+                                                   Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9405,8 +9405,9 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
+                                                      IndexSpace color_space,
                                                       PartitionKind kind,
-                                                      int color)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9418,7 +9419,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_union(forest, parent, handle1, handle2,
-                                            kind, color);
+                                            color_space, kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9426,8 +9427,9 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
+                                                      IndexSpace color_space,
                                                       PartitionKind kind,
-                                                      int color)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9440,7 +9442,8 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_intersection(forest, parent, handle1,
-                                                   handle2, kind, color);
+                                                   handle2, color_space,
+                                                   kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9448,8 +9451,9 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
+                                                      IndexSpace color_space,
                                                       PartitionKind kind,
-                                                      int color)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9462,28 +9466,52 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_difference(forest, parent, handle1, 
-                                                 handle2, kind, color);
+                                                 handle2, color_space,
+                                                 kind, color);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::create_cross_product_partition(Context ctx,
+    Color Runtime::create_cross_product_partition(Context ctx,
                                                  IndexPartition handle1,
                                                  IndexPartition handle2,
-                                  std::map<DomainPoint,IndexPartition> &handles,
-                                                 PartitionKind kind, int color)
+                                  std::map<IndexSpace,IndexPartition> &handles,
+                                                 PartitionKind kind,Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
       {
-        log_run.error("Illegal dummy context create cross product "
-                            "partition!");
+        log_run.error("Illegal dummy context create cross product partition!");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      ctx->create_cross_product_partition(forest, handle1, handle2, handles,
-                                          kind, color);
+      return ctx->create_cross_product_partition(forest, handle1, handle2, 
+                                                 handles, kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_restricted_partition(Context ctx,
+                                                      IndexSpace parent,
+                                                      IndexSpace color_space,
+                                                      const void *transform,
+                                                      const void *extent,
+                                                      TypeTag type_tag,
+                                                      PartitionKind part_kind,
+                                                      Color color)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create restricted partition!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      return ctx->create_restricted_partition(forest, parent, color_space,
+                                              transform, extent, type_tag,
+                                              part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -9492,7 +9520,7 @@ namespace Legion {
                                                       LogicalRegion parent_priv,
                                                       FieldID fid,
                                                       IndexSpace color_space,
-                                                      int color)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9515,7 +9543,7 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color)
+                                                    Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9531,6 +9559,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_image_range(Context ctx,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context partition by image range!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      return ctx->create_partition_by_image_range(forest, handle, projection, 
+                                  parent, fid, color_space, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage(Context ctx,
                                                     IndexPartition projection,
                                                     LogicalRegion handle,
@@ -9538,7 +9589,7 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color)
+                                                    Color color)
     //--------------------------------------------------------------------------
     { 
       if (ctx == DUMMY_CONTEXT)
@@ -9554,11 +9605,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_preimage_range(Context ctx,
+                                                    IndexPartition projection,
+                                                    LogicalRegion handle,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color)
+    //--------------------------------------------------------------------------
+    { 
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context partition by preimage range!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      return ctx->create_partition_by_preimage_range(forest, projection, handle,
+                                    parent, fid, color_space, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx, 
                                                      IndexSpace parent, 
                                                      IndexSpace color_space,
                                                      PartitionKind part_kind,
-                                                     int color)
+                                                     Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)

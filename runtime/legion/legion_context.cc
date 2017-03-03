@@ -2536,7 +2536,7 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       size_t granularity,
-                                                      int color)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
@@ -2570,7 +2570,8 @@ namespace Legion {
                                           IndexSpace parent,
                                           IndexPartition handle1,
                                           IndexPartition handle2,
-                                          PartitionKind kind, int color)
+                                          IndexSpace color_space,
+                                          PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -2600,9 +2601,6 @@ namespace Legion {
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
-      IndexSpace color_space;
-      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          Realm::IndexSpace::ISO_UNION);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_union_partition(this, pid, handle1, handle2);
@@ -2623,7 +2621,8 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexPartition handle1,
                                               IndexPartition handle2,
-                                              PartitionKind kind, int color)
+                                              IndexSpace color_space,
+                                              PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -2653,9 +2652,6 @@ namespace Legion {
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
-      IndexSpace color_space;
-      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          Realm::IndexSpace::ISO_INTERSECT);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
@@ -2676,7 +2672,9 @@ namespace Legion {
                                                   IndexSpace parent,
                                                   IndexPartition handle1,
                                                   IndexPartition handle2,
-                                                  PartitionKind kind, int color)
+                                                  IndexSpace color_space,
+                                                  PartitionKind kind, 
+                                                  Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -2708,9 +2706,6 @@ namespace Legion {
       ColorPoint partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
-      IndexSpace color_space;
-      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          Realm::IndexSpace::ISO_SUBTRACT);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
@@ -2725,13 +2720,14 @@ namespace Legion {
       return pid;
     }
 
+#if 0
     //--------------------------------------------------------------------------
-    void InnerContext::create_cross_product_partition(RegionTreeForest *forest,
+    Color InnerContext::create_cross_product_partition(RegionTreeForest *forest,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
                                   std::map<DomainPoint,IndexPartition> &handles,
                                                       PartitionKind kind,
-                                                      int color)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -2748,7 +2744,7 @@ namespace Legion {
         exit(ERROR_INDEX_TREE_MISMATCH);
       }
 #endif
-      ColorPoint partition_color;
+      Color partition_color;
       if (color != static_cast<int>(AUTO_GENERATE_ID))
         partition_color = ColorPoint(color);
       PendingPartitionOp *part_op = 
@@ -2764,6 +2760,7 @@ namespace Legion {
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
     }
+#endif
 
     //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_field(
@@ -2772,7 +2769,7 @@ namespace Legion {
                                               LogicalRegion parent_priv,
                                               FieldID fid,
                                               IndexSpace color_space,
-                                              int color)
+                                              Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -2826,7 +2823,7 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color)
+                                                    Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -2871,6 +2868,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_image_range(
+                                                    RegionTreeForest *forest,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition by image range in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      ColorPoint part_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        part_color = ColorPoint(color);
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = 
+        runtime->get_available_dependent_partition_op(true);
+      part_op->initialize_by_image_range(this, pid, projection,
+                                         parent, fid, color_space);
+      ApEvent term_event = part_op->get_completion_event();
+      ApEvent handle_ready = part_op->get_handle_ready();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle, color_space, part_color,
+                                       part_kind, handle_ready, term_event); 
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_image_range call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_preimage(
                                                   RegionTreeForest *forest,
                                                   IndexPartition projection,
@@ -2879,7 +2929,7 @@ namespace Legion {
                                                   FieldID fid,
                                                   IndexSpace color_space,
                                                   PartitionKind part_kind,
-                                                  int color)
+                                                  Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -2926,12 +2976,67 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_preimage_range(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition projection,
+                                                  LogicalRegion handle,
+                                                  LogicalRegion parent,
+                                                  FieldID fid,
+                                                  IndexSpace color_space,
+                                                  PartitionKind part_kind,
+                                                  Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_index_space().get_tree_id(),
+                         parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition by preimage range in task %s "
+                      "(ID %lld)", get_task_name(), get_unique_id());
+#endif
+      ColorPoint part_color;
+      if (color != static_cast<int>(AUTO_GENERATE_ID))
+        part_color = ColorPoint(color);
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = 
+        runtime->get_available_dependent_partition_op(true);
+      part_op->initialize_by_preimage_range(this, pid, projection, handle,
+                                            parent, fid, color_space);
+      ApEvent term_event = part_op->get_completion_event();
+      ApEvent handle_ready = part_op->get_handle_ready();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle.get_index_space(), 
+                                       color_space, part_color, part_kind,
+                                       handle_ready, term_event);
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_preimage_range call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_pending_partition(
                                                 RegionTreeForest *forest,
                                                 IndexSpace parent,
                                                 IndexSpace color_space, 
                                                 PartitionKind part_kind,
-                                                int color)
+                                                Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6586,7 +6691,7 @@ namespace Legion {
     IndexPartition LeafContext::create_equal_partition(RegionTreeForest *forest,
                                              IndexSpace parent,
                                              IndexSpace color_space,
-                                             size_t granularity, int color)
+                                             size_t granularity, Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal equal partition creation performed in leaf "
@@ -6604,7 +6709,8 @@ namespace Legion {
                                           IndexSpace parent,
                                           IndexPartition handle1,
                                           IndexPartition handle2,
-                                          PartitionKind kind, int color)
+                                          IndexSpace color_space,
+                                          PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal union partition creation performed in leaf "
@@ -6622,7 +6728,8 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
-                                                PartitionKind kind, int color)
+                                                IndexSpace color_space,
+                                                PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal intersection partition creation performed in "
@@ -6640,8 +6747,9 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
+                                                      IndexSpace color_space,
                                                       PartitionKind kind,
-                                                      int color)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal difference partition creation performed in leaf "
@@ -6654,12 +6762,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::create_cross_product_partition(RegionTreeForest *forest,
-                                                     IndexPartition handle1,
-                                                     IndexPartition handle2,
-                                  std::map<DomainPoint,IndexPartition> &handles,
-                                                     PartitionKind kind,
-                                                     int color)
+    Color LeafContext::create_cross_product_partition(RegionTreeForest *forest,
+                                                      IndexPartition handle1,
+                                                      IndexPartition handle2,
+                                   std::map<IndexSpace,IndexPartition> &handles,
+                                                      PartitionKind kind,
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal create cross product partitions performed in "
@@ -6668,6 +6776,28 @@ namespace Legion {
       assert(false);
 #endif
       exit(ERROR_LEAF_TASK_VIOLATION);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_restricted_partition(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                IndexSpace color_space,
+                                                const void *transform,
+                                                const void *extent,
+                                                TypeTag type_tag,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create restricted partition performed in "
+                     "leaf task %s (ID %lld)", get_task_name(),get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
     }
 
     //--------------------------------------------------------------------------
@@ -6677,7 +6807,7 @@ namespace Legion {
                                                 LogicalRegion parent_priv,
                                                 FieldID fid,
                                                 IndexSpace color_space,
-                                                int color)
+                                                Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by field performed in leaf "
@@ -6698,10 +6828,31 @@ namespace Legion {
                                               FieldID fid,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              int color)
+                                              Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by image performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_image_range(
+                                              RegionTreeForest *forest,
+                                              IndexSpace handle,
+                                              LogicalPartition projection,
+                                              LogicalRegion parent,
+                                              FieldID fid,
+                                              IndexSpace color_space,
+                                              PartitionKind part_kind,
+                                              Color color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal partition by image range performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
@@ -6719,10 +6870,31 @@ namespace Legion {
                                                 FieldID fid,
                                                 IndexSpace color_space,
                                                 PartitionKind part_kind,
-                                                int color)
+                                                Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by preimage performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_preimage_range(
+                                                RegionTreeForest *forest,
+                                                IndexPartition projection,
+                                                LogicalRegion handle,
+                                                LogicalRegion parent,
+                                                FieldID fid,
+                                                IndexSpace color_space,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal partition by preimage range performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
@@ -6737,7 +6909,7 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              int color)
+                                              Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal create pending partition performed in leaf "
@@ -7865,7 +8037,7 @@ namespace Legion {
                                                 RegionTreeForest *forest,
                                                 IndexSpace parent,
                                                 IndexSpace color_space,
-                                                size_t granularity, int color)
+                                                size_t granularity, Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_equal_partition(forest, parent, color_space,
@@ -7878,11 +8050,13 @@ namespace Legion {
                                       IndexSpace parent,
                                       IndexPartition handle1,
                                       IndexPartition handle2,
-                                      PartitionKind kind, int color)
+                                      IndexSpace color_space,
+                                      PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_union(forest, parent, handle1,
-                                                  handle2, kind, color);
+                                                  handle2, color_space,
+                                                  kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -7891,11 +8065,13 @@ namespace Legion {
                                       IndexSpace parent,
                                       IndexPartition handle1,
                                       IndexPartition handle2,
-                                      PartitionKind kind, int color)
+                                      IndexSpace color_space,
+                                      PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_intersection(forest, parent,
-                                          handle1, handle2, kind, color);
+                                          handle1, handle2, color_space, 
+                                          kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -7904,24 +8080,42 @@ namespace Legion {
                                       IndexSpace parent,
                                       IndexPartition handle1,
                                       IndexPartition handle2,
-                                      PartitionKind kind, int color)   
+                                      IndexSpace color_space,
+                                      PartitionKind kind, Color color)   
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_difference(forest, parent,
-                                        handle1, handle2, kind, color);
+                          handle1, handle2, color_space, kind, color);
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::create_cross_product_partition(RegionTreeForest *forest,
+    Color InlineContext::create_cross_product_partition(
+                                                       RegionTreeForest *forest,
                                                        IndexPartition handle1,
                                                        IndexPartition handle2,
-                                  std::map<DomainPoint,IndexPartition> &handles,
+                                  std::map<IndexSpace,IndexPartition> &handles,
                                                        PartitionKind kind,
-                                                       int color)
+                                                       Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_cross_product_partition(forest, handle1, handle2,
                                                        handles, kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_restricted_partition(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                IndexSpace color_space,
+                                                const void *transform,
+                                                const void *extent,
+                                                TypeTag type_tag,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_restricted_partition(forest, parent, color_space,
+                                 transform, extent, type_tag, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -7931,7 +8125,7 @@ namespace Legion {
                                                       LogicalRegion parent_priv,
                                                       FieldID fid,
                                                       IndexSpace color_space,
-                                                      int color)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_field(forest, handle, parent_priv,
@@ -7947,11 +8141,27 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color)
+                                                    Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_image(forest, handle, projection,
                                   parent, fid, color_space, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_image_range(
+                                                    RegionTreeForest *forest,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_image_range(forest, handle, 
+                projection, parent, fid, color_space, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -7963,11 +8173,27 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color)
+                                                    Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_preimage(forest, projection, handle,
                                    parent, fid, color_space, part_kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_preimage_range(
+                                                    RegionTreeForest *forest,
+                                                    IndexPartition projection,
+                                                    LogicalRegion handle,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_preimage_range(forest, projection, 
+                          handle, parent, fid, color_space, part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -7976,7 +8202,7 @@ namespace Legion {
                                                     IndexSpace parent,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color)
+                                                    Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_pending_partition(forest, parent, color_space,

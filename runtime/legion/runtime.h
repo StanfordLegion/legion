@@ -1477,32 +1477,43 @@ namespace Legion {
     public:
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
                                             IndexSpace color_space, 
-                                            size_t granuarlity, int color);
+                                            size_t granuarlity, Color color);
       IndexPartition create_partition_by_union(Context ctx, IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,
-                                               PartitionKind kind, int color);
+                                               IndexSpace color_space,
+                                               PartitionKind kind, Color color);
       IndexPartition create_partition_by_intersection(Context ctx, 
                                                IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,
-                                               PartitionKind kind, int color);
+                                               IndexSpace color_space,
+                                               PartitionKind kind, Color color);
       IndexPartition create_partition_by_difference(Context ctx, 
                                                IndexSpace parent,
                                                IndexPartition handle1,
                                                IndexPartition handle2,
-                                               PartitionKind kind, int color);
-      void create_cross_product_partition(Context ctx, 
-                                          IndexPartition handle1,
-                                          IndexPartition handle2,
-                              std::map<DomainPoint,IndexPartition> &handles,
-                                          PartitionKind kind, int color);
+                                               IndexSpace color_space,
+                                               PartitionKind kind, Color color);
+      Color create_cross_product_partition(Context ctx, 
+                                           IndexPartition handle1,
+                                           IndexPartition handle2,
+                              std::map<IndexSpace,IndexPartition> &handles,
+                                           PartitionKind kind, Color color);
+      IndexPartition create_restricted_partition(Context ctx,
+                                                 IndexSpace parent,
+                                                 IndexSpace color_space,
+                                                 const void *transform,
+                                                 const void *extent,
+                                                 TypeTag type_tag,
+                                                 PartitionKind part_kind,
+                                                 Color color);
       IndexPartition create_partition_by_field(Context ctx, 
                                                LogicalRegion handle,
                                                LogicalRegion parent,
                                                FieldID fid,
                                                IndexSpace color_space,
-                                               int color);
+                                               Color color);
       IndexPartition create_partition_by_image(Context ctx,
                                                IndexSpace handle,
                                                LogicalPartition projection,
@@ -1510,7 +1521,15 @@ namespace Legion {
                                                FieldID fid, 
                                                IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               int color);
+                                               Color color);
+      IndexPartition create_partition_by_image_range(Context ctx,
+                                               IndexSpace handle,
+                                               LogicalPartition projection,
+                                               LogicalRegion parent,
+                                               FieldID fid, 
+                                               IndexSpace color_space,
+                                               PartitionKind part_kind,
+                                               Color color);
       IndexPartition create_partition_by_preimage(Context ctx,
                                                IndexPartition projection,
                                                LogicalRegion handle,
@@ -1518,11 +1537,19 @@ namespace Legion {
                                                FieldID fid,
                                                IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               int color);
+                                               Color color);
+      IndexPartition create_partition_by_preimage_range(Context ctx,
+                                               IndexPartition projection,
+                                               LogicalRegion handle,
+                                               LogicalRegion parent,
+                                               FieldID fid,
+                                               IndexSpace color_space,
+                                               PartitionKind part_kind,
+                                               Color color);
       IndexPartition create_pending_partition(Context ctx, IndexSpace parent,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              int color);
+                                              Color color);
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
                                           const DomainPoint &color, 
                                         const std::vector<IndexSpace> &handles);

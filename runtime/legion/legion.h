@@ -2469,7 +2469,7 @@ namespace Legion {
     //==========================================================================
 
     /**
-     * @deprecated, use the dependent partitioning calls instead
+     * @deprecated 
      * \struct ColoredPoints
      * Colored points struct for describing colorings.
      */
