@@ -310,7 +310,7 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename T2>
-  ZRect<N,T>& ZRect<N,T>::operator=(const ZRect<N, T2>& copy_from)
+  inline ZRect<N,T>& ZRect<N,T>::operator=(const ZRect<N, T2>& copy_from)
   {
     lo = copy_from.lo;
     hi = copy_from.hi;
@@ -325,7 +325,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  size_t ZRect<N,T>::volume(void) const
+  inline size_t ZRect<N,T>::volume(void) const
   {
     size_t v = 1;
     for(int i = 0; i < N; i++)
@@ -337,7 +337,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool ZRect<N,T>::contains(const ZPoint<N,T>& p) const
+  inline bool ZRect<N,T>::contains(const ZPoint<N,T>& p) const
   {
     for(int i = 0; i < N; i++)
       if((p[i] < lo[i]) || (p[i] > hi[i])) return false;
@@ -346,7 +346,7 @@ namespace Realm {
 
   // true if all points in other are in this rectangle
   template <int N, typename T>
-  bool ZRect<N,T>::contains(const ZRect<N,T>& other) const
+  inline bool ZRect<N,T>::contains(const ZRect<N,T>& other) const
   {
     // containment is weird w.r.t. emptiness: if other is empty, the answer is
     //  always true - if we're empty, the answer is false, unless other was empty
@@ -366,7 +366,7 @@ namespace Realm {
 
   // true if there are any points in the intersection of the two rectangles
   template <int N, typename T>
-  bool ZRect<N,T>::overlaps(const ZRect<N,T>& other) const
+  inline bool ZRect<N,T>::overlaps(const ZRect<N,T>& other) const
   {
     // overlapping requires there be an element that lies in both ranges, which
     //  is equivalent to saying that both lo's are <= both hi's - this catches
@@ -378,7 +378,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  ZRect<N,T> ZRect<N,T>::intersection(const ZRect<N,T>& other) const
+  inline ZRect<N,T> ZRect<N,T>::intersection(const ZRect<N,T>& other) const
   {
     ZRect<N,T> out;
     for(int i = 0; i < N; i++) {
@@ -389,7 +389,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  ZRect<N,T> ZRect<N,T>::union_bbox(const ZRect<N,T>& other) const
+  inline ZRect<N,T> ZRect<N,T>::union_bbox(const ZRect<N,T>& other) const
   {
     ZRect<N,T> out;
     for(int i = 0; i < N; i++) {
@@ -556,7 +556,7 @@ namespace Realm {
   // kicks off any operation needed to get detailed sparsity information - asking for
   //  approximate data can be a lot quicker for complicated index spaces
   template <int N, typename T>
-  Event ZIndexSpace<N,T>::make_valid(bool precise /*= true*/) const
+  inline Event ZIndexSpace<N,T>::make_valid(bool precise /*= true*/) const
   {
     if(sparsity.exists())
       return sparsity.impl()->make_valid(precise);
@@ -565,7 +565,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool ZIndexSpace<N,T>::is_valid(bool precise /*= true*/) const
+  inline bool ZIndexSpace<N,T>::is_valid(bool precise /*= true*/) const
   {
     if(sparsity.exists())
       return sparsity.impl()->is_valid(precise);
@@ -879,11 +879,11 @@ namespace Realm {
   // simple wrapper for the multiple subspace version
   template <int N, typename T>
   template <int N2, typename T2>
-  Event ZIndexSpace<N,T>::create_subspace_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& field_data,
-						      const ZIndexSpace<N2,T2>& target,
-						      ZIndexSpace<N,T>& preimage,
-						      const ProfilingRequestSet &reqs,
-						      Event wait_on /*= Event::NO_EVENT*/) const
+  inline Event ZIndexSpace<N,T>::create_subspace_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& field_data,
+							     const ZIndexSpace<N2,T2>& target,
+							     ZIndexSpace<N,T>& preimage,
+							     const ProfilingRequestSet &reqs,
+							     Event wait_on /*= Event::NO_EVENT*/) const
   {
     std::vector<ZIndexSpace<N2,T2> > targets(1, target);
     std::vector<ZIndexSpace<N,T> > preimages;
@@ -894,47 +894,7 @@ namespace Realm {
 
   // simple wrappers for the multiple subspace version
   template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_union(const ZIndexSpace<N,T>& lhs,
-						   const ZIndexSpace<N,T>& rhs,
-						   ZIndexSpace<N,T>& result,
-						   const ProfilingRequestSet &reqs,
-						   Event wait_on /*= Event::NO_EVENT*/)
-  {
-    std::vector<ZIndexSpace<N,T> > lhss(1, lhs);
-    std::vector<ZIndexSpace<N,T> > rhss(1, rhs);
-    std::vector<ZIndexSpace<N,T> > results;
-    Event e = compute_unions(lhss, rhss, results, reqs, wait_on);
-    result = results[0];
-    return e;
-  }
-
-  template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_unions(const ZIndexSpace<N,T>& lhs,
-						    const std::vector<ZIndexSpace<N,T> >& rhss,
-						    std::vector<ZIndexSpace<N,T> >& results,
-						    const ProfilingRequestSet &reqs,
-						    Event wait_on /*= Event::NO_EVENT*/)
-  {
-    std::vector<ZIndexSpace<N,T> > lhss(1, lhs);
-    Event e = compute_unions(lhss, rhss, results, reqs, wait_on);
-    return e;
-  }
-
-  template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_unions(const std::vector<ZIndexSpace<N,T> >& lhss,
-						    const ZIndexSpace<N,T>& rhs,
-						    std::vector<ZIndexSpace<N,T> >& results,
-						    const ProfilingRequestSet &reqs,
-						    Event wait_on /*= Event::NO_EVENT*/)
-  {
-    std::vector<ZIndexSpace<N,T> > rhss(1, rhs);
-    Event e = compute_unions(lhss, rhss, results, reqs, wait_on);
-    return e;
-  }
-
-  // simple wrappers for the multiple subspace version
-  template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_intersection(const ZIndexSpace<N,T>& lhs,
+  inline /*static*/ Event ZIndexSpace<N,T>::compute_union(const ZIndexSpace<N,T>& lhs,
 							  const ZIndexSpace<N,T>& rhs,
 							  ZIndexSpace<N,T>& result,
 							  const ProfilingRequestSet &reqs,
@@ -943,17 +903,57 @@ namespace Realm {
     std::vector<ZIndexSpace<N,T> > lhss(1, lhs);
     std::vector<ZIndexSpace<N,T> > rhss(1, rhs);
     std::vector<ZIndexSpace<N,T> > results;
+    Event e = compute_unions(lhss, rhss, results, reqs, wait_on);
+    result = results[0];
+    return e;
+  }
+
+  template <int N, typename T>
+  inline /*static*/ Event ZIndexSpace<N,T>::compute_unions(const ZIndexSpace<N,T>& lhs,
+							   const std::vector<ZIndexSpace<N,T> >& rhss,
+							   std::vector<ZIndexSpace<N,T> >& results,
+							   const ProfilingRequestSet &reqs,
+							   Event wait_on /*= Event::NO_EVENT*/)
+  {
+    std::vector<ZIndexSpace<N,T> > lhss(1, lhs);
+    Event e = compute_unions(lhss, rhss, results, reqs, wait_on);
+    return e;
+  }
+
+  template <int N, typename T>
+  inline /*static*/ Event ZIndexSpace<N,T>::compute_unions(const std::vector<ZIndexSpace<N,T> >& lhss,
+							   const ZIndexSpace<N,T>& rhs,
+							   std::vector<ZIndexSpace<N,T> >& results,
+							   const ProfilingRequestSet &reqs,
+							   Event wait_on /*= Event::NO_EVENT*/)
+  {
+    std::vector<ZIndexSpace<N,T> > rhss(1, rhs);
+    Event e = compute_unions(lhss, rhss, results, reqs, wait_on);
+    return e;
+  }
+
+  // simple wrappers for the multiple subspace version
+  template <int N, typename T>
+  inline /*static*/ Event ZIndexSpace<N,T>::compute_intersection(const ZIndexSpace<N,T>& lhs,
+								 const ZIndexSpace<N,T>& rhs,
+								 ZIndexSpace<N,T>& result,
+								 const ProfilingRequestSet &reqs,
+								 Event wait_on /*= Event::NO_EVENT*/)
+  {
+    std::vector<ZIndexSpace<N,T> > lhss(1, lhs);
+    std::vector<ZIndexSpace<N,T> > rhss(1, rhs);
+    std::vector<ZIndexSpace<N,T> > results;
     Event e = compute_intersections(lhss, rhss, results, reqs, wait_on);
     result = results[0];
     return e;
   }
 
   template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_intersections(const ZIndexSpace<N,T>& lhs,
-							   const std::vector<ZIndexSpace<N,T> >& rhss,
-							   std::vector<ZIndexSpace<N,T> >& results,
-							   const ProfilingRequestSet &reqs,
-							   Event wait_on /*= Event::NO_EVENT*/)
+  inline /*static*/ Event ZIndexSpace<N,T>::compute_intersections(const ZIndexSpace<N,T>& lhs,
+								  const std::vector<ZIndexSpace<N,T> >& rhss,
+								  std::vector<ZIndexSpace<N,T> >& results,
+								  const ProfilingRequestSet &reqs,
+								  Event wait_on /*= Event::NO_EVENT*/)
   {
     std::vector<ZIndexSpace<N,T> > lhss(1, lhs);
     Event e = compute_intersections(lhss, rhss, results, reqs, wait_on);
@@ -961,11 +961,11 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
-							   const ZIndexSpace<N,T>& rhs,
-							   std::vector<ZIndexSpace<N,T> >& results,
-							   const ProfilingRequestSet &reqs,
-							   Event wait_on /*= Event::NO_EVENT*/)
+  inline /*static*/ Event ZIndexSpace<N,T>::compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
+								  const ZIndexSpace<N,T>& rhs,
+								  std::vector<ZIndexSpace<N,T> >& results,
+								  const ProfilingRequestSet &reqs,
+								  Event wait_on /*= Event::NO_EVENT*/)
   {
     std::vector<ZIndexSpace<N,T> > rhss(1, rhs);
     Event e = compute_intersections(lhss, rhss, results, reqs, wait_on);
@@ -974,11 +974,11 @@ namespace Realm {
 
   // simple wrappers for the multiple subspace version
   template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_difference(const ZIndexSpace<N,T>& lhs,
-							const ZIndexSpace<N,T>& rhs,
-							ZIndexSpace<N,T>& result,
-							const ProfilingRequestSet &reqs,
-							Event wait_on /*= Event::NO_EVENT*/)
+  inline /*static*/ Event ZIndexSpace<N,T>::compute_difference(const ZIndexSpace<N,T>& lhs,
+							       const ZIndexSpace<N,T>& rhs,
+							       ZIndexSpace<N,T>& result,
+							       const ProfilingRequestSet &reqs,
+							       Event wait_on /*= Event::NO_EVENT*/)
   {
     std::vector<ZIndexSpace<N,T> > lhss(1, lhs);
     std::vector<ZIndexSpace<N,T> > rhss(1, rhs);
@@ -989,11 +989,11 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_differences(const ZIndexSpace<N,T>& lhs,
-							 const std::vector<ZIndexSpace<N,T> >& rhss,
-							 std::vector<ZIndexSpace<N,T> >& results,
-							 const ProfilingRequestSet &reqs,
-							 Event wait_on /*= Event::NO_EVENT*/)
+  inline /*static*/ Event ZIndexSpace<N,T>::compute_differences(const ZIndexSpace<N,T>& lhs,
+								const std::vector<ZIndexSpace<N,T> >& rhss,
+								std::vector<ZIndexSpace<N,T> >& results,
+								const ProfilingRequestSet &reqs,
+								Event wait_on /*= Event::NO_EVENT*/)
   {
     std::vector<ZIndexSpace<N,T> > lhss(1, lhs);
     Event e = compute_differences(lhss, rhss, results, reqs, wait_on);
@@ -1001,11 +1001,11 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
-							 const ZIndexSpace<N,T>& rhs,
-							 std::vector<ZIndexSpace<N,T> >& results,
-							 const ProfilingRequestSet &reqs,
-							 Event wait_on /*= Event::NO_EVENT*/)
+  inline /*static*/ Event ZIndexSpace<N,T>::compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
+								const ZIndexSpace<N,T>& rhs,
+								std::vector<ZIndexSpace<N,T> >& results,
+								const ProfilingRequestSet &reqs,
+								Event wait_on /*= Event::NO_EVENT*/)
   {
     std::vector<ZIndexSpace<N,T> > rhss(1, rhs);
     Event e = compute_differences(lhss, rhss, results, reqs, wait_on);
@@ -1035,7 +1035,7 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  ZIndexSpaceIterator<N,T>::ZIndexSpaceIterator(const ZIndexSpace<N,T>& _space)
+  inline ZIndexSpaceIterator<N,T>::ZIndexSpaceIterator(const ZIndexSpace<N,T>& _space)
     : valid(false)
   {
     reset(_space);
@@ -1237,7 +1237,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  LinearizedIndexSpaceIntfc *AffineLinearizedIndexSpace<N,T>::clone(void) const
+  inline LinearizedIndexSpaceIntfc *AffineLinearizedIndexSpace<N,T>::clone(void) const
   {
     return new AffineLinearizedIndexSpace<N,T>(*this);
   }
