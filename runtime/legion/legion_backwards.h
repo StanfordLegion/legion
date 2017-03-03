@@ -68,6 +68,23 @@ namespace Legion {
         return result;
       }
 
+      template<int DIM, typename T>
+      DomainPoint(const Realm::ZPoint<DIM,T> &rhs) : dim(DIM)
+      {
+        for (int i = 0; i < DIM; i++)
+          point_data[i] = rhs[i];
+      }
+
+      template<int DIM, typename T>
+      operator Realm::ZPoint<DIM,T>(void) const
+      {
+        assert(DIM == dim);
+        Realm::ZPoint<DIM,T> result;
+        for (int i = 0; i < DIM; i++)
+          result[i] = point_data[i];
+        return result;
+      }
+
       DomainPoint& operator=(const DomainPoint &rhs)
       {
         dim = rhs.dim;
@@ -206,6 +223,25 @@ namespace Legion {
 	  rect_data[i] = other.rect_data[i];
       }
 
+      template<int DIM, typename T>
+      Domain(const Realm::ZRect<DIM,T> &other) : is_id(0), dim(DIM)
+      {
+        for (int i = 0; i < DIM; i++)
+          rect_data[i] = other.lo[i];
+        for (int i = 0; i < DIM; i++)
+          rect_data[DIM+i] = other.hi[i];
+      }
+
+      template<int DIM, typename T>
+      Domain(const Realm::ZIndexSpace<DIM,T> &other)
+        : is_id(other.sparsity.id), dim(DIM)
+      {
+        for (int i = 0; i < DIM; i++)
+          rect_data[i] = other.bounds.lo[i];
+        for (int i = 0; i < DIM; i++)
+          rect_data[DIM+i] = other.bounds.hi[i];
+      }
+
       Domain(const Realm::Domain &other) : is_id(other.is_id), dim(other.dim)
       {
         for(int i = 0; i < MAX_RECT_DIM*2; i++)
@@ -291,6 +327,19 @@ namespace Legion {
           result.lo[i] = rect_data[i];
         for (int i = 0; i < DIM; i++)
           result.hi[i] = rect_data[DIM+i];
+        return result;
+      }
+
+      template<int DIM, typename T>
+      operator Realm::ZIndexSpace<DIM,T>(void) const
+      {
+        assert(DIM == dim);
+        Realm::ZIndexSpace<DIM,T> result;
+        result.sparsity.id = is_id;
+        for (int i = 0; i < DIM; i++)
+          result.bounds.lo[i] = rect_data[i];
+        for (int i = 0; i < DIM; i++)
+          result.bounds.hi[i] = rect_data[DIM+i];
         return result;
       }
 

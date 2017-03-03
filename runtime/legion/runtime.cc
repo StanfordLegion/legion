@@ -9046,7 +9046,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx, size_t max_num_elmts)
+    IndexSpace Runtime::create_index_space(Context ctx, const void *realm_is,
+                                           TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9057,44 +9058,7 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->create_index_space(forest, max_num_elmts);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx, Domain domain)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-      {
-        log_run.error("Illegal dummy context create index space!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DUMMY_CONTEXT_OPERATION);
-      }
-#ifdef DEBUG_LEGION
-      assert(domain.exists());
-#endif
-      return ctx->create_index_space(forest, domain);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::create_index_space(Context ctx, 
-                                           const std::set<Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!domains.empty());
-#endif
-      if (ctx == DUMMY_CONTEXT)
-      {
-        log_run.error("Illegal dummy context create index space!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DUMMY_CONTEXT_OPERATION);
-      }
-      return ctx->create_index_space(forest, domains); 
+      return ctx->create_index_space(forest, realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------

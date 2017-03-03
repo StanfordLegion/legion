@@ -118,11 +118,8 @@ namespace Legion {
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            size_t max_num_elmts) = 0; 
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const Domain &domain) = 0;
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                           const std::set<Domain> &domains) = 0;
+                                            const void *realm_is, 
+                                            TypeTag type_tag) = 0;
       virtual void destroy_index_space(IndexSpace handle) = 0;
       virtual void destroy_index_partition(IndexPartition handle) = 0;
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
@@ -637,11 +634,8 @@ namespace Legion {
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            size_t max_num_elmts);
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const Domain &domain);
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const std::set<Domain> &domains);
+                                            const void *realm_is, 
+                                            TypeTag type_tag);
       virtual void destroy_index_space(IndexSpace handle);
       virtual void destroy_index_partition(IndexPartition handle);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
@@ -1074,11 +1068,8 @@ namespace Legion {
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            size_t max_num_elmts);
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const Domain &domain);
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const std::set<Domain> &domains);
+                                            const void *realm_is, 
+                                            TypeTag type_tag);
       virtual void destroy_index_space(IndexSpace handle);
       virtual void destroy_index_partition(IndexPartition handle);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
@@ -1329,11 +1320,8 @@ namespace Legion {
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            size_t max_num_elmts);
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const Domain &domain);
-      virtual IndexSpace create_index_space(RegionTreeForest *forest,
-                                            const std::set<Domain> &domains);
+                                            const void *realm_is, 
+                                            TypeTag type_tag);
       virtual void destroy_index_space(IndexSpace handle);
       virtual void destroy_index_partition(IndexPartition handle);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,

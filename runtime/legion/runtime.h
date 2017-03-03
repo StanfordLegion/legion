@@ -1456,10 +1456,8 @@ namespace Legion {
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args);
     public:
-      IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
-      IndexSpace create_index_space(Context ctx, Domain domain);
-      IndexSpace create_index_space(Context ctx, 
-                                    const std::set<Domain> &domains);
+      IndexSpace create_index_space(Context ctx, const void *realm_is,
+                                    TypeTag type_tag);
       void destroy_index_space(Context ctx, IndexSpace handle);
       // Called from deletion op
       void finalize_index_space_destroy(IndexSpace handle);

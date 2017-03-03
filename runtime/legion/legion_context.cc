@@ -2485,185 +2485,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space(RegionTreeForest *forest,
-                                                size_t max_num_elmts)
+                                         const void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
       IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id(),
-                        NT_TemplateHelper::encode_tag<1,coord_t>());
+                        runtime->get_unique_index_tree_id(), type_tag);
 #ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task %s "
-                      "(ID %lld) with %zd maximum elements", handle.id, 
-                      get_task_name(), get_unique_id(), max_num_elmts); 
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-
-      Realm::IndexSpace space = 
-                      Realm::IndexSpace::create_index_space(max_num_elmts);
-      forest->create_index_space(handle, Domain(space), 
-                                 UNSTRUCTURED_KIND, MUTABLE);
-      register_index_space_creation(handle);
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InnerContext::create_index_space(RegionTreeForest *forest,
-                                                const Domain &domain)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexSpace handle;
-      switch (domain.get_dim())
-      {
-        case 0:
-        case 1:
-          {
-            handle = IndexSpace(runtime->get_unique_index_space_id(),
-                                runtime->get_unique_index_tree_id(),
-                                NT_TemplateHelper::encode_tag<1,coord_t>()); 
-            break;
-          }
-        case 2:
-          {
-            handle = IndexSpace(runtime->get_unique_index_space_id(),
-                                runtime->get_unique_index_tree_id(),
-                                NT_TemplateHelper::encode_tag<2,coord_t>()); 
-            break;
-          }
-        case 3:
-          {
-            handle = IndexSpace(runtime->get_unique_index_space_id(),
-                                runtime->get_unique_index_tree_id(),
-                                NT_TemplateHelper::encode_tag<3,coord_t>()); 
-            break;
-          }
-        default:
-          assert(false);
-      }
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating dummy index space %x in task %s (ID %lld) "
-                      "for domain", handle.id, get_task_name(),get_unique_id());
-#endif
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-
-      forest->create_index_space(handle, domain, DENSE_ARRAY_KIND, NO_MEMORY);
-      register_index_space_creation(handle);
-      return handle;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InnerContext::create_index_space(RegionTreeForest *forest,
-                                                const std::set<Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexSpace handle;
-      switch (domains.begin()->get_dim())
-      {
-        case 0:
-        case 1:
-          {
-            handle = IndexSpace(runtime->get_unique_index_space_id(),
-                                runtime->get_unique_index_tree_id(),
-                                NT_TemplateHelper::encode_tag<1,coord_t>()); 
-            break;
-          }
-        case 2:
-          {
-            handle = IndexSpace(runtime->get_unique_index_space_id(),
-                                runtime->get_unique_index_tree_id(),
-                                NT_TemplateHelper::encode_tag<2,coord_t>()); 
-            break;
-          }
-        case 3:
-          {
-            handle = IndexSpace(runtime->get_unique_index_space_id(),
-                                runtime->get_unique_index_tree_id(),
-                                NT_TemplateHelper::encode_tag<3,coord_t>()); 
-            break;
-          }
-        default:
-          assert(false);
-      }
-      // First compute the convex hull of all the domains
-      Domain hull = *(domains.begin());
-#ifdef DEBUG_LEGION
-      if (hull.get_dim() == 0)
-      {
-        log_index.error("Create index space with multiple domains "
-                        "must be created with domains for non-zero "
-                        "dimension in task %s (ID %lld)",
-                        get_task_name(), get_unique_id());
-        assert(false);
-        exit(ERROR_DOMAIN_DIM_MISMATCH);
-      }
-      for (std::set<Domain>::const_iterator it = domains.begin();
-            it != domains.end(); it++)
-      {
-        assert(it->exists());
-        if (hull.get_dim() != it->get_dim())
-        {
-          log_index.error("A set of domains passed to create_index_space "
-                          "must all have the same dimensions in task "
-                          "%s (ID %lld)", get_task_name(), get_unique_id());
-          assert(false);
-          exit(ERROR_DOMAIN_DIM_MISMATCH);
-        }
-      }
-#endif
-      switch (hull.get_dim())
-      {
-        case 1:
-          {
-            LegionRuntime::Arrays::Rect<1> base = hull.get_rect<1>();
-            for (std::set<Domain>::const_iterator it = domains.begin();
-                  it != domains.end(); it++)
-            {
-              LegionRuntime::Arrays::Rect<1> next = it->get_rect<1>();
-              base = base.convex_hull(next);
-            }
-            hull = Domain::from_rect<1>(base);
-            break;
-          }
-        case 2:
-          {
-            LegionRuntime::Arrays::Rect<2> base = hull.get_rect<2>();
-            for (std::set<Domain>::const_iterator it = domains.begin();
-                  it != domains.end(); it++)
-            {
-              LegionRuntime::Arrays::Rect<2> next = it->get_rect<2>();
-              base = base.convex_hull(next);
-            }
-            hull = Domain::from_rect<2>(base);
-            break;
-          }
-        case 3:
-          {
-            LegionRuntime::Arrays::Rect<3> base = hull.get_rect<3>();
-            for (std::set<Domain>::const_iterator it = domains.begin();
-                  it != domains.end(); it++)
-            {
-              LegionRuntime::Arrays::Rect<3> next = it->get_rect<3>();
-              base = base.convex_hull(next);
-            }
-            hull = Domain::from_rect<3>(base);
-            break;
-          }
-        default:
-          assert(false);
-      }
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating dummy index space %x in task %s (ID %lld) for "
-                      "domain", handle.id, get_task_name(), get_unique_id());
-#endif
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_top_index_space(handle.id);
-
-      forest->create_index_space(handle, hull, domains,
-                                 DENSE_ARRAY_KIND, NO_MEMORY);
+      forest->create_index_space(handle, realm_is); 
       register_index_space_creation(handle);
       return handle;
     }
@@ -6712,35 +6546,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space(RegionTreeForest *forest,
-                                               size_t max_num_elmts)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal index space creation performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexSpace::NO_SPACE;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace LeafContext::create_index_space(RegionTreeForest *forest,
-                                               const Domain &domain)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal index space creation performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexSpace::NO_SPACE;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace LeafContext::create_index_space(RegionTreeForest *forest,
-                                               const std::set<Domain> &domains)
+                                         const void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal index space creation performed in leaf task %s "
@@ -8034,26 +7840,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
-                                                 size_t max_num_elmts)
+                                         const void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_index_space(forest, max_num_elmts);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
-                                                 const Domain &domain)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(forest, domain);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
-                                                const std::set<Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_space(forest, domains);
+      return enclosing->create_index_space(forest, realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------

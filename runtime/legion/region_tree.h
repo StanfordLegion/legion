@@ -65,11 +65,7 @@ namespace Legion {
     public:
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
-      void create_index_space(IndexSpace handle, const Domain &domain,
-                              IndexSpaceKind kind, AllocateMode mode);
-      void create_index_space(IndexSpace handle, const Domain &hull,
-                              const std::set<Domain> &domains,
-                              IndexSpaceKind kind, AllocateMode mode);
+      void create_index_space(IndexSpace handle, const void *realm_is);
       void create_index_partition(IndexPartition pid, IndexSpace parent,
                                   ColorPoint part_color, 
                                   const std::map<DomainPoint,Domain> &subspaces,

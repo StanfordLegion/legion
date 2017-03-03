@@ -2413,22 +2413,126 @@ namespace Legion {
                                                     size_t max_num_elmts)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_index_space(ctx, max_num_elmts);
+      Realm::ZRect<1,coord_t> bounds((Realm::ZPoint<1,coord_t>(0)),
+                                   (Realm::ZPoint<1,coord_t>(max_num_elmts-1)));
+      Realm::ZIndexSpace<1,coord_t> realm_index_space(bounds);
+      return create_index_space_internal(ctx, &realm_index_space,
+                          Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, Domain domain)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_index_space(ctx, domain);
+      if (domain == Domain::NO_DOMAIN)
+        return IndexSpace::NO_SPACE;
+      switch (domain.get_dim())
+      {
+        case 1:
+          {
+            Realm::ZRect<1,coord_t> bounds = domain;
+            Realm::ZIndexSpace<1,coord_t> realm_is(bounds);
+            return create_index_space_internal(ctx, &realm_is,
+                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+          }
+        case 2:
+          {
+            Realm::ZRect<2,coord_t> bounds = domain;
+            Realm::ZIndexSpace<2,coord_t> realm_is(bounds);
+            return create_index_space_internal(ctx, &realm_is,
+                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+          }
+        case 3:
+          {
+            Realm::ZRect<3,coord_t> bounds = domain;
+            Realm::ZIndexSpace<3,coord_t> realm_is(bounds);
+            return create_index_space_internal(ctx, &realm_is,
+                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+          }
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space(Context ctx, 
-                                                const std::set<Domain> &domains)
+                                           const std::set<Domain> &domains)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_index_space(ctx, domains);
+      if (domains.empty())
+        return IndexSpace::NO_SPACE;
+      // Union these domains together into a common realm index space   
+      // I don't care about performance here so we'll do it the dumb way
+      Realm::ProfilingRequestSet empty_requests;
+      switch (domains.begin()->get_dim())
+      {
+        case 1:
+          {
+            std::vector<Realm::ZIndexSpace<1,coord_t> > spaces(domains.size());
+            unsigned index = 0;
+            for (std::set<Domain>::const_iterator it = domains.begin();
+                  it != domains.end(); it++, index++)
+            {
+              Realm::ZRect<1,coord_t> bounds = *it;  
+              spaces[index] = Realm::ZIndexSpace<1,coord_t>(bounds);
+            }
+            Realm::ZIndexSpace<1,coord_t> realm_index_space;
+            Realm::Event ready = Realm::ZIndexSpace<1,coord_t>::compute_union(
+                spaces, realm_index_space, empty_requests);
+            // Wait for the space to be ready
+            ready.wait();
+            return create_index_space_internal(ctx, &realm_index_space,
+                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+          }
+        case 2:
+          {
+            std::vector<Realm::ZIndexSpace<2,coord_t> > spaces(domains.size());
+            unsigned index = 0;
+            for (std::set<Domain>::const_iterator it = domains.begin();
+                  it != domains.end(); it++, index++)
+            {
+              Realm::ZRect<2,coord_t> bounds = *it;  
+              spaces[index] = Realm::ZIndexSpace<2,coord_t>(bounds);
+            }
+            Realm::ZIndexSpace<2,coord_t> realm_index_space;
+            Realm::Event ready = Realm::ZIndexSpace<2,coord_t>::compute_union(
+                spaces, realm_index_space, empty_requests);
+            // Wait for the space to be ready
+            ready.wait();
+            return create_index_space_internal(ctx, &realm_index_space,
+                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+          }
+        case 3:
+          {
+            std::vector<Realm::ZIndexSpace<3,coord_t> > spaces(domains.size());
+            unsigned index = 0;
+            for (std::set<Domain>::const_iterator it = domains.begin();
+                  it != domains.end(); it++, index++)
+            {
+              Realm::ZRect<3,coord_t> bounds = *it;  
+              spaces[index] = Realm::ZIndexSpace<3,coord_t>(bounds);
+            }
+            Realm::ZIndexSpace<3,coord_t> realm_index_space;
+            Realm::Event ready = Realm::ZIndexSpace<3,coord_t>::compute_union(
+                spaces, realm_index_space, empty_requests);
+            // Wait for the space to be ready
+            ready.wait();
+            return create_index_space_internal(ctx, &realm_index_space,
+                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+          }
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::create_index_space_internal(Context ctx, 
+                                         const void *realm_is, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->create_index_space(ctx, realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -2526,13 +2630,15 @@ namespace Legion {
         }
       }
       unmap_region(ctx, temp_region);
+      // Make an index space for the color space, just leak it for now
+      IndexSpace index_color_space = create_index_space(ctx, color_space);;
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
-                                      temp_lr, color_fid, color_space);
+                                      temp_lr, color_fid, index_color_space);
       // Then project the partition image through the pointer field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result = create_partition_by_image(ctx, parent, temp_lp, 
-                        temp_lr, pointer_fid, color_space, part_kind, color);
+                  temp_lr, pointer_fid, index_color_space, part_kind, color);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -2633,15 +2739,19 @@ namespace Legion {
         }
       }
       unmap_region(ctx, temp_region);
+      // Make an index space for the color space, we'll leak it for now
+      IndexSpaceT<1,Color> index_color_space = 
+                                  create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartitionT<1,coord_t> temp_ip = create_partition_by_field(ctx,
-                                temp_lr, temp_lr, color_fid, color_space);
+                            temp_lr, temp_lr, color_fid, index_color_space);
       // Then project the partition image through the pointer field
       LogicalPartitionT<1,coord_t> temp_lp = 
                                      get_logical_partition(temp_lr, temp_ip);
       IndexPartitionT<1,coord_t> result = create_partition_by_image(ctx,
           IndexSpaceT<1,coord_t>(parent), temp_lp, temp_lr, pointer_fid, 
-          color_space, (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
+          index_color_space, (disjoint ? DISJOINT_KIND : ALIASED_KIND), 
+          part_color);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -2671,7 +2781,6 @@ namespace Legion {
       size_t range_size = 0;
       switch (coloring.begin()->second.get_dim())
       {
-        case 0:
         case 1:
           {
             range_size = sizeof(Realm::ZRect<1,coord_t>);
@@ -2721,7 +2830,6 @@ namespace Legion {
                                 it->first.point_data, color_point_size); 
         switch (it->second.get_dim())
         {
-          case 0:
           case 1:
             {
               Realm::ZRect<1,coord_t> range = it->second;
@@ -2755,13 +2863,15 @@ namespace Legion {
         next_entry++;
       }
       unmap_region(ctx, temp_region);
+      // Make an index space for the color space, just leak it for now
+      IndexSpace index_color_space = create_index_space(ctx, color_space);;
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
-                                      temp_lr, color_fid, color_space);
+                                temp_lr, color_fid, index_color_space);
       // Then project the partition image through the range field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result = create_partition_by_image_range(ctx, parent, 
-            temp_lp, temp_lr, range_fid, color_space, part_kind, color);
+            temp_lp, temp_lr, range_fid, index_color_space, part_kind, color);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -2876,13 +2986,15 @@ namespace Legion {
         next_entry++;
       }
       unmap_region(ctx, temp_region);
+      IndexSpaceT<1,Color> index_color_space = 
+                            create_index_space<1,Color>(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr,
-                                      temp_lr, color_fid, color_space);
+                                      temp_lr, color_fid, index_color_space);
       // Then project the partition image through the pointer field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result = create_partition_by_image_range(ctx,
-          parent, temp_lp, temp_lr, range_fid, color_space, 
+          parent, temp_lp, temp_lr, range_fid, index_color_space, 
           (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
@@ -2916,7 +3028,6 @@ namespace Legion {
       size_t range_size = 0;
       switch (coloring.begin()->second.begin()->get_dim())
       {
-        case 0:
         case 1:
           {
             range_size = sizeof(Realm::ZRect<1,coord_t>);
@@ -2969,7 +3080,6 @@ namespace Legion {
                                   cit->first.point_data, color_point_size); 
           switch (it->get_dim())
           {
-            case 0:
             case 1:
               {
                 Realm::ZRect<1,coord_t> range = *it;
@@ -3004,13 +3114,15 @@ namespace Legion {
         }
       }
       unmap_region(ctx, temp_region);
+      // Make an index space for the color space, just leak it for now
+      IndexSpace index_color_space = create_index_space(ctx, color_space);;
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
-                                      temp_lr, color_fid, color_space);
+                                      temp_lr, color_fid, index_color_space);
       // Then project the partition image through the range field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result = create_partition_by_image_range(ctx, parent, 
-            temp_lp, temp_lr, range_fid, color_space, part_kind, color);
+            temp_lp, temp_lr, range_fid, index_color_space, part_kind, color);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -3132,13 +3244,15 @@ namespace Legion {
         }
       }
       unmap_region(ctx, temp_region);
+      IndexSpaceT<1,Color> index_color_space = 
+                            create_index_space<1,Color>(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr,
-                                      temp_lr, color_fid, color_space);
+                                      temp_lr, color_fid, index_color_space);
       // Then project the partition image through the pointer field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result = create_partition_by_image_range(ctx,
-          parent, temp_lp, temp_lr, range_fid, color_space, 
+          parent, temp_lp, temp_lr, range_fid, index_color_space, 
           (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
@@ -3186,12 +3300,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_union(Context ctx,
                                     IndexSpace parent, IndexPartition handle1,
-                                    IndexPartition handle2, PartitionKind kind,
+                                    IndexPartition handle2, 
+                                    IndexSpace color_space, PartitionKind kind,
                                     int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_union(ctx, parent, handle1, handle2, 
-                                                kind, color);
+                                                color_space, kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -3199,11 +3314,13 @@ namespace Legion {
                                                 Context ctx, IndexSpace parent,
                                                 IndexPartition handle1, 
                                                 IndexPartition handle2,
+                                                IndexSpace color_space,
                                                 PartitionKind kind, int color) 
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_intersection(ctx, parent, handle1,
-                                                       handle2, kind, color);
+                                                       handle2, color_space,
+                                                       kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -3211,22 +3328,38 @@ namespace Legion {
                                                 Context ctx, IndexSpace parent,
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
+                                                IndexSpace color_space,
                                                 PartitionKind kind, int color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_difference(ctx, parent, handle1,
-                                                     handle2, kind, color);
+                                                     handle2, color_space,
+                                                     kind, color);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::create_cross_product_partitions(Context ctx,
                                 IndexPartition handle1, IndexPartition handle2,
-                                std::map<DomainPoint,IndexPartition> &handles,
+                                std::map<IndexSpace,IndexPartition> &handles,
                                 PartitionKind kind, int color)
     //--------------------------------------------------------------------------
     {
       runtime->create_cross_product_partition(ctx, handle1, handle2, handles,
                                               kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_restricted_partition(Context ctx,
+                                              IndexSpace parent, 
+                                              IndexSpace color_space,
+                                              const void *transform,
+                                              const void *extent, 
+                                              TypeTag type_tag,
+                                              PartitionKind part_kind,
+                                              Color color)
+    //--------------------------------------------------------------------------
+    {
+
     }
 
     //--------------------------------------------------------------------------

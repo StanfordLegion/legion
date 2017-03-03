@@ -82,6 +82,7 @@ namespace Legion {
       return *this;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_index_space(IndexSpace handle,
                                               const Domain &domain,
@@ -94,28 +95,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled && (domain.get_dim() > 0))
         IndexSpaceNode::log_index_space_domain(handle, domain);
     }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::create_index_space(IndexSpace handle,
-                                              const Domain &hull,
-                                              const std::set<Domain> &domains,
-                                              IndexSpaceKind kind,
-                                              AllocateMode mode)
-    //--------------------------------------------------------------------------
-    {
-      // Note that it is safe that we do this in two passes
-      // because we haven't given back the handle yet for
-      // the index space so no one actually knows it exists yet.
-      IndexSpaceNode *node = create_node(handle, hull, NULL/*parent*/, 
-                                         ColorPoint(0)/*color*/, kind, mode);
-      node->update_component_domains(domains);
-      if (Runtime::legion_spy_enabled && (hull.get_dim() > 0))
-      {
-        for (std::set<Domain>::const_iterator it = domains.begin();
-              it != domains.end(); it++)
-          IndexSpaceNode::log_index_space_domain(handle, *it);
-      }
-    }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_index_partition(IndexPartition pid,
