@@ -2081,12 +2081,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(const Domain &dom, ptr_t start)
-      : enumerator(dom
-		   .get_index_space().get_valid_mask()
-		   .enumerate_enabled(start.value))
     //--------------------------------------------------------------------------
     {
-      finished = !(enumerator->get_next(current_pointer,remaining_elmts));
+#ifdef DEBUG_LEGION
+      assert(dom.get_dim() == 1);
+#endif
+      iterator = new Domain::DomainPointIterator(dom);
     }
 
     //--------------------------------------------------------------------------
@@ -2095,9 +2095,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain dom = rt->get_index_space_domain(ctx, space);
-      enumerator = dom.get_index_space().get_valid_mask()
- 	              .enumerate_enabled(start.value);
-      finished = !(enumerator->get_next(current_pointer,remaining_elmts));
+#ifdef DEBUG_LEGION
+      assert(dom.get_dim() == 1);
+#endif
+      iterator = new Domain::DomainPointIterator(dom);
     }
 
     //--------------------------------------------------------------------------
@@ -2106,14 +2107,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Domain dom = rt->get_index_space_domain(ctx, handle.get_index_space());
-      enumerator = dom.get_index_space().get_valid_mask()
-	              .enumerate_enabled(start.value);
-      finished = !(enumerator->get_next(current_pointer,remaining_elmts));
+#ifdef DEBUG_LEGION
+      assert(dom.get_dim() == 1);
+#endif
+      iterator = new Domain::DomainPointIterator(dom);
     }
 
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(const IndexIterator &rhs)
-      : enumerator(NULL)
+      : iterator(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2124,7 +2126,7 @@ namespace Legion {
     IndexIterator::~IndexIterator(void)
     //--------------------------------------------------------------------------
     {
-      delete enumerator;
+      delete iterator;
     }
 
     //--------------------------------------------------------------------------

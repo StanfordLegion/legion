@@ -205,7 +205,6 @@ namespace Legion {
     public:
       typedef ::legion_lowlevel_id_t IDType;
       // For backwards compatibility
-      typedef Realm::IndexSpace IndexSpace;
       typedef Realm::ElementMask ElementMask;
       typedef Realm::RegionInstance RegionInstance;
       typedef Realm::Event Event;
@@ -216,7 +215,6 @@ namespace Legion {
       // in lowlevel_config.h
       enum { MAX_RECT_DIM = ::MAX_RECT_DIM };
       Domain(void) : is_id(0), dim(0) {}
-      Domain(IndexSpace is) : is_id(is.id), dim(0) {}
       Domain(const Domain& other) : is_id(other.is_id), dim(other.dim)
       {
 	for(int i = 0; i < MAX_RECT_DIM*2; i++)
@@ -295,7 +293,7 @@ namespace Legion {
 
       static const Domain NO_DOMAIN;
 
-      bool exists(void) const { return (is_id != 0) || (dim > 0); }
+      bool exists(void) const { return (dim > 0); }
 
       template<int DIM>
       static Domain from_rect(typename LegionRuntime::Arrays::Rect<DIM> r)
@@ -360,121 +358,36 @@ namespace Legion {
         return Domain::NO_DOMAIN;
       }
 
-      size_t compute_size(void) const
-      {
-        size_t result;
-        if (dim == 0)
-          result = (2 * sizeof(IDType));
-        else
-          result = ((1 + 2 * dim) * sizeof(IDType));
-        return result;
-      }
+      // No longer supported
+      Realm::IndexSpace get_index_space(void) const;
 
-      IDType *serialize(IDType *data) const
-      {
-	*data++ = dim;
-	if(dim == 0) {
-	  *data++ = is_id;
-	} else {
-	  for(int i = 0; i < dim*2; i++)
-	    *data++ = rect_data[i];
-	}
-	return data;
-      }
-
-      const IDType *deserialize(const IDType *data)
-      {
-	dim = *data++;
-	if(dim == 0) {
-	  is_id = *data++;
-	} else {
-	  for(int i = 0; i < dim*2; i++)
-	    rect_data[i] = *data++;
-	}
-	return data;
-      }
-
-      IndexSpace get_index_space(void) const
-      {
-        if (is_id)
-        {
-          IndexSpace is;
-          is.id = static_cast<IDType>(is_id);
-          return is;
-        }
-        return IndexSpace::NO_SPACE;
-      }
-
-      bool is_valid(void) const
-      {
-        switch (dim)
-        {
-          case -1:
-            return false;
-          case 0:
-            {
-              if (is_id)
-              {
-                IndexSpace is;
-                is.id = static_cast<IDType>(is_id);
-                return is.exists();
-              }
-              return false;
-            }
-          case 3:
-            {
-              if (rect_data[4] > rect_data[5])
-                return false;
-            }
-          case 2:
-            {
-              if (rect_data[2] > rect_data[3])
-                return false;
-            }
-          case 1:
-            {
-              if (rect_data[0] > rect_data[1])
-                return false;
-              break;
-            }
-          default:
-            assert(false);
-        }
-        return true;
-      }
+      bool is_valid(void) const { return exists(); }
 
       bool contains(DomainPoint point) const
       {
+        assert(point.get_dim() == dim);
         bool result = false;
         switch (dim)
         {
-          case -1:
-            break;
-          case 0:
-            {
-              const ElementMask &mask = get_index_space().get_valid_mask();
-              result = mask.is_set(point.point_data[0]);
-              break;
-            }
           case 1:
             {
-              LegionRuntime::Arrays::Point<1> p1 = point.get_point<1>();
-              LegionRuntime::Arrays::Rect<1> r1 = get_rect<1>();
-              result = r1.contains(p1);
+              Realm::ZPoint<1,coord_t> p1 = point;
+              Realm::ZIndexSpace<1,coord_t> is1 = *this;
+              result = is1.contains(p1);
               break;
             }
           case 2:
             {
-              LegionRuntime::Arrays::Point<2> p2 = point.get_point<2>();
-              LegionRuntime::Arrays::Rect<2> r2 = get_rect<2>();
-              result = r2.contains(p2);
+              Realm::ZPoint<2,coord_t> p2 = point;
+              Realm::ZIndexSpace<2,coord_t> is2 = *this;
+              result = is2.contains(p2);
               break;
             }
           case 3:
             {
-              LegionRuntime::Arrays::Point<3> p3 = point.get_point<3>();
-              LegionRuntime::Arrays::Rect<3> r3 = get_rect<3>();
-              result = r3.contains(p3);
+              Realm::ZPoint<3,coord_t> p3 = point;
+              Realm::ZIndexSpace<3,coord_t> is3 = *this;
+              result = is3.contains(p3);
               break;
             }
           default:
@@ -489,22 +402,20 @@ namespace Legion {
       {
         switch (dim)
         {
-          case 0:
-            return get_index_space().get_valid_mask().pop_count();
           case 1:
             {
-              LegionRuntime::Arrays::Rect<1> r1 = get_rect<1>();
-              return r1.volume();
+              Realm::ZIndexSpace<1,coord_t> is = *this;
+              return is.volume();
             }
           case 2:
             {
-              LegionRuntime::Arrays::Rect<2> r2 = get_rect<2>();
-              return r2.volume();
+              Realm::ZIndexSpace<2,coord_t> is = *this;
+              return is.volume();
             }
           case 3:
             {
-              LegionRuntime::Arrays::Rect<3> r3 = get_rect<3>();
-              return r3.volume();
+              Realm::ZIndexSpace<3,coord_t> is = *this;
+              return is.volume();
             }
           default:
             assert(false);
@@ -517,20 +428,45 @@ namespace Legion {
       Domain intersection(const Domain &other) const
       {
         assert(dim == other.dim);
-
+        Realm::ProfilingRequestSet dummy_requests;
         switch (dim)
         {
-          case 0:
-            assert(false);
           case 1:
-            return Domain::from_rect<1>(get_rect<1>().intersection(
-                                              other.get_rect<1>()));
+            {
+              Realm::ZIndexSpace<1,coord_t> is1 = *this;
+              Realm::ZIndexSpace<1,coord_t> is2 = other;
+              Realm::ZIndexSpace<1,coord_t> result;
+              Realm::Event wait_on = 
+                Realm::ZIndexSpace<1,coord_t>::compute_intersection(is1,is2,
+                                                      result,dummy_requests);
+              if (wait_on.exists())
+                wait_on.wait();
+              return Domain(result);
+            }
           case 2:
-            return Domain::from_rect<2>(get_rect<2>().intersection(
-                                              other.get_rect<2>()));
+            {
+              Realm::ZIndexSpace<2,coord_t> is1 = *this;
+              Realm::ZIndexSpace<2,coord_t> is2 = other;
+              Realm::ZIndexSpace<2,coord_t> result;
+              Realm::Event wait_on = 
+                Realm::ZIndexSpace<2,coord_t>::compute_intersection(is1,is2,
+                                                      result,dummy_requests);
+              if (wait_on.exists())
+                wait_on.wait();
+              return Domain(result);
+            }
           case 3:
-            return Domain::from_rect<3>(get_rect<3>().intersection(
-                                              other.get_rect<3>()));
+            {
+              Realm::ZIndexSpace<3,coord_t> is1 = *this;
+              Realm::ZIndexSpace<3,coord_t> is2 = other;
+              Realm::ZIndexSpace<3,coord_t> result;
+              Realm::Event wait_on = 
+                Realm::ZIndexSpace<3,coord_t>::compute_intersection(is1,is2,
+                                                      result,dummy_requests);
+              if (wait_on.exists())
+                wait_on.wait();
+              return Domain(result);
+            }
           default:
             assert(false);
         }
@@ -542,28 +478,44 @@ namespace Legion {
       Domain convex_hull(const DomainPoint &p) const
       {
         assert(dim == p.dim);
-
+        Realm::ProfilingRequestSet dummy_requests;
         switch (dim)
         {
-          case 0:
-            assert(false);
           case 1:
             {
-              LegionRuntime::Arrays::Point<1> pt = p.get_point<1>();
-              return Domain::from_rect<1>(get_rect<1>().convex_hull(
-                    LegionRuntime::Arrays::Rect<1>(pt, pt)));
-             }
+              Realm::ZIndexSpace<1,coord_t> is1 = *this;
+              Realm::ZIndexSpace<1,coord_t> is2(Realm::ZRect<1,coord_t>(p, p));
+              Realm::ZIndexSpace<1,coord_t> result;
+              Realm::Event wait_on = 
+                Realm::ZIndexSpace<1,coord_t>::compute_union(is1,is2,
+                                              result,dummy_requests);
+              if (wait_on.exists())
+                wait_on.wait();
+              return Domain(result);
+            }
           case 2:
             {
-              LegionRuntime::Arrays::Point<2> pt = p.get_point<2>();
-              return Domain::from_rect<2>(get_rect<2>().convex_hull(
-                    LegionRuntime::Arrays::Rect<2>(pt, pt)));
+              Realm::ZIndexSpace<2,coord_t> is1 = *this;
+              Realm::ZIndexSpace<2,coord_t> is2(Realm::ZRect<2,coord_t>(p, p));
+              Realm::ZIndexSpace<2,coord_t> result;
+              Realm::Event wait_on = 
+                Realm::ZIndexSpace<2,coord_t>::compute_union(is1,is2,
+                                              result,dummy_requests);
+              if (wait_on.exists())
+                wait_on.wait();
+              return Domain(result);
             }
           case 3:
             {
-              LegionRuntime::Arrays::Point<3> pt = p.get_point<3>();
-              return Domain::from_rect<3>(get_rect<3>().convex_hull(
-                    LegionRuntime::Arrays::Rect<3>(pt, pt)));
+              Realm::ZIndexSpace<3,coord_t> is1 = *this;
+              Realm::ZIndexSpace<3,coord_t> is2(Realm::ZRect<3,coord_t>(p, p));
+              Realm::ZIndexSpace<3,coord_t> result;
+              Realm::Event wait_on = 
+                Realm::ZIndexSpace<3,coord_t>::compute_union(is1,is2,
+                                              result,dummy_requests);
+              if (wait_on.exists())
+                wait_on.wait();
+              return Domain(result);
             }
           default:
             assert(false);
@@ -573,8 +525,10 @@ namespace Legion {
 
       template <int DIM>
       LegionRuntime::Arrays::Rect<DIM> get_rect(void) const 
-      { 
-        assert(dim == DIM); 
+      {
+        assert(DIM > 0);
+        assert(DIM == dim);
+        assert(is_id == 0);
         return LegionRuntime::Arrays::Rect<DIM>(rect_data); 
       }
 
@@ -584,49 +538,60 @@ namespace Legion {
 	{
 	  p.dim = d.get_dim();
 	  switch(p.get_dim()) {
-	  case 0: // index space
-	    {
-	      const ElementMask *mask = &(d.get_index_space().get_valid_mask());
-	      iterator = (void *)mask;
-              int index = mask->find_enabled();
-	      p.point_data[0] = index;
-	      any_left = (index >= 0);
-	    }
-	    break;
-
 	  case 1:
 	    {
-	      LegionRuntime::Arrays::GenericPointInRectIterator<1> *pir = 
-                new LegionRuntime::Arrays::GenericPointInRectIterator<1>(
-                                                          d.get_rect<1>());
-	      iterator = (void *)pir;
-	      pir->p.to_array(p.point_data);
-	      any_left = pir->any_left;
+              Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
+                new Realm::ZIndexSpaceIterator<1,coord_t>(d);
+	      is_iterator = (void *)is_itr;
+              any_rect_left = is_itr->valid;
+              if (any_rect_left) {
+                Realm::ZPointInRectIterator<1,coord_t> *rect_itr = 
+                  new Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
+                rect_iterator = (void *)rect_itr;
+                any_point_left = rect_itr->valid;
+                p = rect_itr->p; 
+              } else {
+                rect_iterator = NULL;
+                any_point_left = false;
+              }
+	      break;
 	    }
-	    break;
-
 	  case 2:
 	    {
-	      LegionRuntime::Arrays::GenericPointInRectIterator<2> *pir = 
-                new LegionRuntime::Arrays::GenericPointInRectIterator<2>(
-                                                          d.get_rect<2>());
-	      iterator = (void *)pir;
-	      pir->p.to_array(p.point_data);
-	      any_left = pir->any_left;
+              Realm::ZIndexSpaceIterator<2,coord_t> *is_itr = 
+                new Realm::ZIndexSpaceIterator<2,coord_t>(d);
+	      is_iterator = (void *)is_itr;
+              any_rect_left = is_itr->valid;
+              if (any_rect_left) {
+                Realm::ZPointInRectIterator<2,coord_t> *rect_itr = 
+                  new Realm::ZPointInRectIterator<2,coord_t>(is_itr->rect);
+                rect_iterator = (void *)rect_itr;
+                any_point_left = rect_itr->valid;
+                p = rect_itr->p; 
+              } else {
+                rect_iterator = NULL;
+                any_point_left = false;
+              }
+	      break;
 	    }
-	    break;
-
 	  case 3:
 	    {
-	      LegionRuntime::Arrays::GenericPointInRectIterator<3> *pir = 
-                new LegionRuntime::Arrays::GenericPointInRectIterator<3>(
-                                                          d.get_rect<3>());
-	      iterator = (void *)pir;
-	      pir->p.to_array(p.point_data);
-	      any_left = pir->any_left;
+              Realm::ZIndexSpaceIterator<3,coord_t> *is_itr = 
+                new Realm::ZIndexSpaceIterator<3,coord_t>(d);
+	      is_iterator = (void *)is_itr;
+              any_rect_left = is_itr->valid;
+              if (any_rect_left) {
+                Realm::ZPointInRectIterator<3,coord_t> *rect_itr = 
+                  new Realm::ZPointInRectIterator<3,coord_t>(is_itr->rect);
+                rect_iterator = (void *)rect_itr;
+                any_point_left = rect_itr->valid;
+                p = rect_itr->p; 
+              } else {
+                rect_iterator = NULL;
+                any_point_left = false;
+              }
+	      break;
 	    }
-	    break;
-
 	  default:
 	    assert(0);
 	  };
@@ -635,90 +600,119 @@ namespace Legion {
 	~DomainPointIterator(void)
 	{
 	  switch(p.get_dim()) {
-	  case 0:
-	    // nothing to do
-	    break;
-
 	  case 1:
 	    {
-	      LegionRuntime::Arrays::GenericPointInRectIterator<1> *pir = 
-               (LegionRuntime::Arrays::GenericPointInRectIterator<1> *)iterator;
-	      delete pir;
+              Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
+                (Realm::ZIndexSpaceIterator<1,coord_t>*)is_iterator;
+              delete is_itr;
+              if (rect_iterator) {
+                Realm::ZPointInRectIterator<1,coord_t> *rect_itr = 
+                  (Realm::ZPointInRectIterator<1,coord_t>*)rect_iterator;
+                delete rect_itr;
+              }
+              break;
 	    }
-	    break;
-
 	  case 2:
 	    {
-	      LegionRuntime::Arrays::GenericPointInRectIterator<2> *pir = 
-               (LegionRuntime::Arrays::GenericPointInRectIterator<2> *)iterator;
-	      delete pir;
+              Realm::ZIndexSpaceIterator<2,coord_t> *is_itr = 
+                (Realm::ZIndexSpaceIterator<2,coord_t>*)is_iterator;
+              delete is_itr;
+              if (rect_iterator) {
+                Realm::ZPointInRectIterator<2,coord_t> *rect_itr = 
+                  (Realm::ZPointInRectIterator<2,coord_t>*)rect_iterator;
+                delete rect_itr;
+              }
+              break;
 	    }
-	    break;
-
 	  case 3:
 	    {
-	      LegionRuntime::Arrays::GenericPointInRectIterator<3> *pir = 
-               (LegionRuntime::Arrays::GenericPointInRectIterator<3> *)iterator;
-	      delete pir;
+              Realm::ZIndexSpaceIterator<3,coord_t> *is_itr = 
+                (Realm::ZIndexSpaceIterator<3,coord_t>*)is_iterator;
+              delete is_itr;
+              if (rect_iterator) {
+                Realm::ZPointInRectIterator<3,coord_t> *rect_itr = 
+                  (Realm::ZPointInRectIterator<3,coord_t>*)rect_iterator;
+                delete rect_itr;
+              }
+              break;
 	    }
-	    break;
-
 	  default:
 	    assert(0);
 	  }
 	}
 
 	DomainPoint p;
-	bool any_left;
-	void *iterator;
+        void *is_iterator, *rect_iterator;
+        bool any_point_left, any_rect_left;
 
 	bool step(void)
 	{
 	  switch(p.get_dim()) {
-	  case 0:
-	    {
-	      const ElementMask *mask = (const ElementMask *)iterator;
-	      int index = mask->find_enabled(1, p.point_data[0] + 1);
-	      p.point_data[0] = index;
-	      any_left = (index >= 0);
-	    }
-	    break;
-
 	  case 1:
 	    {
-	      LegionRuntime::Arrays::GenericPointInRectIterator<1> *pir = 
-               (LegionRuntime::Arrays::GenericPointInRectIterator<1> *)iterator;
-	      any_left = pir->step();
-	      pir->p.to_array(p.point_data);
+              Realm::ZPointInRectIterator<1,coord_t> *rect_itr = 
+                (Realm::ZPointInRectIterator<1,coord_t>*)rect_iterator;
+              if (!any_point_left) {
+                Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
+                  (Realm::ZIndexSpaceIterator<1,coord_t>*)is_iterator;
+                any_rect_left = is_itr->step();
+                delete rect_itr;
+                rect_itr = 
+                  new Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
+                any_point_left = rect_itr->valid;
+                p = rect_itr->p;
+              } else {
+                any_point_left = rect_itr->step();
+                p = rect_itr->p;
+              }
+              break;
 	    }
-	    break;
-
 	  case 2:
 	    {
-	      LegionRuntime::Arrays::GenericPointInRectIterator<2> *pir = 
-               (LegionRuntime::Arrays::GenericPointInRectIterator<2> *)iterator;
-	      any_left = pir->step();
-	      pir->p.to_array(p.point_data);
-	    }
-	    break;
+              Realm::ZPointInRectIterator<1,coord_t> *rect_itr = 
+                (Realm::ZPointInRectIterator<1,coord_t>*)rect_iterator;
+              if (!any_point_left) {
+                Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
+                  (Realm::ZIndexSpaceIterator<1,coord_t>*)is_iterator;
+                any_rect_left = is_itr->step();
+                delete rect_itr;
+                rect_itr = 
+                  new Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
 
+                any_point_left = rect_itr->valid;
+                p = rect_itr->p;
+              } else {
+                any_point_left = rect_itr->step();
+                p = rect_itr->p;
+              }
+              break;
+	    }
 	  case 3:
 	    {
-	      LegionRuntime::Arrays::GenericPointInRectIterator<3> *pir = 
-               (LegionRuntime::Arrays::GenericPointInRectIterator<3> *)iterator;
-	      any_left = pir->step();
-	      pir->p.to_array(p.point_data);
+              Realm::ZPointInRectIterator<1,coord_t> *rect_itr = 
+                (Realm::ZPointInRectIterator<1,coord_t>*)rect_iterator;
+              if (!any_point_left) {
+                Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
+                  (Realm::ZIndexSpaceIterator<1,coord_t>*)is_iterator;
+                any_rect_left = is_itr->step();
+                delete rect_itr;
+                rect_itr = 
+                  new Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
+                any_point_left = rect_itr->valid;
+                p = rect_itr->p;
+              } else {
+                any_point_left = rect_itr->step();
+                p = rect_itr->p;
+              }
+              break;
 	    }
-	    break;
-
 	  default:
 	    assert(0);
 	  }
-
-	  return any_left;
+          return any_rect_left || any_point_left;
 	}
 
-	operator bool(void) const { return any_left; }
+	operator bool(void) const { return any_rect_left || any_point_left; }
 	DomainPointIterator& operator++(int /*i am postfix*/) 
           { step(); return *this; }
       };

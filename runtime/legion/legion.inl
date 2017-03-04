@@ -1825,26 +1825,15 @@ namespace Legion {
     inline bool IndexIterator::has_next(void) const
     //--------------------------------------------------------------------------
     {
-      return (!finished);
+      return *iterator;
     }
     
     //--------------------------------------------------------------------------
     inline ptr_t IndexIterator::next(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!finished);
-#endif
-      ptr_t result = current_pointer;
-      remaining_elmts--;
-      if (remaining_elmts > 0)
-      {
-        current_pointer++;
-      }
-      else
-      {
-        finished = !(enumerator->get_next(current_pointer, remaining_elmts));
-      }
+      ptr_t result = iterator->p[0];
+      iterator->step();
       return result;
     }
 
@@ -1852,24 +1841,10 @@ namespace Legion {
     inline ptr_t IndexIterator::next_span(size_t& act_count, size_t req_count)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!finished);
-#endif
-      ptr_t result = current_pointer;
-      // did we consume the entire span from the enumerator?
-      if ((size_t)remaining_elmts <= req_count)
-      {
-	// yes, limit the actual count to what we had, and get the next span
-	act_count = remaining_elmts;
-	current_pointer += remaining_elmts;
-        finished = !(enumerator->get_next(current_pointer, remaining_elmts));
-      }
-      else
-      {
-	// no, just return what was requested
-	act_count = req_count;
-	current_pointer += req_count;
-      }
+      // This is slow for backwards compatability
+      ptr_t result = iterator->p[0];
+      iterator->step();
+      act_count = 1;
       return result;
     }
 

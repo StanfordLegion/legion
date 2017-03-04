@@ -23,13 +23,6 @@
 #include "lowlevel.h"
 #include "utilities.h"
 
-#ifdef SHARED_LOWLEVEL
-#define USE_LEGION_CROSS_PRODUCT 1
-#else
-// General LLR can't handle new partion API yet.
-#define USE_LEGION_CROSS_PRODUCT 0
-#endif
-
 #ifndef USE_TLS
 // Mac OS X and GCC <= 4.7 do not support C++11 thread_local.
 #if __cplusplus < 201103L || defined(__MACH__) || (defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ <= 7)))
@@ -294,7 +287,7 @@ should_flip_cross_product(HighLevelRuntime *runtime,
   return rhs_span_count < lhs_span_count;
 }
 
-#if !USE_LEGION_CROSS_PRODUCT
+#ifdef USE_LEGION_PARTAPI_SHIM
 // Creates cross product between structured IndexPartition's.
 // See documentation of `create_cross_product()` for details.
 static Color
@@ -512,14 +505,7 @@ create_cross_product(HighLevelRuntime *runtime,
                      const std::set<DomainPoint> *lhs_filter /* = NULL */,
                      const std::set<DomainPoint> *rhs_filter /* = NULL */)
 {
-#if USE_LEGION_CROSS_PRODUCT
-  std::map<DomainPoint, IndexPartition> handles;
-  runtime->create_cross_product_partitions(
-    ctx, lhs, rhs, handles,
-    (runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND),
-    rhs_color, true);
-  return rhs_color;
-#else
+#ifdef USE_LEGION_PARTAPI_SHIM
   // The two partitions should belong to the same index tree.
   assert(lhs.get_tree_id() == rhs.get_tree_id());
   
@@ -530,6 +516,13 @@ create_cross_product(HighLevelRuntime *runtime,
     return create_cross_product_unstructured(runtime, ctx, lhs, rhs, rhs_color,
         consistent_ids, chosen_colors, lhs_filter, rhs_filter);
   }
+#else
+  std::map<IndexSpace, IndexPartition> handles;
+  runtime->create_cross_product_partitions(
+    ctx, lhs, rhs, handles,
+    (runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND),
+    rhs_color);
+  return rhs_color;
 #endif
 }
 

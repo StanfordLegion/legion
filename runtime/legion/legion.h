@@ -1971,10 +1971,7 @@ namespace Legion {
     public:
       IndexIterator& operator=(const IndexIterator &rhs);
     private:
-      Enumerator *enumerator;
-      bool finished;
-      coord_t current_pointer;
-      size_t remaining_elmts;
+      Domain::DomainPointIterator *iterator;
     };
 
  
@@ -3508,7 +3505,6 @@ namespace Legion {
       bool has_multiple_domains(IndexSpace handle);
 
       /**
-       * @deprecated
        * Return the domain corresponding to the
        * specified index space if it exists
        * @param ctx enclosing task context
