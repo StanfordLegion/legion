@@ -12,15 +12,13 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- type_mismatch_adjust1.rg:23: type mismatch in argument 1: expected a phase barrier but got int32
+--   adjust(1, 1)
+--        ^
+
 import "regent"
 
-task main()
-  var x = phase_barrier(2)
-  arrive(x)
-  adjust(x, 1) -- Add one more arriver.
-  arrive(x)
-  arrive(x)
-  x = advance(x)
-  await(x)
+task f()
+  adjust(1, 1)
 end
-regentlib.start(main)

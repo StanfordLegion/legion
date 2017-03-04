@@ -2225,13 +2225,38 @@ function type_check.expr_advance(cx, node)
   }
 end
 
+function type_check.expr_adjust(cx, node)
+  local barrier = type_check.expr(cx, node.barrier)
+  local barrier_type = std.check_read(cx, barrier)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  if not (std.validate_implicit_cast(barrier_type, std.phase_barrier) or
+            std.is_list_of_phase_barriers(barrier_type) or
+          std.is_dynamic_collective(barrier_type)) then
+    report.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
+  end
+  if not std.validate_implicit_cast(value_type, int) then
+    report.error(node, "type mismatch in argument 2: expected " ..
+                tostring(int) .. " but got " .. tostring(value_type))
+  end
+  local expr_type = barrier_type
+
+  return ast.typed.expr.Adjust {
+    barrier = barrier,
+    value = value,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_arrive(cx, node)
   local barrier = type_check.expr(cx, node.barrier)
   local barrier_type = std.check_read(cx, barrier)
   local value = node.value and type_check.expr(cx, node.value)
   local value_type = node.value and std.check_read(cx, value)
   if not (std.is_phase_barrier(barrier_type) or std.is_dynamic_collective(barrier_type)) then
-    report.error(node, "type mismatch in argument 1: expected a dynamic collective but got " .. tostring(barrier_type))
+    report.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
   end
   if std.is_phase_barrier(barrier_type) and value_type then
     report.error(node, "type mismatch in arrive: expected 1 argument but got 2")
@@ -2984,6 +3009,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Advance) then
     return type_check.expr_advance(cx, node)
+
+  elseif node:is(ast.specialized.expr.Adjust) then
+    return type_check.expr_adjust(cx, node)
 
   elseif node:is(ast.specialized.expr.Arrive) then
     return type_check.expr_arrive(cx, node)

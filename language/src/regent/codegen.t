@@ -4861,6 +4861,67 @@ function codegen.expr_advance(cx, node)
     expr_type)
 end
 
+local function expr_adjust_phase_barrier(cx, barrier, barrier_type,
+                                         value, value_type)
+  if std.is_phase_barrier(barrier_type) then
+    return quote
+      c.legion_phase_barrier_alter_arrival_count(
+        [cx.runtime], [cx.context], [barrier].impl, [value])
+    end
+  elseif std.is_dynamic_collective(barrier_type) then
+    return quote
+      c.legion_dynamic_collective_alter_arrival_count(
+        [cx.runtime], [cx.context], [barrier].impl, [value])
+    end
+  else
+    assert(false)
+  end
+end
+
+local function expr_adjust_list(cx, barrier, barrier_type, value, value_type)
+  if std.is_list(barrier_type) then
+    local result = terralib.newsymbol(barrier_type, "result")
+    local element = terralib.newsymbol(barrier_type.element_type, "element")
+    local inner_actions = expr_adjust_list(
+      cx, element, barrier_type.element_type, value, value_type)
+    local actions = quote
+      for i = 0, [barrier].__size do
+        var [element] = [barrier_type:data(barrier)][i]
+        [inner_actions]
+      end
+    end
+    return actions, result
+  else
+    return expr_adjust_phase_barrier(
+      cx, barrier, barrier_type, value, value_type)
+  end
+end
+
+function codegen.expr_adjust(cx, node)
+  local barrier_type = std.as_read(node.barrier.expr_type)
+  local barrier = codegen.expr(cx, node.barrier):read(cx, barrier_type)
+  local value_type = std.as_read(node.value.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx, value_type)
+  local expr_type = std.as_read(node.expr_type)
+  local actions = quote
+    [barrier.actions];
+    [value.actions];
+    [emit_debuginfo(node)]
+  end
+
+  local result_actions = expr_adjust_list(
+    cx, barrier.value, barrier_type, value.value, value_type)
+  actions = quote
+    [actions];
+    [result_actions]
+  end
+
+  return values.value(
+    node,
+    expr.just(actions, barrier.value),
+    expr_type)
+end
+
 function codegen.expr_arrive(cx, node)
   local barrier_type = std.as_read(node.barrier.expr_type)
   local barrier = codegen.expr(cx, node.barrier):read(cx, barrier_type)
@@ -6314,6 +6375,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Advance) then
     return codegen.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Adjust) then
+    return codegen.expr_adjust(cx, node)
 
   elseif node:is(ast.typed.expr.Arrive) then
     return codegen.expr_arrive(cx, node)

@@ -914,6 +914,19 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("adjust") then
+    p:expect("(")
+    local barrier = p:expr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Adjust {
+      barrier = barrier,
+      value = value,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("arrive") then
     p:expect("(")
     local barrier = p:expr()
