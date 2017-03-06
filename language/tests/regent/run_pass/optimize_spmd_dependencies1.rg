@@ -80,6 +80,7 @@ task toplevel()
   c.legion_domain_point_coloring_destroy(coloring1)
   c.legion_domain_point_coloring_destroy(coloring2)
 
+  __forbid(__vectorize) -- FIXME: Vectorize bug
   for i in r do
     r[i].a = i*(i+1)
     r[i].b = 1000 - i
