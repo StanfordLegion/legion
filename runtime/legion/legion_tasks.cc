@@ -3727,7 +3727,8 @@ namespace Legion {
             localize_region_requirement(clone_requirements[idx]);
             // Also make the region requirement read-write to force
             // people to wait on the value
-            clone_requirements[idx].privilege = READ_WRITE;
+            if (!IS_REDUCE(regions[idx]))
+              clone_requirements[idx].privilege = READ_WRITE;
             unmap_events[idx] = Runtime::create_ap_user_event();
             execution_context->add_physical_region(clone_requirements[idx],
                     false/*mapped*/, map_id, tag, unmap_events[idx],
