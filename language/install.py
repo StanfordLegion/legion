@@ -133,13 +133,11 @@ def install_terra(terra_dir, external_terra_dir, thread_count):
             print(external_terra_dir, terra_dir)
             os.symlink(external_terra_dir, terra_dir)
         return
-    else:
-        if os.path.islink(terra_dir):
-            print('Error: Attempting build with internal Terra when external Terra')
-            print('already exists. Please remove the following symlink to continue with')
-            print('an internal Terra installation.')
-            print('    %s' % terra_dir)
-            sys.exit(1)
+    elif os.path.islink(terra_dir):
+        print('Reusing existing external Terra:')
+        print('    %s' % os.path.realpath(terra_dir))
+        print()
+        return
 
     if not os.path.exists(terra_dir):
         git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
