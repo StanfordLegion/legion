@@ -74,15 +74,21 @@ def build_llvm(source_dir, build_dir, install_dir, thread_count):
     subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
     subprocess.check_call(['make', 'install'], cwd=build_dir)
 
-def build_terra(terra_dir, llvm_dir, thread_count):
+def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
+    flags = [
+        'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
+        'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
+        'LLVM_VERSION=35',
+        '-j', str(thread_count),
+    ]
+    if is_cray:
+        # On Cray systems, need to force dynamic linking.
+        flags.extend([
+            'CC=%s -dynamic' % os.environ['CC'],
+            'CXX=%s -dynamic' % os.environ['CXX'],
+        ])
     subprocess.check_call(
-        ['make',
-         'CC=%s -dynamic' % os.environ['CC'],
-         'CXX=%s -dynamic' % os.environ['CXX'],
-         'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
-         'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
-         'LLVM_VERSION=35',
-         '-j', str(thread_count)],
+        ['make'] + flags,
         cwd = terra_dir)
 
 if __name__ == '__main__':
@@ -92,6 +98,8 @@ if __name__ == '__main__':
         raise Exception('Please set CXX in your environment')
     if 'LG_RT_DIR' in os.environ:
         raise Exception('Please unset LG_RT_DIR in your environment')
+
+    is_cray = 'CRAYPE_VERSION' in os.environ
 
     root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     legion_dir = os.path.dirname(root_dir)
@@ -130,7 +138,7 @@ if __name__ == '__main__':
     terra_dir = os.path.join(root_dir, 'terra.build')
     if not os.path.exists(terra_dir):
         git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-sc17-snapshot')
-        build_terra(terra_dir, llvm_install_dir, thread_count)
+        build_terra(terra_dir, llvm_install_dir, is_cray, thread_count)
 
     use_hdf = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
     install.install(
