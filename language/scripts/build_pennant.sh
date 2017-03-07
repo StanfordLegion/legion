@@ -8,7 +8,7 @@ cd "$1"
 SAVEOBJ=1 ../regent.py ../examples/pennant_fast.rg -fflow 0
 mv ./pennant pennant.none
 
-SAVEOBJ=1 ../regent.py ../examples/pennant_fast.rg -fflow 1 -fflow-spmd-shardsize 12
+SAVEOBJ=1 ../regent.py ../examples/pennant_fast.rg -fflow 1 -fflow-spmd 1 -fflow-spmd-shardsize 12
 mv ./pennant pennant.spmd12
 
 cp ../../bindings/terra/liblegion_terra.so .
@@ -16,4 +16,4 @@ cp ../examples/libpennant.so .
 
 cp -r ../examples/pennant.tests .
 
-cp ../scripts/run_pennant.sh .
+cp ../scripts/*_pennant.sh .
