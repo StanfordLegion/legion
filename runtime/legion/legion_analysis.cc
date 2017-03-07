@@ -4009,7 +4009,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalState::capture_composite_root(CompositeView *composite_view,
-                                               const FieldMask &close_mask,
+                  const FieldMask &close_mask, ReferenceMutator *mutator,
                   const LegionMap<LogicalView*,FieldMask>::aligned &valid_above)
     //--------------------------------------------------------------------------
     {
@@ -4020,7 +4020,7 @@ namespace Legion {
         FieldMask overlap = it->second & close_mask;
         if (!overlap)
           continue;
-        it->first->capture_root(composite_view, overlap);
+        it->first->capture_root(composite_view, overlap, mutator);
       }
       // Finally record any valid above views
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
@@ -7866,7 +7866,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::capture_root(CompositeView *target, 
-                                    const FieldMask &capture_mask) const
+                 const FieldMask &capture_mask, ReferenceMutator *mutator) const
     //--------------------------------------------------------------------------
     { 
       // We'll only capture nested composite views if we have no choice
@@ -7888,7 +7888,8 @@ namespace Legion {
             FieldMask overlap = it->second & capture_mask;
             if (!overlap)
               continue;
-            target->record_child_version_state(cit->first, it->first, overlap);
+            target->record_child_version_state(cit->first, it->first, 
+                                               overlap, mutator);
           }
         }
         FieldMask dirty_overlap = dirty_mask & capture_mask;

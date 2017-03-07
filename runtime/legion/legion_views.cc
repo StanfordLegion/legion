@@ -5562,7 +5562,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeView::record_child_version_state(const ColorPoint &color, 
-                                     VersionState *state, const FieldMask &mask)
+          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       RegionTreeNode *child_node = logical_node->get_tree_child(color);
@@ -5571,7 +5571,7 @@ namespace Legion {
       {
         if (it->first->logical_node == child_node)
         {
-          it->first->record_version_state(state, mask, true/*root*/);
+          it->first->record_version_state(state, mask, mutator, true/*root*/);
           it->second |= mask;
           return;
         }
@@ -5579,7 +5579,7 @@ namespace Legion {
       // Didn't find it so make it
       CompositeNode *child = 
         legion_new<CompositeNode>(child_node, this, did); 
-      child->record_version_state(state, mask, true/*root*/);
+      child->record_version_state(state, mask, mutator, true/*root*/);
       children[child] = mask;
     }
 
@@ -6024,6 +6024,9 @@ namespace Legion {
                               const FieldMask &clone_mask) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+#endif
       const ColorPoint &color = logical_node->get_color();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =  
@@ -6032,7 +6035,9 @@ namespace Legion {
         FieldMask overlap = it->second & clone_mask;
         if (!overlap)
           continue;
-        target->record_child_version_state(color, it->first, overlap);
+        // We already hold a reference here so we can pass a NULL mutator
+        target->record_child_version_state(color, it->first, 
+                                           overlap, NULL/*mutator*/);
       }
     }
 
@@ -6247,7 +6252,8 @@ namespace Legion {
       {
         if (it->first->logical_node == child_node)
         {
-          it->first->record_version_state(state, mask, false/*root*/);
+          it->first->record_version_state(state, mask, 
+                                          NULL/*mutator*/, false/*root*/);
           it->second |= mask;
           return;
         }
@@ -6255,13 +6261,13 @@ namespace Legion {
       // Didn't find it so make it
       CompositeNode *child = 
         legion_new<CompositeNode>(child_node, this, owner_did); 
-      child->record_version_state(state, mask, false/*root*/);
+      child->record_version_state(state, mask, NULL/*mutator*/, false/*root*/);
       children[child] = mask;
     }
 
     //--------------------------------------------------------------------------
     void CompositeNode::record_version_state(VersionState *state, 
-                                             const FieldMask &mask, bool root)
+                    const FieldMask &mask, ReferenceMutator *mutator, bool root)
     //--------------------------------------------------------------------------
     {
       LegionMap<VersionState*,FieldMask>::aligned::iterator finder = 
@@ -6271,7 +6277,7 @@ namespace Legion {
         state->add_nested_resource_ref(owner_did);
         version_states[state] = mask;
         if (root && currently_valid)
-          state->add_nested_valid_ref(owner_did);
+          state->add_nested_valid_ref(owner_did, mutator);
       }
       else
         finder->second |= mask;

@@ -13219,7 +13219,8 @@ namespace Legion {
           }
         }
       }
-      state->capture_composite_root(result, closing_mask, valid_above);
+      WrapperReferenceMutator mutator(ready_events);
+      state->capture_composite_root(result, closing_mask, &mutator,valid_above);
       result->finalize_capture(true/*prune*/);
       // Clear out any reductions
       invalidate_reduction_views(state, closing_mask);
