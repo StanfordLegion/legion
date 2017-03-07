@@ -14,9 +14,9 @@
 
 import "regent"
 
--- The nested reduction privileges caused this test to fail, even
--- WITHOUT inner task optimization. Regent is requesting
--- REDUCTION_FOLD instances for both tasks.
+-- This test exercised two bugs in the runtime, both associated with
+-- nested reduction privileges. One failed with inner optimization,
+-- one without. Both are being tested below.
 
 fspace node {
   m : int,
@@ -44,6 +44,6 @@ task main()
   new(ptr(node, r), n)
   fill(r.m, 0)
   foo_non_inner(r)
-  -- foo_inner(r) -- FIXME: Triggers runtime bug
+  foo_inner(r)
 end
 regentlib.start(main)
