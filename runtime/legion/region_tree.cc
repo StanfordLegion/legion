@@ -2331,7 +2331,7 @@ namespace Legion {
           }
         }
         // Handle any restricted copy out operations we need to do
-        if (!copy_out_views.empty() || !reduce_out_views.empty())
+        if (!copy_out_views.empty())
         {
           RegionNode *node = get_node(req.region);
           RegionTreeContext ctx = enclosing_contexts[idx1]->get_context();

@@ -2825,10 +2825,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert((open_state == OPEN_SINGLE_REDUCE) ||
                (open_state == OPEN_MULTI_REDUCE) ||
-               (open_state == OPEN_REDUCE_PROJ));
+               (open_state == OPEN_REDUCE_PROJ) ||
+               (open_state == OPEN_REDUCE_PROJ_DIRTY));
         assert((rhs.open_state == OPEN_SINGLE_REDUCE) ||
                (rhs.open_state == OPEN_MULTI_REDUCE) ||
-               (rhs.open_state == OPEN_REDUCE_PROJ));
+               (rhs.open_state == OPEN_REDUCE_PROJ) ||
+               (rhs.open_state == OPEN_REDUCE_PROJ_DIRTY));
 #endif
         // Only support merging reduction fields with exactly the
         // same mask which should be single fields for reductions
