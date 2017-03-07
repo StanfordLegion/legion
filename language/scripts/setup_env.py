@@ -50,12 +50,14 @@ def git_update(repo_dir):
 def discover_conduit():
     if 'CONDUIT' in os.environ:
         return os.environ['CONDUIT']
+    elif platform.node().startswith('cori'):
+        return 'aries'
     elif platform.node().startswith('daint'):
         return 'aries'
     elif platform.node().startswith('excalibur'):
         return 'aries'
-    elif platform.node().startswith('cori'):
-        return 'aries'
+    elif platform.node().startswith('quartz'):
+        return 'psm'
     else:
         raise Exception('Please set CONDUIT in your environment')
 
@@ -127,7 +129,7 @@ if __name__ == '__main__':
 
     terra_dir = os.path.join(root_dir, 'terra.build')
     if not os.path.exists(terra_dir):
-        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-ppopp17-snapshot')
+        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-sc17-snapshot')
         build_terra(terra_dir, llvm_install_dir, thread_count)
 
     use_hdf = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
