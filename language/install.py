@@ -150,7 +150,8 @@ def symlink(from_path, to_path):
         os.symlink(from_path, to_path)
 
 def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
-                     cuda, hdf, spy, gasnet, gasnet_dir, clean_first, thread_count, extra_flags):
+                     cuda, hdf, spy, gasnet, gasnet_dir, conduit,
+                     clean_first, thread_count, extra_flags):
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
         ('TERRA_DIR', terra_dir),                           # for bindings
@@ -166,6 +167,7 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
          ] +
         extra_flags +
         (['GASNET=%s' % gasnet_dir] if gasnet_dir is not None else []) +
+        (['CONDUIT=%s' % conduit] if conduit is not None else []) +
         (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
 
     if clean_first:
@@ -203,8 +205,8 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
              os.path.join(bindings_dir, 'liblegion_terra.so')])
 
 def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False, hdf=False,
-            spy=False, rdir=None, external_terra_dir=None, gasnet_dir=None, debug=False,
-            clean_first=True, thread_count=None, extra_flags=[]):
+            spy=False, conduit=None, rdir=None, external_terra_dir=None, gasnet_dir=None,
+            debug=False, clean_first=True, thread_count=None, extra_flags=[]):
     if shared_llr:
         raise Exception('Shared LLR is deprecated. Please use general LLR.')
 
@@ -218,6 +220,9 @@ def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False, hdf=Fa
 
     if spy and not debug:
         raise Exception('Debugging mode is required for detailed Legion Spy.')
+
+    if conduit is not None and not gasnet:
+        raise Exception('GASNet is required for conduit option.')
 
     thread_count = thread_count
     if thread_count is None:
@@ -239,8 +244,8 @@ def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False, hdf=Fa
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
-                     general, cuda, hdf, spy, gasnet, gasnet_dir, clean_first,
-                     thread_count, extra_flags)
+                     general, cuda, hdf, spy, gasnet, gasnet_dir, conduit,
+                     clean_first, thread_count, extra_flags)
 
 def driver():
     parser = argparse.ArgumentParser(
@@ -272,7 +277,11 @@ def driver():
     parser.add_argument(
         '--spy', dest = 'spy', action = 'store_true', required = False,
         default = 'USE_SPY' in os.environ and os.environ['USE_SPY'] == '1',
-        help = 'Build Legion with the detailed Legion Spy enabled.')
+        help = 'Build Legion with detailed Legion Spy enabled.')
+    parser.add_argument(
+        '--conduit', dest = 'conduit', action = 'store', required = False,
+        default = os.environ['CONDUIT'] if 'CONDUIT' in os.environ else None,
+        help = 'Build Legion with specified GASNet conduit.')
     parser.add_argument(
         '--rdir', dest = 'rdir', required = False,
         choices = ['prompt', 'auto', 'manual', 'skip', 'never'], default = None,
