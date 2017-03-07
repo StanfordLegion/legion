@@ -1533,7 +1533,7 @@ namespace Legion {
       void issue_restricted_reductions(const TraversalInfo &info,
          const RestrictInfo &restrict_info,
          const InstanceSet &restricted_instances,
-         const std::vector<MaterializedView*> &restricted_views,
+         const std::vector<InstanceView*> &restricted_views,
          const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views);
       // Look for a view to remove from the set of valid views
       void filter_valid_views(PhysicalState *state, LogicalView *to_filter);
