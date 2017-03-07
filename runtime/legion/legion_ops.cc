@@ -11009,7 +11009,7 @@ namespace Legion {
     void PendingPartitionOp::initialize_cross_product(TaskContext *ctx,
                                                       IndexPartition base,
                                                       IndexPartition source,
-                                  std::map<DomainPoint,IndexPartition> &handles)
+                                  std::map<LegionColor,IndexPartition> &handles)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -11110,8 +11110,6 @@ namespace Legion {
     {
       // Perform the partitioning operation
       ApEvent ready_event = thunk->perform(runtime->forest);
-      // We can trigger the handle ready event now
-      Runtime::trigger_event(handle_ready);
       complete_mapping();
       Runtime::trigger_event(completion_event, ready_event);
       need_completion_trigger = false;
@@ -11123,7 +11121,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      handle_ready = Runtime::create_ap_user_event();
     }
 
     //--------------------------------------------------------------------------
@@ -11430,10 +11427,6 @@ namespace Legion {
       }
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
-#ifdef DEBUG_LEGION
-      assert(handle_ready.exists() && !handle_ready.has_triggered());
-#endif
-      Runtime::trigger_event(handle_ready);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -11458,7 +11451,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
-      handle_ready = Runtime::create_ap_user_event();
     }
 
     //--------------------------------------------------------------------------
@@ -11467,8 +11459,6 @@ namespace Legion {
     {
       deactivate_operation();
       privilege_path = RegionTreePath();
-      if (!handle_ready.has_triggered())
-        Runtime::trigger_event(handle_ready);
       version_info.clear();
       restrict_info.clear();
       map_applied_conditions.clear();

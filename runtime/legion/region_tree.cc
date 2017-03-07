@@ -60,17 +60,6 @@ namespace Legion {
     {
       lookup_lock.destroy_reservation();
       lookup_lock = Reservation::NO_RESERVATION;
-      // Log any index spaces with allocators
-      if (Runtime::legion_spy_enabled)
-      {
-        for (std::map<IndexSpace,IndexSpaceNode*>::const_iterator it = 
-              index_nodes.begin(); it != index_nodes.end(); it++)
-        {
-          const Domain &dom = it->second->get_domain_no_wait();
-          if (dom.get_dim() == 0)
-            IndexSpaceNode::log_index_space_domain(it->first, dom);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -82,41 +71,37 @@ namespace Legion {
       return *this;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_index_space(IndexSpace handle,
-                                              const Domain &domain,
-                                              IndexSpaceKind kind,
-                                              AllocateMode mode) 
+                                              const void *realm_is)
     //--------------------------------------------------------------------------
     {
-      create_node(handle, domain, NULL/*parent*/, 
-                  ColorPoint(0)/*color*/, kind, mode);
-      if (Runtime::legion_spy_enabled && (domain.get_dim() > 0))
-        IndexSpaceNode::log_index_space_domain(handle, domain);
+      IndexSpaceNode *node = 
+        create_node(handle, realm_is, NULL/*parent*/, 0/*color*/);
+      if (Runtime::legion_spy_enabled)
+        node->log_index_space_points();
     }
-#endif
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_index_partition(IndexPartition pid,
-        IndexSpace parent, ColorPoint part_color, 
-        const std::map<DomainPoint,Domain> &coloring, 
-        const Domain &color_space, PartitionKind part_kind, AllocateMode mode)
+    RtEvent RegionTreeForest::create_pending_partition(IndexPartition pid,
+                                                       IndexSpace parent,
+                                                       IndexSpace color_space,
+                                                    LegionColor partition_color,
+                                                       PartitionKind part_kind,
+                                                       ApEvent domain_ready,
+                                                       bool separate_children)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *parent_node = get_node(parent);
-      if (!part_color.is_valid())
-        part_color = ColorPoint(DomainPoint::from_point<1>(
-              LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
+      IndexSpaceNode *color_node = get_node(color_space);
+      if (partition_color == INVALID_COLOR)
+        partition_color = parent_node->generate_color();
       // If we are making this partition on a different node than the
       // owner node of the parent index space then we have to tell that
       // owner node about the existence of this partition
       RtEvent parent_notified;
       const AddressSpaceID parent_owner = parent_node->get_owner_space();
-      // If we have to send the notification and we know the disjointness
-      // then we can send it now, otherwise, wait for disjointness test
-      if ((parent_owner != runtime->address_space) && 
-          (part_kind != COMPUTE_KIND))
+      if (parent_owner != runtime->address_space)
       {
         RtUserEvent notified_event = Runtime::create_rt_user_event();
         Serializer rez;
@@ -124,60 +109,65 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(pid);
           rez.serialize(parent);
-          rez.serialize(part_color);
-          rez.serialize(color_space);
-          rez.serialize(part_kind);
-          rez.serialize(mode);
+          rez.serialize(partition_color);
           rez.serialize(notified_event);
         }
         runtime->send_index_partition_notification(parent_owner, rez);
         parent_notified = notified_event;
       }
-      IndexPartNode *new_part;
       RtUserEvent disjointness_event;
+      IndexPartNode *partition_node;
       if (part_kind == COMPUTE_KIND)
       {
         disjointness_event = Runtime::create_rt_user_event();
-        new_part = create_node(pid, parent_node, part_color, color_space,
-                               disjointness_event, mode);
+        partition_node = create_node(pid, parent_node, color_node,
+                                     partition_color, disjointness_event);
       }
       else
-        new_part = create_node(pid, parent_node, part_color, color_space, 
-                               (part_kind == DISJOINT_KIND), mode);
-
-      if (Runtime::legion_spy_enabled)
       {
-        bool disjoint = (part_kind == DISJOINT_KIND);
-        LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-            part_color.get_point());
-      }
-      // Now do all the child nodes
-      for (std::map<DomainPoint,Domain>::const_iterator it = 
-            coloring.begin(); it != coloring.end(); it++)
-      {
-        if (!color_space.contains(it->first))
-        {
-          log_index.error("Invalid child color specified "
-                                "for create index partition.  All colors "
-                                "must be contained within the "
-                                "given color space");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_PARTITION_COLOR);
-        }
-        IndexSpace handle(runtime->get_unique_index_space_id(),
-                          pid.get_tree_id(), pid.get_type_tag());
-        create_node(handle, it->second, new_part, ColorPoint(it->first),
-                    parent_node->kind, mode);
-
+        const bool disjoint = (part_kind == DISJOINT_KIND);
+        partition_node = create_node(pid, parent_node, color_node,
+                                     partition_color, disjoint);
         if (Runtime::legion_spy_enabled)
+          LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
+                                         partition_color);
+      }
+      // We also need to explicitly instantiate all the children so
+      // that they know the domains will be ready at a later time.
+      // We instantiate them with an empty domain that will be filled in later
+      color_node->instantiate_color_space(partition_node, domain_ready,
+                                          separate_children);
+#if 0
+      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
+      {
+        IndexSpace is(runtime->get_unique_index_space_id(), pid.get_tree_id(),
+                      pid.get_type_tag());
+        ColorPoint child_color(itr.p);
+        if (create_separate)
         {
-          LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-          if (it->second.get_dim() > 0)
-            IndexSpaceNode::log_index_space_domain(handle, it->second);
+#ifdef DEBUG_LEGION
+          assert(!handle_ready.exists());
+          assert(!domain_ready.exists());
+#endif
+          // Create a separate handle ready event for each node
+          ApUserEvent local_handle_ready = Runtime::create_ap_user_event();
+          ApUserEvent local_domain_ready = Runtime::create_ap_user_event();
+          create_node(is, local_handle_ready, local_domain_ready,
+                      partition_node, child_color, parent_node->kind, 
+                      NO_MEMORY);
+          partition_node->add_pending_child(child_color, local_handle_ready,
+                                            local_domain_ready);
         }
-      } 
+        else
+          create_node(is, handle_ready, domain_ready,
+                      partition_node, child_color, parent_node->kind, 
+                      NO_MEMORY);
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
+      }
+#endif
+      // If we need to compute the disjointness, only do that
+      // after the partition is actually ready
       if (part_kind == COMPUTE_KIND)
       {
 #ifdef DEBUG_LEGION
@@ -187,167 +177,10 @@ namespace Legion {
         DisjointnessArgs args;
         args.handle = pid;
         args.ready = disjointness_event;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
+                                         Runtime::protect_event(domain_ready));
       }
-      // If we didn't send the notification yet because we need the 
-      // disjointness test, now we can send it
-      if ((parent_owner != runtime->address_space) && 
-          (part_kind == COMPUTE_KIND))
-      {
-        // Get the disjointness result, this will likely wait on
-        // the disjointness test issued above
-        const bool disjoint = new_part->is_disjoint(true/*app*/);
-        RtUserEvent notified_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(pid);
-          rez.serialize(parent);
-          rez.serialize(part_color);
-          rez.serialize(color_space);
-          if (disjoint)
-            rez.serialize(DISJOINT_KIND);
-          else
-            rez.serialize(ALIASED_KIND);
-          rez.serialize(mode);
-          rez.serialize(notified_event);
-        }
-        runtime->send_index_partition_notification(parent_owner, rez);
-        parent_notified = notified_event;
-      }
-      // Wait for the parent index space to be notified if necessary
-      if (parent_notified.exists())
-        parent_notified.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::create_index_partition(IndexPartition pid,
-       IndexSpace parent, ColorPoint part_color, 
-       const std::map<DomainPoint,Domain> &convex_hulls,
-       const std::map<DomainPoint,std::set<Domain> > &component_domains,
-       const Domain &color_space, PartitionKind part_kind, AllocateMode mode)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *parent_node = get_node(parent);
-      if (!part_color.is_valid())
-        part_color = ColorPoint(DomainPoint::from_point<1>(
-              LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
-      // If we are making this partition on a different node than the
-      // owner node of the parent index space then we have to tell that
-      // owner node about the existence of this partition
-      RtEvent parent_notified;
-      const AddressSpaceID parent_owner = parent_node->get_owner_space();
-      // If we know the disjointness result, we can send the notification
-      // now otherwise we will wait until we know the disjointness
-      if ((parent_owner != runtime->address_space) &&
-          (part_kind != COMPUTE_KIND))
-      {
-        RtUserEvent notified_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(pid);
-          rez.serialize(parent);
-          rez.serialize(part_color);
-          rez.serialize(color_space);
-          rez.serialize(part_kind);
-          rez.serialize(mode);
-          rez.serialize(notified_event);
-        }
-        runtime->send_index_partition_notification(parent_owner, rez);
-        parent_notified = notified_event;
-      }
-      IndexPartNode *new_part;
-      RtUserEvent disjointness_event;
-      if (part_kind == COMPUTE_KIND)
-      {
-        disjointness_event = Runtime::create_rt_user_event();
-        new_part = create_node(pid, parent_node, part_color, color_space, 
-                               disjointness_event, mode);
-      }
-      else
-        new_part = create_node(pid, parent_node, part_color, color_space, 
-                               (part_kind == DISJOINT_KIND), mode);
-
-      if (Runtime::legion_spy_enabled)
-      {
-        bool disjoint = (part_kind == DISJOINT_KIND);
-        LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-            part_color.get_point());
-      }
-      // Now do all the child nodes
-      std::map<DomainPoint,std::set<Domain> >::const_iterator comp_it = 
-        component_domains.begin();
-      for (std::map<DomainPoint,Domain>::const_iterator it = 
-            convex_hulls.begin(); it != convex_hulls.end(); it++, comp_it++)
-      {
-        if (!color_space.contains(it->first))
-        {
-          log_index.error("Invalid child color specified "
-                                "for create index partition.  All colors "
-                                "must be contained within the given"
-                                "color space");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_PARTITION_COLOR);
-        }
-        IndexSpace handle(runtime->get_unique_index_space_id(),
-                          pid.get_tree_id(), pid.get_type_tag());
-        IndexSpaceNode *child = create_node(handle, it->second, 
-                                            new_part, ColorPoint(it->first),
-                                            parent_node->kind, mode);
-        child->update_component_domains(comp_it->second);
-
-        if (Runtime::legion_spy_enabled)
-        {
-          LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-          if (it->second.get_dim() > 0)
-            for (std::set<Domain>::const_iterator cit = 
-                  comp_it->second.begin(); cit != comp_it->second.end(); cit++)
-              IndexSpaceNode::log_index_space_domain(handle, *cit); 
-        }
-      }
-      if (part_kind == COMPUTE_KIND)
-      {
-#ifdef DEBUG_LEGION
-        assert(disjointness_event.exists());
-#endif
-        // Launch a task to compute the disjointness
-        DisjointnessArgs args;
-        args.handle = pid;
-        args.ready = disjointness_event;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
-      }
-      // If we didn't send the notification yet because we need the 
-      // disjointness test, now we can send it
-      if ((parent_owner != runtime->address_space) && 
-          (part_kind == COMPUTE_KIND))
-      {
-        // Get the disjointness result, this will likely wait on
-        // the disjointness test issued above
-        const bool disjoint = new_part->is_disjoint(true/*app*/);
-        RtUserEvent notified_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(pid);
-          rez.serialize(parent);
-          rez.serialize(part_color);
-          rez.serialize(color_space);
-          if (disjoint)
-            rez.serialize(DISJOINT_KIND);
-          else
-            rez.serialize(ALIASED_KIND);
-          rez.serialize(mode);
-          rez.serialize(notified_event);
-        }
-        runtime->send_index_partition_notification(parent_owner, rez);
-        parent_notified = notified_event;
-      }
-      // Wait for the parent index space to be notified if necessary
-      if (parent_notified.exists())
-        parent_notified.wait();
+      return parent_notified;
     }
 
     //--------------------------------------------------------------------------
@@ -427,18 +260,19 @@ namespace Legion {
                                            Realm::IndexSpace::ISO_SUBTRACT);
     }
 
+#if 0 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_cross_product_partitions(
                                                           IndexPartition base,
                                                           IndexPartition source,
-                                  std::map<DomainPoint,IndexPartition> &handles)
+                                  std::map<LegionColor,IndexPartition> &handles)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base_node = get_node(base);
       IndexPartNode *source_node = get_node(source);
       std::set<ApEvent> ready_events;
       // Iterate over all our sub-regions and fill in the intersections
-      for (std::map<DomainPoint,IndexPartition>::const_iterator it = 
+      for (std::map<LegionColor,IndexPartition>::const_iterator it = 
             handles.begin(); it != handles.end(); it++)
       {
         ColorPoint child_color(it->first);
@@ -449,91 +283,6 @@ namespace Legion {
         ready_events.insert(ready);
       }
       return Runtime::merge_events(ready_events);
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::create_pending_partition(IndexPartition pid,
-                                                    IndexSpace parent,
-                                                    IndexSpace color_space,
-                                                    ColorPoint partition_color,
-                                                    PartitionKind part_kind,
-                                                    ApEvent handle_ready,
-                                                    ApEvent domain_ready,
-                                                    bool create_separate)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *parent_node = get_node(parent);
-      if (!partition_color.is_valid())
-        partition_color = ColorPoint(DomainPoint::from_point<1>(
-              LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
-      RtUserEvent disjointness_event;
-      IndexPartNode *partition_node;
-      if (part_kind == COMPUTE_KIND)
-      {
-        disjointness_event = Runtime::create_rt_user_event();
-        partition_node = create_node(pid, parent_node, partition_color,
-                                     color_space, disjointness_event,
-                                     NO_MEMORY);
-      }
-      else
-        partition_node = create_node(pid, parent_node, partition_color,
-                                     color_space, (part_kind == DISJOINT_KIND),
-                                     NO_MEMORY);
-
-      if (Runtime::legion_spy_enabled)
-      {
-        bool disjoint = (part_kind == DISJOINT_KIND);
-        LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-            partition_color.get_point());
-      }
-      // We also need to explicitly instantiate all the children so
-      // that they know the domains will be ready at a later time.
-      // We instantiate them with an empty domain that will be filled in later
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        IndexSpace is(runtime->get_unique_index_space_id(), pid.get_tree_id(),
-                      pid.get_type_tag());
-        ColorPoint child_color(itr.p);
-        if (create_separate)
-        {
-#ifdef DEBUG_LEGION
-          assert(!handle_ready.exists());
-          assert(!domain_ready.exists());
-#endif
-          // Create a separate handle ready event for each node
-          ApUserEvent local_handle_ready = Runtime::create_ap_user_event();
-          ApUserEvent local_domain_ready = Runtime::create_ap_user_event();
-          create_node(is, local_handle_ready, local_domain_ready,
-                      partition_node, child_color, parent_node->kind, 
-                      NO_MEMORY);
-          partition_node->add_pending_child(child_color, local_handle_ready,
-                                            local_domain_ready);
-        }
-        else
-          create_node(is, handle_ready, domain_ready,
-                      partition_node, child_color, parent_node->kind, 
-                      NO_MEMORY);
-        if (Runtime::legion_spy_enabled)
-          LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
-      }
-      // If we need to compute the disjointness, only do that
-      // after the partition is actually ready
-      if (part_kind == COMPUTE_KIND)
-      {
-#ifdef DEBUG_LEGION
-        assert(disjointness_event.exists());
-#endif
-        // Launch a task to compute the disjointness
-        DisjointnessArgs args;
-        args.handle = pid;
-        args.ready = disjointness_event;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
-                                         Runtime::protect_event(domain_ready));
-#ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(domain_ready, disjointness_event);
-#endif
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -767,7 +516,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_pending_space(IndexPartition parent,
                                                     const DomainPoint &color,
-                                                    ApUserEvent &handle_ready,
                                                     ApUserEvent &domain_ready)
     //--------------------------------------------------------------------------
     {
@@ -783,8 +531,7 @@ namespace Legion {
         exit(ERROR_INVALID_PARTITION_COLOR);
       }
       IndexSpaceNode *child_node = parent_node->get_child(child_color);
-      if (!parent_node->get_pending_child(child_color, 
-                                          handle_ready, domain_ready))
+      if (!parent_node->get_pending_child(child_color, domain_ready))
       {
         log_run.error("Invalid pending child!");
 #ifdef DEBUG_LEGION
@@ -7221,6 +6968,10 @@ namespace Legion {
       // Once we get here, we know the disjointness result so we can
       // trigger the event saying when the disjointness value is ready
       Runtime::trigger_event(ready_event);
+      // Record the result for Legion Spy
+      if (Runtime::legion_spy_enabled)
+          LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
+                                         partition_color);
     }
 
     //--------------------------------------------------------------------------
@@ -7508,7 +7259,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool IndexPartNode::get_pending_child(const ColorPoint &child_color,
-                                          ApUserEvent &handle_ready,
                                           ApUserEvent &domain_ready)
     //--------------------------------------------------------------------------
     {
@@ -7517,7 +7267,6 @@ namespace Legion {
         finder = pending_children.find(child_color);
       if (finder != pending_children.end())
       {
-        handle_ready = finder->second.first;
         domain_ready = finder->second.second;
         return true;
       }
@@ -8216,24 +7965,12 @@ namespace Legion {
       derez.deserialize(pid);
       IndexSpace parent;
       derez.deserialize(parent);
-      ColorPoint part_color;
+      LegionColor part_color;
       derez.deserialize(part_color);
-      Domain color_space;
-      derez.deserialize(color_space);
-      PartitionKind part_kind;
-      derez.deserialize(part_kind);
-      AllocateMode mode;
-      derez.deserialize(mode);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-#ifdef DEBUG_LEGION
-      assert(part_kind != COMPUTE_KIND);
-#endif
       IndexSpaceNode *parent_node = forest->get_node(parent);
-      // We know it is safe to make this node because this message only
-      // comes before the handle has been given back to the application
-      forest->create_node(pid, parent_node, part_color, color_space,
-                          (part_kind == DISJOINT_KIND), mode);
+      parent_node->record_remote_child(pid, part_color);
       // Now we can trigger the done event
       Runtime::trigger_event(done_event);
     }

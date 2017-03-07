@@ -3439,9 +3439,11 @@ namespace Legion {
        * @param color of index partition
        * @return true if an index partition exists with the specified color
        */
+      bool has_index_partition(Context ctx, IndexSpace parent, Color color);
       bool has_index_partition(Context ctx, IndexSpace parent,
                                const DomainPoint &color);
       // Context free
+      bool has_index_partition(IndexSpace parent, Color color);
       bool has_index_partition(IndexSpace parent,
                                const DomainPoint &color);
       // Template version
@@ -3514,6 +3516,9 @@ namespace Legion {
       Domain get_index_space_domain(Context ctx, IndexSpace handle);
       // Context free
       Domain get_index_space_domain(IndexSpace handle);
+      // Template version
+      template<int DIM, typename COORD_T>
+      Realm::ZIndexSpace<DIM,COORD_T> get_index_space_domain(IndexSpace handle);
 
       /**
        * @deprecated
@@ -3544,8 +3549,24 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
-      IndexSpaceT<COLOR_DIM,COLOR_COORD_T> 
+      Realm::ZIndexSpace<COLOR_DIM,COLOR_COORD_T>
              get_index_partition_color_space(IndexPartitionT<DIM,COORD_T> p);
+
+      /**
+       * Return the name of the color space for a partition
+       * @param ctx enclosing task context
+       * @param p handle for the index partition
+       * @return the name of the color space of the specified partition
+       */
+      IndexSpace get_index_partition_color_space_name(Context ctx, 
+                                                      IndexPartition p);
+      // Context free
+      IndexSpace get_index_partition_color_space_name(IndexPartition p);
+      // Template version
+      template<int DIM, typename COORD_T,
+               int COLOR_DIM, typename COLOR_COORD_T>
+      IndexSpaceT<COLOR_DIM,COLOR_COORD_T> 
+           get_index_partition_color_space_name(IndexPartitionT<DIM,COORD_T> p);
 
       /**
        * Return a set that contains the colors of all
@@ -3717,17 +3738,15 @@ namespace Legion {
       
       /**
        * Safe case a domain point down to a target region.  If the point
-       * is not in the target region, then an empty domain point
-       * is returned.
+       * is not in the target region, returns false, otherwise returns true
        * @param ctx enclosing task context
        * @param point the domain point to be cast
        * @param region the target logical region
-       * @return the same point if it can be safely cast, otherwise empty
+       * @return if the point is in the logical region
        */
       template<int DIM, typename COORD_T>
-      Realm::ZPoint<DIM,COORD_T> safe_cast(Context ctx, 
-                                           Realm::ZPoint<DIM,COORD_T> point,
-                                           LogicalRegionT<DIM,COORD_T> region);
+      bool safe_cast(Context ctx, Realm::ZPoint<DIM,COORD_T> point,
+                     LogicalRegionT<DIM,COORD_T> region);
     public:
       //------------------------------------------------------------------------
       // Field Space Operations
@@ -6085,6 +6104,45 @@ namespace Legion {
                                       const void *transform,
                                       const void *extent, TypeTag type_tag,
                                       PartitionKind part_kind, Color color);
+      IndexSpace create_index_space_union_internal(Context ctx,
+                                      IndexPartition parent,
+                                      const void *realm_color, TypeTag type_tag,
+                                      const std::vector<IndexSpace> &handles);
+      IndexSpace create_index_space_union_internal(Context ctx, 
+                                      IndexPartition parent, 
+                                      const void *realm_color, TypeTag type_tag,
+                                      IndexPartition handle);
+      IndexSpace create_index_space_intersection_internal(Context ctx,
+                                      IndexPartition parent,
+                                      const void *realm_color, TypeTag type_tag,
+                                      const std::vector<IndexSpace> &handles);
+      IndexSpace create_index_space_intersection_internal(Context ctx, 
+                                      IndexPartition parent, 
+                                      const void *realm_color, TypeTag type_tag,
+                                      IndexPartition handle);
+      IndexSpace create_index_space_difference_internal(Context ctx,
+                                      IndexPartition paretn,
+                                      const void *realm_color, TypeTag type_tag,
+                                      IndexSpace initial,
+                                      const std::vector<IndexSpace> &handles);
+      IndexSpace get_index_subspace_internal(IndexPartition handle, 
+                                      const void *realm_color,TypeTag type_tag);
+      bool has_index_subspace_internal(IndexPartition handle,
+                                      const void *realm_color,TypeTag type_tag);
+      void get_index_partition_color_space_internal(IndexPartition handle,
+                                      void *realm_is, TypeTag type_tag);
+      void get_index_space_domain_internal(IndexSpace handle, 
+                                      void *realm_is, TypeTag type_tag);
+      void get_index_space_color_internal(IndexSpace handle,
+                                      void *realm_color, TypeTag type_tag);
+      bool safe_cast_internal(Context ctx, LogicalRegion region,
+                                      const void *realm_point,TypeTag type_tag);
+      LogicalRegion get_logical_subregion_by_color_internal(
+                                      LogicalPartition parent,
+                                      const void *realm_color,TypeTag type_tag);
+      bool has_logical_subregion_by_color_internal(
+                                      LogicalPartition parent,
+                                      const void *realm_color,TypeTag type_tag);
     private:
       friend class FieldAllocator;
       FieldID allocate_field(Context ctx, FieldSpace space, 

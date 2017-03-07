@@ -2051,7 +2051,7 @@ namespace Legion {
       class CrossProductThunk : public PendingPartitionThunk {
       public:
         CrossProductThunk(IndexPartition b, IndexPartition s,
-                          std::map<DomainPoint,IndexPartition> &h)
+                          std::map<LegionColor,IndexPartition> &h)
           : base(b), source(s), handles(h) { }
         virtual ~CrossProductThunk(void) { }
       public:
@@ -2062,7 +2062,7 @@ namespace Legion {
       protected:
         IndexPartition base;
         IndexPartition source;
-        std::map<DomainPoint,IndexPartition> handles;
+        std::map<LegionColor,IndexPartition> handles;
       };
       class ComputePendingSpace : public PendingPartitionThunk {
       public:
@@ -2122,7 +2122,7 @@ namespace Legion {
                                            IndexPartition handle2);
       void initialize_cross_product(TaskContext *ctx,
                                     IndexPartition base, IndexPartition source,
-                                std::map<DomainPoint,IndexPartition> &handles);
+                                std::map<LegionColor,IndexPartition> &handles);
       void initialize_index_space_union(TaskContext *ctx, IndexSpace target, 
                                         const std::vector<IndexSpace> &handles);
       void initialize_index_space_union(TaskContext *ctx, IndexSpace target, 
@@ -2138,7 +2138,6 @@ namespace Legion {
                                              IndexSpace initial,
                                         const std::vector<IndexSpace> &handles);
       void perform_logging();
-      inline ApEvent get_handle_ready(void) const { return handle_ready; }
     public:
       virtual void trigger_mapping(void);
       virtual bool is_partition_op(void) const { return true; } 
@@ -2148,7 +2147,6 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     protected:
-      ApUserEvent handle_ready;
       PendingPartitionThunk *thunk;
     };
 
@@ -2196,7 +2194,6 @@ namespace Legion {
                                LogicalRegion parent, FieldID fid,
                                IndexSpace color_space);
       const RegionRequirement& get_requirement(void) const;
-      inline ApEvent get_handle_ready(void) const { return handle_ready; }
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
@@ -2216,7 +2213,6 @@ namespace Legion {
     protected:
       void compute_parent_index(void);
     protected:
-      ApUserEvent handle_ready;
       PartOpKind partition_kind;
       RegionRequirement requirement;
       VersionInfo version_info;

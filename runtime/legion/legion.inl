@@ -2158,8 +2158,10 @@ namespace Legion {
       std::vector<IndexSpace> untyped_handles(handles.size());
       for (unsigned idx = 0; idx < handles.size(); idx++)
         untyped_handles[idx] = handles[idx];
-      return IndexSpaceT<DIM,T>(create_index_space_union(ctx, 
-            IndexPartition(parent), DomainPoint(color), untyped_handles));
+      return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx, 
+            IndexPartition(parent), &color, 
+            Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
+            untyped_handles));
     }
 
     //--------------------------------------------------------------------------
@@ -2170,8 +2172,10 @@ namespace Legion {
                                 IndexPartitionT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
-      return IndexSpaceT<DIM,T>(create_index_space_union(ctx,
-          IndexPartition(parent), DomainPoint(color), IndexPartition(handle)));
+      return IndexSpaceT<DIM,T>(create_index_space_union_internal(ctx,
+          IndexPartition(parent), &color, 
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
+          IndexPartition(handle)));
     }
 
     //--------------------------------------------------------------------------
@@ -2186,8 +2190,10 @@ namespace Legion {
       std::vector<IndexSpace> untyped_handles(handles.size());
       for (unsigned idx = 0; idx < handles.size(); idx++)
         untyped_handles[idx] = handles[idx];
-      return IndexSpaceT<DIM,T>(create_index_space_intersection(ctx, 
-            IndexPartition(parent), DomainPoint(color), untyped_handles));
+      return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
+            IndexPartition(parent), &color,
+            Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
+            untyped_handles));
     }
 
     //--------------------------------------------------------------------------
@@ -2198,8 +2204,10 @@ namespace Legion {
                                 IndexPartitionT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
-      return IndexSpaceT<DIM,T>(create_index_space_intersection(ctx,
-          IndexPartition(parent), DomainPoint(color), IndexPartition(handle)));
+      return IndexSpaceT<DIM,T>(create_index_space_intersection_internal(ctx,
+          IndexPartition(parent), &color, 
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(),
+          IndexPartition(handle)));
     }
 
     //--------------------------------------------------------------------------
@@ -2215,9 +2223,10 @@ namespace Legion {
       std::vector<IndexSpace> untyped_handles(handles.size());
       for (unsigned idx = 0; idx < handles.size(); idx++)
         untyped_handles[idx] = handles[idx];
-      return IndexSpaceT<DIM,T>(create_index_space_difference(ctx,
-            IndexPartition(parent), DomainPoint(color), IndexSpace(initial),
-            untyped_handles));
+      return IndexSpaceT<DIM,T>(create_index_space_difference_internal(ctx,
+            IndexPartition(parent), &color,
+            Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>(), 
+            IndexSpace(initial), untyped_handles));
     }
 
     //--------------------------------------------------------------------------
@@ -2244,7 +2253,8 @@ namespace Legion {
                                          Realm::ZPoint<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
-      return get_index_subspace(IndexPartition(p), DomainPoint(color));
+      return get_index_subspace_internal(IndexPartition(p), &color,
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
     }
 
     //--------------------------------------------------------------------------
@@ -2253,16 +2263,41 @@ namespace Legion {
                                      Realm::ZPoint<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
-      return has_index_subspace(IndexPartition(p), DomainPoint(color));
+      return has_index_subspace_internal(IndexPartition(p), &color,
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::ZIndexSpace<DIM,T> Runtime::get_index_space_domain(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> realm_is;
+      get_index_space_domain_internal(handle, &realm_is, 
+          Internal::NT_TemplateHelper::encode_tag<DIM,T>());
+      return realm_is;
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
-    IndexSpaceT<COLOR_DIM,COLOR_T> Runtime::get_index_partition_color_space(
-                                                       IndexPartitionT<DIM,T> p)
+    Realm::ZIndexSpace<COLOR_DIM,COLOR_T> 
+              Runtime::get_index_partition_color_space(IndexPartitionT<DIM,T> p)
     //--------------------------------------------------------------------------
     {
-      return get_index_partition_color_space(IndexPartition(p));
+      Realm::ZIndexSpace<COLOR_DIM, COLOR_T> realm_is;
+      get_index_partition_color_space_internal(p, &realm_is, 
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
+      return realm_is;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexSpaceT<COLOR_DIM,COLOR_T> 
+         Runtime::get_index_partition_color_space_name(IndexPartitionT<DIM,T> p)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<COLOR_DIM,COLOR_T>(
+                              get_index_space_partition_color_space_name(p));
     }
 
     //--------------------------------------------------------------------------
@@ -2281,7 +2316,9 @@ namespace Legion {
                                                       IndexSpaceT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
-      return get_index_space_color(IndexSpace(handle));
+      Realm::ZPoint<COLOR_DIM,COLOR_T> point;
+      get_index_space_color_internal(IndexSpace(handle), &point,
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
     }
 
     //--------------------------------------------------------------------------
@@ -2305,11 +2342,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Realm::ZPoint<DIM,T> Runtime::safe_cast(Context ctx, 
-                       Realm::ZPoint<DIM,T> point, LogicalRegionT<DIM,T> region)
+    bool Runtime::safe_cast(Context ctx, Realm::ZPoint<DIM,T> point, 
+                            LogicalRegionT<DIM,T> region)
     //--------------------------------------------------------------------------
     {
-      return safe_cast(ctx, DomainPoint(point), LogicalRegion(region));
+      return safe_cast_internal(ctx, LogicalRegion(region), &point,
+          Internal::NT_TemplateHelper::encode_tag<DIM,T>());
     }
 
     //--------------------------------------------------------------------------
@@ -2368,8 +2406,9 @@ namespace Legion {
         LogicalPartitionT<DIM,T> parent, Realm::ZPoint<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
-      return LogicalRegionT<DIM,T>(get_logical_subregion_by_color(
-                    LogicalPartition(parent), DomainPoint(color)));
+      return LogicalRegionT<DIM,T>(get_logical_subregion_by_color_interal(
+            LogicalPartition(parent), &color,
+            Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>()));
     }
 
     //--------------------------------------------------------------------------
@@ -2378,8 +2417,9 @@ namespace Legion {
         LogicalPartitionT<DIM,T> parent, Realm::ZPoint<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
-      return has_logical_subregion_by_color(LogicalPartition(parent), 
-                                            DomainPoint(color));
+      return has_logical_subregion_by_color_internal(
+          LogicalPartition(parent), &color,
+          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
     }
 
     //--------------------------------------------------------------------------

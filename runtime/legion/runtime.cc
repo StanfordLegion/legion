@@ -9109,278 +9109,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::validate_unstructured_disjointness(IndexPartition pid,
-                                    const std::map<DomainPoint,Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-      std::set<DomainPoint> current_colors;
-      for (std::map<DomainPoint,Domain>::const_iterator it1 = 
-            domains.begin(); it1 != domains.end(); it1++)
-      {
-        current_colors.insert(it1->first);
-        for (std::map<DomainPoint,Domain>::const_iterator it2 = 
-              domains.begin(); it2 != domains.end(); it2++)
-        {
-          // Skip pairs that we already checked
-          if (current_colors.find(it2->first) != current_colors.end())
-            continue;
-          // Otherwise perform the check
-          const Realm::ElementMask &em1 = 
-            it1->second.get_index_space().get_valid_mask();
-          const Realm::ElementMask &em2 = 
-            it2->second.get_index_space().get_valid_mask();
-          Realm::ElementMask::OverlapResult result = 
-            em1.overlaps_with(em2, 1/*effort level*/);
-          if (result == Realm::ElementMask::OVERLAP_YES)
-          {
-            log_run.error("ERROR: colors %d and %d of partition %d "
-                          "are not disjoint when they were claimed to be!",
-                          (int)it1->first.get_index(),
-                          (int)it2->first.get_index(), pid.id);
-            assert(false);
-            exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-          }
-          else if (result == Realm::ElementMask::OVERLAP_MAYBE)
-          {
-            log_run.warning("WARNING: colors %d and %d of partition "
-                          "%d may not be disjoint when they were claimed to be!"
-                           "(At least according to the low-level runtime.  You "
-                            "might also try telling the the low-level runtime "
-                            "to stop being lazy and try harder.)",
-                            (int)it1->first.get_index(),
-                            (int)it2->first.get_index(), pid.id);
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::validate_structured_disjointness(IndexPartition pid,
-                                    const std::map<DomainPoint,Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-      std::set<DomainPoint> current_colors;
-      for (std::map<DomainPoint,Domain>::const_iterator it1 = 
-            domains.begin(); it1 != domains.end(); it1++)
-      {
-        current_colors.insert(it1->first);
-        for (std::map<DomainPoint,Domain>::const_iterator it2 = 
-              domains.begin(); it2 != domains.end(); it2++)
-        {
-          if (current_colors.find(it2->first) != current_colors.end())
-            continue;
-          assert(it1->second.get_dim() == it2->second.get_dim());
-          switch (it1->second.get_dim())
-          {
-            case 1:
-              {
-                LegionRuntime::Arrays::Rect<1> d1 = it1->second.get_rect<1>();
-                LegionRuntime::Arrays::Rect<1> d2 = it2->second.get_rect<1>();
-                if (d1.overlaps(d2))
-                {
-                  log_run.error("ERROR: colors %d and %d of "
-                                       "partition %d are not disjoint "
-                                       "when they are claimed to be!",
-                                (int)it1->first[0], (int)it2->first[0], pid.id);
-                  assert(false);
-                  exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-                }
-                break;
-              }
-            case 2:
-              {
-                LegionRuntime::Arrays::Rect<2> d1 = it1->second.get_rect<2>();
-                LegionRuntime::Arrays::Rect<2> d2 = it2->second.get_rect<2>();
-                if (d1.overlaps(d2))
-                {
-                  log_run.error("ERROR: colors (%d,%d) and "
-                                      "(%d,%d) of partition %d are "
-                                      "not disjoint when they are "
-                                      "claimed to be!",
-                            (int)it1->first[0], (int)it1->first[1],
-                            (int)it2->first[0], (int)it2->first[1], pid.id);
-                  assert(false);
-                  exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-                }
-                break;
-              }
-            case 3:
-              {
-                LegionRuntime::Arrays::Rect<3> d1 = it1->second.get_rect<3>();
-                LegionRuntime::Arrays::Rect<3> d2 = it2->second.get_rect<3>();
-                if (d1.overlaps(d2))
-                {
-                  log_run.error("ERROR: colors (%d,%d,%d) and "
-                                       "(%d,%d,%d) of partition %d are "
-                                       "not disjoint when they are "
-                                       "claimed to be!",
-                                       (int)it1->first[0],
-                                       (int)it1->first[1],
-                                       (int)it1->first[2],
-                                       (int)it2->first[0],
-                                       (int)it2->first[1],
-                                       (int)it2->first[2], pid.id);
-                  assert(false);
-                  exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-                }
-                break;
-              }
-            default:
-              assert(false); // should never get here
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::validate_multi_structured_disjointness(IndexPartition pid,
-                         const std::map<DomainPoint,std::set<Domain> > &domains)
-    //--------------------------------------------------------------------------
-    {
-      std::set<DomainPoint> current_colors;
-      for (std::map<DomainPoint,std::set<Domain> >::const_iterator it1 = 
-            domains.begin(); it1 != domains.end(); it1++)
-      {
-        current_colors.insert(it1->first);
-        for (std::map<DomainPoint,std::set<Domain> >::const_iterator it2 = 
-              domains.begin(); it2 != domains.end(); it2++)
-        {
-          if (current_colors.find(it2->first) != current_colors.end())
-            continue;
-          for (std::set<Domain>::const_iterator it3 = it1->second.begin();
-                it3 != it1->second.end(); it3++)
-          {
-            for (std::set<Domain>::const_iterator it4 = it2->second.begin();
-                  it4 != it2->second.end(); it4++)
-            {
-              assert(it3->get_dim() == it4->get_dim());
-              switch (it3->get_dim())
-              {
-                case 1:
-                  {
-                    LegionRuntime::Arrays::Rect<1> d1 = it3->get_rect<1>();
-                    LegionRuntime::Arrays::Rect<1> d2 = it4->get_rect<1>();
-                    if (d1.overlaps(d2))
-                    {
-                      log_run.error("ERROR: colors %d and %d of "
-                                           "multi-domain partition %d are "
-                                           "not disjoint when they are "
-                                           "claimed to be!", 
-                                           (int)it1->first[0],
-                                           (int)it2->first[0], pid.id);
-                      assert(false);
-                      exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-                    }
-                    break;
-                  }
-                case 2:
-                  {
-                    LegionRuntime::Arrays::Rect<2> d1 = it3->get_rect<2>();
-                    LegionRuntime::Arrays::Rect<2> d2 = it4->get_rect<2>();
-                    if (d1.overlaps(d2))
-                    {
-                      log_run.error("ERROR: colors (%d,%d) and (%d,%d) "
-                                           "of multi-domain partition %d are "
-                                           "not disjoint when they are "
-                                           "claimed to be!", 
-                                           (int)it1->first[0],
-                                           (int)it1->first[1],
-                                           (int)it2->first[0],
-                                           (int)it2->first[1], pid.id);
-                      assert(false);
-                      exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-                    }
-                    break;
-                  }
-                case 3:
-                  {
-                    LegionRuntime::Arrays::Rect<3> d1 = it3->get_rect<3>();
-                    LegionRuntime::Arrays::Rect<3> d2 = it4->get_rect<3>();
-                    if (d1.overlaps(d2))
-                    {
-                      log_run.error("ERROR: colors (%d,%d,%d) and "
-                                           "(%d,%d,%d) of multi-domain "
-                                           "partition %d are not disjoint "
-                                           "when they are claimed to be!", 
-                                           (int)it1->first[0],
-                                           (int)it1->first[1],
-                                           (int)it1->first[2],
-                                           (int)it2->first[0],
-                                           (int)it2->first[1],
-                                           (int)it2->first[2], pid.id);
-                      assert(false);
-                      exit(ERROR_DISJOINTNESS_TEST_FAILURE);
-                    }
-                    break;
-                  }
-                default:
-                  assert(false);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    Domain Runtime::construct_convex_hull(const std::set<Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-      Domain hull = *(domains.begin());
-      switch (hull.get_dim())
-      {
-        case 1:
-          {
-            LegionRuntime::Arrays::Rect<1> base = hull.get_rect<1>();
-            for (std::set<Domain>::const_iterator dom_it =
-                  domains.begin(); dom_it != domains.end(); dom_it++)
-            {
-#ifdef DEBUG_LEGION
-              assert(dom_it->get_dim() == 1);
-#endif
-              LegionRuntime::Arrays::Rect<1> next = dom_it->get_rect<1>();
-              base = base.convex_hull(next);
-            }
-            hull = Domain::from_rect<1>(base);
-            break;
-          }
-        case 2:
-          {
-            LegionRuntime::Arrays::Rect<2> base = hull.get_rect<2>();
-            for (std::set<Domain>::const_iterator dom_it =
-                  domains.begin(); dom_it != domains.end(); dom_it++)
-            {
-#ifdef DEBUG_LEGION
-              assert(dom_it->get_dim() == 2);
-#endif
-              LegionRuntime::Arrays::Rect<2> next = dom_it->get_rect<2>();
-              base = base.convex_hull(next);
-            }
-            hull = Domain::from_rect<2>(base);
-            break;
-          }
-        case 3:
-          {
-            LegionRuntime::Arrays::Rect<3> base = hull.get_rect<3>();
-            for (std::set<Domain>::const_iterator dom_it =
-                  domains.begin(); dom_it != domains.end(); dom_it++)
-            {
-#ifdef DEBUG_LEGION
-              assert(dom_it->get_dim() == 3);
-#endif
-              LegionRuntime::Arrays::Rect<3> next = dom_it->get_rect<3>();
-              base = base.convex_hull(next);
-            }
-            hull = Domain::from_rect<3>(base);
-            break;
-          }
-        default:
-          assert(false);
-      }
-      return hull;
-    }
-
-    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_equal_partition(Context ctx, 
                                                    IndexSpace parent,
                                                    IndexSpace color_space,
@@ -9650,7 +9378,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union(Context ctx, 
                                                  IndexPartition parent,
-                                                 const DomainPoint &color,
+                                                 const void *realm_color, 
+                                                 TypeTag type_tag,
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
@@ -9662,13 +9391,15 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->create_index_space_union(forest, parent, color, handles);
+      return ctx->create_index_space_union(forest, parent, realm_color, 
+                                           type_tag, handles);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_union(Context ctx,
                                                  IndexPartition parent,
-                                                 const DomainPoint &color,
+                                                 const void *realm_color,
+                                                 TypeTag type_tag,
                                                  IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -9680,13 +9411,15 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->create_index_space_union(forest, parent, color, handle);
+      return ctx->create_index_space_union(forest, parent, realm_color, 
+                                           type_tag, handle);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection(Context ctx,
                                                         IndexPartition parent,
-                                                       const DomainPoint &color,
+                                                        const void *realm_color,
+                                                        TypeTag type_tag,
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
@@ -9699,14 +9432,15 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->create_index_space_intersection(forest, parent, 
-                                                  color, handles); 
+      return ctx->create_index_space_intersection(forest, parent, realm_color,
+                                                  type_tag, handles); 
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_intersection(Context ctx,
                                                         IndexPartition parent,
-                                                       const DomainPoint &color,
+                                                        const void *realm_color,
+                                                        TypeTag type_tag,
                                                         IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -9719,13 +9453,15 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->create_index_space_intersection(forest, parent, color,handle);
+      return ctx->create_index_space_intersection(forest, parent, realm_color,
+                                                  type_tag, handle);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::create_index_space_difference(Context ctx,
                                                       IndexPartition parent,
-                                                      const DomainPoint &color,
+                                                      const void *realm_color,
+                                                      TypeTag type_tag,
                                                       IndexSpace initial,
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -9739,8 +9475,8 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->create_index_space_difference(forest, parent, color,
-                                                initial, handles);
+      return ctx->create_index_space_difference(forest, parent, realm_color,
+                                                type_tag, initial, handles);
     }
 
     //--------------------------------------------------------------------------
@@ -9760,13 +9496,11 @@ namespace Legion {
     IndexPartition Runtime::get_index_partition(IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition result = forest->get_index_partition(parent, 
-                                                          ColorPoint(color));
+      IndexPartition result = forest->get_index_partition(parent, color);
 #ifdef DEBUG_LEGION
       if (!result.exists())
       {
-        log_index.error("Invalid color %d for get index partitions", 
-                                color);
+        log_index.error("Invalid color %d for get index partitions", color);
         assert(false);
         exit(ERROR_INVALID_INDEX_SPACE_COLOR);
       }
@@ -9775,55 +9509,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_index_partition(Context ctx,
-                                    IndexSpace parent, const DomainPoint &color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      IndexPartition result = get_index_partition(parent, color);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition Runtime::get_index_partition(IndexSpace parent,
-                                                const DomainPoint &color)
-    //--------------------------------------------------------------------------
-    {
-      IndexPartition result = forest->get_index_partition(parent, 
-                                                          ColorPoint(color));
-#ifdef DEBUG_LEGION
-      if (!result.exists())
-      {
-        switch (color.get_dim())
-        {
-          case 0:
-          case 1:
-            log_index.error("Invalid color %d for get index partitions", 
-                            (int)color.point_data[0]);
-            break;
-          case 2:
-            log_index.error("Invalid color (%d,%d) for get index partitions", 
-                            (int)color.point_data[0], (int)color.point_data[1]);
-            break;
-          case 3:
-            log_index.error("Invalid color (%d,%d,%d) for get index "
-                            "partitions", (int)color.point_data[0], 
-                            (int)color.point_data[1], (int)color.point_data[2]);
-            break;
-        }
-        assert(false);
-        exit(ERROR_INVALID_INDEX_SPACE_COLOR);
-      }
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::has_index_partition(Context ctx, IndexSpace parent,
-                                      const DomainPoint &color)
+    bool Runtime::has_index_partition(Context ctx, IndexSpace parent, 
+                                      Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx != DUMMY_CONTEXT)
@@ -9835,52 +9522,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_index_partition(IndexSpace parent,
-                                      const DomainPoint &color)
+    bool Runtime::has_index_partition(IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition result = forest->get_index_partition(parent, 
-                                                          ColorPoint(color));
+      IndexPartition result = forest->get_index_partition(parent, color);
       return result.exists();
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_index_subspace(Context ctx, 
-                                                  IndexPartition p, Color color)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      IndexSpace result = get_index_subspace(p, color); 
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace Runtime::get_index_subspace(IndexPartition p, Color color)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
-#ifdef DEBUG_LEGION
-      if (!result.exists())
-      {
-        log_index.error("Invalid color %d for get index subspace", color);
-        assert(false);
-        exit(ERROR_INVALID_INDEX_PART_COLOR); 
-      }
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     IndexSpace Runtime::get_index_subspace(Context ctx, IndexPartition p, 
-                                           const DomainPoint &color)
+                                           const void *realm_color,
+                                           TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      IndexSpace result = get_index_subspace(p, color); 
+      IndexSpace result = get_index_subspace(p, realm_color, type_tag); 
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
       return result;
@@ -9888,131 +9545,36 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace Runtime::get_index_subspace(IndexPartition p, 
-                                           const DomainPoint &color) 
+                                           const void *realm_color,
+                                           TypeTag type_tag) 
     //--------------------------------------------------------------------------
     {
-      IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
-#ifdef DEBUG_LEGION
-      if (!result.exists())
-      {
-        switch (color.get_dim())
-        {
-          case 0:
-          case 1:
-            log_index.error("Invalid color %d for get index subspace",
-                            (int)color.point_data[0]);
-            break;
-          case 2:
-            log_index.error("Invalid color (%d,%d) for get index subspace",
-                            (int)color.point_data[0], (int)color.point_data[1]);
-            break;
-          case 3:
-            log_index.error("Invalid color (%d,%d,%d) for get index subspace",
-                            (int)color.point_data[0],
-                            (int)color.point_data[1],
-                            (int)color.point_data[2]);
-            break;
-        }
-        assert(false);
-        exit(ERROR_INVALID_INDEX_PART_COLOR); 
-      }
-#endif
-      return result;
+      return forest->get_index_subspace(p, realm_color, type_tag);
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::has_index_subspace(Context ctx, IndexPartition p,
-                                     const DomainPoint &color)
+    void Runtime::get_index_space_domain(Context ctx, IndexSpace handle,
+                                         void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      bool result = has_index_subspace(p, color); 
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::has_index_subspace(IndexPartition p, const DomainPoint &color)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpace result = forest->get_index_subspace(p, ColorPoint(color));
-      return result.exists();
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::has_multiple_domains(Context ctx, IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      bool result = forest->has_multiple_domains(handle);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::has_multiple_domains(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return forest->has_multiple_domains(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    Domain Runtime::get_index_space_domain(Context ctx, IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      Domain result = get_index_space_domain(handle);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    Domain Runtime::get_index_space_domain(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      Domain result = forest->get_index_space_domain(handle);
-#ifdef DEBUG_LEGION
-      if (!result.exists())
-      {
-        log_index.error("Invalid handle %x for get index space "
-                               "domain", 
-                                handle.id);
-        assert(false);
-        exit(ERROR_INVALID_INDEX_DOMAIN);
-      }
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::get_index_space_domains(Context ctx, IndexSpace handle,
-                                          std::vector<Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      forest->get_index_space_domains(handle, domains);
+      get_index_space_domain(handle, realm_is, type_tag);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::get_index_space_domains(IndexSpace handle,
-                                          std::vector<Domain> &domains)
+    void Runtime::get_index_space_domain(IndexSpace handle, 
+                                         void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      forest->get_index_space_domains(handle, domains);
+      forest->get_index_space_domain(handle, realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------
-    Domain Runtime::get_index_partition_color_space(Context ctx, 
-                                                             IndexPartition p)
+    Domain Runtime::get_index_partition_color_space(Context ctx,
+                                                    IndexPartition p)
     //--------------------------------------------------------------------------
     {
       if (ctx != DUMMY_CONTEXT)
@@ -10027,17 +9589,45 @@ namespace Legion {
     Domain Runtime::get_index_partition_color_space(IndexPartition p)
     //--------------------------------------------------------------------------
     {
-      Domain result = forest->get_index_partition_color_space(p);
-#ifdef DEBUG_LEGION
-      if (!result.exists())
+      IndexPartNode *part = forest->get_node(p);
+      const IndexSpace color_space = part->color_space->handle;
+      switch (NT_TemplateHelper::get_dim(color_space.get_type_tag()))
       {
-        log_index.error("Invalid partition handle %d for get index "
-                               "partition color space", p.id);
-        assert(false);
-        exit(ERROR_INVALID_INDEX_PART_DOMAIN);
+        case 1:
+          {
+            Realm::ZIndexSpace<1,coord_t> color_index_space;
+            forest->get_index_space_domain(color_space, &color_index_space,
+                                           color_space.get_type_tag());
+            return Domain(color_index_space);
+          }
+        case 2:
+          {
+            Realm::ZIndexSpace<2,coord_t> color_index_space;
+            forest->get_index_space_domain(color_space, &color_index_space,
+                                           color_space.get_type_tag());
+            return Domain(color_index_space);
+          }
+        case 3:
+          {
+            Realm::ZIndexSpace<3,coord_t> color_index_space;
+            forest->get_index_space_domain(color_space, &color_index_space,
+                                           color_space.get_type_tag());
+            return Domain(color_index_space);
+          }
+        default:
+          assert(false);
       }
-#endif
-      return result;
+      return Domain::NO_DOMAIN;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::get_index_partition_color_space(IndexPartition p,
+                                               void *realm_is, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *part = forest->get_node(p);
+      const IndexSpace color_space = part->color_space->handle;
+      forest->get_index_space_domain(color_space, realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -10057,39 +9647,7 @@ namespace Legion {
                                                    std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
-      std::set<ColorPoint> color_points;
-      forest->get_index_space_partition_colors(handle, color_points);
-      for (std::set<ColorPoint>::const_iterator it = color_points.begin();
-            it != color_points.end(); it++)
-      {
-        colors.insert(it->get_index());
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::get_index_space_partition_colors(Context ctx, IndexSpace sp,
-                                                  std::set<DomainPoint> &colors)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      get_index_space_partition_colors(sp, colors);
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::get_index_space_partition_colors(IndexSpace sp,
-                                                  std::set<DomainPoint> &colors)
-    //--------------------------------------------------------------------------
-    {
-      std::set<ColorPoint> color_points;
-      forest->get_index_space_partition_colors(sp, color_points);
-      for (std::set<ColorPoint>::const_iterator it = color_points.begin();
-            it != color_points.end(); it++)
-      {
-        colors.insert(it->get_point());
-      }
+      forest->get_index_space_partition_colors(handle, colors);
     }
 
     //--------------------------------------------------------------------------
@@ -10131,42 +9689,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_index_space_color(Context ctx, IndexSpace handle)
+    void Runtime::get_index_space_color_point(Context ctx, IndexSpace handle,
+                                            void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      Color result = forest->get_index_space_color(handle).get_index();
+      forest->get_index_space_color(handle, realm_color, type_tag);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
-      return result;
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_index_space_color(IndexSpace handle)
+    void Runtime::get_index_space_color_point(IndexSpace handle,
+                                            void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_space_color(handle).get_index();
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_index_space_color_point(Context ctx, 
-                                                     IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      DomainPoint result = forest->get_index_space_color(handle).get_point();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_index_space_color_point(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_index_space_color(handle).get_point();
+      forest->get_index_space_color(handle, realm_color, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -10176,7 +9715,7 @@ namespace Legion {
     {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      Color result = forest->get_index_partition_color(handle).get_index();
+      Color result = forest->get_index_partition_color(handle);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
       return result;
@@ -10186,28 +9725,7 @@ namespace Legion {
     Color Runtime::get_index_partition_color(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_index_partition_color(handle).get_index();
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_index_partition_color_point(Context ctx,
-                                                         IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      DomainPoint result = 
-        forest->get_index_partition_color(handle).get_point();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_index_partition_color_point(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_index_partition_color(handle).get_point();
+      return forest->get_index_partition_color(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -10309,8 +9827,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, 
-                                      LogicalRegion region)
+    ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, LogicalRegion region)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -10323,12 +9840,16 @@ namespace Legion {
       }
       if (pointer.is_null())
         return pointer;
-      return ctx->perform_safe_cast(region.get_index_space(), pointer);
+      Realm::ZPoint<1,coord_t> realm_point(pointer.value);
+      if (forest->safe_cast(region.get_index_space(), &realm_point, 
+            NT_TemplateHelper::encode_tag<1,coord_t>()))
+        return pointer;
+      return ptr_t::nil();
     }
 
     //--------------------------------------------------------------------------
-    DomainPoint Runtime::safe_cast(Context ctx, DomainPoint point, 
-                                            LogicalRegion region)
+    bool Runtime::safe_cast(Context ctx, LogicalRegion region,
+                            const void *realm_point, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -10339,9 +9860,7 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      if (point.is_null())
-        return point;
-      return ctx->perform_safe_cast(region.get_index_space(), point);
+      return forest->safe_cast(region.get_index_space(), realm_point, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -10526,21 +10045,7 @@ namespace Legion {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
       LogicalPartition result = 
-        forest->get_logical_partition_by_color(parent, ColorPoint(c));
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_color(
-                        Context ctx, LogicalRegion parent, const DomainPoint &c)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      LogicalPartition result = 
-        forest->get_logical_partition_by_color(parent, ColorPoint(c));
+        forest->get_logical_partition_by_color(parent, c);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
       return result;
@@ -10551,26 +10056,17 @@ namespace Legion {
                                                              Color c)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition_by_color(par, ColorPoint(c));
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalPartition Runtime::get_logical_partition_by_color(LogicalRegion par,
-                                                           const DomainPoint &c)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_logical_partition_by_color(par, ColorPoint(c));
+      return forest->get_logical_partition_by_color(par, c);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::has_logical_partition_by_color(Context ctx, 
-                                 LogicalRegion parent, const DomainPoint &color)
+                                              LogicalRegion parent, Color color)
     //--------------------------------------------------------------------------
     {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      bool result = 
-        forest->has_logical_partition_by_color(parent, ColorPoint(color));
+      bool result = forest->has_logical_partition_by_color(parent, color);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
       return result;
@@ -10578,10 +10074,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Runtime::has_logical_partition_by_color(LogicalRegion parent, 
-                                                 const DomainPoint &color)
+                                                 Color color)
     //--------------------------------------------------------------------------
     {
-      return forest->has_logical_partition_by_color(parent, ColorPoint(color));
+      return forest->has_logical_partition_by_color(parent, color);
     }
 
     //--------------------------------------------------------------------------
@@ -10631,28 +10127,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_color(Context ctx, 
-                                             LogicalPartition parent, Color c)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      LogicalRegion result = 
-        forest->get_logical_subregion_by_color(parent, ColorPoint(c));
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_logical_subregion_by_color(Context ctx,
-                                  LogicalPartition parent, const DomainPoint &c)
+             LogicalPartition parent, const void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
       LogicalRegion result = 
-        forest->get_logical_subregion_by_color(parent, ColorPoint(c));
+        forest->get_logical_subregion_by_color(parent, realm_color, type_tag);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
       return result;
@@ -10660,29 +10142,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalRegion Runtime::get_logical_subregion_by_color(LogicalPartition par,
-                                                          Color c)
+                                      const void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_subregion_by_color(par, ColorPoint(c));
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion Runtime::get_logical_subregion_by_color(LogicalPartition par,
-                                                          const DomainPoint &c)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_logical_subregion_by_color(par, ColorPoint(c));
+      return forest->get_logical_subregion_by_color(par, realm_color, type_tag);
     }
 
     //--------------------------------------------------------------------------
     bool Runtime::has_logical_subregion_by_color(Context ctx,
-                              LogicalPartition parent, const DomainPoint &color)
+             LogicalPartition parent, const void *realm_point, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
       bool result = 
-        forest->has_logical_subregion_by_color(parent, ColorPoint(color));
+        forest->has_logical_subregion_by_color(parent, realm_point, type_tag);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
       return result;
@@ -10690,10 +10164,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Runtime::has_logical_subregion_by_color(LogicalPartition parent, 
-                                                 const DomainPoint &color)
+                                      const void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      return forest->has_logical_subregion_by_color(parent, ColorPoint(color));
+      return forest->has_logical_subregion_by_color(parent, 
+                                                    realm_color, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -10720,43 +10195,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_logical_region_color(Context ctx, 
-                                                  LogicalRegion handle)
+    void Runtime::get_logical_region_color(Context ctx, LogicalRegion handle, 
+                                           void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      Color result = forest->get_logical_region_color(handle).get_index();
+      forest->get_logical_region_color(handle, realm_color, type_tag);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
-      return result;
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::get_logical_region_color(LogicalRegion handle)
+    void Runtime::get_logical_region_color(LogicalRegion handle,
+                                            void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_region_color(handle).get_index();
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_logical_region_color_point(Context ctx,
-                                                        LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      DomainPoint result = forest->get_logical_region_color(handle).get_point();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_logical_region_color_point(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_logical_region_color(handle).get_point();
+      forest->get_logical_region_color(handle, realm_color, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -10766,7 +10221,7 @@ namespace Legion {
     {
       if (ctx != DUMMY_CONTEXT)
         ctx->begin_runtime_call();
-      Color result = forest->get_logical_partition_color(handle).get_index();
+      Color result = forest->get_logical_partition_color(handle);
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
       return result;
@@ -10776,29 +10231,7 @@ namespace Legion {
     Color Runtime::get_logical_partition_color(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      return forest->get_logical_partition_color(handle).get_index();
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_logical_partition_color_point(Context ctx,
-                                                        LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx != DUMMY_CONTEXT)
-        ctx->begin_runtime_call();
-      DomainPoint result = 
-        forest->get_logical_partition_color(handle).get_point();
-      if (ctx != DUMMY_CONTEXT)
-        ctx->end_runtime_call();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    DomainPoint Runtime::get_logical_partition_color_point(
-                                                        LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      return forest->get_logical_partition_color(handle).get_point();
+      return forest->get_logical_partition_color(handle);
     }
 
     //--------------------------------------------------------------------------

@@ -218,27 +218,32 @@ namespace Legion {
       virtual IndexSpace create_index_space_union(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual IndexSpace create_index_space_union(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexPartition handle) = 0;
       virtual IndexSpace create_index_space_intersection(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual IndexSpace create_index_space_intersection(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexPartition handle) = 0;
       virtual IndexSpace create_index_space_difference(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual FieldSpace create_field_space(RegionTreeForest *forest) = 0;
@@ -444,9 +449,6 @@ namespace Legion {
                             CustomSerdezID serdez_id);
       void allocate_local_field(const LocalFieldInfo &info);
     public:
-      ptr_t perform_safe_cast(IndexSpace is, ptr_t pointer);
-      DomainPoint perform_safe_cast(IndexSpace is, const DomainPoint &point);
-    public:
       void analyze_destroy_index_space(IndexSpace handle, 
                                    std::vector<RegionRequirement> &delete_reqs,
                                    std::vector<unsigned> &parent_req_indexes);
@@ -567,9 +569,6 @@ namespace Legion {
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
       LegionDeque<ApBarrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
       LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked local_fields;
-    protected:
-      // Some help for performing fast safe casts
-      std::map<IndexSpace,Domain> safe_cast_domains;   
     protected:
       RtEvent pending_done;
       bool task_executed;
@@ -764,27 +763,32 @@ namespace Legion {
       virtual IndexSpace create_index_space_union(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
       virtual FieldSpace create_field_space(RegionTreeForest *forest);
@@ -1228,27 +1232,32 @@ namespace Legion {
       virtual IndexSpace create_index_space_union(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
       virtual FieldSpace create_field_space(RegionTreeForest *forest);
@@ -1510,27 +1519,32 @@ namespace Legion {
       virtual IndexSpace create_index_space_union(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_union(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_intersection(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                 const std::vector<IndexSpace> &handles);
       virtual IndexSpace create_index_space_intersection(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexPartition handle);
       virtual IndexSpace create_index_space_difference(
                                             RegionTreeForest *forest,
                                             IndexPartition parent,
-                                            const DomainPoint &color,
+                                            const void *realm_color,
+                                            TypeTag type_tag,
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
       virtual FieldSpace create_field_space(RegionTreeForest *forest);

@@ -1466,15 +1466,6 @@ namespace Legion {
       // Called from deletion op
       void finalize_index_partition_destroy(IndexPartition handle);
     public:
-      // Helper methods for partition construction
-      void validate_unstructured_disjointness(IndexPartition pid,
-                                  const std::map<DomainPoint,Domain> &domains);
-      void validate_structured_disjointness(IndexPartition pid,
-                                  const std::map<DomainPoint,Domain> &domains);
-      void validate_multi_structured_disjointness(IndexPartition pid,
-                       const std::map<DomainPoint,std::set<Domain> > &domains);
-      Domain construct_convex_hull(const std::set<Domain> &domains);
-    public:
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
                                             IndexSpace color_space, 
                                             size_t granuarlity, Color color);
@@ -1551,77 +1542,68 @@ namespace Legion {
                                               PartitionKind part_kind,
                                               Color color);
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
-                                          const DomainPoint &color, 
+                                          const void *realm_color, 
+                                          TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles);
       IndexSpace create_index_space_union(Context ctx, IndexPartition parent,
-                                          const DomainPoint &color,
+                                          const void *realm_color,
+                                          TypeTag type_tag,
                                           IndexPartition handle);
       IndexSpace create_index_space_intersection(Context ctx, 
                                                  IndexPartition parent,
-                                                 const DomainPoint &color,
+                                                 const void *realm_color,
+                                                 TypeTag type_tag,
                                        const std::vector<IndexSpace> &handles);
       IndexSpace create_index_space_intersection(Context ctx,
                                                  IndexPartition parent,
-                                                 const DomainPoint &color,
+                                                 const void *realm_color,
+                                                 TypeTag type_tag,
                                                  IndexPartition handle); 
       IndexSpace create_index_space_difference(Context ctx, 
                                                IndexPartition parent,
-                                               const DomainPoint &color,
+                                               const void *realm_color,
+                                               TypeTag type_tag,
                                                IndexSpace initial,
                                        const std::vector<IndexSpace> &handles);
     public:
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
       IndexPartition get_index_partition(IndexSpace parent, Color color);
-      IndexPartition get_index_partition(Context ctx, IndexSpace parent,
-                                         const DomainPoint &color);
-      IndexPartition get_index_partition(IndexSpace parent,
-                                         const DomainPoint &color);
-      bool has_index_partition(Context ctx, IndexSpace parent,
-                               const DomainPoint &color);
-      bool has_index_partition(IndexSpace parent, 
-                               const DomainPoint &color);
-      IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
-                                    Color color); 
-      IndexSpace get_index_subspace(IndexPartition p, Color c);
+      bool has_index_partition(Context ctx, IndexSpace parent, Color color);
+      bool has_index_partition(IndexSpace parent, Color color); 
       IndexSpace get_index_subspace(Context ctx, IndexPartition p,
-                                    const DomainPoint &color);
-      IndexSpace get_index_subspace(IndexPartition p, const DomainPoint &c);
+                                    const void *realm_color, TypeTag type_tag);
+      IndexSpace get_index_subspace(IndexPartition p, 
+                                    const void *realm_color, TypeTag type_tag);
       bool has_index_subspace(Context ctx, IndexPartition p,
-                              const DomainPoint &color);
+                              const void *realm_color, TypeTag type_tag);
       bool has_index_subspace(IndexPartition p, 
-                              const DomainPoint &color);
-      bool has_multiple_domains(Context ctx, IndexSpace handle);
-      bool has_multiple_domains(IndexSpace handle);
-      Domain get_index_space_domain(Context ctx, IndexSpace handle);
-      Domain get_index_space_domain(IndexSpace handle);
-      void get_index_space_domains(Context ctx, IndexSpace handle,
-                                   std::vector<Domain> &domains);
-      void get_index_space_domains(IndexSpace handle,
-                                   std::vector<Domain> &domains);
+                              const void *realm_color, TypeTag type_tag);
+      void get_index_space_domain(Context ctx, IndexSpace handle,
+                                  void *realm_is, TypeTag type_tag);
+      void get_index_space_domain(IndexSpace handle, 
+                                  void *realm_is, TypeTag type_tag);
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
       Domain get_index_partition_color_space(IndexPartition p);
+      void get_index_partition_color_space(IndexPartition p, 
+                                           void *realm_is, TypeTag type_tag);
+      IndexSpace get_index_partition_color_space_name(Context ctx,
+                                                      IndexPartition p);
+      IndexSpace get_index_partition_color_space_name(IndexPartition p);
       void get_index_space_partition_colors(Context ctx, IndexSpace handle,
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(IndexSpace handle,
                                             std::set<Color> &colors);
-      void get_index_space_partition_colors(Context ctx, IndexSpace handle,
-                                            std::set<DomainPoint> &colors);
-      void get_index_space_partition_colors(IndexSpace handle,
-                                            std::set<DomainPoint> &colors);
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(Context ctx, IndexPartition p);
       bool is_index_partition_complete(IndexPartition p);
-      Color get_index_space_color(Context ctx, IndexSpace handle);
-      Color get_index_space_color(IndexSpace handle);
-      DomainPoint get_index_space_color_point(Context ctx, IndexSpace handle);
-      DomainPoint get_index_space_color_point(IndexSpace handle);
+      void get_index_space_color_point(Context ctx, IndexSpace handle,
+                                       void *realm_color, TypeTag type_tag);
+      void get_index_space_color_point(IndexSpace handle,
+                                       void *realm_color, TypeTag type_tag);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
       Color get_index_partition_color(IndexPartition handle);
-      DomainPoint get_index_partition_color_point(Context ctx, 
-                                                  IndexPartition handle);
-      DomainPoint get_index_partition_color_point(IndexPartition handle);
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
@@ -1634,8 +1616,8 @@ namespace Legion {
       unsigned get_index_partition_depth(IndexPartition handle);
     public:
       ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
-      DomainPoint safe_cast(Context ctx, DomainPoint point, 
-                            LogicalRegion region);
+      bool safe_cast(Context ctx, LogicalRegion region,
+                     const void *realm_point, TypeTag type_tag);
     public:
       FieldSpace create_field_space(Context ctx);
       void destroy_field_space(Context ctx, FieldSpace handle);
@@ -1666,17 +1648,11 @@ namespace Legion {
       LogicalPartition get_logical_partition_by_color(Context ctx, 
                                                       LogicalRegion parent, 
                                                       Color c);
-      LogicalPartition get_logical_partition_by_color(Context ctx,
-                                                      LogicalRegion parent,
-                                                      const DomainPoint &c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       Color c);
-      LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
-                                                      const DomainPoint &c);
       bool has_logical_partition_by_color(Context ctx, LogicalRegion parent,
-                                          const DomainPoint &color);
-      bool has_logical_partition_by_color(LogicalRegion parent,
-                                          const DomainPoint &color);
+                                          Color c);
+      bool has_logical_partition_by_color(LogicalRegion parent, Color c);
       LogicalPartition get_logical_partition_by_tree(Context ctx, 
                                                      IndexPartition handle, 
                                                      FieldSpace fspace, 
@@ -1688,20 +1664,19 @@ namespace Legion {
                                           IndexSpace handle);
       LogicalRegion get_logical_subregion(LogicalPartition parent,
                                           IndexSpace handle);
-      LogicalRegion get_logical_subregion_by_color(Context ctx, 
-                                                   LogicalPartition parent, 
-                                                   Color c);
       LogicalRegion get_logical_subregion_by_color(Context ctx,
                                                    LogicalPartition parent,
-                                                   const DomainPoint &c);
+                                                   const void *realm_color,
+                                                   TypeTag type_tag);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
-                                                   Color c);
-      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
-                                                   const DomainPoint &c);
+                                                   const void *realm_color,
+                                                   TypeTag type_tag);
       bool has_logical_subregion_by_color(Context ctx, LogicalPartition parent,
-                                          const DomainPoint &color);
+                                          const void *realm_color, 
+                                          TypeTag type_tag);
       bool has_logical_subregion_by_color(LogicalPartition parent,
-                                          const DomainPoint &color);
+                                          const void *realm_color,
+                                          TypeTag type_tag);
       LogicalRegion get_logical_subregion_by_tree(Context ctx, 
                                                   IndexSpace handle, 
                                                   FieldSpace fspace, 
@@ -1709,16 +1684,12 @@ namespace Legion {
       LogicalRegion get_logical_subregion_by_tree(IndexSpace handle,
                                                   FieldSpace fspace,
                                                   RegionTreeID tid);
-      Color get_logical_region_color(Context ctx, LogicalRegion handle);
-      Color get_logical_region_color(LogicalRegion handle);
-      DomainPoint get_logical_region_color_point(Context ctx, 
-                                                 LogicalRegion handle);
-      DomainPoint get_logical_region_color_point(LogicalRegion handle);
+      void get_logical_region_color(Context ctx, LogicalRegion handle,
+                                    void *realm_color, TypeTag type_tag);
+      void get_logical_region_color(LogicalRegion handle, 
+                                    void *realm_color, TypeTag type_tag);
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
       Color get_logical_partition_color(LogicalPartition handle);
-      DomainPoint get_logical_partition_color_point(Context ctx, 
-                                                    LogicalPartition handle);
-      DomainPoint get_logical_partition_color_point(LogicalPartition handle);
       LogicalRegion get_parent_logical_region(Context ctx, 
                                               LogicalPartition handle);
       LogicalRegion get_parent_logical_region(LogicalPartition handle);

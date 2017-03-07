@@ -419,10 +419,6 @@ namespace Legion {
                                             std::set<Color> &colors);
       bool is_index_partition_disjoint(MappingCallInfo *info,
                                        IndexPartition p);
-      template<unsigned DIM>
-      IndexSpace get_index_subspace(MappingCallInfo *info,
-                                    IndexPartition p, 
-                                    ColorPoint &color_point);
       Color get_index_space_color(MappingCallInfo *info, IndexSpace handle);
       Color get_index_partition_color(MappingCallInfo *info, 
                                       IndexPartition handle);

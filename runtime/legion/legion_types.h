@@ -56,7 +56,6 @@ namespace Legion {
   typedef ::legion_external_resource_t ExternalResource;
   typedef ::legion_timing_measurement_t TimingMeasurement;
   typedef ::legion_dependence_type_t DependenceType;
-  typedef ::legion_index_space_kind_t IndexSpaceKind;
   typedef ::legion_file_mode_t LegionFileMode;
   typedef ::legion_execution_constraint_t ExecutionConstraintKind;
   typedef ::legion_layout_constraint_t LayoutConstraintKind;
@@ -145,7 +144,6 @@ namespace Legion {
   struct RegionUsage;
   class AutoLock;
   class ImmovableAutoLock;
-  class ColorPoint;
   class Serializer;
   class Deserializer;
   class LgEvent; // base event type for legion
@@ -1464,6 +1462,7 @@ namespace Legion {
   typedef ::legion_projection_epoch_id_t ProjectionEpochID;
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
+  typedef ::legion_internal_color_t LegionColor;
   typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
   typedef std::map<Color,Domain> DomainColoring;
   typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
@@ -1494,6 +1493,8 @@ namespace Legion {
   };
 
   namespace Internal { 
+    // The invalid color
+    const LegionColor INVALID_COLOR = LLONG_MAX;
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
     // Helper for encoding templates
@@ -1515,6 +1516,16 @@ namespace Legion {
 #endif
         assert(t1 == t);
 #endif
+      }
+      struct DimHelper {
+      public:
+        template<typename N, typename T>
+        static inline void demux(int *result) { *result = N::N; }
+      };
+      static inline int get_dim(const TypeTag t) {
+        int result = 0;
+        SUPER::demux<DimHelper>(t, &result);
+        return result; 
       }
     };
     struct NTNT_TemplateHelper :

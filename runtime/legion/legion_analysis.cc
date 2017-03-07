@@ -64,7 +64,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    PhysicalUser::PhysicalUser(const RegionUsage &u, const ColorPoint &c,
+    PhysicalUser::PhysicalUser(const RegionUsage &u, const LegionColor c,
                                UniqueID id, unsigned idx, RegionNode *n)
       : usage(u), child(c), op_id(id), index(idx), node(n)
     //--------------------------------------------------------------------------
@@ -2590,8 +2590,8 @@ namespace Legion {
           it = field_states.erase(it);
           continue;
         }
-        std::vector<ColorPoint> to_delete;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::iterator child_it = 
+        std::vector<LegionColor> to_delete;
+        for (LegionMap<LegionColor,FieldMask>::aligned::iterator child_it = 
               it->open_children.begin(); child_it != 
               it->open_children.end(); child_it++)
         {
@@ -2601,7 +2601,7 @@ namespace Legion {
         }
         if (!to_delete.empty())
         {
-          for (std::vector<ColorPoint>::const_iterator cit = to_delete.begin();
+          for (std::vector<LegionColor>::const_iterator cit = to_delete.begin();
                 cit != to_delete.end(); cit++)
             it->open_children.erase(*cit);
         }
@@ -2763,7 +2763,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
-                           const ColorPoint &c)
+                           const LegionColor c)
       : ChildState(m), redop(0), projection(NULL), 
         projection_domain(Domain::NO_DOMAIN), rebuild_timeout(1)
     //--------------------------------------------------------------------------
@@ -2841,10 +2841,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       valid_fields |= rhs.valid_fields;
-      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
             rhs.open_children.begin(); it != rhs.open_children.end(); it++)
       {
-        LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+        LegionMap<LegionColor,FieldMask>::aligned::iterator finder = 
                                       open_children.find(it->first);
         if (finder == open_children.end())
           open_children[it->first] = it->second;
@@ -2981,44 +2981,14 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
         FieldMask overlap = it->second & capture_mask;
         if (!overlap)
           continue;
         char *mask_buffer = overlap.to_string();
-        switch (it->first.get_dim())
-        {
-          case 0:
-            {
-              logger->log("Color %d   Mask %s", 
-                          it->first.get_index(), mask_buffer);
-              break;
-            }
-          case 1:
-            {
-              logger->log("Color %d   Mask %s", 
-                          it->first[0], mask_buffer);
-              break;
-            }
-          case 2:
-            {
-              logger->log("Color (%d,%d)   Mask %s", 
-                          it->first[0], it->first[1],
-                          mask_buffer);
-              break;
-            }
-          case 3:
-            {
-              logger->log("Color %d   Mask %s", 
-                          it->first[0], it->first[1],
-                          it->first[2], mask_buffer);
-              break;
-            }
-          default:
-            assert(false); // implemenent more dimensions
-        }
+        logger->log("Color %d   Mask %s", it->first, mask_buffer);
         free(mask_buffer);
       }
       logger->up();
@@ -3656,9 +3626,11 @@ namespace Legion {
           // Record the disjoint close, advance the projection epochs
           // and then record the new projection epoch that the close
           // will be a part of
+          const Domain &color_space = root_node->as_partition_node()->
+                        row_source->color_space->get_domain_blocking();
           ProjectionInfo &proj_info = 
             normal_close_op->initialize_disjoint_close(disjoint_close_mask,
-                  root_node->as_partition_node()->row_source->color_space);
+                                                       color_space);
           // Advance these epochs and then mark that we no longer need
           // to advance them during update_state
           state.advance_projection_epochs(disjoint_close_mask);
@@ -4104,7 +4076,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalState::print_physical_state(const FieldMask &capture_mask,
-                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                              TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
@@ -5397,7 +5369,7 @@ namespace Legion {
 #endif
         VersionManager &parent_manager = 
           parent->get_current_version_manager(ctx);
-        const ColorPoint &color = node->get_color();
+        const LegionColor color = node->get_color();
         // This destroys new states, but whatever we're done anyway
         parent_manager.update_child_versions(physical_context, color, 
                                              new_states, applied_events);
@@ -5416,7 +5388,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::update_child_versions(InnerContext *context,
-                                              const ColorPoint &child_color,
+                                              const LegionColor child_color,
                                               VersioningSet<> &new_states,
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -5537,7 +5509,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::print_physical_state(RegionTreeNode *arg_node,
                                 const FieldMask &capture_mask,
-                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
@@ -6344,7 +6316,7 @@ namespace Legion {
     {
       // Need the lock in read only mode to access these data structures
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
-      for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit = 
+      for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator cit =
             open_children.begin(); cit != open_children.end(); cit++)
       {
         FieldMask child_overlap = closing_mask & cit->second.get_valid_mask();
@@ -6447,7 +6419,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionState::reduce_open_children(const ColorPoint &child_color,
+    void VersionState::reduce_open_children(const LegionColor child_color,
                                             const FieldMask &update_mask,
                                             VersioningSet<> &new_states,
                                             std::set<RtEvent> &applied_events,
@@ -6463,7 +6435,7 @@ namespace Legion {
         return;
       }
       WrapperReferenceMutator mutator(applied_events);
-      LegionMap<ColorPoint,StateVersions>::aligned::iterator finder =
+      LegionMap<LegionColor,StateVersions>::aligned::iterator finder =
         open_children.find(child_color);
       // We only have to do insertions if the entry didn't exist before
       // or its fields are disjoint with the update mask
@@ -6837,7 +6809,7 @@ namespace Legion {
           if (request_kind != INITIAL_VERSION_REQUEST)
           {
             rez.serialize<size_t>(open_children.size());
-            for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator 
+            for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator 
                  cit = open_children.begin(); cit != open_children.end(); cit++)
             {
               rez.serialize(cit->first);
@@ -6913,7 +6885,7 @@ namespace Legion {
             {
               Serializer child_rez;
               size_t count = 0;
-              for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator 
+              for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator
                     cit = open_children.begin(); 
                     cit != open_children.end(); cit++)
               {
@@ -7173,8 +7145,8 @@ namespace Legion {
         {
           // See if we have any children we need to send
           bool has_children = false;
-          for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator it =
-                open_children.begin(); it != open_children.end(); it++)
+          for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator 
+                it = open_children.begin(); it != open_children.end(); it++)
           {
             if (it->second.get_valid_mask() * overlap)
               continue;
@@ -7382,7 +7354,7 @@ namespace Legion {
             derez.deserialize(num_children);
             for (unsigned idx = 0; idx < num_children; idx++)
             {
-              ColorPoint child;
+              LegionColor child;
               derez.deserialize(child);
               StateVersions &versions = open_children[child]; 
               size_t num_states;
@@ -7456,7 +7428,7 @@ namespace Legion {
             derez.deserialize(num_children);
             for (unsigned idx = 0; idx < num_children; idx++)
             {
-              ColorPoint child;
+              LegionColor child;
               derez.deserialize(child);
               size_t num_states;
               derez.deserialize(num_states);
@@ -7875,7 +7847,7 @@ namespace Legion {
       {
         // Only need this in read only mode since we're just reading
         AutoLock s_lock(state_lock,1,false/*exclusive*/);
-        for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =
+        for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator cit =
               open_children.begin(); cit != open_children.end(); cit++)
         {
           if (cit->second.get_valid_mask() * capture_mask)
@@ -7976,7 +7948,7 @@ namespace Legion {
           target->record_reduction_view(it->first, overlap);
         }
       }
-      for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator cit =
+      for (LegionMap<LegionColor,StateVersions>::aligned::const_iterator cit =
             open_children.begin(); cit != open_children.end(); cit++)
       {
         if (cit->second.get_valid_mask() * capture_mask)
@@ -8085,7 +8057,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreePath::register_child(unsigned depth, 
-                                        const ColorPoint &color)
+                                        const LegionColor color)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8128,11 +8100,11 @@ namespace Legion {
     {
       assert(min_depth <= depth);
       assert(depth <= max_depth);
-      return path[depth].is_valid();
+      return (path[depth] != INVALID_COLOR);
     }
 
     //--------------------------------------------------------------------------
-    const ColorPoint& RegionTreePath::get_child(unsigned depth) const
+    LegionColor RegionTreePath::get_child(unsigned depth) const
     //--------------------------------------------------------------------------
     {
       assert(min_depth <= depth);

@@ -153,6 +153,12 @@ namespace Legion {
 	return dp;
       }
 
+      Color get_color(void) const
+      {
+        assert(dim == 1);
+        return point_data[0];
+      }
+
       coord_t get_index(void) const
       {
 	assert(dim == 0);
