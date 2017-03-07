@@ -222,59 +222,59 @@ gcc49_cxx98_debug_checks_external:
     <<: [*gcc49, *terra35, *debug, *cxx98_checks]
 
 # Linux with Clang 3.5
-gcc49_cxx98_release_legion:
+clang35_cxx98_release_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *release, *cxx98_normal, *legion]
-gcc49_cxx98_release_regent:
+    <<: [*clang35, *terra35, *release, *cxx98_normal, *legion]
+clang35_cxx98_release_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *release, *cxx98_normal, *regent]
-gcc49_cxx98_debug_checks_legion:
+    <<: [*clang35, *terra35, *release, *cxx98_normal, *regent]
+clang35_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *legion]
-gcc49_cxx98_debug_spy_legion:
+    <<: [*clang35, *terra35, *debug, *cxx98_checks, *legion]
+clang35_cxx98_debug_spy_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_spy, *legion]
-gcc49_cxx98_debug_spy_regent:
+    <<: [*clang35, *terra35, *debug, *cxx98_spy, *legion]
+clang35_cxx98_debug_spy_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_spy, *regent]
-gcc49_cxx11_release_legion:
+    <<: [*clang35, *terra35, *debug, *cxx98_spy, *regent]
+clang35_cxx11_release_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *release, *cxx11_normal, *legion]
-gcc49_cxx98_debug_checks_hdf5_legion:
+    <<: [*clang35, *terra35, *release, *cxx11_normal, *legion]
+clang35_cxx98_debug_checks_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *hdf5, *legion]
-gcc49_cxx98_debug_checks_hdf5_regent:
+    <<: [*clang35, *terra35, *debug, *cxx98_checks, *hdf5, *legion]
+clang35_cxx98_debug_checks_hdf5_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *hdf5, *regent]
+    <<: [*clang35, *terra35, *debug, *cxx98_checks, *hdf5, *regent]
 # # FIXME: Clang with GASNet freezes
-# gcc49_cxx98_debug_checks_gasnet_legion:
+# clang35_cxx98_debug_checks_gasnet_legion:
 #   <<: [*linux_compute, *image, *tests]
 #   variables:
-#     <<: [*gcc49, *terra35, *debug, *cxx98_checks, *gasnet, *legion]
-# gcc49_cxx98_debug_checks_gasnet_regent:
+#     <<: [*clang35, *terra35, *debug, *cxx98_checks, *gasnet, *legion]
+# clang35_cxx98_debug_checks_gasnet_regent:
 #   <<: [*linux_compute, *image, *tests]
 #   variables:
-#     <<: [*gcc49, *terra35, *debug, *cxx98_checks, *gasnet, *regent]
-gcc49_cxx98_32bit_debug_legion:
+#     <<: [*clang35, *terra35, *debug, *cxx98_checks, *gasnet, *regent]
+clang35_cxx98_32bit_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_32bit_normal, *legion]
-gcc49_cxx98_debug_checks_cmake_legion:
+    <<: [*clang35, *terra35, *debug, *cxx98_32bit_normal, *legion]
+clang35_cxx98_debug_checks_cmake_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *cmake, *legion]
-gcc49_cxx98_debug_checks_external:
+    <<: [*clang35, *terra35, *debug, *cxx98_checks, *cmake, *legion]
+clang35_cxx98_debug_checks_external:
   <<: [*linux_compute, *image, *external_tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks]
+    <<: [*clang35, *terra35, *debug, *cxx98_checks]
 
 # # macOS with Clang 3.5
 # macos_clang35_cxx98_debug_checks:
