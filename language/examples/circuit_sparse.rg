@@ -918,7 +918,7 @@ end
 
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lcircuit"}
+  local link_flags = {"-L" .. root_dir, "-lcircuit", "-lm"}
   regentlib.saveobj(toplevel, "circuit", "executable", ccircuit.register_mappers, link_flags)
 else
   regentlib.start(toplevel, ccircuit.register_mappers)
