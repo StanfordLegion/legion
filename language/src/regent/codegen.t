@@ -2832,7 +2832,7 @@ function codegen.expr_call(cx, node)
           expr_type = value_type,
           annotations = node.annotations,
           span = node.span,
-        })
+        }):read(cx)
       local actions = quote
         [value.actions]
         c.legion_future_destroy(future)
