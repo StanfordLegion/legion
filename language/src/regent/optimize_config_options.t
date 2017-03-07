@@ -280,8 +280,10 @@ end
 local optimize_config_options = {}
 
 function optimize_config_options.top_task(cx, node)
-  local leaf = analyze_leaf(cx, node.body)
-  local inner = not leaf and analyze_inner(cx, node.body)
+  -- Do the analysis first and then mask it out if the configuration
+  -- is disabled. This is to ensure that the analysis always works.
+  local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]
+  local inner = analyze_inner(cx, node.body) and std.config["inner"] and not leaf
 
   return node {
     config_options = ast.TaskConfigOptions {
