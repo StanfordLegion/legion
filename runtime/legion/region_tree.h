@@ -159,8 +159,7 @@ namespace Legion {
                                     IndexSpace initial,
                                     const std::vector<IndexSpace> &handles);
     public:
-      IndexPartition get_index_partition(IndexSpace parent, 
-                                         const LegionColor &color);
+      IndexPartition get_index_partition(IndexSpace parent, Color color); 
       IndexSpace get_index_subspace(IndexPartition parent, 
                                     const void *realm_color,
                                     TypeTag type_tag);
@@ -825,6 +824,15 @@ namespace Legion {
       virtual void instantiate_color_space(IndexPartNode *partition,
                                            ApEvent domain_ready,
                                            bool separate_children) = 0;
+      virtual LegionColor linearize_color(const void *realm_color,
+                                          TypeTag type_tag) = 0;
+      virtual ApEvent compute_pending_space(
+            const std::vector<IndexSpace> &handles, bool is_union) = 0;
+      virtual ApEvent compute_pending_space(IndexPartition handle,
+                                            bool is_union) = 0;
+      virtual ApEvent compute_pending_difference(IndexSpace initial,
+                           const std::vector<IndexSpace> &handles) = 0;
+      virtual void get_index_space_domain(void *realm_is, TypeTag type_tag) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;

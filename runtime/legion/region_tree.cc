@@ -515,12 +515,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_pending_space(IndexPartition parent,
-                                                    const DomainPoint &color,
+                                                    const void *realm_color,
+                                                    TypeTag type_tag,
                                                     ApUserEvent &domain_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *parent_node = get_node(parent);
-      ColorPoint child_color(color);
+      LegionColor child_color = 
+        parent_node->color_space->linearize_color(realm_color, type_tag);
       // First get the child node   
       if (!parent_node->has_child(child_color))
       {
@@ -549,40 +551,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      IndexPartNode *parent_node = child_node->parent;
-      // Compute the new index space 
-      std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace> spaces(handles.size());
-      unsigned idx = 0;
-      for (std::vector<IndexSpace>::const_iterator it = handles.begin();
-            it != handles.end(); it++, idx++)
-      {
-        IndexSpaceNode *node = get_node(*it); 
-        ApEvent precondition;
-        const Domain &dom = node->get_domain(precondition);
-        spaces[idx] = dom.get_index_space();
-        if (precondition.exists())
-          preconditions.insert(precondition);
-      }
-      ApEvent parent_precondition;
-      const Domain &parent_dom = 
-              parent_node->parent->get_domain(parent_precondition);
-      if (parent_precondition.exists())
-        preconditions.insert(parent_precondition);
-      // Now we can compute the low-level index space
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::IndexSpace result;
-      ApEvent ready(Realm::IndexSpace::reduce_index_spaces(
-          is_union ? Realm::IndexSpace::ISO_UNION : 
-                     Realm::IndexSpace::ISO_INTERSECT, spaces, result, 
-          ((parent_node->mode & MUTABLE) != 0)/* allocable */,
-          parent_dom.get_index_space(), precondition));
-      // Now set the result and trigger the handle ready event
-      child_node->set_domain(Domain(result));
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, ready);
-#endif
-      return ready;
+      return child_node->compute_pending_space(handles, is_union);
     }
 
     //--------------------------------------------------------------------------
@@ -592,42 +561,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      IndexPartNode *parent_node = child_node->parent;
-      IndexPartNode *reduce_node = get_node(handle);
-      std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace> 
-        spaces(reduce_node->color_space.get_volume());
-      unsigned idx = 0;
-      for (Domain::DomainPointIterator itr(reduce_node->color_space); 
-            itr; itr++, idx++)
-      {
-        ColorPoint node_color(itr.p);
-        IndexSpaceNode *node = reduce_node->get_child(node_color);
-        ApEvent precondition;
-        const Domain &dom = node->get_domain(precondition);
-        spaces[idx] = dom.get_index_space();
-        if (precondition.exists())
-          preconditions.insert(precondition);
-      }
-      ApEvent parent_precondition;
-      const Domain &parent_dom = 
-            parent_node->parent->get_domain(parent_precondition);
-      if (parent_precondition.exists())
-        preconditions.insert(parent_precondition);
-      // Now we can compute the low-level index space
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::IndexSpace result;
-      ApEvent ready(Realm::IndexSpace::reduce_index_spaces(
-          is_union ? Realm::IndexSpace::ISO_UNION : 
-                     Realm::IndexSpace::ISO_INTERSECT, spaces, result,
-          ((parent_node->mode & MUTABLE) != 0)/* allocable */,
-          parent_dom.get_index_space(), precondition));
-      // Now set the result and trigger the handle ready event
-      child_node->set_domain(Domain(result));
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, ready);
-#endif
-      return ready;
+      return child_node->compute_pending_space(handle, is_union);
     }
 
     //--------------------------------------------------------------------------
@@ -637,49 +571,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      IndexPartNode *parent_node = child_node->parent;
-      std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace> spaces(handles.size()+1);
-      IndexSpaceNode *init_node = get_node(initial);
-      ApEvent init_precondition;
-      const Domain &init_dom = init_node->get_domain(init_precondition);
-      spaces[0] = init_dom.get_index_space();
-      if (init_precondition.exists())
-        preconditions.insert(init_precondition);
-      unsigned idx = 1;
-      for (std::vector<IndexSpace>::const_iterator it = handles.begin();
-            it != handles.end(); it++, idx++)
-      {
-        IndexSpaceNode *node = get_node(*it);  
-        ApEvent precondition;
-        const Domain &dom = node->get_domain(precondition);
-        spaces[idx] = dom.get_index_space();
-        if (precondition.exists())
-          preconditions.insert(precondition);
-      }
-      ApEvent parent_precondition;
-      const Domain &parent_dom = 
-              parent_node->parent->get_domain(parent_precondition);
-      if (parent_precondition.exists())
-        preconditions.insert(parent_precondition);
-      // Now we can compute the low-level index space
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::IndexSpace result;
-      ApEvent ready(Realm::IndexSpace::reduce_index_spaces(
-                             Realm::IndexSpace::ISO_SUBTRACT, spaces, result,
-          ((parent_node->mode & MUTABLE) != 0)/* allocable */,
-          parent_dom.get_index_space(), precondition));
-      // Now set the result and trigger the handle ready event
-      child_node->set_domain(Domain(result));
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, ready);
-#endif
-      return ready;
+      return child_node->compute_pending_difference(initial, handles);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition RegionTreeForest::get_index_partition(IndexSpace parent,
-                                                       const ColorPoint &color)
+                                                         Color color)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *parent_node = get_node(parent);
@@ -689,58 +586,51 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::get_index_subspace(IndexPartition parent,
-                                                    const ColorPoint &color)
+                                                    const void *realm_color,
+                                                    TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *parent_node = get_node(parent);
-      IndexSpaceNode *child_node = parent_node->get_child(color);
+      LegionColor child_color = 
+        parent_node->color_space->linearize_color(realm_color, type_tag);
+      IndexSpaceNode *child_node = parent_node->get_child(child_color);
       return child_node->handle;
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_multiple_domains(IndexSpace handle)
+    void RegionTreeForest::get_index_space_domain(IndexSpace handle,
+                                               void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      return node->has_component_domains();
+      node->get_index_space_domain(realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------
-    Domain RegionTreeForest::get_index_space_domain(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *node = get_node(handle);
-      return node->get_domain_blocking();
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::get_index_space_domains(IndexSpace handle,
-                                                   std::vector<Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *node = get_node(handle);
-      node->get_domains_blocking(domains); 
-    }
-
-    //--------------------------------------------------------------------------
-    Domain RegionTreeForest::get_index_partition_color_space(IndexPartition p)
+    IndexSpace RegionTreeForest::get_index_partition_color_space(
+                                                               IndexPartition p)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *node = get_node(p);
-      return node->color_space;
+      return node->color_space->handle;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::get_index_space_partition_colors(IndexSpace sp,
-                                                   std::set<ColorPoint> &colors)
+                                                        std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(sp);
-      node->get_colors(colors); 
+      std::set<LegionColor> temp_colors;
+      node->get_colors(temp_colors); 
+      for (std::set<LegionColor>::const_iterator it = temp_colors.begin();
+            it != temp_colors.end(); it++)
+        colors.insert(*it);
     }
 
     //--------------------------------------------------------------------------
-    ColorPoint RegionTreeForest::get_index_space_color(IndexSpace handle)
+    void RegionTreeForest::get_index_space_color(IndexSpace handle,
+                                            void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
