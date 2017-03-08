@@ -1656,8 +1656,8 @@ namespace LegionRuntime {
           delete dma_threads[i];
         for (int i = 0; i < num_memcpy_threads; i++)
           delete memcpy_threads[i];
-        delete[] dma_threads;
-        delete[] memcpy_threads;
+        free(dma_threads);
+        free(memcpy_threads);
       }
 
 
