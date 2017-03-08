@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <errno.h>
 
-#include <map>
+#include <vector>
 
 #ifdef __linux__
 #include <unistd.h>
@@ -88,7 +88,7 @@ namespace Realm {
 
   // return info on the memory and cpu in each NUMA node
   // default is to restrict to only those nodes enabled in the current affinity mask
-  bool numasysif_get_mem_info(std::vector<NumaNodeMemInfo>& info,
+  bool numasysif_get_mem_info(std::map<int, NumaNodeMemInfo>& info,
 			      bool only_available /*= true*/)
   {
 #ifdef __linux__
@@ -132,10 +132,9 @@ namespace Realm {
 	    continue;
 	  }
 	  // success - add this to the list and stop reading
-	  NumaNodeMemInfo mi;
+	  NumaNodeMemInfo& mi = info[i];
 	  mi.node_id = i;
 	  mi.bytes_available = (sz << 10);
-	  info.push_back(mi);
 	  break;
 	}
 	// if we get all the way through the file without finding the size,
@@ -150,7 +149,7 @@ namespace Realm {
 #endif
   }
 
-  bool numasysif_get_cpu_info(std::vector<NumaNodeCpuInfo>& info,
+  bool numasysif_get_cpu_info(std::map<int, NumaNodeCpuInfo>& info,
 			      bool only_available /*= true*/)
   {
 #ifdef __linux__
@@ -202,10 +201,9 @@ namespace Realm {
       for(std::map<int,int>::const_iterator it = cpu_counts.begin();
 	  it != cpu_counts.end();
 	  ++it) {
-	NumaNodeCpuInfo ci;
+	NumaNodeCpuInfo& ci = info[it->first];
 	ci.node_id = it->first;
 	ci.cores_available = it->second;
-	info.push_back(ci);
       }
       return true;
     } else

@@ -37,7 +37,7 @@ if std.config["inline"] then passes_hooks.add_optimization(1, inline_tasks) end
 if std.config["parallelize"] then passes_hooks.add_optimization(10, parallelize_tasks) end
 if std.config["index-launch"] then passes_hooks.add_optimization(25, optimize_index_launches) end
 if std.config["future"] then passes_hooks.add_optimization(30, optimize_futures) end
-if std.config["leaf"] then passes_hooks.add_optimization(40, optimize_config_options) end
+if std.config["leaf"] or std.config["inner"] then passes_hooks.add_optimization(40, optimize_config_options) end
 if std.config["mapping"] then passes_hooks.add_optimization(50, optimize_mapping) end
 if std.config["trace"] then passes_hooks.add_optimization(60, optimize_traces) end
 if std.config["no-dynamic-branches"] then passes_hooks.add_optimization(70, optimize_divergence) end

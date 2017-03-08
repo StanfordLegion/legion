@@ -22,7 +22,7 @@
 #define NUMASYSIF_H
 
 #include <cstdlib>
-#include <vector>
+#include <map>
 
 namespace Realm {
 
@@ -41,9 +41,9 @@ namespace Realm {
 
   // return info on the memory and cpu in each NUMA node
   // default is to restrict to only those nodes enabled in the current affinity mask
-  bool numasysif_get_mem_info(std::vector<NumaNodeMemInfo>& info,
+  bool numasysif_get_mem_info(std::map<int, NumaNodeMemInfo>& info,
 			      bool only_available = true);
-  bool numasysif_get_cpu_info(std::vector<NumaNodeCpuInfo>& info,
+  bool numasysif_get_cpu_info(std::map<int, NumaNodeCpuInfo>& info,
 			      bool only_available = true);
 
   // return the "distance" between two nodes - try to normalize to Linux's model of

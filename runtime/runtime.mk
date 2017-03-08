@@ -203,6 +203,19 @@ ifeq ($(strip $(USE_LLVM)),1)
   LEGION_LD_FLAGS += $(LLVM_SYSTEM_LIBS)
 endif
 
+USE_OPENMP ?= 0
+ifeq ($(strip $(USE_OPENMP)),1)
+  CC_FLAGS += -DREALM_USE_OPENMP
+  REALM_OPENMP_GOMP_SUPPORT ?= 1
+  ifeq ($(strip $(REALM_OPENMP_GOMP_SUPPORT)),1)
+    CC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
+  endif
+  REALM_OPENMP_KMP_SUPPORT ?= 1	
+  ifeq ($(strip $(REALM_OPENMP_KMP_SUPPORT)),1)
+    CC_FLAGS += -DREALM_OPENMP_KMP_SUPPORT
+  endif
+endif
+
 # Flags for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
@@ -296,6 +309,13 @@ ifeq ($(strip $(USE_GASNET)),1)
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
+  ifeq ($(strip $(CONDUIT)),psm)
+    INC_FLAGS 	+= -I$(GASNET)/include/psm-conduit
+    CC_FLAGS	+= -DGASNET_CONDUIT_PSM
+    LEGION_LD_FLAGS	+= -lgasnet-psm-par -lpsm2 -lpmi2 # PMI2 is required for OpenMPI
+    # GASNet needs MPI for interop support
+    USE_MPI	= 1
+  endif
   ifeq ($(strip $(CONDUIT)),mpi)
     INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_MPI
@@ -382,6 +402,11 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
                    $(LG_RT_DIR)/lowlevel_disk.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/numa/numa_module.cc \
 		   $(LG_RT_DIR)/realm/numa/numasysif.cc
+ifeq ($(strip $(USE_OPENMP)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/openmp/openmp_module.cc \
+		   $(LG_RT_DIR)/realm/openmp/openmp_threadpool.cc \
+		   $(LG_RT_DIR)/realm/openmp/openmp_api.cc
+endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/procset/procset_module.cc
 ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc \

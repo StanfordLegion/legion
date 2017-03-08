@@ -325,6 +325,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf
     return os.path.join(build_dir, 'bin')
 
 def clean_cxx(tests, root_dir, env, thread_count):
+    env = dict(list(env.items()) + [
+        ('MAKEFLAGS', 's'), # Always silence initial clean.
+    ])
     for test_file, test_flags in tests:
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         cmd(['make', '-C', test_dir, 'clean'], env=env)
