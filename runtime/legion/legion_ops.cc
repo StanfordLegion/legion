@@ -1819,7 +1819,7 @@ namespace Legion {
         const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, track, regions);
+      initialize_operation(ctx, track, regions, dependences);
       if (p == Predicate::TRUE_PRED)
       {
         speculation_state = RESOLVE_TRUE_STATE;
