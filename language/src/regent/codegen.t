@@ -1978,6 +1978,10 @@ function codegen.expr_index_access(cx, node)
         local region = value:read(cx)
         local region_type = std.as_read(node.expr_type)
 
+        if cx:has_region_or_list(region_type) then
+          return values.value(node, region, region_type)
+        end
+
         if std.is_region(region_type) then
           -- FIXME: For the moment, iterators, allocators, and physical
           -- regions are inaccessible since we assume lists are always
