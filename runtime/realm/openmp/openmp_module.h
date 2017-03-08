@@ -13,24 +13,26 @@
  * limitations under the License.
  */
 
-#ifndef REALM_NUMA_MODULE_H
-#define REALM_NUMA_MODULE_H
+#ifndef REALM_OPENMP_MODULE_H
+#define REALM_OPENMP_MODULE_H
 
 #include "realm/module.h"
 #include "realm/proc_impl.h"
 #include "realm/mem_impl.h"
 
+#include <set>
+
 namespace Realm {
 
-  namespace Numa {
+  namespace OpenMP {
 
     // our interface to the rest of the runtime
-    class NumaModule : public Module {
+    class OpenMPModule : public Module {
     protected:
-      NumaModule(void);
+      OpenMPModule(void);
       
     public:
-      virtual ~NumaModule(void);
+      virtual ~OpenMPModule(void);
 
       static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
 
@@ -40,7 +42,7 @@ namespace Realm {
 
       // create any memories provided by this module (default == do nothing)
       //  (each new MemoryImpl should use a Memory from RuntimeImpl::next_local_memory_id)
-      virtual void create_memories(RuntimeImpl *runtime);
+      //virtual void create_memories(RuntimeImpl *runtime);
 
       // create any processors provided by the module (default == do nothing)
       //  (each new ProcessorImpl should use a Processor from
@@ -48,32 +50,28 @@ namespace Realm {
       virtual void create_processors(RuntimeImpl *runtime);
 
       // create any DMA channels provided by the module (default == do nothing)
-      virtual void create_dma_channels(RuntimeImpl *runtime);
+      //virtual void create_dma_channels(RuntimeImpl *runtime);
 
       // create any code translators provided by the module (default == do nothing)
-      virtual void create_code_translators(RuntimeImpl *runtime);
+      //virtual void create_code_translators(RuntimeImpl *runtime);
 
       // clean up any common resources created by the module - this will be called
       //  after all memories/processors/etc. have been shut down and destroyed
       virtual void cleanup(void);
 
     public:
-      size_t cfg_numa_mem_size_in_mb;
-      ssize_t cfg_numa_nocpu_mem_size_in_mb;
-      int cfg_num_numa_cpus;
-      bool cfg_pin_memory;
+      int cfg_num_openmp_cpus;
+      int cfg_num_threads_per_cpu;
+      bool cfg_use_numa;
+      bool cfg_fake_cpukind;
       size_t cfg_stack_size_in_mb;
 
-      // "global" variables live here too
-      std::map<int, void *> numa_mem_bases;
-      std::map<int, size_t> numa_mem_sizes;
-      std::map<int, int> numa_cpu_counts;
-      std::map<int, MemoryImpl *> memories;
+      std::set<int> active_numa_domains;
     };
 
-    REGISTER_REALM_MODULE(NumaModule);
+    REGISTER_REALM_MODULE(OpenMPModule);
 
-  }; // namespace Numa
+  }; // namespace OpenMP
 
 }; // namespace Realm
 

@@ -43,7 +43,7 @@ namespace Legion {
     public:
       ISAConstraint(uint64_t prop = 0);
     public:
-      bool entaisl(const ISAConstraint &other) const;
+      bool entails(const ISAConstraint &other) const;
       bool conflicts(const ISAConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;

@@ -2825,10 +2825,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert((open_state == OPEN_SINGLE_REDUCE) ||
                (open_state == OPEN_MULTI_REDUCE) ||
-               (open_state == OPEN_REDUCE_PROJ));
+               (open_state == OPEN_REDUCE_PROJ) ||
+               (open_state == OPEN_REDUCE_PROJ_DIRTY));
         assert((rhs.open_state == OPEN_SINGLE_REDUCE) ||
                (rhs.open_state == OPEN_MULTI_REDUCE) ||
-               (rhs.open_state == OPEN_REDUCE_PROJ));
+               (rhs.open_state == OPEN_REDUCE_PROJ) ||
+               (rhs.open_state == OPEN_REDUCE_PROJ_DIRTY));
 #endif
         // Only support merging reduction fields with exactly the
         // same mask which should be single fields for reductions
@@ -3979,7 +3981,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalState::capture_composite_root(CompositeView *composite_view,
-                                               const FieldMask &close_mask,
+                  const FieldMask &close_mask, ReferenceMutator *mutator,
                   const LegionMap<LogicalView*,FieldMask>::aligned &valid_above)
     //--------------------------------------------------------------------------
     {
@@ -3990,7 +3992,7 @@ namespace Legion {
         FieldMask overlap = it->second & close_mask;
         if (!overlap)
           continue;
-        it->first->capture_root(composite_view, overlap);
+        it->first->capture_root(composite_view, overlap, mutator);
       }
       // Finally record any valid above views
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
@@ -7836,7 +7838,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::capture_root(CompositeView *target, 
-                                    const FieldMask &capture_mask) const
+                 const FieldMask &capture_mask, ReferenceMutator *mutator) const
     //--------------------------------------------------------------------------
     { 
       // We'll only capture nested composite views if we have no choice
@@ -7858,7 +7860,8 @@ namespace Legion {
             FieldMask overlap = it->second & capture_mask;
             if (!overlap)
               continue;
-            target->record_child_version_state(cit->first, it->first, overlap);
+            target->record_child_version_state(cit->first, it->first, 
+                                               overlap, mutator);
           }
         }
         FieldMask dirty_overlap = dirty_mask & capture_mask;
@@ -7917,7 +7920,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::capture(CompositeNode *target,
-                               const FieldMask &capture_mask) const
+                               const FieldMask &capture_mask,
+                               ReferenceMutator *mutator) const
     //--------------------------------------------------------------------------
     {
       // Only need this in read only mode since we're just reading
@@ -7959,7 +7963,8 @@ namespace Legion {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
             continue;
-          target->record_child_version_state(cit->first, it->first, overlap);
+          target->record_child_version_state(cit->first, it->first, 
+                                             overlap, mutator);
         }
       }
     }

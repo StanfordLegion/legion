@@ -1289,7 +1289,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>      *static_dependences;
+      const std::vector<StaticDependence> *static_dependences;
     public:
       // Users can inform the runtime that all region requirements
       // are independent of each other in this task. Independent
@@ -1363,7 +1363,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>      *static_dependences;
+      const std::vector<StaticDependence> *static_dependences;
     public:
       // Users can inform the runtime that all region requirements
       // are independent of each other in this task. Independent
@@ -1400,7 +1400,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>   *static_dependences;
+      const std::vector<StaticDependence> *static_dependences;
     };
 
     /**
@@ -1455,7 +1455,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>   *static_dependences;
+      const std::vector<StaticDependence> *static_dependences;
     public:
       bool                            silence_warnings;
     };
@@ -1498,7 +1498,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>   *static_dependences;
+      const std::vector<StaticDependence> *static_dependences;
     public:
       bool                            silence_warnings;
     };
@@ -1543,7 +1543,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>   *static_dependences;
+      const std::vector<StaticDependence> *static_dependences;
     public:
       bool                            silence_warnings;
     };
@@ -1609,7 +1609,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>   *static_dependences;
+      const std::vector<StaticDependence> *static_dependences;
     public:
       bool                            silence_warnings;
     };
@@ -1655,7 +1655,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>                 *static_dependences;
+      const std::vector<StaticDependence>           *static_dependences;
     };
 
     /**
@@ -2021,7 +2021,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>   *static_dependences;
+      const std::vector<StaticDependence> *static_dependences;
     public:
       bool                            silence_warnings;
     };
@@ -2063,7 +2063,7 @@ namespace Legion {
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
-      std::vector<StaticDependence>   *static_dependences;
+      const std::vector<StaticDependence> *static_dependences;
     public:
       bool                            silence_warnings;
     };

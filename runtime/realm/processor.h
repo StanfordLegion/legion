@@ -60,6 +60,7 @@ namespace Realm {
         IO_PROC = ::IO_PROC, // I/O core
         PROC_GROUP = ::PROC_GROUP, // Processor group
         PROC_SET = ::PROC_SET, // Set of Processors for OpenMP/Kokkos etc.
+	OMP_PROC = ::OMP_PROC, // OpenMP (or similar) thread pool
       };
 
       // Return what kind of processor this is

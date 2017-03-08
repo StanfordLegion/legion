@@ -826,6 +826,8 @@ namespace Legion {
                                            bool separate_children) = 0;
       virtual LegionColor linearize_color(const void *realm_color,
                                           TypeTag type_tag) = 0;
+      virtual void delinearize_color(LegionColor color, 
+                                     void *realm_color, TypeTag type_tag) = 0;
       virtual ApEvent compute_pending_space(
             const std::vector<IndexSpace> &handles, bool is_union) = 0;
       virtual ApEvent compute_pending_space(IndexPartition handle,
@@ -1508,7 +1510,7 @@ namespace Legion {
       void issue_restricted_reductions(const TraversalInfo &info,
          const RestrictInfo &restrict_info,
          const InstanceSet &restricted_instances,
-         const std::vector<MaterializedView*> &restricted_views,
+         const std::vector<InstanceView*> &restricted_views,
          const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views);
       // Look for a view to remove from the set of valid views
       void filter_valid_views(PhysicalState *state, LogicalView *to_filter);

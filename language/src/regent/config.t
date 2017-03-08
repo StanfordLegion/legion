@@ -28,6 +28,7 @@ local default_options = {
   ["inline"] = true,
   ["future"] = true,
   ["leaf"] = true,
+  ["inner"] = true,
   ["mapping"] = true,
   ["vectorize"] = true,
 

@@ -812,7 +812,7 @@ namespace Legion {
       void apply_state(std::set<RtEvent> &applied_conditions) const; 
     public:
       void capture_composite_root(CompositeView *composite_view,
-                                  const FieldMask &closed_mask,
+        const FieldMask &closed_mask, ReferenceMutator *mutator,
         const LegionMap<LogicalView*,FieldMask>::aligned &valid_above);
       void perform_disjoint_close(InterCloseOp *op, unsigned index,
                    InnerContext *context, const FieldMask &closing_mask);
@@ -1238,8 +1238,10 @@ namespace Legion {
                                                  Deserializer &derez); 
     public:
       void capture_root(CompositeView *target, 
-                        const FieldMask &capture_mask) const;
-      void capture(CompositeNode *target, const FieldMask &capture_mask) const;
+                        const FieldMask &capture_mask,
+                        ReferenceMutator *mutator) const;
+      void capture(CompositeNode *target, const FieldMask &capture_mask,
+                   ReferenceMutator *mutator) const;
       void capture_dirty_instances(const FieldMask &capture_mask, 
                                    VersionState *target) const;
     public:

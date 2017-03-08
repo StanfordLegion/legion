@@ -87,6 +87,7 @@ namespace Realm {
     NumaModule::NumaModule(void)
       : Module("numa")
       , cfg_numa_mem_size_in_mb(0)
+      , cfg_numa_nocpu_mem_size_in_mb(-1)
       , cfg_num_numa_cpus(0)
       , cfg_pin_memory(false)
       , cfg_stack_size_in_mb(2)
@@ -108,6 +109,7 @@ namespace Realm {
 	CommandLineParser cp;
 
 	cp.add_option_int("-ll:nsize", m->cfg_numa_mem_size_in_mb)
+	  .add_option_int("-ll:ncsize", m->cfg_numa_nocpu_mem_size_in_mb)
 	  .add_option_int("-ll:ncpu", m->cfg_num_numa_cpus)
 	  .add_option_bool("-numa:pin", m->cfg_pin_memory);
 	
@@ -134,8 +136,8 @@ namespace Realm {
       }
 
       // get number/sizes of NUMA nodes
-      std::vector<NumaNodeMemInfo> meminfo;
-      std::vector<NumaNodeCpuInfo> cpuinfo;
+      std::map<int, NumaNodeMemInfo> meminfo;
+      std::map<int, NumaNodeCpuInfo> cpuinfo;
       if(!numasysif_get_mem_info(meminfo) ||
 	 !numasysif_get_cpu_info(cpuinfo)) {
 	log_numa.fatal() << "failed to get mem/cpu info from system";
@@ -143,27 +145,42 @@ namespace Realm {
       }
 
       // some sanity-checks
-      for(std::vector<NumaNodeMemInfo>::const_iterator it = meminfo.begin();
+      for(std::map<int, NumaNodeMemInfo>::const_iterator it = meminfo.begin();
 	  it != meminfo.end();
 	  ++it) {
-	log_numa.info() << "NUMA memory node " << it->node_id << ": " << (it->bytes_available >> 20) << " MB";
-	if(it->bytes_available >= (m->cfg_numa_mem_size_in_mb << 20)) {
-	  m->numa_mem_bases[it->node_id] = 0;
+	const NumaNodeMemInfo& mi = it->second;
+	log_numa.info() << "NUMA memory node " << mi.node_id << ": " << (mi.bytes_available >> 20) << " MB";
+
+	size_t mem_size = (m->cfg_numa_mem_size_in_mb << 20);
+	if(m->cfg_numa_nocpu_mem_size_in_mb >= 0) {
+	  // use this value instead if there are no cpus in this domain
+	  if(cpuinfo.count(mi.node_id) == 0)
+	    mem_size = (m->cfg_numa_nocpu_mem_size_in_mb << 20);
+	}
+
+	// skip domain silently if no memory is requested
+	if(mem_size == 0)
+	  continue;
+
+	if(mi.bytes_available >= mem_size) {
+	  m->numa_mem_bases[mi.node_id] = 0;
+	  m->numa_mem_sizes[mi.node_id] = mem_size;
 	} else {
 	  // TODO: fatal error?
-	  log_numa.warning() << "insufficient memory in NUMA node " << it->node_id << " - skipping allocation";
+	  log_numa.warning() << "insufficient memory in NUMA node " << mi.node_id << " (" << mem_size << " > " << mi.bytes_available << " bytes) - skipping allocation";
 	}
       }
-      for(std::vector<NumaNodeCpuInfo>::const_iterator it = cpuinfo.begin();
+      for(std::map<int, NumaNodeCpuInfo>::const_iterator it = cpuinfo.begin();
 	  it != cpuinfo.end();
 	  ++it) {
-	log_numa.info() << "NUMA cpu node " << it->node_id << ": " << it->cores_available << " cores";
-	if(it->cores_available >= m->cfg_num_numa_cpus) {
-	  m->numa_cpu_counts[it->node_id] = m->cfg_num_numa_cpus;
+	const NumaNodeCpuInfo& ci = it->second;
+	log_numa.info() << "NUMA cpu node " << ci.node_id << ": " << ci.cores_available << " cores";
+	if(ci.cores_available >= m->cfg_num_numa_cpus) {
+	  m->numa_cpu_counts[ci.node_id] = m->cfg_num_numa_cpus;
 	} else {
 	  // TODO: fatal error?
-	  log_numa.warning() << "insufficient cores in NUMA node " << it->node_id << " - core assignment will fail";
-	  m->numa_cpu_counts[it->node_id] = m->cfg_num_numa_cpus;
+	  log_numa.warning() << "insufficient cores in NUMA node " << ci.node_id << " - core assignment will fail";
+	  m->numa_cpu_counts[ci.node_id] = m->cfg_num_numa_cpus;
 	}
       }
 
@@ -180,11 +197,13 @@ namespace Realm {
       for(std::map<int, void *>::iterator it = numa_mem_bases.begin();
 	  it != numa_mem_bases.end();
 	  ++it) {
+	size_t mem_size = numa_mem_sizes[it->first];
+	assert(mem_size > 0);
 	void *base = numasysif_alloc_mem(it->first,
-					 cfg_numa_mem_size_in_mb << 20,
+					 mem_size,
 					 cfg_pin_memory);
 	if(!base) {
-	  log_numa.fatal() << "allocation of " << cfg_numa_mem_size_in_mb << " MB in NUMA node " << it->first << " failed!";
+	  log_numa.fatal() << "allocation of " << mem_size << " bytes in NUMA node " << it->first << " failed!";
 	  assert(false);
 	}
 	it->second = base;
@@ -202,10 +221,12 @@ namespace Realm {
 	  ++it) {
 	int mem_node = it->first;
 	void *base_ptr = it->second;
+	size_t mem_size = numa_mem_sizes[it->first];
+	assert(mem_size > 0);
 
 	Memory m = runtime->next_local_memory_id();
 	LocalCPUMemory *numamem = new LocalCPUMemory(m,
-						     cfg_numa_mem_size_in_mb << 20,
+						     mem_size,
 						     base_ptr,
 						     false /*!registered*/);
 	runtime->add_memory(numamem);
@@ -265,6 +286,9 @@ namespace Realm {
 		pma.bandwidth = 80;   // "large"
 		pma.latency = 10;     // "small"
 	      }
+	      // FIXME: once the stuff in runtime_impl.cc is removed, remove
+	      //  this 'continue' so that we create affinities here
+	      continue;
 	    } else {
 	      int d = numasysif_get_distance(cpu_node, mem_node);
 	      if(d >= 0) {
@@ -305,8 +329,9 @@ namespace Realm {
       for(std::map<int, void *>::iterator it = numa_mem_bases.begin();
 	  it != numa_mem_bases.end();
 	  ++it) {
-	bool ok = numasysif_free_mem(it->first, it->second,
-				     cfg_numa_mem_size_in_mb << 20);
+	size_t mem_size = numa_mem_sizes[it->first];
+	assert(mem_size > 0);
+	bool ok = numasysif_free_mem(it->first, it->second, mem_size);
 	if(!ok)
 	  log_numa.error() << "failed to free memory in NUMA node " << it->first << ": ptr=" << it->second;
       }
