@@ -1459,6 +1459,10 @@ namespace Realm {
     ZIndexSpace(const ZRect<N,T>& _bounds);
     ZIndexSpace(const ZRect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
 
+    // reclaim any physical resources associated with this index space
+    //  will clear the sparsity map of this index space if it exists
+    void destroy(void);
+
     // true if we're SURE that there are no points in the space (may be imprecise due to
     //  lazy loading of sparsity data)
     bool empty(void) const;
