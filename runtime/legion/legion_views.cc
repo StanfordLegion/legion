@@ -6117,7 +6117,11 @@ namespace Legion {
           state->add_nested_resource_ref(owner_did);
           // We are the root so add our valid ref too
           WrapperReferenceMutator mutator(preconditions);
-          state->add_nested_valid_ref(owner_did, &mutator);
+          if (state->is_owner())
+            state->add_nested_valid_ref(owner_did, &mutator);
+          else
+            state->send_remote_valid_update(state->owner_space, &mutator,
+                                            1/*count*/, true/*add*/);
         }
       }
       return result;
@@ -6132,7 +6136,11 @@ namespace Legion {
       nargs->state->add_nested_resource_ref(nargs->owner_did);
       // We are the root so add our valid ref too
       LocalReferenceMutator mutator;
-      nargs->state->add_nested_valid_ref(nargs->owner_did, &mutator);
+      if (nargs->state->is_owner())
+        nargs->state->add_nested_valid_ref(nargs->owner_did, &mutator);
+      else
+        nargs->state->send_remote_valid_update(nargs->state->owner_space,
+                                      &mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6146,7 +6154,13 @@ namespace Legion {
       {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               version_states.begin(); it != version_states.end(); it++)
-          it->first->add_nested_valid_ref(owner_did, mutator);
+        {
+          if (it->first->is_owner())
+            it->first->add_nested_valid_ref(owner_did, mutator);
+          else
+            it->first->send_remote_valid_update(it->first->owner_space,
+                                      mutator, 1/*count*/, true/*add*/);
+        }
       }
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -6171,7 +6185,13 @@ namespace Legion {
       {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               version_states.begin(); it != version_states.end(); it++)
-          it->first->remove_nested_valid_ref(owner_did, mutator);
+        {
+          if (it->first->is_owner())
+            it->first->remove_nested_valid_ref(owner_did, mutator);
+          else
+            it->first->send_remote_valid_update(it->first->owner_space,
+                                    mutator, 1/*count*/, false/*add*/);
+        }
       }
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -6279,7 +6299,13 @@ namespace Legion {
         state->add_nested_resource_ref(owner_did);
         version_states[state] = mask;
         if (root && currently_valid)
-          state->add_nested_valid_ref(owner_did, mutator);
+        {
+          if (state->is_owner())
+            state->add_nested_valid_ref(owner_did, mutator);
+          else
+            state->send_remote_valid_update(state->owner_space, mutator,
+                                            1/*count*/, true/*add*/);
+        }
       }
       else
         finder->second |= mask;
