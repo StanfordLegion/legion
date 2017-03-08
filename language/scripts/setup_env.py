@@ -70,8 +70,8 @@ def build_llvm(source_dir, build_dir, install_dir, cmake_exe, thread_count):
     env = None
     if is_cray:
         env = dict(list(os.environ.items()) + [
-            ('HOST_CC', os.environ['HOST_CC']),
-            ('HOST_CXX', os.environ['HOST_CXX']),
+            ('CC', os.environ['HOST_CC']),
+            ('CXX', os.environ['HOST_CXX']),
         ])
     subprocess.check_call(
         [cmake_exe,
