@@ -1240,7 +1240,8 @@ namespace Legion {
       void capture_root(CompositeView *target, 
                         const FieldMask &capture_mask,
                         ReferenceMutator *mutator) const;
-      void capture(CompositeNode *target, const FieldMask &capture_mask) const;
+      void capture(CompositeNode *target, const FieldMask &capture_mask,
+                   ReferenceMutator *mutator) const;
       void capture_dirty_instances(const FieldMask &capture_mask, 
                                    VersionState *target) const;
     public:

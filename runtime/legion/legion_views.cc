@@ -5783,7 +5783,7 @@ namespace Legion {
                                  DistributedID own_did)
       : CompositeBase(node_lock), logical_node(node), parent(p), 
         owner_did(own_did), node_lock(Reservation::create_reservation()),
-        currently_valid(true)
+        currently_valid(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -5933,7 +5933,10 @@ namespace Legion {
           preconditions.insert(precondition);
         }
         else // We can do the capture now!
-          capture(capture_event);
+        {
+          WrapperReferenceMutator mutator(preconditions);
+          capture(capture_event, &mutator);
+        }
       }
       if (!preconditions.empty())
       {
@@ -5986,7 +5989,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeNode::capture(RtUserEvent capture_event)
+    void CompositeNode::capture(RtUserEvent capture_event, 
+                                ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       {
@@ -6003,7 +6007,7 @@ namespace Legion {
           FieldMask overlap = it->second & finder->second;
           if (!overlap)
             continue;
-          it->first->capture(this, overlap);
+          it->first->capture(this, overlap, mutator);
         }
         valid_fields |= finder->second;
         pending_captures.erase(finder); 
@@ -6016,7 +6020,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferCaptureArgs *dargs = (const DeferCaptureArgs*)args;
-      dargs->proxy_this->capture(dargs->capture_event);
+      LocalReferenceMutator mutator;
+      dargs->proxy_this->capture(dargs->capture_event, &mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -6134,25 +6139,25 @@ namespace Legion {
     void CompositeNode::notify_valid(ReferenceMutator *mutator, bool root)
     //--------------------------------------------------------------------------
     {
-      if (!currently_valid)
+#ifdef DEBUG_LEGION
+      assert(!currently_valid);
+#endif
+      if (root)
       {
-        if (root)
-        {
-          for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
-                version_states.begin(); it != version_states.end(); it++)
-            it->first->add_nested_valid_ref(owner_did, mutator);
-        }
-        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
-              children.begin(); it != children.end(); it++)
-          it->first->notify_valid(mutator, false/*root*/);
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-              valid_views.begin(); it != valid_views.end(); it++)
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              version_states.begin(); it != version_states.end(); it++)
           it->first->add_nested_valid_ref(owner_did, mutator);
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-              reduction_views.begin(); it != reduction_views.end(); it++)
-          it->first->add_nested_valid_ref(owner_did, mutator);
-        currently_valid = true;
       }
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+        it->first->notify_valid(mutator, false/*root*/);
+      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
+            valid_views.begin(); it != valid_views.end(); it++)
+        it->first->add_nested_valid_ref(owner_did, mutator);
+      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
+            reduction_views.begin(); it != reduction_views.end(); it++)
+        it->first->add_nested_valid_ref(owner_did, mutator);
+      currently_valid = true;
     }
 
     //--------------------------------------------------------------------------
@@ -6192,9 +6197,6 @@ namespace Legion {
     void CompositeNode::record_valid_view(LogicalView *view, const FieldMask &m)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(currently_valid);
-#endif
       // should already hold the lock from the caller
       LegionMap<LogicalView*,FieldMask>::aligned::iterator finder = 
         valid_views.find(view);
@@ -6203,7 +6205,8 @@ namespace Legion {
         // Add both a resource and a valid reference
         // No need for a mutator since these must be valid if we are capturing
         view->add_nested_resource_ref(owner_did);
-        view->add_nested_valid_ref(owner_did);
+        if (currently_valid)
+          view->add_nested_valid_ref(owner_did);
         valid_views[view] = m;
       }
       else
@@ -6223,9 +6226,6 @@ namespace Legion {
                                               const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(currently_valid);
-#endif
       // should already hold the lock from the caller
       LegionMap<ReductionView*,FieldMask>::aligned::iterator finder = 
         reduction_views.find(view);
@@ -6234,7 +6234,8 @@ namespace Legion {
         // Add both a resource and a valid reference
         // No need for a mutator since these must be valid if we are capturing
         view->add_nested_resource_ref(owner_did);
-        view->add_nested_valid_ref(owner_did);
+        if (currently_valid)
+          view->add_nested_valid_ref(owner_did);
         reduction_views[view] = mask;
       }
       else
@@ -6243,7 +6244,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeNode::record_child_version_state(const ColorPoint &color,
-                                     VersionState *state, const FieldMask &mask)
+          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       RegionTreeNode *child_node = logical_node->get_tree_child(color);
@@ -6252,8 +6253,7 @@ namespace Legion {
       {
         if (it->first->logical_node == child_node)
         {
-          it->first->record_version_state(state, mask, 
-                                          NULL/*mutator*/, false/*root*/);
+          it->first->record_version_state(state, mask, mutator, false/*root*/); 
           it->second |= mask;
           return;
         }
@@ -6261,8 +6261,10 @@ namespace Legion {
       // Didn't find it so make it
       CompositeNode *child = 
         legion_new<CompositeNode>(child_node, this, owner_did); 
-      child->record_version_state(state, mask, NULL/*mutator*/, false/*root*/);
+      child->record_version_state(state, mask, mutator, false/*root*/);
       children[child] = mask;
+      if (currently_valid)
+        child->notify_valid(mutator, false/*root*/);
     }
 
     //--------------------------------------------------------------------------

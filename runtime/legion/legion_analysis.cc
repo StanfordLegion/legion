@@ -7948,7 +7948,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionState::capture(CompositeNode *target,
-                               const FieldMask &capture_mask) const
+                               const FieldMask &capture_mask,
+                               ReferenceMutator *mutator) const
     //--------------------------------------------------------------------------
     {
       // Only need this in read only mode since we're just reading
@@ -7990,7 +7991,8 @@ namespace Legion {
           FieldMask overlap = it->second & capture_mask;
           if (!overlap)
             continue;
-          target->record_child_version_state(cit->first, it->first, overlap);
+          target->record_child_version_state(cit->first, it->first, 
+                                             overlap, mutator);
         }
       }
     }
