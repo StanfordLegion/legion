@@ -1099,21 +1099,44 @@ namespace Realm {
 	unsigned num_procs = 0;
 	unsigned num_memories = 0;
 
-	// announce each processor and its affinities
+	// announce each processor
 	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
 	    it != n->processors.end();
 	    it++)
 	  if(*it) {
 	    Processor p = (*it)->me;
 	    Processor::Kind k = (*it)->me.kind();
-        int num_cores = (*it)->num_cores;
+	    int num_cores = (*it)->num_cores;
 
 	    num_procs++;
 	    adata[apos++] = NODE_ANNOUNCE_PROC;
 	    adata[apos++] = p.id;
 	    adata[apos++] = k;
-        adata[apos++] = num_cores;
+	    adata[apos++] = num_cores;
+	  }
 
+	// now each memory
+	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
+	    it != n->memories.end();
+	    it++)
+	  if(*it) {
+	    Memory m = (*it)->me;
+	    Memory::Kind k = (*it)->me.kind();
+
+	    num_memories++;
+	    adata[apos++] = NODE_ANNOUNCE_MEM;
+	    adata[apos++] = m.id;
+	    adata[apos++] = k;
+	    adata[apos++] = (*it)->size;
+	    adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
+	  }
+
+	// announce each processor's affinities
+	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
+	    it != n->processors.end();
+	    it++)
+	  if(*it) {
+	    Processor p = (*it)->me;
 	    std::vector<Machine::ProcessorMemoryAffinity> pmas;
 	    machine->get_proc_mem_affinity(pmas, p);
 
@@ -1128,21 +1151,12 @@ namespace Realm {
 	    }
 	  }
 
-	// now each memory and its affinities with other memories
+	// now each memory's affinities with other memories
 	for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
 	    it != n->memories.end();
 	    it++)
 	  if(*it) {
 	    Memory m = (*it)->me;
-	    Memory::Kind k = (*it)->me.kind();
-
-	    num_memories++;
-	    adata[apos++] = NODE_ANNOUNCE_MEM;
-	    adata[apos++] = m.id;
-	    adata[apos++] = k;
-	    adata[apos++] = (*it)->size;
-	    adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
-
 	    std::vector<Machine::MemoryMemoryAffinity> mmas;
 	    machine->get_mem_mem_affinity(mmas, m);
 
