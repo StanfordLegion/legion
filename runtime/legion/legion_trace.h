@@ -85,6 +85,7 @@ namespace Legion {
                                            const FieldMask &aliased_mask) = 0;
     public:
       void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
+      void end_trace_execution(FenceOp *fence_op);
     public:
       static void delete_trace(LegionTrace *trace);
     public:
@@ -183,7 +184,6 @@ namespace Legion {
     public:
       // Called by analysis thread
       void end_trace_capture(void);
-      void end_trace_execution(Operation *op);
     public:
       virtual void record_static_dependences(Operation *op,
                           const std::vector<StaticDependence> *dependences);
@@ -279,7 +279,7 @@ namespace Legion {
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
     protected:
-      DynamicTrace *local_trace;
+      LegionTrace *local_trace;
     };
 
   }; // namespace Internal 
