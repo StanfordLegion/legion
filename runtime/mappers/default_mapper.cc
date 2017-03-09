@@ -2211,7 +2211,8 @@ namespace Legion {
         if (finder == source_memories.end())
         {
           affinity.clear();
-          machine.get_mem_mem_affinity(affinity, location, destination_memory);
+          machine.get_mem_mem_affinity(affinity, location, destination_memory,
+				       false /*not just local affinities*/);
           unsigned memory_bandwidth = 0;
           if (affinity.empty()) {
             // TODO: More graceful way of dealing with multi-hop copies
