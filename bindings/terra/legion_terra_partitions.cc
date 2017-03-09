@@ -1367,19 +1367,20 @@ create_cross_product_complete_unstructured(
     std::map<IndexSpace, std::vector<IndexSpace> >& product,
     legion_terra_index_space_list_list_t &result)
 {
-  std::vector<Color> lhs_colors;
+  std::vector<DomainPoint> lhs_colors;
   lhs_colors.reserve(lhs.size());
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
     IndexSpace& lh_space = lhs[lhs_idx];
-    Color lh_color = runtime->get_index_space_color(ctx, lh_space);
+    DomainPoint lh_color = runtime->get_index_space_color_point(ctx, lh_space);
     lhs_colors.push_back(lh_color);
   }
 
-  std::map<IndexSpace, Coloring> coloring;
+  std::map<IndexSpace, PointColoring> coloring;
+  std::map<IndexSpace, Domain> color_spaces;
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
     IndexSpace& lh_space = lhs[lhs_idx];
     std::vector<IndexSpace>& rh_spaces = product[lh_space];
-    Color lh_color = lhs_colors[lhs_idx];
+    DomainPoint lh_color = lhs_colors[lhs_idx];
 
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
       IndexSpace& rh_space = rh_spaces[rhs_idx];
@@ -1399,6 +1400,13 @@ create_cross_product_complete_unstructured(
             break;
           }
 
+          if (color_spaces.count(rh_space) > 0) {
+            color_spaces[rh_space] =
+              color_spaces[rh_space].convex_hull(lh_color);
+          } else {
+            color_spaces[rh_space] = Domain::from_domain_point(lh_color);
+          }
+
           if (lh_end.value > rh_end.value) {
             coloring[rh_space][lh_color].ranges.insert(std::pair<ptr_t, ptr_t>(lh_ptr, rh_end));
             break;
@@ -1411,17 +1419,22 @@ create_cross_product_complete_unstructured(
   }
 
   std::map<IndexSpace, IndexPartition> rh_partitions;
-  for (std::map<IndexSpace, Coloring>::iterator it = coloring.begin();
+  for (std::map<IndexSpace, PointColoring>::iterator it = coloring.begin();
        it != coloring.end(); ++it) {
-    IndexPartition ip =
-      runtime->create_index_partition(ctx, it->first, it->second, lhs_part_disjoint);
+    IndexSpace rh_space = it->first;
+    const PointColoring& coloring = it->second;
+    assert(color_spaces.count(rh_space) > 0);
+
+    IndexPartition ip = runtime->create_index_partition(
+        ctx, /* parent = */ rh_space, /* color_space = */ color_spaces[rh_space],
+        coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
     rh_partitions[it->first] = ip;
   }
 
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
     IndexSpace& lh_space = lhs[lhs_idx];
     std::vector<IndexSpace>& rh_spaces = product[lh_space];
-    Color lh_color = lhs_colors[lhs_idx];
+    DomainPoint lh_color = lhs_colors[lhs_idx];
 
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
       IndexSpace& rh_space = rh_spaces[rhs_idx];
