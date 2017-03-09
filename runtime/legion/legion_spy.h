@@ -98,13 +98,10 @@ namespace Legion {
       }
 
       static inline void log_index_partition(IDType parent_id, 
-                IDType unique_id, bool disjoint, const DomainPoint& point)
+                IDType unique_id, bool disjoint, LegionColor point)
       {
-        log_spy.print("Index Partition " IDFMT " " IDFMT " %u %u %d %d %d",
-		      parent_id, unique_id, disjoint, point.dim, 
-                    (int)point.point_data[0],
-                    (int)point.point_data[1],
-                    (int)point.point_data[2]);
+        log_spy.print("Index Partition " IDFMT " " IDFMT " %u 1 %lld",
+		      parent_id, unique_id, disjoint, point); 
       }
 
       static inline void log_index_partition_name(IDType unique_id,
@@ -115,13 +112,10 @@ namespace Legion {
       }
 
       static inline void log_index_subspace(IDType parent_id, 
-                              IDType unique_id, const DomainPoint& point)
+                              IDType unique_id, LegionColor point)
       {
-        log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %d %d %d",
-		      parent_id, unique_id, point.dim, 
-		      (int)point.point_data[0],
-		      (int)point.point_data[1],
-		      (int)point.point_data[2]);
+        log_spy.print("Index Subspace " IDFMT " " IDFMT " 1 %lld",
+		      parent_id, unique_id, point);
       }
 
       static inline void log_field_space(unsigned unique_id)

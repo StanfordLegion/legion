@@ -3030,9 +3030,10 @@ namespace Legion {
       LegionColor part_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
+      ApUserEvent partition_ready = Runtime::create_ap_user_event();
       forest->create_pending_partition(pid, parent, color_space, part_color,
-                                       part_kind, ApEvent::NO_AP_EVENT,
-                                       true/*separate*/);
+                                       part_kind, partition_ready, 
+                                       partition_ready);
       return pid;
     }
 

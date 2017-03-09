@@ -139,6 +139,7 @@ namespace Legion {
   // legion_backwards.h
   class DomainPoint;
   class Domain;
+  class IndexSpaceAllocator;
 
   // legion_utilities.h
   struct RegionUsage;
@@ -1409,7 +1410,6 @@ namespace Legion {
   typedef LegionRuntime::Accessor::ByteOffset ByteOffset;
   typedef Realm::Runtime RealmRuntime;
   typedef Realm::Machine Machine;
-  typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
   typedef Realm::Memory Memory;
   typedef Realm::Processor Processor;
   typedef Realm::CodeDescriptor CodeDescriptor;

@@ -852,6 +852,13 @@ namespace Legion {
       return os;
     }
 
+    class IndexSpaceAllocator {
+    public:
+      coord_t alloc(size_t count = 1) const;
+      void reserve(coord_t ptr, size_t count = 1) const;
+      void free(coord_t ptr, size_t count = 1) const;
+    };
+
 }; // namespace Legion
 
 #endif // __LEGION_BACKWARDS_H__
