@@ -62,13 +62,16 @@ namespace Realm {
 					Processor::Kind kind) const;
 
       // Return the set of memories visible from a processor
-      void get_visible_memories(Processor p, std::set<Memory>& mset) const;
+      void get_visible_memories(Processor p, std::set<Memory>& mset,
+				bool local_only = true) const;
 
       // Return the set of memories visible from a memory
-      void get_visible_memories(Memory m, std::set<Memory>& mset) const;
+      void get_visible_memories(Memory m, std::set<Memory>& mset,
+				bool local_only = true) const;
 
       // Return the set of processors which can all see a given memory
-      void get_shared_processors(Memory m, std::set<Processor>& pset) const;
+      void get_shared_processors(Memory m, std::set<Processor>& pset,
+				 bool local_only = true) const;
 
       size_t get_address_space_count(void) const;
 
@@ -88,11 +91,13 @@ namespace Realm {
 
       int get_proc_mem_affinity(std::vector<ProcessorMemoryAffinity>& result,
 				Processor restrict_proc = Processor::NO_PROC,
-				Memory restrict_memory = Memory::NO_MEMORY) const;
+				Memory restrict_memory = Memory::NO_MEMORY,
+				bool local_only = true) const;
 
       int get_mem_mem_affinity(std::vector<MemoryMemoryAffinity>& result,
 			       Memory restrict_mem1 = Memory::NO_MEMORY,
-			       Memory restrict_mem2 = Memory::NO_MEMORY) const;
+			       Memory restrict_mem2 = Memory::NO_MEMORY,
+			       bool local_only = true) const;
 
       // subscription interface for dynamic machine updates
       class MachineUpdateSubscriber {

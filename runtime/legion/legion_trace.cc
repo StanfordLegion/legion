@@ -65,6 +65,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionTrace::end_trace_execution(FenceOp *op)
+    //--------------------------------------------------------------------------
+    {
+      // Register for this fence on every one of the operations in
+      // the trace and then clear out the operations data structure
+      for (unsigned idx = 0; idx < operations.size(); idx++)
+      {
+        const std::pair<Operation*,GenerationID> &target = operations[idx];
+        op->register_dependence(target.first, target.second);
+#ifdef LEGION_SPY
+        for (unsigned req_idx = 0; req_idx < num_regions[idx]; req_idx++)
+        {
+          LegionSpy::log_mapping_dependence(
+              op->get_context()->get_unique_id(), current_uids[idx], req_idx,
+              op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+        }
+#endif
+        // Remove any mapping references that we hold
+        target.first->remove_mapping_reference(target.second);
+      }
+      operations.clear();
+#ifdef LEGION_SPY
+      current_uids.clear();
+      num_regions.clear();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void LegionTrace::delete_trace(LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
@@ -398,38 +426,7 @@ namespace Legion {
       current_uids.clear();
       num_regions.clear();
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void DynamicTrace::end_trace_execution(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!tracing);
-#endif
-      // Register for this fence on every one of the operations in
-      // the trace and then clear out the operations data structure
-      for (unsigned idx = 0; idx < operations.size(); idx++)
-      {
-        const std::pair<Operation*,GenerationID> &target = operations[idx];
-        op->register_dependence(target.first, target.second);
-#ifdef LEGION_SPY
-        for (unsigned req_idx = 0; req_idx < num_regions[idx]; req_idx++)
-        {
-          LegionSpy::log_mapping_dependence(
-              op->get_context()->get_unique_id(), current_uids[idx], req_idx,
-              op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
-        }
-#endif
-        // Remove any mapping references that we hold
-        target.first->remove_mapping_reference(target.second);
-      }
-      operations.clear();
-#ifdef LEGION_SPY
-      current_uids.clear();
-      num_regions.clear();
-#endif
-    }
+    } 
 
     //--------------------------------------------------------------------------
     bool DynamicTrace::handles_region_tree(RegionTreeID tid) const
@@ -956,9 +953,8 @@ namespace Legion {
       initialize(ctx, MIXED_FENCE);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
-      assert(trace->is_dynamic_trace());
 #endif
-      local_trace = trace->as_dynamic_trace();
+      local_trace = trace;
       // Now mark our trace as NULL to avoid registering this operation
       trace = NULL;
     }
@@ -1007,6 +1003,13 @@ namespace Legion {
       // Now update the parent context with this fence before we can complete
       // the dependence analysis and possibly be deactivated
       parent_ctx->update_current_fence(this);
+      // If this is a static trace, then we remove our reference when we're done
+      if (local_trace->is_static_trace())
+      {
+        StaticTrace *static_trace = static_cast<StaticTrace*>(local_trace);
+        if (static_trace->remove_reference())
+          legion_delete(static_trace);
+      }
     }
     
   }; // namespace Internal 

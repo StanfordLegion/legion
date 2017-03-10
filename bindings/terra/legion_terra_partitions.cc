@@ -198,7 +198,6 @@ static legion_terra_index_space_list_list_t
 create_list_list(std::vector<IndexSpace> &spaces,
                  std::map<IndexSpace, std::vector<IndexSpace> > &product)
 {
-  //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
   legion_terra_index_space_list_list_t result;
   result.count = spaces.size();
   result.sublists = (legion_terra_index_space_list_t*)calloc(result.count,
@@ -212,8 +211,6 @@ create_list_list(std::vector<IndexSpace> &spaces,
       (legion_index_space_t*)calloc(size, sizeof(legion_index_space_t));
     result.sublists[idx].space = CObjectWrapper::wrap(space);
   }
-  //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-  //fprintf(stderr, "create list list: %ld us\n", ts_stop - ts_start);
   return result;
 }
 
@@ -735,7 +732,6 @@ create_cross_product_tree(HighLevelRuntime *runtime,
                           const std::vector<IndexSpace> &rhs,
                           bool rhs_disjoint,
                           legion_terra_index_space_list_list_t &result)
-                          //std::map<IndexSpace, std::vector<IndexSpace> > &result)
 {
   assert(lhs_disjoint);
   std::vector<std::pair<ptr_t, ptr_t> > lhs_bounds;
@@ -759,7 +755,6 @@ create_cross_product_tree(HighLevelRuntime *runtime,
       break;
     }
   Node* root = create_interval_tree(lhs_bounds, lhs_upper_bounds);
-  //print_tree(root, 0);
 
   std::vector<unsigned> potentially_overlap;
   potentially_overlap.reserve(lhs_bounds.size());
@@ -805,8 +800,6 @@ create_cross_product_tree(HighLevelRuntime *runtime,
         }
       }
       if (intersects) {
-        //if (flip) result[rh_space][lhs_idx] = lh_space;
-        //else result[lh_space][rhs_idx] = rh_space;
         if (flip)
           assign_list_list(result, rhs_idx, lhs_idx, CObjectWrapper::wrap(lh_space));
         else
@@ -860,61 +853,22 @@ create_cross_product_shallow_unstructured(HighLevelRuntime *runtime,
                                           legion_terra_index_space_list_list_t &result)
                                           //std::map<IndexSpace, std::vector<IndexSpace> > &result)
 {
-  //typedef std::map<IndexSpace, std::vector<IndexSpace> >::iterator iterator_t;
-  if (lhs_disjoint) // || rhs_disjoint)
+  if (lhs_disjoint)
   {
-    //std::map<IndexSpace, std::vector<IndexSpace> > result;
-    //for (std::vector<IndexSpace>::const_iterator lh = lhs.begin(); lh != lhs.end(); ++lh) {
-    //  std::vector<IndexSpace>& r = result[*lh];
-    //  r.reserve(rhs.size());
-    //  for (unsigned idx = 0; idx < rhs.size(); ++idx)
-    //    r.push_back(IndexSpace::NO_SPACE);
-    //}
-    //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
     create_cross_product_tree(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, result);
-    //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-    //fprintf(stderr, "cross product %zd x %zd with interval tree: %lld us\n",
-    //    lhs.size(), rhs.size(), ts_stop - ts_start);
-    //for (iterator_t it = result.begin(); it != result.end(); ++it) {
-    //  printf("Space (%lx, %d) overlaps with: \n",
-    //      it->first.get_id(), it->first.get_tree_id());
-    //  for (std::vector<IndexSpace>::iterator iit = it->second.begin();
-    //       iit != it->second.end(); ++iit)
-    //  {
-    //    if (*iit != IndexSpace::NO_SPACE)
-    //      printf("    Space (%lx, %d)\n", iit->get_id(), iit->get_tree_id());
-    //  }
-    //}
-    //printf("==========\n");
     return;
   }
-  else if (rhs_disjoint) // || rhs_disjoint)
+  else if (rhs_disjoint)
   {
-    //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
     create_cross_product_tree(runtime, ctx, !flip, rhs, rhs_disjoint, lhs, lhs_disjoint, result);
-    //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-    //fprintf(stderr, "cross product %zd x %zd with interval tree: %lld us\n",
-    //    rhs.size(), lhs.size(), ts_stop - ts_start);
     return;
   }
 
-  //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
   std::vector<std::pair<ptr_t, ptr_t> > lhs_bounds;
   std::vector<std::pair<ptr_t, ptr_t> > rhs_bounds;
 
   get_bounding_boxes(runtime, ctx, lhs, lhs_bounds);
   get_bounding_boxes(runtime, ctx, rhs, rhs_bounds);
-
-  // size_t total = 0, overlap = 0;
-  // for (std::vector<std::pair<ptr_t, ptr_t> >::iterator i = lhs_bounds.begin(); i != lhs_bounds.end(); ++i) {
-  //   for (std::vector<std::pair<ptr_t, ptr_t> >::iterator j = rhs_bounds.begin(); j != rhs_bounds.end(); ++j) {
-  //     if (!(i->second.value < j->first.value || j->second.value < i->first.value)) {
-  //       overlap++;
-  //     }
-  //     total++;
-  //   }
-  // }
-  // printf("bounding boxes: total %lu overlap %lu percent %f\n", total, overlap, double(overlap)/total*100.);
 
   for (size_t i = 0; i < lhs.size(); i++) {
     IndexSpace lh_space = lhs[i];
@@ -945,27 +899,11 @@ create_cross_product_shallow_unstructured(HighLevelRuntime *runtime,
         }
       }
       if (intersects) {
-        //if (flip) result[rh_space][i] = lh_space;
-        //else result[lh_space][j] = rh_space;
         if (flip) assign_list_list(result, j, i, CObjectWrapper::wrap(lh_space));
         else assign_list_list(result, i, j, CObjectWrapper::wrap(rh_space));
       }
     }
   }
-  //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-  //fprintf(stderr, "cross product %zd x %zd with N^2 comparisons: %lld us\n",
-  //    lhs.size(), rhs.size(), ts_stop - ts_start);
-  //for (iterator_t it = result.begin(); it != result.end(); ++it) {
-  //  printf("Space (%lx, %d) overlaps with: \n",
-  //      it->first.get_id(), it->first.get_tree_id());
-  //  for (std::vector<IndexSpace>::iterator iit = it->second.begin();
-  //       iit != it->second.end(); ++iit)
-  //  {
-  //    if (*iit != IndexSpace::NO_SPACE)
-  //      printf("    Space (%lx, %d)\n", iit->get_id(), iit->get_tree_id());
-  //  }
-  //}
-  //printf("==========\n");
 }
 
 static void
@@ -1116,41 +1054,6 @@ partition_from_list(HighLevelRuntime *runtime, Context ctx,
   return runtime->get_parent_index_partition(ctx, subspaces[0]);
 }
 
-//static IndexPartition
-//partition_from_list_list(HighLevelRuntime *runtime, Context ctx,
-//                         std::map<IndexSpace, std::vector<IndexSpace> > &product)
-//{
-//  for (std::map<IndexSpace, std::vector<IndexSpace> >::const_iterator it = product.begin();
-//       it != product.end(); ++it) {
-//    IndexPartition part = partition_from_list(runtime, ctx, it->second);
-//    if (part != IndexPartition::NO_PART) return part;
-//  }
-//  return IndexPartition::NO_PART;
-//}
-//
-//static void
-//filter_from_list(HighLevelRuntime *runtime, Context ctx,
-//                 const std::vector<IndexSpace> &spaces,
-//                 std::set<Color> &filter)
-//{
-//  for (std::vector<IndexSpace>::const_iterator it = spaces.begin();
-//       it != spaces.end(); ++it) {
-//    Color c = runtime->get_index_space_color(ctx, *it);
-//    filter.insert(c);
-//  }
-//}
-//
-//static void
-//filter_from_list_list(HighLevelRuntime *runtime, Context ctx,
-//                      const std::map<IndexSpace, std::vector<IndexSpace> > &product,
-//                      std::set<Color> &filter)
-//{
-//  for (std::map<IndexSpace, std::vector<IndexSpace> >::const_iterator it = product.begin();
-//       it != product.end(); ++it) {
-//    filter_from_list(runtime, ctx, it->second, filter);
-//  }
-//}
-
 legion_terra_index_space_list_list_t
 legion_terra_index_cross_product_create_list(
   legion_runtime_t runtime_,
@@ -1209,20 +1112,8 @@ legion_terra_index_cross_product_create_list_shallow(
   std::vector<IndexSpace> rhs;
   unwrap_list(rhs_, rhs);
 
-  //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
-  //std::map<IndexSpace, std::vector<IndexSpace> > result;
-  //size_t rhs_size = rhs.size();
-  //for (std::vector<IndexSpace>::iterator lh = lhs.begin(); lh != lhs.end(); ++lh) {
-  //  std::vector<IndexSpace>& r = result[*lh];
-  //  r.reserve(rhs_size);
-  //  for (unsigned idx = 0; idx < rhs_size; ++idx)
-  //    r.push_back(IndexSpace::NO_SPACE);
-  //}
   legion_terra_index_space_list_list_t result =
     create_list_list(lhs_, lhs.size(), rhs.size());
-  //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-  //fprintf(stderr, "initialize map %zd x %zd: %lld us\n",
-  //    lhs.size(), rhs.size(), ts_stop - ts_start);
 
   IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
   IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
@@ -1246,22 +1137,6 @@ legion_terra_index_cross_product_create_list_shallow(
     }
   }
 
-  //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
-  //std::map<IndexSpace, std::vector<IndexSpace> > result;
-  //for (std::vector<IndexSpace>::iterator lh = lhs.begin(); lh != lhs.end(); ++lh) {
-  //  std::vector<IndexSpace>& r = result[*lh];
-  //  for (std::vector<IndexSpace>::iterator rh = rhs.begin(); rh != rhs.end(); ++rh) {
-  //    if (flip) {
-  //      r.push_back(product[*rh].count(*lh) ? *rh : IndexSpace::NO_SPACE);
-  //    } else {
-  //      r.push_back(product[*lh].count(*rh) ? *rh : IndexSpace::NO_SPACE);
-  //    }
-  //  }
-  //}
-  //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-  //fprintf(stderr, "reordering results %zd x %zd: %lld us\n",
-  //    lhs.size(), rhs.size(), ts_stop - ts_start);
-  //return wrap_list_list(lhs, result);
   return result;
 }
 
@@ -1367,19 +1242,20 @@ create_cross_product_complete_unstructured(
     std::map<IndexSpace, std::vector<IndexSpace> >& product,
     legion_terra_index_space_list_list_t &result)
 {
-  std::vector<Color> lhs_colors;
+  std::vector<DomainPoint> lhs_colors;
   lhs_colors.reserve(lhs.size());
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
     IndexSpace& lh_space = lhs[lhs_idx];
-    Color lh_color = runtime->get_index_space_color(ctx, lh_space);
+    DomainPoint lh_color = runtime->get_index_space_color_point(ctx, lh_space);
     lhs_colors.push_back(lh_color);
   }
 
-  std::map<IndexSpace, Coloring> coloring;
+  std::map<IndexSpace, PointColoring> coloring;
+  std::map<IndexSpace, Domain> color_spaces;
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
     IndexSpace& lh_space = lhs[lhs_idx];
     std::vector<IndexSpace>& rh_spaces = product[lh_space];
-    Color lh_color = lhs_colors[lhs_idx];
+    DomainPoint lh_color = lhs_colors[lhs_idx];
 
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
       IndexSpace& rh_space = rh_spaces[rhs_idx];
@@ -1399,6 +1275,13 @@ create_cross_product_complete_unstructured(
             break;
           }
 
+          if (color_spaces.count(rh_space) > 0) {
+            color_spaces[rh_space] =
+              color_spaces[rh_space].convex_hull(lh_color);
+          } else {
+            color_spaces[rh_space] = Domain::from_domain_point(lh_color);
+          }
+
           if (lh_end.value > rh_end.value) {
             coloring[rh_space][lh_color].ranges.insert(std::pair<ptr_t, ptr_t>(lh_ptr, rh_end));
             break;
@@ -1411,17 +1294,22 @@ create_cross_product_complete_unstructured(
   }
 
   std::map<IndexSpace, IndexPartition> rh_partitions;
-  for (std::map<IndexSpace, Coloring>::iterator it = coloring.begin();
+  for (std::map<IndexSpace, PointColoring>::iterator it = coloring.begin();
        it != coloring.end(); ++it) {
-    IndexPartition ip =
-      runtime->create_index_partition(ctx, it->first, it->second, lhs_part_disjoint);
+    IndexSpace rh_space = it->first;
+    const PointColoring& coloring = it->second;
+    assert(color_spaces.count(rh_space) > 0);
+
+    IndexPartition ip = runtime->create_index_partition(
+        ctx, /* parent = */ rh_space, /* color_space = */ color_spaces[rh_space],
+        coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
     rh_partitions[it->first] = ip;
   }
 
   for (unsigned lhs_idx = 0; lhs_idx < lhs.size(); ++lhs_idx) {
     IndexSpace& lh_space = lhs[lhs_idx];
     std::vector<IndexSpace>& rh_spaces = product[lh_space];
-    Color lh_color = lhs_colors[lhs_idx];
+    DomainPoint lh_color = lhs_colors[lhs_idx];
 
     for (unsigned rhs_idx = 0; rhs_idx < rh_spaces.size(); ++rhs_idx) {
       IndexSpace& rh_space = rh_spaces[rhs_idx];
@@ -1457,51 +1345,10 @@ legion_terra_index_cross_product_create_list_complete(
     create_cross_product_complete_structured(runtime, ctx, lhs, lhs_part_disjoint,
         product, result);
   } else { // Unstructured index spaces.
-    //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
     create_cross_product_complete_unstructured(runtime, ctx, lhs, lhs_part_disjoint,
         product, result);
-    //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-    //fprintf(stderr, "create_cross_product_complete: %ld us\n", ts_stop - ts_start);
   }
   return result;
-
-  //IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
-  //IndexPartition rhs_part = partition_from_list_list(runtime, ctx, product);
-
-  //std::set<Color> lhs_filter;
-  //filter_from_list(runtime, ctx, lhs, lhs_filter);
-  //std::set<Color> rhs_filter;
-  //filter_from_list_list(runtime, ctx, product, rhs_filter);
-
-  //std::map<IndexSpace, Color> chosen_colors;
-  //if (lhs_part != IndexPartition::NO_PART && rhs_part != IndexPartition::NO_PART) {
-  //  create_cross_product(
-  //    runtime, ctx, rhs_part, lhs_part, -1, consistent_ids, &chosen_colors,
-  //    &rhs_filter, &lhs_filter);
-  //}
-
-  ////unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
-  //std::map<IndexSpace, std::vector<IndexSpace> > result;
-  //for (std::vector<IndexSpace>::iterator it = lhs.begin(); it != lhs.end(); ++it) {
-  //  IndexSpace lh_space = *it;
-  //  Color lh_color = runtime->get_index_space_color(ctx, lh_space);
-  //  assert(product.count(lh_space));
-  //  std::vector<IndexSpace> &rh_spaces = product[lh_space];
-  //  for (std::vector<IndexSpace>::iterator it = rh_spaces.begin(); it != rh_spaces.end(); ++it) {
-  //    IndexSpace rh_space = *it;
-
-  //    assert(chosen_colors.count(rh_space));
-  //    Color color = chosen_colors[rh_space];
-  //    IndexPartition rh_part = runtime->get_index_partition(ctx, rh_space, color);
-  //    IndexSpace rh_subspace = runtime->get_index_subspace(ctx, rh_part, lh_color);
-  //    result[lh_space].push_back(rh_subspace);
-  //  }
-  //  assert(result[lh_space].size() == product[lh_space].size());
-  //}
-  ////unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-  ////fprintf(stderr, "populate: %ld us\n", ts_stop - ts_start);
-
-  //return wrap_list_list(lhs, result);
 }
 
 void

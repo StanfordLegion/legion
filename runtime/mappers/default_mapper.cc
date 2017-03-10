@@ -1869,7 +1869,8 @@ namespace Legion {
             it != visible_memories.end(); it++)
       {
         affinity.clear();
-        machine.get_proc_mem_affinity(affinity, target_proc, *it);
+        machine.get_proc_mem_affinity(affinity, target_proc, *it,
+				      false /*not just local affinities*/);
         assert(affinity.size() == 1);
         if (!chosen.exists() || (affinity[0].bandwidth > best_bandwidth)) {
           chosen = *it;
@@ -2211,7 +2212,8 @@ namespace Legion {
         if (finder == source_memories.end())
         {
           affinity.clear();
-          machine.get_mem_mem_affinity(affinity, location, destination_memory);
+          machine.get_mem_mem_affinity(affinity, location, destination_memory,
+				       false /*not just local affinities*/);
           unsigned memory_bandwidth = 0;
           if (affinity.empty()) {
             // TODO: More graceful way of dealing with multi-hop copies

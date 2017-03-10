@@ -5234,12 +5234,13 @@ namespace Legion {
 #endif
         exit(ERROR_UNMATCHED_END_TRACE);
       }
-      // We're done with this trace
-      if (current_trace->remove_reference())
-        legion_delete(current_trace->as_static_trace());
+      // We're done with this trace, need a trace complete op to clean up
+      // This operation takes ownership of the static trace reference
+      TraceCompleteOp *complete_op = runtime->get_available_trace_op(true);
+      complete_op->initialize_complete(this);
+      runtime->add_to_dependence_queue(this, executing_processor, complete_op);
+      // We no longer have a trace that we're executing 
       current_trace = NULL;
-      // Now dump a mapping fence into the analysis
-      runtime->issue_mapping_fence(this);
     }
 
     //--------------------------------------------------------------------------
