@@ -124,7 +124,7 @@ if __name__ == '__main__':
 
     terra_dir = os.path.join(root_dir, 'terra.build')
     if not os.path.exists(terra_dir):
-        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'pizdaint')
+        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-sc16-snapshot')
         build_terra(terra_dir, llvm_install_dir, thread_count)
 
     install.install(
