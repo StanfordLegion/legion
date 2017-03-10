@@ -1869,7 +1869,8 @@ namespace Legion {
             it != visible_memories.end(); it++)
       {
         affinity.clear();
-        machine.get_proc_mem_affinity(affinity, target_proc, *it);
+        machine.get_proc_mem_affinity(affinity, target_proc, *it,
+				      false /*not just local affinities*/);
         assert(affinity.size() == 1);
         if (!chosen.exists() || (affinity[0].bandwidth > best_bandwidth)) {
           chosen = *it;
