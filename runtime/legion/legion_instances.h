@@ -57,19 +57,19 @@ namespace Legion {
     public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 PhysicalInstance inst,
-                                std::vector<Domain::CopySrcDstField> &fields);
+                                std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(FieldID copy_field, PhysicalInstance inst,
-                                std::vector<Domain::CopySrcDstField> &fields);
+                                std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 PhysicalInstance inst,
-                                std::vector<Domain::CopySrcDstField> &fields);
+                                std::vector<CopySrcDstField> &fields);
     public:
       void get_fields(std::set<FieldID> &fields) const;
       bool has_field(FieldID fid) const;
       void has_fields(std::map<FieldID,bool> &fields) const;
       void remove_space_fields(std::set<FieldID> &fields) const;
     public:
-      const Domain::CopySrcDstField& find_field_info(FieldID fid) const;
+      const CopySrcDstField& find_field_info(FieldID fid) const;
       size_t get_total_field_size(void) const;
       void get_fields(std::vector<FieldID>& fields) const;
       void compute_destroyed_fields(
@@ -90,9 +90,9 @@ namespace Legion {
     protected:
       // In order by index of bit mask
 #ifdef NEW_INSTANCE_CREATION
-      std::vector<Domain::CopySrcDstFieldInfo> field_infos;
+      std::vector<CopySrcDstFieldInfo> field_infos;
 #else
-      std::vector<Domain::CopySrcDstField> field_infos;
+      std::vector<CopySrcDstField> field_infos;
 #endif
       // A mapping from FieldIDs to indexes into our field_infos
       std::map<FieldID,unsigned/*index*/> field_indexes;
@@ -228,9 +228,9 @@ namespace Legion {
       const FieldMask &full_mask;
     public:
       void compute_across_offsets(const FieldMask &src_mask,
-             std::vector<Domain::CopySrcDstField> &dst_fields);
+                   std::vector<CopySrcDstField> &dst_fields);
     public:
-      std::vector<Domain::CopySrcDstField> offsets; 
+      std::vector<CopySrcDstField> offsets; 
       LegionDeque<std::pair<FieldMask,FieldMask> >::aligned compressed_cache;
     };
 
@@ -271,11 +271,11 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
       void compute_copy_offsets(const FieldMask &copy_mask,
-                                std::vector<Domain::CopySrcDstField> &fields);
+                                std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(FieldID fid, 
-                                std::vector<Domain::CopySrcDstField> &fields);
+                                std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
-                                std::vector<Domain::CopySrcDstField> &fields);
+                                std::vector<CopySrcDstField> &fields);
       void initialize_across_helper(CopyAcrossHelper *across_helper,
                                     const FieldMask &mask,
                                     const std::vector<unsigned> &src_indexes,
@@ -326,10 +326,10 @@ namespace Legion {
     public:
       virtual bool is_foldable(void) const = 0;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
-          std::vector<Domain::CopySrcDstField> &fields) = 0;
+          std::vector<CopySrcDstField> &fields) = 0;
       virtual ApEvent issue_reduction(Operation *op,
-          const std::vector<Domain::CopySrcDstField> &src_fields,
-          const std::vector<Domain::CopySrcDstField> &dst_fields,
+          const std::vector<CopySrcDstField> &src_fields,
+          const std::vector<CopySrcDstField> &dst_fields,
           RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
           bool reduction_fold, bool precise_domain, 
           RegionTreeNode *intersect) = 0;
@@ -396,10 +396,10 @@ namespace Legion {
     public:
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
-          std::vector<Domain::CopySrcDstField> &fields);
+          std::vector<CopySrcDstField> &fields);
       virtual ApEvent issue_reduction(Operation *op,
-          const std::vector<Domain::CopySrcDstField> &src_fields,
-          const std::vector<Domain::CopySrcDstField> &dst_fields,
+          const std::vector<CopySrcDstField> &src_fields,
+          const std::vector<CopySrcDstField> &dst_fields,
           RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
           bool reduction_fold, bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;
@@ -442,10 +442,10 @@ namespace Legion {
     public:
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
-          std::vector<Domain::CopySrcDstField> &fields);
+          std::vector<CopySrcDstField> &fields);
       virtual ApEvent issue_reduction(Operation *op,
-          const std::vector<Domain::CopySrcDstField> &src_fields,
-          const std::vector<Domain::CopySrcDstField> &dst_fields,
+          const std::vector<CopySrcDstField> &src_fields,
+          const std::vector<CopySrcDstField> &dst_fields,
           RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
           bool reduction_fold, bool precise_domain, RegionTreeNode *intersect);
       virtual Domain get_pointer_space(void) const;

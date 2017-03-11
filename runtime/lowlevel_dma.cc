@@ -193,8 +193,8 @@ namespace LegionRuntime {
 		    int _priority);
 
       ReduceRequest(const Domain& _domain,
-		    const std::vector<Domain::CopySrcDstField>& _srcs,
-		    const Domain::CopySrcDstField& _dst,
+		    const std::vector<Realm::CopySrcDstField>& _srcs,
+		    const Realm::CopySrcDstField& _dst,
 		    bool _inst_lock_needed,
 		    ReductionOpID _redop_id,
 		    bool _red_fold,
@@ -223,8 +223,8 @@ namespace LegionRuntime {
       virtual bool handler_safe(void) { return(false); }
 
       Domain domain;
-      std::vector<Domain::CopySrcDstField> srcs;
-      Domain::CopySrcDstField dst;
+      std::vector<Realm::CopySrcDstField> srcs;
+      Realm::CopySrcDstField dst;
       bool inst_lock_needed;
       Event inst_lock_event;
       ReductionOpID redop_id;
@@ -242,7 +242,7 @@ namespace LegionRuntime {
                   Event _after_fill,
                   int priority);
       FillRequest(const Domain &_domain,
-                  const Domain::CopySrcDstField &_dst,
+                  const Realm::CopySrcDstField &_dst,
                   const void *fill_value, size_t fill_size,
                   Event _before_fill,
                   Event _after_fill,
@@ -269,7 +269,7 @@ namespace LegionRuntime {
       size_t optimize_fill_buffer(RegionInstanceImpl *impl, int &fill_elmts);
 
       Domain domain;
-      Domain::CopySrcDstField dst;
+      Realm::CopySrcDstField dst;
       void *fill_buffer;
       size_t fill_size;
       Event before_fill;
@@ -3273,7 +3273,7 @@ namespace LegionRuntime {
       // get sources
       int n_srcs = *idata++;
       for(int i = 0; i < n_srcs; i++) {
-	Domain::CopySrcDstField f;
+	Realm::CopySrcDstField f;
 	f.inst.id = *idata++;
 	f.offset = *idata++;
 	f.size = *idata++;
@@ -3312,8 +3312,8 @@ namespace LegionRuntime {
     }
 
     ReduceRequest::ReduceRequest(const Domain& _domain,
-				 const std::vector<Domain::CopySrcDstField>& _srcs,
-				 const Domain::CopySrcDstField& _dst,
+				 const std::vector<Realm::CopySrcDstField>& _srcs,
+				 const Realm::CopySrcDstField& _dst,
 				 bool _inst_lock_needed,
 				 ReductionOpID _redop_id,
 				 bool _red_fold,
@@ -3366,7 +3366,7 @@ namespace LegionRuntime {
 
       // now source fields
       *msgptr++ = srcs.size();
-      for(std::vector<Domain::CopySrcDstField>::const_iterator it = srcs.begin();
+      for(std::vector<Realm::CopySrcDstField>::const_iterator it = srcs.begin();
 	  it != srcs.end();
 	  it++) {
 	*msgptr++ = it->inst.id;
@@ -3435,7 +3435,7 @@ namespace LegionRuntime {
 	}
 
 	// now go through all source instance pairs
-	for(std::vector<Domain::CopySrcDstField>::iterator it = srcs.begin();
+	for(std::vector<Realm::CopySrcDstField>::iterator it = srcs.begin();
 	    it != srcs.end();
 	    it++) {
 	  RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(it->inst);
@@ -3949,7 +3949,7 @@ namespace LegionRuntime {
     }
 
     FillRequest::FillRequest(const Domain &d, 
-                             const Domain::CopySrcDstField &_dst,
+                             const Realm::CopySrcDstField &_dst,
                              const void *_fill_value, size_t _fill_size,
                              Event _before_fill, Event _after_fill, int _priority,
                              const Realm::ProfilingRequestSet &reqs)

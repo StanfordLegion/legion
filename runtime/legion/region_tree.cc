@@ -2255,7 +2255,7 @@ namespace Legion {
             dst_ref.get_manager()->as_instance_manager();
           const FieldMask &dst_mask = dst_ref.get_valid_fields();
           std::map<unsigned,
-                   std::vector<Domain::CopySrcDstField> > src_fields,dst_fields;
+                   std::vector<CopySrcDstField> > src_fields,dst_fields;
           for (unsigned idx2 = 0; idx2 < dst_indexes.size(); idx2++)
           {
             const unsigned dst_field_index = dst_indexes[idx2];
@@ -2284,11 +2284,11 @@ namespace Legion {
           if (src_fields.empty())
             continue;
           ApEvent dst_precondition = dst_ref.get_ready_event(); 
-          for (std::map<unsigned,std::vector<Domain::CopySrcDstField> >::
+          for (std::map<unsigned,std::vector<CopySrcDstField> >::
                 const_iterator src_it = src_fields.begin(); 
                 src_it != src_fields.end(); src_it++)
           {
-            std::map<unsigned,std::vector<Domain::CopySrcDstField> >::
+            std::map<unsigned,std::vector<CopySrcDstField> >::
               const_iterator dst_it = dst_fields.find(src_it->first);
 #ifdef DEBUG_LEGION
             assert(dst_it != dst_fields.end());
@@ -2351,10 +2351,10 @@ namespace Legion {
         }
       }
       // Let's handle all the actual instances first
-      std::vector<Domain::CopySrcDstField> src_fields_fold;
-      std::vector<Domain::CopySrcDstField> dst_fields_fold;
-      std::vector<Domain::CopySrcDstField> src_fields_list;
-      std::vector<Domain::CopySrcDstField> dst_fields_list;
+      std::vector<CopySrcDstField> src_fields_fold;
+      std::vector<CopySrcDstField> dst_fields_fold;
+      std::vector<CopySrcDstField> src_fields_list;
+      std::vector<CopySrcDstField> dst_fields_list;
       for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
       {
         const InstanceRef &dst_ref = dst_targets[idx1];
@@ -11781,8 +11781,8 @@ namespace Legion {
       {
         EventSet &pre_set = *pit;
         // Build the src and dst fields vectors
-        std::vector<Domain::CopySrcDstField> src_fields;
-        std::vector<Domain::CopySrcDstField> dst_fields;
+        std::vector<CopySrcDstField> src_fields;
+        std::vector<CopySrcDstField> dst_fields;
         LegionMap<MaterializedView*,FieldMask>::aligned update_views;
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = src_instances.begin(); it != src_instances.end(); it++)
@@ -13086,8 +13086,8 @@ namespace Legion {
 #if 0
     //--------------------------------------------------------------------------
     ApEvent RegionNode::issue_copy(Operation *op,
-                        const std::vector<Domain::CopySrcDstField> &src_fields,
-                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const std::vector<CopySrcDstField> &src_fields,
+                        const std::vector<CopySrcDstField> &dst_fields,
                         ApEvent precondition, PredEvent predicate_guard,
                         RegionTreeNode *intersect/*=NULL*/,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
@@ -13218,7 +13218,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionNode::issue_fill(Operation *op,
-                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const std::vector<CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
                         ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
@@ -14251,7 +14251,7 @@ namespace Legion {
         {
           // If we have a predicate guard we add that to the set now
           ApEvent precondition = Runtime::merge_events(pit->preconditions);
-          std::vector<Domain::CopySrcDstField> dst_fields;
+          std::vector<CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);
           ApEvent fill_event = issue_fill(op, dst_fields, value, 
                                           value_size, precondition, true_guard
@@ -15063,8 +15063,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent PartitionNode::issue_copy(Operation *op,
-                        const std::vector<Domain::CopySrcDstField> &src_fields,
-                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const std::vector<CopySrcDstField> &src_fields,
+                        const std::vector<CopySrcDstField> &dst_fields,
                         ApEvent precondition, PredEvent predicate_guard,
                         RegionTreeNode *intersect/*=NULL*/,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
@@ -15076,7 +15076,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent PartitionNode::issue_fill(Operation *op,
-                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const std::vector<CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
                         ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY

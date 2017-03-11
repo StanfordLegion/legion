@@ -1493,6 +1493,7 @@ namespace Legion {
     const LegionColor INVALID_COLOR = LLONG_MAX;
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
+    typedef Realm::CopySrcDstField CopySrcDstField;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 

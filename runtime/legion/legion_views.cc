@@ -504,7 +504,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::copy_field(FieldID fid,
-                              std::vector<Domain::CopySrcDstField> &copy_fields)
+                                      std::vector<CopySrcDstField> &copy_fields)
     //--------------------------------------------------------------------------
     {
       std::vector<FieldID> local_fields(1,fid);
@@ -513,7 +513,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::copy_to(const FieldMask &copy_mask,
-                               std::vector<Domain::CopySrcDstField> &dst_fields,
+                                   std::vector<CopySrcDstField> &dst_fields,
                                    CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
@@ -525,7 +525,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::copy_from(const FieldMask &copy_mask,
-                               std::vector<Domain::CopySrcDstField> &src_fields)
+                                     std::vector<CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
       manager->compute_copy_offsets(copy_mask, src_fields);
@@ -534,7 +534,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool MaterializedView::reduce_to(ReductionOpID redop, 
                                      const FieldMask &copy_mask,
-                               std::vector<Domain::CopySrcDstField> &dst_fields,
+                                     std::vector<CopySrcDstField> &dst_fields,
                                      CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
@@ -548,7 +548,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MaterializedView::reduce_from(ReductionOpID redop,
                                        const FieldMask &reduce_mask, 
-                               std::vector<Domain::CopySrcDstField> &src_fields)
+                                       std::vector<CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
       manager->compute_copy_offsets(reduce_mask, src_fields);
@@ -4087,8 +4087,8 @@ namespace Legion {
               it->set_mask, false/*reading*/, false/*restrict out*/, 
               local_space, info.map_applied_events); 
         // Perform the copy
-        std::vector<Domain::CopySrcDstField> src_fields;
-        std::vector<Domain::CopySrcDstField> dst_fields;
+        std::vector<CopySrcDstField> src_fields;
+        std::vector<CopySrcDstField> dst_fields;
         temporary_dst->copy_from(it->set_mask, src_fields);
         dst->copy_to(it->set_mask, dst_fields);
 #ifdef DEBUG_LEGION
@@ -6533,7 +6533,7 @@ namespace Legion {
       {
         EventSet &pre_set = *pit;
         // Build the src and dst fields vectors
-        std::vector<Domain::CopySrcDstField> dst_fields;
+        std::vector<CopySrcDstField> dst_fields;
         dst->copy_to(pre_set.set_mask, dst_fields, across_helper);
         ApEvent fill_pre = Runtime::merge_events(pre_set.preconditions);
         // Issue the fill command
@@ -7227,8 +7227,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime,REDUCTION_VIEW_PERFORM_REDUCTION_CALL);
-      std::vector<Domain::CopySrcDstField> src_fields;
-      std::vector<Domain::CopySrcDstField> dst_fields;
+      std::vector<CopySrcDstField> src_fields;
+      std::vector<CopySrcDstField> dst_fields;
 
       bool fold = target->reduce_to(manager->redop, reduce_mask, dst_fields);
       this->reduce_from(manager->redop, reduce_mask, src_fields);
@@ -7281,8 +7281,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, 
                         REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_CALL);
-      std::vector<Domain::CopySrcDstField> src_fields;
-      std::vector<Domain::CopySrcDstField> dst_fields;
+      std::vector<CopySrcDstField> src_fields;
+      std::vector<CopySrcDstField> dst_fields;
       bool fold = target->reduce_to(manager->redop, red_mask, 
                                     dst_fields, helper);
       this->reduce_from(manager->redop, red_mask, src_fields);
@@ -7326,8 +7326,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, 
                         REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_ACROSS_CALL);
-      std::vector<Domain::CopySrcDstField> src_fields;
-      std::vector<Domain::CopySrcDstField> dst_fields;
+      std::vector<CopySrcDstField> src_fields;
+      std::vector<CopySrcDstField> dst_fields;
       const bool fold = false;
       target->copy_field(dst_field, dst_fields);
       FieldMask red_mask; red_mask.set_bit(src_index);
@@ -7944,7 +7944,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool ReductionView::reduce_to(ReductionOpID redop, 
                                   const FieldMask &reduce_mask,
-                              std::vector<Domain::CopySrcDstField> &dst_fields,
+                                  std::vector<CopySrcDstField> &dst_fields,
                                   CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
@@ -7962,7 +7962,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReductionView::reduce_from(ReductionOpID redop,
                                     const FieldMask &reduce_mask,
-                               std::vector<Domain::CopySrcDstField> &src_fields)
+                                    std::vector<CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7974,7 +7974,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::copy_to(const FieldMask &copy_mask,
-                               std::vector<Domain::CopySrcDstField> &dst_fields,
+                                std::vector<CopySrcDstField> &dst_fields,
                                 CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
@@ -7984,7 +7984,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReductionView::copy_from(const FieldMask &copy_mask,
-                               std::vector<Domain::CopySrcDstField> &src_fields)
+                                  std::vector<CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
       // should never be called

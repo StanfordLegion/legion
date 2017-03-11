@@ -215,7 +215,6 @@ namespace Legion {
       typedef Realm::RegionInstance RegionInstance;
       typedef Realm::Event Event;
       typedef Realm::ProfilingRequestSet ProfilingRequestSet;
-      typedef Realm::Domain::CopySrcDstField CopySrcDstField;
 
       // Keep this in sync with legion_lowlevel_domain_max_rect_dim_t
       // in lowlevel_config.h
@@ -790,7 +789,7 @@ namespace Legion {
                                           const std::vector<size_t> &field_sizes,
                                           legion_lowlevel_file_mode_t file_mode) const;
 
-      Event fill(const std::vector<CopySrcDstField> &dsts,
+      Event fill(const std::vector<Realm::CopySrcDstField> &dsts,
                  const void *fill_value, size_t fill_value_size,
                  Event wait_on = Event::NO_EVENT) const;
 
@@ -798,38 +797,38 @@ namespace Legion {
 		 size_t elem_size, Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;
 
-      Event copy(const std::vector<CopySrcDstField>& srcs,
-		 const std::vector<CopySrcDstField>& dsts,
+      Event copy(const std::vector<Realm::CopySrcDstField>& srcs,
+		 const std::vector<Realm::CopySrcDstField>& dsts,
 		 Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;
 
-      Event copy(const std::vector<CopySrcDstField>& srcs,
-		 const std::vector<CopySrcDstField>& dsts,
+      Event copy(const std::vector<Realm::CopySrcDstField>& srcs,
+		 const std::vector<Realm::CopySrcDstField>& dsts,
 		 const ElementMask& mask,
 		 Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;
 
-      Event copy_indirect(const CopySrcDstField& idx,
-			  const std::vector<CopySrcDstField>& srcs,
-			  const std::vector<CopySrcDstField>& dsts,
+      Event copy_indirect(const Realm::CopySrcDstField& idx,
+			  const std::vector<Realm::CopySrcDstField>& srcs,
+			  const std::vector<Realm::CopySrcDstField>& dsts,
 			  Event wait_on = Event::NO_EVENT,
 			  ReductionOpID redop_id = 0, bool red_fold = false) const;
 
-      Event copy_indirect(const CopySrcDstField& idx,
-			  const std::vector<CopySrcDstField>& srcs,
-			  const std::vector<CopySrcDstField>& dsts,
+      Event copy_indirect(const Realm::CopySrcDstField& idx,
+			  const std::vector<Realm::CopySrcDstField>& srcs,
+			  const std::vector<Realm::CopySrcDstField>& dsts,
 			  const ElementMask& mask,
 			  Event wait_on = Event::NO_EVENT,
 			  ReductionOpID redop_id = 0, bool red_fold = false) const;
 
       // Variants of the above for profiling
-      Event fill(const std::vector<CopySrcDstField> &dsts,
+      Event fill(const std::vector<Realm::CopySrcDstField> &dsts,
                  const ProfilingRequestSet &requests,
                  const void *fill_value, size_t fill_value_size,
                  Event wait_on = Event::NO_EVENT) const;
 
-      Event copy(const std::vector<CopySrcDstField>& srcs,
-		 const std::vector<CopySrcDstField>& dsts,
+      Event copy(const std::vector<Realm::CopySrcDstField>& srcs,
+		 const std::vector<Realm::CopySrcDstField>& dsts,
                  const ProfilingRequestSet &reqeusts,
 		 Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;

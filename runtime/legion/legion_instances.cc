@@ -59,7 +59,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyAcrossHelper::compute_across_offsets(const FieldMask &src_mask,
-                               std::vector<Domain::CopySrcDstField> &dst_fields)
+                                       std::vector<CopySrcDstField> &dst_fields)
     //--------------------------------------------------------------------------
     {
       FieldMask compressed; 
@@ -91,7 +91,7 @@ namespace Legion {
       for (int idx = 0; idx < pop_count; idx++)
       {
         int index = compressed.find_next_set(next_start);
-        Domain::CopySrcDstField &field = dst_fields[offset+idx];
+        CopySrcDstField &field = dst_fields[offset+idx];
         field = offsets[index];
         // We'll start looking again at the next index after this one
         next_start = index + 1;
@@ -132,7 +132,7 @@ namespace Legion {
         unsigned index = mask_index_map[idx];
         FieldID fid = field_sizes[index].first;
         field_indexes[fid] = idx;
-        Domain::CopySrcDstField &info = field_infos[idx];
+        CopySrcDstField &info = field_infos[idx];
         info.offset = offsets[index];
         info.size = field_sizes[index].second;
         info.field_id = fid;
@@ -210,7 +210,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(const FieldMask &copy_mask,
                                                  PhysicalInstance instance,
-                                   std::vector<Domain::CopySrcDstField> &fields)
+                                           std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
       uint64_t hash_key = copy_mask.get_hash_key();
@@ -260,7 +260,7 @@ namespace Legion {
       for (int idx = 0; idx < pop_count; idx++)
       {
         int index = compressed.find_next_set(next_start);
-        Domain::CopySrcDstField &field = fields[offset+idx];
+        CopySrcDstField &field = fields[offset+idx];
         field = field_infos[index];
         // Our field infos are annonymous so specify the instance now
         field.inst = instance;
@@ -271,7 +271,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LayoutDescription::compute_copy_offsets(FieldID fid, 
-        PhysicalInstance instance, std::vector<Domain::CopySrcDstField> &fields)
+                PhysicalInstance instance, std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
       std::map<FieldID,unsigned>::const_iterator finder = 
@@ -289,7 +289,7 @@ namespace Legion {
     void LayoutDescription::compute_copy_offsets(
                                    const std::vector<FieldID> &copy_fields, 
                                    PhysicalInstance instance,
-                                   std::vector<Domain::CopySrcDstField> &fields)
+                                   std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
       unsigned offset = fields.size();
@@ -301,7 +301,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != field_indexes.end());
 #endif
-        Domain::CopySrcDstField &info = fields[offset+idx];
+        CopySrcDstField &info = fields[offset+idx];
         info = field_infos[finder->second];
         // Since instances are annonymous in layout descriptions we
         // have to fill them in when we add the field info
@@ -359,8 +359,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const Domain::CopySrcDstField& LayoutDescription::find_field_info(
-                                                              FieldID fid) const
+    const CopySrcDstField& LayoutDescription::find_field_info(FieldID fid) const
     //--------------------------------------------------------------------------
     {
       std::map<FieldID,unsigned>::const_iterator finder = 
@@ -377,7 +376,7 @@ namespace Legion {
     {
       size_t result = 0;
       // Add up all the field sizes
-      for (std::vector<Domain::CopySrcDstField>::const_iterator it = 
+      for (std::vector<CopySrcDstField>::const_iterator it = 
             field_infos.begin(); it != field_infos.end(); it++)
       {
         result += it->size;
@@ -394,7 +393,7 @@ namespace Legion {
       for (std::map<FieldID,unsigned>::const_iterator it = 
             field_indexes.begin(); it != field_indexes.end(); it++)
       {
-        const Domain::CopySrcDstField &info = field_infos[it->second];
+        const CopySrcDstField &info = field_infos[it->second];
         offsets[info.offset] = it->first;
       }
       for (std::map<unsigned, FieldID>::const_iterator it = offsets.begin();
@@ -408,7 +407,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // See if we have any special fields which need serdez deletion
-      for (std::vector<Domain::CopySrcDstField>::const_iterator it = 
+      for (std::vector<CopySrcDstField>::const_iterator it = 
             field_infos.begin(); it != field_infos.end(); it++)
       {
         if (it->serdez_id > 0)
@@ -452,7 +451,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != field_indexes.end());
 #endif
-      const Domain::CopySrcDstField &info = field_infos[finder->second];
+      const CopySrcDstField &info = field_infos[finder->second];
       desc.field_offset = info.offset;
       desc.field_size = info.size;
     }
@@ -1089,7 +1088,7 @@ namespace Legion {
       assert(instance.exists());
       assert(layout != NULL);
 #endif
-      const Domain::CopySrcDstField &info = layout->find_field_info(fid);
+      const CopySrcDstField &info = layout->find_field_info(fid);
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> temp = 
                                                     instance.get_accessor();
@@ -1133,7 +1132,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InstanceManager::compute_copy_offsets(const FieldMask &copy_mask,
-                                  std::vector<Domain::CopySrcDstField> &fields)
+                                           std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1145,7 +1144,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InstanceManager::compute_copy_offsets(FieldID fid,
-                                  std::vector<Domain::CopySrcDstField> &fields)
+                                           std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1158,7 +1157,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InstanceManager::compute_copy_offsets(
                                   const std::vector<FieldID> &copy_fields,
-                                  std::vector<Domain::CopySrcDstField> &fields)
+                                  std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1178,7 +1177,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(src_indexes.size() == dst_indexes.size());
 #endif
-      std::vector<Domain::CopySrcDstField> dst_fields;
+      std::vector<CopySrcDstField> dst_fields;
       layout->compute_copy_offsets(dst_mask, instance, dst_fields);
 #ifdef DEBUG_LEGION
       assert(dst_fields.size() == dst_indexes.size());
@@ -1707,7 +1706,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ListReductionManager::find_field_offsets(const FieldMask &reduce_mask,
-                                  std::vector<Domain::CopySrcDstField> &fields)
+                                           std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1719,8 +1718,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent ListReductionManager::issue_reduction(Operation *op, 
-        const std::vector<Domain::CopySrcDstField> &src_fields,
-        const std::vector<Domain::CopySrcDstField> &dst_fields,
+        const std::vector<CopySrcDstField> &src_fields,
+        const std::vector<CopySrcDstField> &dst_fields,
         RegionTreeNode *dst, ApEvent precondition, PredEvent guard,
         bool reduction_fold, bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
@@ -1837,7 +1836,7 @@ namespace Legion {
       assert(instance.exists());
       assert(layout != NULL);
 #endif
-      const Domain::CopySrcDstField &info = layout->find_field_info(fid);
+      const CopySrcDstField &info = layout->find_field_info(fid);
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> temp = 
                                                     instance.get_accessor();
@@ -1870,7 +1869,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FoldReductionManager::find_field_offsets(const FieldMask &reduce_mask,
-                                  std::vector<Domain::CopySrcDstField> &fields)
+                                           std::vector<CopySrcDstField> &fields)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1882,8 +1881,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent FoldReductionManager::issue_reduction(Operation *op,
-        const std::vector<Domain::CopySrcDstField> &src_fields,
-        const std::vector<Domain::CopySrcDstField> &dst_fields,
+        const std::vector<CopySrcDstField> &src_fields,
+        const std::vector<CopySrcDstField> &dst_fields,
         RegionTreeNode *dst, ApEvent precondition, PredEvent guard,
         bool reduction_fold, bool precise, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
@@ -2142,7 +2141,7 @@ namespace Legion {
             // that we want Legion Spy to see
             void *fill_buffer = malloc(reduction_op->sizeof_rhs);
             reduction_op->init(fill_buffer, 1);
-            std::vector<Domain::CopySrcDstField> dsts;
+            std::vector<CopySrcDstField> dsts;
             {
               std::vector<FieldID> fill_fields(field_sizes.size());
               for (unsigned idx = 0; idx < field_sizes.size(); idx++)

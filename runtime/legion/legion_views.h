@@ -184,17 +184,17 @@ namespace Legion {
     public:
       // Getting field information for performing copies
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields,
+                   std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+                   std::vector<CopySrcDstField> &src_fields) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
-                     std::vector<Domain::CopySrcDstField> &src_fields,
+                     std::vector<CopySrcDstField> &src_fields,
                              CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void reduce_from(ReductionOpID redop,
                                const FieldMask &reduce_mask, 
-                       std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+                       std::vector<CopySrcDstField> &src_fields) = 0;
     public:
       inline InstanceView* get_instance_subview(const LegionColor c) 
         { return get_subview(c)->as_instance_view(); }
@@ -290,19 +290,19 @@ namespace Legion {
       static void handle_subview_did_response(Deserializer &derez); 
       MaterializedView* get_materialized_parent_view(void) const;
     public:
-      void copy_field(FieldID fid, std::vector<Domain::CopySrcDstField> &infos);
+      void copy_field(FieldID fid, std::vector<CopySrcDstField> &infos);
     public:
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields,
+                   std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &src_fields);
+                   std::vector<CopySrcDstField> &src_fields);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::vector<Domain::CopySrcDstField> &dst_fields,
+                     std::vector<CopySrcDstField> &dst_fields,
                              CopyAcrossHelper *across_helper = NULL);
       virtual void reduce_from(ReductionOpID redop,
                                const FieldMask &reduce_mask,
-                          std::vector<Domain::CopySrcDstField> &src_fields);
+                          std::vector<CopySrcDstField> &src_fields);
     public:
       void accumulate_events(std::set<ApEvent> &all_events);
     public:
@@ -833,16 +833,16 @@ namespace Legion {
                                       std::set<ApEvent> &wait_on);
     public:
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::vector<Domain::CopySrcDstField> &dst_fields,
+                     std::vector<CopySrcDstField> &dst_fields,
                              CopyAcrossHelper *across_helper = NULL);
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields,
+                   std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &src_fields);
+                   std::vector<CopySrcDstField> &src_fields);
       virtual void reduce_from(ReductionOpID redop,
                                const FieldMask &reduce_mask,
-                          std::vector<Domain::CopySrcDstField> &src_fields);
+                          std::vector<CopySrcDstField> &src_fields);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);

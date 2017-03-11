@@ -1736,13 +1736,13 @@ namespace Legion {
     public:
       // Interfaces to Realm
       virtual ApEvent issue_copy(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &src_fields,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
       virtual ApEvent issue_fill(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
@@ -1869,13 +1869,13 @@ namespace Legion {
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
     public:
       virtual ApEvent issue_copy(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &src_fields,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
@@ -2070,13 +2070,13 @@ namespace Legion {
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
     public:
       virtual ApEvent issue_copy(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &src_fields,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
