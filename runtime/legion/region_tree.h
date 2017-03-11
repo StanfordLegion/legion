@@ -65,6 +65,7 @@ namespace Legion {
     public:
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
+      IndexSpace create_child_space_name(IndexPartition pid) const;
       void create_index_space(IndexSpace handle, const void *realm_is);
       RtEvent create_pending_partition(IndexPartition pid,
                                        IndexSpace parent,
@@ -603,24 +604,7 @@ namespace Legion {
      * \class IndexTreeNode
      * The abstract base class for nodes in the index space trees.
      */
-    class IndexTreeNode {
-    public:
-      struct IntersectInfo {
-      public:
-        IntersectInfo(void)
-          : has_intersects(false),
-            intersections_valid(false) { }
-        IntersectInfo(bool has)
-          : has_intersects(has), 
-            intersections_valid(!has) { }
-        IntersectInfo(const std::set<Domain> &ds)
-          : has_intersects(true), intersections_valid(true),
-            intersections(ds) { }
-      public:
-        bool has_intersects;
-        bool intersections_valid;
-        std::set<Domain> intersections;
-      };
+    class IndexTreeNode { 
     public:
       IndexTreeNode(void);
       IndexTreeNode(RegionTreeForest *ctx, unsigned depth,
@@ -664,7 +648,6 @@ namespace Legion {
     protected:
       Reservation node_lock;
     protected:
-      std::map<IndexTreeNode*,IntersectInfo> intersections;
       std::map<IndexTreeNode*,bool> dominators;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
@@ -815,21 +798,19 @@ namespace Legion {
       virtual void delinearize_color(LegionColor color, 
                                      void *realm_color, TypeTag type_tag) = 0;
       virtual bool contains_color(LegionColor color, 
-                                  bool report_error = false) const = 0;
+                                  bool report_error = false) = 0;
       virtual void instantiate_color_space(IndexPartNode *partition,
                                            ApUserEvent instantiate) = 0;
       virtual void instantiate_colors(std::vector<LegionColor> &colors) = 0;
       virtual Domain get_color_space_domain(void) const = 0;
       virtual DomainPoint get_domain_point_color(void) const = 0;
     public:
-      virtual bool is_disjoint(IndexSpaceNode *rhs) = 0;
-      virtual bool is_complete(IndexPartNode *rhs) = 0;
       virtual bool intersects_with(IndexSpaceNode *rhs) = 0;
       virtual bool intersects_with(IndexPartNode *rhs) = 0;
       virtual bool dominates(IndexSpaceNode *rhs) = 0;
       virtual bool dominates(IndexPartNode *rhs) = 0;
     public:
-      virtual void pack_index_space(Serializer &rez) = 0;
+      virtual void pack_index_space(Serializer &rez) const = 0;
     public:
       virtual ApEvent create_equal_children(IndexPartNode *partition, 
                                             size_t granularity) = 0;
@@ -871,7 +852,7 @@ namespace Legion {
     public:
       IndexSpaceNodeT(RegionTreeForest *ctx, IndexSpace handle,
                       IndexPartNode *parent, LegionColor color, 
-                      const Realm::ZIndexSpace<DIM,T> &realm_is,
+                      const Realm::ZIndexSpace<DIM,T> *realm_is,
                       ApEvent ready_event);
       IndexSpaceNodeT(const IndexSpaceNodeT &rhs);
       virtual ~IndexSpaceNodeT(void);
@@ -879,6 +860,11 @@ namespace Legion {
       IndexSpaceNodeT& operator=(const IndexSpaceNodeT &rhs);
       void* operator new(size_t count);
       void operator delete(void *ptr);
+    public:
+      inline void get_realm_index_space(Realm::ZIndexSpace<DIM,T> &result) const
+        { result = realm_index_space; }
+      inline void set_realm_index_space(const Realm::ZIndexSpace<DIM,T> &value)
+        { realm_index_space = value; }
     public:
       virtual void log_index_space_points(void) const;
       virtual ApEvent compute_pending_space(
@@ -897,21 +883,19 @@ namespace Legion {
       virtual void delinearize_color(LegionColor color, 
                                      void *realm_color, TypeTag type_tag);
       virtual bool contains_color(LegionColor color,
-                                  bool report_error = false) const;
+                                  bool report_error = false);
       virtual void instantiate_color_space(IndexPartNode *partition,
                                            ApUserEvent instantiate);
       virtual void instantiate_colors(std::vector<LegionColor> &colors);
       virtual Domain get_color_space_domain(void) const;
       virtual DomainPoint get_domain_point_color(void) const;
     public:
-      virtual bool is_disjoint(IndexSpaceNode *rhs);
-      virtual bool is_complete(IndexPartNode *rhs);
       virtual bool intersects_with(IndexSpaceNode *rhs);
       virtual bool intersects_with(IndexPartNode *rhs);
       virtual bool dominates(IndexSpaceNode *rhs);
       virtual bool dominates(IndexPartNode *rhs);
     public:
-      virtual void pack_index_space(Serializer &rez);
+      virtual void pack_index_space(Serializer &rez) const;
     public:
       virtual ApEvent create_equal_children(IndexPartNode *partition, 
                                             size_t granularity);
@@ -928,7 +912,15 @@ namespace Legion {
                                            IndexPartNode *left,
                                            IndexPartNode *right);
     protected:
+      void compute_linearization_metadata(void);
+    protected:
       Realm::ZIndexSpace<DIM,T> realm_index_space;
+    protected:
+      std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> > intersections;
+    protected: // linearization meta-data, computed on demand
+      Realm::ZPoint<DIM,ptrdiff_t> strides;
+      size_t offset;
+      bool linearization_ready;
     };
 
     /**
@@ -948,7 +940,7 @@ namespace Legion {
         const Realm::ZIndexSpace<N::N,T> *is = 
           (const Realm::ZIndexSpace<N::N,T>*)creator->realm_is;
         creator->result = new IndexSpaceNodeT<N::N,T>(creator->forest,
-            creator->space, creator->parent, creator->color, *is,
+            creator->space, creator->parent, creator->color, is,
             creator->ready);
       }
     public:
@@ -1070,6 +1062,7 @@ namespace Legion {
       ApEvent create_by_intersection(IndexSpaceNode *left,IndexPartNode *right);
       ApEvent create_by_difference(IndexPartNode *left, IndexPartNode *right);
     public:
+      virtual bool compute_complete(void) = 0;
       virtual bool intersects_with(IndexSpaceNode *other) = 0; 
       virtual bool intersects_with(IndexPartNode *other) = 0; 
       virtual bool dominates(IndexSpaceNode *other) = 0;
@@ -1141,10 +1134,19 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
+      virtual bool compute_complete(void);
       virtual bool intersects_with(IndexSpaceNode *other); 
       virtual bool intersects_with(IndexPartNode *other); 
       virtual bool dominates(IndexSpaceNode *other);
       virtual bool dominates(IndexPartNode *other);
+    public:
+      ApEvent get_union_index_space(Realm::ZIndexSpace<DIM,T> &space);
+    protected:
+      Realm::ZIndexSpace<DIM,T> partition_union_space;
+      ApEvent partition_union_ready;
+      bool has_union_space;
+    protected:
+      std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> > intersections;
     };
 
     /**

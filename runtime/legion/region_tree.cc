@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-
 #include "legion.h"
 #include "runtime.h"
 #include "legion_ops.h"
@@ -27,6 +26,8 @@
 #include "legion_analysis.h"
 #include "interval_tree.h"
 #include "rectangle_set.h"
+
+#include "region_tree.inl"
 
 namespace Legion {
   namespace Internal {
@@ -69,6 +70,14 @@ namespace Legion {
       // should never happen
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace RegionTreeForest::create_child_space_name(IndexPartition p) const
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpace(runtime->get_unique_index_space_id(),
+                        p.get_tree_id(), p.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
@@ -137,35 +146,6 @@ namespace Legion {
       // We instantiate them with an empty domain that will be filled in later
       if (instantiate.exists())
         color_node->instantiate_color_space(partition_node, instantiate);
-#if 0
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        IndexSpace is(runtime->get_unique_index_space_id(), pid.get_tree_id(),
-                      pid.get_type_tag());
-        ColorPoint child_color(itr.p);
-        if (create_separate)
-        {
-#ifdef DEBUG_LEGION
-          assert(!handle_ready.exists());
-          assert(!domain_ready.exists());
-#endif
-          // Create a separate handle ready event for each node
-          ApUserEvent local_handle_ready = Runtime::create_ap_user_event();
-          ApUserEvent local_domain_ready = Runtime::create_ap_user_event();
-          create_node(is, local_handle_ready, local_domain_ready,
-                      partition_node, child_color, parent_node->kind, 
-                      NO_MEMORY);
-          partition_node->add_pending_child(child_color, local_handle_ready,
-                                            local_domain_ready);
-        }
-        else
-          create_node(is, handle_ready, domain_ready,
-                      partition_node, child_color, parent_node->kind, 
-                      NO_MEMORY);
-        if (Runtime::legion_spy_enabled)
-          LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
-      }
-#endif
       // If we need to compute the disjointness, only do that
       // after the partition is actually ready
       if (part_kind == COMPUTE_KIND)
@@ -4263,19 +4243,6 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
-      for (std::map<IndexTreeNode*,IntersectInfo>::iterator it = 
-            intersections.begin(); it != intersections.end(); it++)
-      {
-        IntersectInfo &info = it->second; 
-        for (std::set<Domain>::iterator dit = info.intersections.begin();
-              dit != info.intersections.end(); dit++)
-        {
-          Realm::IndexSpace space = dit->get_index_space();
-          if (space.exists())
-            space.destroy();
-        }
-      }
-      intersections.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -5272,18 +5239,7 @@ namespace Legion {
       std::map<LegionColor,IndexSpaceNode*> left_spaces, right_spaces;    
       left->get_children(left_spaces);
       right->get_children(right_spaces);
-      bool disjoint = true;
-      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator lit = 
-            left_spaces.begin(); disjoint && (lit != left_spaces.end()); lit++)
-      {
-        for (std::map<LegionColor,IndexSpaceNode*>::const_iterator rit = 
-              right_spaces.begin(); disjoint && 
-              (rit != right_spaces.end()); rit++)
-        {
-          if (!lit->second->is_disjoint(rit->second))
-            disjoint = false;
-        }
-      }
+      const bool disjoint = !left->intersects_with(right);
       parent->record_disjointness(disjoint, left->color, right->color);
     }
 
@@ -5547,14 +5503,6 @@ namespace Legion {
       derez.deserialize(ready);
       Runtime::trigger_event(ready);
     }
-
-    /////////////////////////////////////////////////////////////
-    // Templated Index Space Node 
-    /////////////////////////////////////////////////////////////
-
-    // Note we can put the implementations of these methods for a
-    // templated class in this file because this file is also 
-    // where the templates are explicitly instantiated
 
     /////////////////////////////////////////////////////////////
     // Index Partition Node 
@@ -5821,15 +5769,16 @@ namespace Legion {
       {
         IndexSpace is(context->runtime->get_unique_index_space_id(),
                       handle.get_tree_id(), handle.get_type_tag());
+        // Make a new index space node ready when the partition is ready
+        IndexSpaceNode *result = context->create_node(is, NULL/*realm is*/, 
+                                                  this, c, partition_ready); 
         if (Runtime::legion_spy_enabled)
         {
-          LegionSpy::log_index_subspace(handle.id, is.id, c);
+          LegionSpy::log_index_subspace(handle.id, is.id, 
+                        result->get_domain_point_color());
           LegionSpy::log_empty_index_space(is.id);
         }
-
-        // Make a new index space node ready when the partition is ready
-        return context->create_node(is, NULL/*realm is*/, 
-                                    this, c, partition_ready);
+        return result; 
       }
       // Otherwise, request a child node from the owner node
       else
@@ -6078,7 +6027,7 @@ namespace Legion {
       {
 	// if not disjoint, we have to do a considerably-more-expensive test
 	//  that handles overlap (i.e. double-counting) in the child domains
-	result = parent->is_complete(this);
+	result = compute_complete();
       }
       // Save the result for the future
       AutoLock n_lock(node_lock);
