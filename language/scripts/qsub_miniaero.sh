@@ -4,13 +4,10 @@
 #PBS -l walltime=01:00:00
 #PBS -q debug
 #PBS -m abe
-#PBS -M slaughter@cs.stanford.edu
-#PBS -A ARLST35471000
+#PBS -M EMAIL_ADDRESS
+#PBS -A ACCOUNT_ID
 
 cd "$PBS_O_WORKDIR"
-
-# root_dir="$HOME/regent/language/"
-# cd "$root_dir"
 
 echo "Running 1x2x8..."
 time LD_LIBRARY_PATH="." aprun -n2 -S1 -cc numa_node -e GASNET_NETWORKDEPTH=64 -e GASNET_NETWORKDEPTH_TOTAL=384 ./miniaero.spmd8 -blocks 16 -mesh 64x2048x4 -x_length 2 -y_length 0.2 -z_length 1 -ramp 0 -dt 1e-8 -viscous -second_order -time_steps 30 -output_frequency 31 -hl:sched 256 -ll:cpu 8 -ll:util 2 -ll:dma 2 -ll:csize 32768 -ll:rsize 0 -ll:gsize 0 -hl:prof 512 -level legion_prof=2 -logfile prof_1x2x8_%.log | tee out_1x2x8.log
