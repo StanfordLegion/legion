@@ -1462,7 +1462,7 @@ namespace Realm {
 
     // reclaim any physical resources associated with this index space
     //  will clear the sparsity map of this index space if it exists
-    void destroy(void);
+    void destroy(Event wait_on = Event::NO_EVENT);
 
     // true if we're SURE that there are no points in the space (may be imprecise due to
     //  lazy loading of sparsity data)
@@ -1515,6 +1515,25 @@ namespace Realm {
 				   const ProfilingRequestSet& reqs) const;
 #endif
 
+    // copy and fill operations
+
+    Event fill(const std::vector<CopySrcDstField> &dsts,
+               const ProfilingRequestSet &requests,
+               const void *fill_value, size_t fill_value_size,
+               Event wait_on = Event::NO_EVENT) const;
+
+    Event copy(const std::vector<CopySrcDstField> &srcs,
+               const std::vector<CopySrcDstField> &dsts,
+               const ProfilingRequestSet &requests,
+               Event wait_on = Event::NO_EVENT,
+               ReductionOpID redop_id = 0, bool red_fold = false) const;
+
+    Event copy(const std::vector<CopySrcDstField> &srcs,
+               const std::vector<CopySrcDstField> &dsts,
+               const ZIndexSpace<N,T> &mask,
+               const ProfilingRequestSet &requests,
+               Event wait_on = Event::NO_EVENT,
+               ReductionOpID redop_id = 0, bool red_fold = false) const;
 
     // partitioning operations
 
