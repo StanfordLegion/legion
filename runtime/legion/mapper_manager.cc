@@ -2291,7 +2291,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      IndexSpace result = runtime->get_index_subspace(p, c);
+      Realm::ZPoint<1,coord_t> color(c);
+      IndexSpace result = runtime->get_index_subspace(p, &color,
+                    NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
       return result;
     }
@@ -2303,7 +2305,33 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      IndexSpace result = runtime->get_index_subspace(p, color);
+      IndexSpace result = IndexSpace::NO_SPACE;
+      switch (color.get_dim())
+      {
+        case 1:
+          {
+            Realm::ZPoint<1,coord_t> point(color);
+            result = runtime->get_index_subspace(p, &point,
+                NT_TemplateHelper::encode_tag<1,coord_t>());
+            break;
+          }
+        case 2:
+          {
+            Realm::ZPoint<2,coord_t> point(color);
+            result = runtime->get_index_subspace(p, &point,
+                NT_TemplateHelper::encode_tag<2,coord_t>());
+            break;
+          }
+        case 3:
+          {
+            Realm::ZPoint<3,coord_t> point(color);
+            result = runtime->get_index_subspace(p, &point,
+                NT_TemplateHelper::encode_tag<3,coord_t>());
+            break;
+          }
+        default:
+          assert(false);
+      }
       resume_mapper_call(ctx);
       return result;
     }
@@ -2313,10 +2341,8 @@ namespace Legion {
                                              IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      pause_mapper_call(ctx);
-      bool result = runtime->has_multiple_domains(handle);
-      resume_mapper_call(ctx);
-      return result;
+      // Never have multiple domains
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2325,7 +2351,34 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Domain result = runtime->get_index_space_domain(handle);
+      Domain result = Domain::NO_DOMAIN;
+      const TypeTag type_tag = handle.get_type_tag();
+      switch (NT_TemplateHelper::get_dim(type_tag))
+      {
+        case 1:
+          {
+            Realm::ZIndexSpace<1,coord_t> realm_is;
+            runtime->get_index_space_domain(handle, &realm_is, type_tag);
+            result = realm_is;
+            break;
+          }
+        case 2:
+          {
+            Realm::ZIndexSpace<2,coord_t> realm_is;
+            runtime->get_index_space_domain(handle, &realm_is, type_tag);
+            result = realm_is;
+            break;
+          }
+        case 3:
+          {
+            Realm::ZIndexSpace<3,coord_t> realm_is;
+            runtime->get_index_space_domain(handle, &realm_is, type_tag);
+            result = realm_is;
+            break;
+          }
+        default:
+          assert(false);
+      }
       resume_mapper_call(ctx);
       return result;
     }
@@ -2336,9 +2389,7 @@ namespace Legion {
                                                 std::vector<Domain> &domains)
     //--------------------------------------------------------------------------
     {
-      pause_mapper_call(ctx);
-      runtime->get_index_space_domains(handle, domains);
-      resume_mapper_call(ctx);
+      domains.push_back(get_index_space_domain(ctx, handle));
     }
 
     //--------------------------------------------------------------------------
@@ -2379,9 +2430,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Color result = runtime->get_index_space_color(handle);
+      Realm::ZPoint<1,coord_t> point;
+      runtime->get_index_space_color_point(handle, &point,
+                NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
-      return result;
+      return point[0];
     }
 
     //--------------------------------------------------------------------------
@@ -2501,8 +2554,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
+#ifdef DEBUG_LEGION
+      assert((color.get_dim() == 0) || (color.get_dim() == 1));
+#endif
       LogicalPartition result = 
-        runtime->get_logical_partition_by_color(par, color);
+        runtime->get_logical_partition_by_color(par, color[0]);
       resume_mapper_call(ctx);
       return result;
     }
@@ -2540,7 +2596,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      LogicalRegion result = runtime->get_logical_subregion_by_color(par,color);
+      Realm::ZPoint<1,coord_t> point(color);
+      LogicalRegion result = runtime->get_logical_subregion_by_color(par,
+                      &point, NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
       return result;
     }
@@ -2551,7 +2609,33 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      LogicalRegion result = runtime->get_logical_subregion_by_color(par,color);
+      LogicalRegion result = LogicalRegion::NO_REGION;
+      switch (color.get_dim())
+      {
+        case 1:
+          {
+            Realm::ZPoint<1,coord_t> point(color);
+            result = runtime->get_logical_subregion_by_color(par, &point,
+                              NT_TemplateHelper::encode_tag<1,coord_t>());
+            break;
+          }
+        case 2:
+          {
+            Realm::ZPoint<2,coord_t> point(color);
+            result = runtime->get_logical_subregion_by_color(par, &point,
+                              NT_TemplateHelper::encode_tag<2,coord_t>());
+            break;
+          }
+        case 3:
+          {
+            Realm::ZPoint<3,coord_t> point(color);
+            result = runtime->get_logical_subregion_by_color(par, &point,
+                              NT_TemplateHelper::encode_tag<3,coord_t>());
+            break;
+          }
+        default:
+          assert(false);
+      }
       resume_mapper_call(ctx);
       return result;
     }
@@ -2575,9 +2659,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Color result = runtime->get_logical_region_color(handle);
+      Realm::ZPoint<1,coord_t> point;
+      runtime->get_logical_region_color(handle, &point, 
+            NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
-      return result;
+      return point[0];
     }
 
     //--------------------------------------------------------------------------

@@ -713,8 +713,6 @@ namespace Legion {
       virtual ~IndexSpaceNode(void);
     public:
       IndexSpaceNode& operator=(const IndexSpaceNode &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -821,6 +819,8 @@ namespace Legion {
       virtual void instantiate_color_space(IndexPartNode *partition,
                                            ApUserEvent instantiate) = 0;
       virtual void instantiate_colors(std::vector<LegionColor> &colors) = 0;
+      virtual Domain get_color_space_domain(void) const = 0;
+      virtual DomainPoint get_domain_point_color(void) const = 0;
     public:
       virtual bool is_disjoint(IndexSpaceNode *rhs) = 0;
       virtual bool is_complete(IndexPartNode *rhs) = 0;
@@ -877,6 +877,8 @@ namespace Legion {
       virtual ~IndexSpaceNodeT(void);
     public:
       IndexSpaceNodeT& operator=(const IndexSpaceNodeT &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
       virtual void log_index_space_points(void) const;
       virtual ApEvent compute_pending_space(
@@ -899,6 +901,8 @@ namespace Legion {
       virtual void instantiate_color_space(IndexPartNode *partition,
                                            ApUserEvent instantiate);
       virtual void instantiate_colors(std::vector<LegionColor> &colors);
+      virtual Domain get_color_space_domain(void) const;
+      virtual DomainPoint get_domain_point_color(void) const;
     public:
       virtual bool is_disjoint(IndexSpaceNode *rhs);
       virtual bool is_complete(IndexPartNode *rhs);
@@ -1009,8 +1013,6 @@ namespace Legion {
       virtual ~IndexPartNode(void);
     public:
       IndexPartNode& operator=(const IndexPartNode &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -1068,10 +1070,8 @@ namespace Legion {
       ApEvent create_by_intersection(IndexSpaceNode *left,IndexPartNode *right);
       ApEvent create_by_difference(IndexPartNode *left, IndexPartNode *right);
     public:
-      virtual bool intersects_with(IndexSpaceNode *other, 
-                                   bool compute = true) = 0;
-      virtual bool intersects_with(IndexPartNode *other, 
-                                   bool compute = true) = 0;
+      virtual bool intersects_with(IndexSpaceNode *other) = 0; 
+      virtual bool intersects_with(IndexPartNode *other) = 0; 
       virtual bool dominates(IndexSpaceNode *other) = 0;
       virtual bool dominates(IndexPartNode *other) = 0;
     public:
@@ -1124,7 +1124,7 @@ namespace Legion {
      * associated with realm index spaces
      */
     template<int DIM, typename T>
-    class IndexPartNodeT : public IndexSpaceNode {
+    class IndexPartNodeT : public IndexPartNode {
     public:
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
@@ -1138,11 +1138,11 @@ namespace Legion {
       virtual ~IndexPartNodeT(void);
     public:
       IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
     public:
-      virtual bool intersects_with(IndexSpaceNode *other, 
-                                   bool compute = true);
-      virtual bool intersects_with(IndexPartNode *other, 
-                                   bool compute = true);
+      virtual bool intersects_with(IndexSpaceNode *other); 
+      virtual bool intersects_with(IndexPartNode *other); 
       virtual bool dominates(IndexSpaceNode *other);
       virtual bool dominates(IndexPartNode *other);
     };
@@ -1716,7 +1716,7 @@ namespace Legion {
       PhysicalManager* find_manager(DistributedID did);
     public:
       virtual unsigned get_depth(void) const = 0;
-      virtual const LegionColor& get_color(void) const = 0;
+      virtual LegionColor get_color(void) const = 0;
       virtual IndexTreeNode *get_row_source(void) const = 0;
       virtual RegionTreeID get_tree_id(void) const = 0;
       virtual RegionTreeNode* get_parent(void) const = 0;
@@ -1862,7 +1862,7 @@ namespace Legion {
       void destroy_node(AddressSpaceID source);
     public:
       virtual unsigned get_depth(void) const;
-      virtual const LegionColor& get_color(void) const;
+      virtual LegionColor get_color(void) const;
       virtual IndexTreeNode *get_row_source(void) const;
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
@@ -2063,7 +2063,7 @@ namespace Legion {
       void destroy_node(AddressSpaceID source);
     public:
       virtual unsigned get_depth(void) const;
-      virtual const LegionColor& get_color(void) const;
+      virtual LegionColor get_color(void) const;
       virtual IndexTreeNode *get_row_source(void) const;
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;

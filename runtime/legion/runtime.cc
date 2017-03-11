@@ -8841,20 +8841,20 @@ namespace Legion {
     void Runtime::initialize_legion_prof(void)
     //--------------------------------------------------------------------------
     {
-      LG_TASK_DESCRIPTIONS(hlr_task_descriptions);
+      LG_TASK_DESCRIPTIONS(lg_task_descriptions);
       profiler = new LegionProfiler((local_utils.empty() ? 
                                     Processor::NO_PROC : utility_group), 
                                     machine, LG_LAST_TASK_ID,
-                                    hlr_task_descriptions, 
+                                    lg_task_descriptions, 
                                     Operation::LAST_OP_KIND, 
                                     Operation::op_names); 
-      LG_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
-      profiler->record_message_kinds(hlr_message_descriptions, LAST_SEND_KIND);
-      MAPPER_CALL_NAMES(hlr_mapper_calls);
-      profiler->record_mapper_call_kinds(hlr_mapper_calls, LAST_MAPPER_CALL);
+      LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
+      profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
+      MAPPER_CALL_NAMES(lg_mapper_calls);
+      profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
 #ifdef DETAILED_LEGION_PROF
-      RUNTIME_CALL_DESCRIPTIONS(hlr_runtime_calls);
-      profiler->record_runtime_call_kinds(hlr_runtime_calls, 
+      RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
+      profiler->record_runtime_call_kinds(lg_runtime_calls, 
                                           LAST_RUNTIME_CALL_KIND);
 #endif
     }
@@ -9698,6 +9698,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_space_color_point(Context ctx, 
+                                                     IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      IndexSpaceNode *node = forest->get_node(handle);
+      DomainPoint result = node->get_domain_point_color();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_index_space_color_point(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = forest->get_node(handle);
+      return node->get_domain_point_color();
+    }
+
+    //--------------------------------------------------------------------------
     Color Runtime::get_index_partition_color(Context ctx, 
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -10201,6 +10223,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       forest->get_logical_region_color(handle, realm_color, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_region_color_point(Context ctx,
+                                                        LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      IndexSpaceNode *node = forest->get_node(handle.get_index_space());
+      DomainPoint result = node->get_domain_point_color();
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    DomainPoint Runtime::get_logical_region_color_point(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = forest->get_node(handle.get_index_space());
+      return node->get_domain_point_color();
     }
 
     //--------------------------------------------------------------------------

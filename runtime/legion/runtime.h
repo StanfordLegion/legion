@@ -1602,6 +1602,8 @@ namespace Legion {
                                        void *realm_color, TypeTag type_tag);
       void get_index_space_color_point(IndexSpace handle,
                                        void *realm_color, TypeTag type_tag);
+      DomainPoint get_index_space_color_point(Context ctx, IndexSpace handle);
+      DomainPoint get_index_space_color_point(IndexSpace handle);
       Color get_index_partition_color(Context ctx, IndexPartition handle);
       Color get_index_partition_color(IndexPartition handle);
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
@@ -1688,6 +1690,9 @@ namespace Legion {
                                     void *realm_color, TypeTag type_tag);
       void get_logical_region_color(LogicalRegion handle, 
                                     void *realm_color, TypeTag type_tag);
+      DomainPoint get_logical_region_color_point(Context ctx, 
+                                                 LogicalRegion handle);
+      DomainPoint get_logical_region_color_point(LogicalRegion handle);
       Color get_logical_partition_color(Context ctx, LogicalPartition handle);
       Color get_logical_partition_color(LogicalPartition handle);
       LogicalRegion get_parent_logical_region(Context ctx, 

@@ -4717,20 +4717,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* IndexSpaceNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexSpaceNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     bool IndexSpaceNode::is_index_space_node(void) const
     //--------------------------------------------------------------------------
     {
@@ -5623,20 +5609,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* IndexPartNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexPartNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -9779,9 +9751,11 @@ namespace Legion {
                     // function to indicate that we are open in 
                     // disjoint shallow mode with read-write
                     RegionUsage close_usage(READ_WRITE, EXCLUSIVE, 0);
+                    IndexSpaceNode *color_space = 
+                      as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        as_partition_node()->row_source->color_space,
+                        color_space->get_color_space_domain(),
                         true/*disjoint*/));
                   }
                 }
@@ -9889,9 +9863,11 @@ namespace Legion {
                     // function to indicate that we are open in 
                     // disjoint shallow mode with read-write
                     RegionUsage close_usage(READ_WRITE, EXCLUSIVE, 0);
+                    IndexSpaceNode *color_space = 
+                      as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        as_partition_node()->row_source->color_space,
+                        color_space->get_color_space_domain(),
                         true/*disjoint*/));
                   }
                 }
@@ -10035,7 +10011,7 @@ namespace Legion {
       // are disjoint, then we can skip a lot of this
       bool removed_fields = false;
       const bool all_children_disjoint = are_all_children_disjoint();
-      if (next_child.is_valid() && all_children_disjoint)
+      if ((next_child != INVALID_COLOR) && all_children_disjoint)
       {
         // If we have a next child and all the children are disjoint
         // then there are never any close operations, all we have to
@@ -10079,7 +10055,7 @@ namespace Legion {
           if (!close_mask)
             continue;
           // Check for same child, only allow
-          if (allow_next_child && next_child.is_valid() && 
+          if (allow_next_child && (next_child != INVALID_COLOR) && 
               (next_child == it->first))
           {
             if (aliased_children == NULL)
@@ -10119,7 +10095,7 @@ namespace Legion {
             }
           }
           // Check for child disjointness
-          if (!overwriting_close && next_child.is_valid() && 
+          if (!overwriting_close && (next_child != INVALID_COLOR) && 
               (it->first != next_child) && (all_children_disjoint || 
                are_children_disjoint(it->first, next_child)))
             continue;
@@ -10154,7 +10130,7 @@ namespace Legion {
         // If there is no next_child, then we have to close all
         // children, otherwise figure out which fields need closes
         FieldMask full_close;
-        if (next_child.is_valid())
+        if (next_child != INVALID_COLOR)
         {
           // Figure what if any children need to be closed
           for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
@@ -10256,7 +10232,7 @@ namespace Legion {
         }
         // If we allow the next child, we need to see if the next
         // child is already open or not
-        if (allow_next_child && next_child.is_valid())
+        if (allow_next_child && (next_child != INVALID_COLOR))
         {
           LegionMap<LegionColor,FieldMask>::aligned::iterator finder = 
                                 state.open_children.find(next_child);
@@ -10706,7 +10682,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(next_child.is_valid());
+      assert(next_child != INVALID_COLOR);
       sanity_check_logical_state(state);
 #endif
       LegionDeque<FieldState>::aligned new_states;
@@ -12968,7 +12944,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PartitionNode* RegionNode::get_child(const LegionColor &c)
+    PartitionNode* RegionNode::get_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       // check to see if we have it, if not try to make it
@@ -13107,6 +13083,7 @@ namespace Legion {
       return get_child(c);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     ApEvent RegionNode::issue_copy(Operation *op,
                         const std::vector<Domain::CopySrcDstField> &src_fields,
@@ -13366,6 +13343,7 @@ namespace Legion {
 #endif
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool RegionNode::are_children_disjoint(const LegionColor c1, 
@@ -13386,11 +13364,11 @@ namespace Legion {
     void RegionNode::instantiate_children(void)
     //--------------------------------------------------------------------------
     {
-      std::set<LegionColor> all_colors;
+      std::vector<LegionColor> all_colors;
       row_source->get_colors(all_colors);
       // This may look like it does nothing, but it checks to see
       // if we have instantiated all the child nodes
-      for (std::set<Legioncolor>::const_iterator it = all_colors.begin(); 
+      for (std::vector<LegionColor>::const_iterator it = all_colors.begin(); 
             it != all_colors.end(); it++)
         get_child(*it);
     }
@@ -14610,20 +14588,14 @@ namespace Legion {
                                            const FieldMask &capture_mask) 
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
+      DomainPoint color = row_source->get_domain_point_color();
+      switch (color.get_dim())
       {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth());
-            break;
-          }
         case 1:
           {
             logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth());
+              color[0], logger->get_depth());
             break;
           }
         case 2:
@@ -14631,8 +14603,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth());
+              color[0], color[1], logger->get_depth());
             break;
           }
         case 3:
@@ -14640,8 +14611,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth());
+              color[0], color[1], color[2], logger->get_depth());
             break;
           }
         default:
@@ -14679,20 +14649,14 @@ namespace Legion {
                                             const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
+      DomainPoint color = row_source->get_domain_point_color();
+      switch (color.get_dim())
       {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth());
-            break;
-          }
         case 1:
           {
             logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth());
+              color[0], logger->get_depth());
             break;
           }
         case 2:
@@ -14700,8 +14664,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth());
+              color[0], color[1], logger->get_depth());
             break;
           }
         case 3:
@@ -14709,8 +14672,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth());
+              color[0], color[1], color[2], logger->get_depth());
             break;
           }
         default:
@@ -14784,22 +14746,15 @@ namespace Legion {
                                           const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
+      DomainPoint color = row_source->get_domain_point_color();
+      switch (color.get_dim())
       {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at "
-                        "depth %d (%p)", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth(), this);
-            break;
-          }
         case 1:
           {
             logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth(), this);
+              color[0], logger->get_depth(), this);
             break;
           }
         case 2:
@@ -14807,8 +14762,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth(), this);
+              color[0], color[1], logger->get_depth(), this);
             break;
           }
         case 3:
@@ -14816,8 +14770,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth(), this);
+              color[0], color[1], color[2], logger->get_depth(), this);
             break;
           }
         default:
@@ -14851,22 +14804,15 @@ namespace Legion {
                                            const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
+      DomainPoint color = row_source->get_domain_point_color();
+      switch (color.get_dim())
       {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at "
-                        "depth %d (%p)", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth(), this);
-            break;
-          }
         case 1:
           {
             logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth(), this);
+              color[0], logger->get_depth(), this);
             break;
           }
         case 2:
@@ -14874,8 +14820,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth(), this);
+              color[0], color[1], logger->get_depth(), this);
             break;
           }
         case 3:
@@ -14883,8 +14828,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth(), this);
+              color[0], color[1], color[2], logger->get_depth(), this);
             break;
           }
         default:
@@ -15232,14 +15176,27 @@ namespace Legion {
         const bool break_early = traverser->break_early();
         if (traverser->force_instantiation)
         {
-          for (Domain::DomainPointIterator itr(row_source->color_space); 
-                itr; itr++)
+          if (row_source->total_children == row_source->max_linearized_color)
           {
-            LegionColor child_color(itr.p);
-            bool result = get_child(child_color)->visit_node(traverser);
-            continue_traversal = continue_traversal && result;
-            if (!result && break_early)
-              break;
+            for (LegionColor c = 0; c < row_source->total_children; c++)
+            {
+              bool result = get_child(c)->visit_node(traverser);
+              continue_traversal = continue_traversal && result;
+              if (!result && break_early)
+                break;
+            }
+          }
+          else
+          {
+            for (LegionColor c = 0; c < row_source->total_children; c++)
+            {
+              if (!row_source->color_space->contains_color(c))
+                continue;
+              bool result = get_child(c)->visit_node(traverser);
+              continue_traversal = continue_traversal && result;
+              if (!result && break_early)
+                break;
+            }
           }
         }
         else
@@ -15603,49 +15560,10 @@ namespace Legion {
                                               const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), row_source->is_disjoint(), 
-              logger->get_depth());
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->is_disjoint(), 
-              logger->get_depth());
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
+                  "disjoint %d at depth %d", 
+        handle.index_partition.id, handle.field_space.id,handle.tree_id,
+        row_source->color, row_source->is_disjoint(), logger->get_depth());
       logger->down();
       LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
@@ -15679,49 +15597,10 @@ namespace Legion {
                                                const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
+                  "disjoint %d at depth %d", 
+        handle.index_partition.id, handle.field_space.id,handle.tree_id,
+        row_source->color, row_source->is_disjoint(), logger->get_depth());
       logger->down();
       LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
@@ -15790,49 +15669,10 @@ namespace Legion {
                                              const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
+                  "disjoint %d at depth %d (%p)", 
+        handle.index_partition.id, handle.field_space.id,handle.tree_id,
+        row_source->color, row_source->is_disjoint(), logger->get_depth(),this);
       logger->down();
       LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
@@ -15865,49 +15705,10 @@ namespace Legion {
                                               const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
+                  "disjoint %d at depth %d (%p)", 
+        handle.index_partition.id, handle.field_space.id,handle.tree_id,
+        row_source->color, row_source->is_disjoint(), logger->get_depth(),this);
       logger->down();
       LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))

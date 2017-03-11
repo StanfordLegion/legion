@@ -688,8 +688,6 @@ namespace Legion {
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
         "Send Index Partition Child Response",                        \
-        "Send Index Partition Children Request",                      \
-        "Send Index Partition Children Response",                     \
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \

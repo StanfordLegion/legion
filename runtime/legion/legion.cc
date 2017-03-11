@@ -4095,62 +4095,14 @@ namespace Legion {
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      const TypeTag type_tag = handle.get_type_tag();
-      switch (Internal::NT_TemplateHelper::get_dim(type_tag))
-      {
-        case 1:
-          {
-            Realm::ZPoint<1,coord_t> point;
-            runtime->get_index_space_color_point(ctx, handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        case 2:
-          {
-            Realm::ZPoint<2,coord_t> point;
-            runtime->get_index_space_color_point(ctx, handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        case 3:
-          {
-            Realm::ZPoint<3,coord_t> point;
-            runtime->get_index_space_color_point(ctx, handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        default:
-          assert(false);
-      }
-      return DomainPoint();
+      return get_index_space_color_point(ctx, handle); 
     }
 
     //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_space_color_point(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      const TypeTag type_tag = handle.get_type_tag();
-      switch (Internal::NT_TemplateHelper::get_dim(type_tag))
-      {
-        case 1:
-          {
-            Realm::ZPoint<1,coord_t> point;
-            runtime->get_index_space_color_point(handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        case 2:
-          {
-            Realm::ZPoint<2,coord_t> point;
-            runtime->get_index_space_color_point(handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        case 3:
-          {
-            Realm::ZPoint<3,coord_t> point;
-            runtime->get_index_space_color_point(handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        default:
-          assert(false);
-      }
-      return DomainPoint();
+      return get_index_space_color_point(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -4698,31 +4650,7 @@ namespace Legion {
                                                         LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      const TypeTag type_tag = handle.get_type_tag();
-      switch (Internal::NT_TemplateHelper::get_dim(type_tag))
-      {
-        case 1:
-          {
-            Realm::ZPoint<1,coord_t> point;
-            runtime->get_logical_region_color(ctx, handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        case 2:
-          {
-            Realm::ZPoint<2,coord_t> point;
-            runtime->get_logical_region_color(ctx, handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        case 3:
-          {
-            Realm::ZPoint<3,coord_t> point;
-            runtime->get_logical_region_color(ctx, handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        default:
-          assert(false);
-      }
-      return DomainPoint();
+      return runtime->get_logical_region_color_point(ctx, handle); 
     }
 
     //--------------------------------------------------------------------------
@@ -4739,31 +4667,7 @@ namespace Legion {
     DomainPoint Runtime::get_logical_region_color_point(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      const TypeTag type_tag = handle.get_type_tag();
-      switch (Internal::NT_TemplateHelper::get_dim(type_tag))
-      {
-        case 1:
-          {
-            Realm::ZPoint<1,coord_t> point;
-            runtime->get_logical_region_color(handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        case 2:
-          {
-            Realm::ZPoint<2,coord_t> point;
-            runtime->get_logical_region_color(handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        case 3:
-          {
-            Realm::ZPoint<3,coord_t> point;
-            runtime->get_logical_region_color(handle, &point, type_tag);
-            return DomainPoint(point);
-          }
-        default:
-          assert(false);
-      }
-      return DomainPoint();
+      return runtime->get_logical_region_color_point(handle); 
     }
 
     //--------------------------------------------------------------------------
