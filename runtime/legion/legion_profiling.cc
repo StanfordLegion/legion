@@ -537,16 +537,14 @@ namespace Legion {
 		       idx, operation_kind_descriptions[idx]);
       }
       // Log all the processors and memories
-      std::set<Processor> all_procs;
-      machine.get_all_processors(all_procs);
-      for (std::set<Processor>::const_iterator it = all_procs.begin();
+      Machine::ProcessorQuery all_procs(machine);
+      for (Machine::ProcessorQuery::iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
         log_prof.print("Prof Proc Desc " IDFMT " %d", it->id, it->kind());
       }
-      std::set<Memory> all_mems;
-      machine.get_all_memories(all_mems);
-      for (std::set<Memory>::const_iterator it = all_mems.begin();
+      Machine::MemoryQuery all_mems(machine);
+      for (Machine::MemoryQuery::iterator it = all_mems.begin();
             it != all_mems.end(); it++)
       {
         log_prof.print("Prof Mem Desc " IDFMT " %d %zd", 
