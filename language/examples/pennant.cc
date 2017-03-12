@@ -1039,12 +1039,17 @@ void PennantMapper::select_task_options(Task *task)
       Color index = get_logical_region_color(task->regions[0].region);
 #define NO_SPMD 0
 #if NO_SPMD
-        task->target_proc = procs_list[index % procs_list.size()];
+      task->target_proc = procs_list[index % procs_list.size()];
 #else
       std::vector<Processor> &local_procs =
         sysmem_local_procs[proc_sysmems[task->target_proc]];
       if (local_procs.size() > 1) {
+#define SPMD_RESERVE_SHARD_PROC 1
+#if SPMD_RESERVE_SHARD_PROC
         task->target_proc = local_procs[(index % (local_procs.size() - 1)) + 1];
+#else
+        task->target_proc = local_procs[index % local_procs.size()];
+#endif
       } else {
         task->target_proc = local_procs[0];
       }
