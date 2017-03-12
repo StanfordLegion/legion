@@ -998,9 +998,9 @@ if os.getenv('SAVEOBJ') == '1' then
     local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
 
     if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lcircuit", "-llegion_terra"})
+      terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lcircuit", "-llegion_terra", "-lm"})
     else
-      terralib.saveobj(filename, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lcircuit", "-llegion_terra"})
+      terralib.saveobj(filename, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lcircuit", "-llegion_terra", "-lm"})
     end
   end
 
