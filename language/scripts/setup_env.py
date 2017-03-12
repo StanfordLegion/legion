@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2016 Stanford University
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 
 from __future__ import print_function
 import hashlib, multiprocessing, os, platform, subprocess, sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import install # from ./install.py
 
 def check_sha1(file_path, sha1):
@@ -30,7 +31,9 @@ def download(dest_path, url, sha1):
     check_sha1(dest_path, sha1)
 
 def extract(dest_dir, archive_path, format):
-    if format == 'xz':
+    if format == 'gz':
+        subprocess.check_call(['tar', 'xfz', archive_path], cwd=dest_dir)
+    elif format == 'xz':
         subprocess.check_call(['tar', 'xfJ', archive_path], cwd=dest_dir)
     else:
         raise Exception('Unknown format %s' % format)
@@ -49,6 +52,8 @@ def git_update(repo_dir):
 def discover_conduit():
     if 'CONDUIT' in os.environ:
         return os.environ['CONDUIT']
+    elif platform.node().startswith('cori'):
+        return 'aries'
     elif platform.node().startswith('daint'):
         return 'aries'
     elif platform.node().startswith('excalibur'):
@@ -60,25 +65,38 @@ def build_gasnet(gasnet_dir, conduit):
     subprocess.check_call(['make', 'CONDUIT=%s' % conduit], cwd=gasnet_dir)
 
 def build_llvm(source_dir, build_dir, install_dir, thread_count):
+    env = None
+    if is_cray:
+        env = dict(list(os.environ.items()) + [
+            ('CC', os.environ['HOST_CC']),
+            ('CXX', os.environ['HOST_CXX']),
+        ])
     subprocess.check_call(
         [os.path.join(source_dir, 'configure'),
          '--prefix=%s' % install_dir,
          '--enable-optimized',
          '--disable-zlib', '--disable-terminfo', '--disable-libedit'],
-        cwd=build_dir)
+        cwd=build_dir,
+        env=env)
     subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
     subprocess.check_call(['make', 'install'], cwd=build_dir)
 
-def build_terra(terra_dir, llvm_dir, thread_count):
+def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
+    env = None
+    if is_cray:
+        env = dict(list(os.environ.items()) + [
+            ('CC', os.environ['HOST_CC']),
+            ('CXX', os.environ['HOST_CXX']),
+        ])
+
     subprocess.check_call(
         ['make',
-         'CC=%s -dynamic' % os.environ['CC'],
-         'CXX=%s -dynamic' % os.environ['CXX'],
          'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
          'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
-         'LLVM_VERSION=35',
-         '-j', str(thread_count)],
-        cwd = terra_dir)
+         '-j', str(thread_count),
+        ],
+        cwd=terra_dir,
+        env=env)
 
 if __name__ == '__main__':
     if 'CC' not in os.environ:
@@ -88,20 +106,35 @@ if __name__ == '__main__':
     if 'LG_RT_DIR' in os.environ:
         raise Exception('Please unset LG_RT_DIR in your environment')
 
-    root_dir = os.path.dirname(os.path.realpath(__file__))
+    is_cray = 'CRAYPE_VERSION' in os.environ
+
+    if is_cray:
+        print('This system has been detected as a Cray system.')
+        print()
+        print('Note: The Cray wrappers are broken for various purposes')
+        print('(particularly, dynamically linked libraries). For this')
+        print('reason this script requires that HOST_CC and HOST_CXX')
+        print('be set to the underlying compilers (GCC and G++, etc.).')
+        print()
+        if 'HOST_CC' not in os.environ:
+            raise Exception('Please set HOST_CC in your environment')
+        if 'HOST_CXX' not in os.environ:
+            raise Exception('Please set HOST_CXX in your environment')
+
+    root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     legion_dir = os.path.dirname(root_dir)
 
     thread_count = multiprocessing.cpu_count()
 
     conduit = discover_conduit()
-    gasnet_dir = os.path.join(root_dir, 'gasnet')
-    gasnet_release_dir = os.path.join(root_dir, 'gasnet', 'release')
+    gasnet_dir = os.path.realpath(os.path.join(root_dir, 'gasnet'))
+    gasnet_release_dir = os.path.join(gasnet_dir, 'release')
     if not os.path.exists(gasnet_dir):
         git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
         build_gasnet(gasnet_dir, conduit)
     assert os.path.exists(gasnet_release_dir)
 
-    llvm_dir = os.path.join(root_dir, 'llvm')
+    llvm_dir = os.path.realpath(os.path.join(root_dir, 'llvm'))
     llvm_install_dir = os.path.join(llvm_dir, 'install')
     if not os.path.exists(llvm_dir):
         os.mkdir(llvm_dir)
@@ -125,7 +158,7 @@ if __name__ == '__main__':
     terra_dir = os.path.join(root_dir, 'terra.build')
     if not os.path.exists(terra_dir):
         git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-sc16-snapshot')
-        build_terra(terra_dir, llvm_install_dir, thread_count)
+        build_terra(terra_dir, llvm_install_dir, is_cray, thread_count)
 
     install.install(
         shared_llr=False, general_llr=True, gasnet=True, cuda=False,
