@@ -191,16 +191,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_equal_partition(IndexPartition pid,
+    ApEvent RegionTreeForest::create_equal_partition(Operation *op,
+                                                     IndexPartition pid,
                                                      size_t granularity)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_equal_children(granularity);
+      return new_part->create_equal_children(op, granularity);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_union(IndexPartition pid,
+    ApEvent RegionTreeForest::create_partition_by_union(Operation *op,
+                                                        IndexPartition pid,
                                                         IndexPartition handle1,
                                                         IndexPartition handle2)
     //--------------------------------------------------------------------------
@@ -208,11 +210,11 @@ namespace Legion {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_union(node1, node2);
+      return new_part->create_by_union(op, node1, node2);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_intersection(
+    ApEvent RegionTreeForest::create_partition_by_intersection(Operation *op,
                                                          IndexPartition pid,
                                                          IndexPartition handle1,
                                                          IndexPartition handle2)
@@ -221,11 +223,11 @@ namespace Legion {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_intersection(node1, node2);
+      return new_part->create_by_intersection(op, node1, node2);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_difference(
+    ApEvent RegionTreeForest::create_partition_by_difference(Operation *op,
                                                        IndexPartition pid,
                                                        IndexPartition handle1,
                                                        IndexPartition handle2)
@@ -234,7 +236,7 @@ namespace Legion {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_difference(node1, node2);
+      return new_part->create_by_difference(op, node1, node2);
     }
 
 #if 0 
@@ -522,33 +524,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::compute_pending_space(IndexSpace target,
-                                         const std::vector<IndexSpace> &handles,
-                                                                  bool is_union)
+    ApEvent RegionTreeForest::compute_pending_space(Operation *op, 
+       IndexSpace target, const std::vector<IndexSpace> &handles, bool is_union)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      return child_node->compute_pending_space(handles, is_union);
+      return child_node->compute_pending_space(op, handles, is_union);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::compute_pending_space(IndexSpace target,
-                                                    IndexPartition handle,
-                                                    bool is_union)
+    ApEvent RegionTreeForest::compute_pending_space(Operation *op, 
+                        IndexSpace target, IndexPartition handle, bool is_union)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      return child_node->compute_pending_space(handle, is_union);
+      return child_node->compute_pending_space(op, handle, is_union);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::compute_pending_space(IndexSpace target,
-                                                  IndexSpace initial,
+    ApEvent RegionTreeForest::compute_pending_space(Operation *op,
+                                         IndexSpace target, IndexSpace initial,
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      return child_node->compute_pending_difference(initial, handles);
+      return child_node->compute_pending_difference(op, initial, handles);
     }
 
     //--------------------------------------------------------------------------
@@ -6171,42 +6171,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_equal_children(size_t granularity)
+    ApEvent IndexPartNode::create_equal_children(Operation *op,
+                                                 size_t granularity)
     //--------------------------------------------------------------------------
     {
-      return parent->create_equal_children(this, granularity); 
+      return parent->create_equal_children(op, this, granularity); 
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_by_union(IndexPartNode *left, 
+    ApEvent IndexPartNode::create_by_union(Operation *op, 
+                                           IndexPartNode *left, 
                                            IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_union(this, left, right); 
+      return parent->create_by_union(op, this, left, right); 
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_by_intersection(IndexPartNode *left,
+    ApEvent IndexPartNode::create_by_intersection(Operation *op,
+                                                  IndexPartNode *left,
                                                   IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_intersection(this, left, right);
+      return parent->create_by_intersection(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_by_intersection(IndexSpaceNode *left,
+    ApEvent IndexPartNode::create_by_intersection(Operation *op,
+                                                  IndexSpaceNode *left,
                                                   IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_intersection(this, left, right);
+      return parent->create_by_intersection(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_by_difference(IndexPartNode *left,
+    ApEvent IndexPartNode::create_by_difference(Operation *op,
+                                                IndexPartNode *left,
                                                 IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_difference(this, left, right);
+      return parent->create_by_difference(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------

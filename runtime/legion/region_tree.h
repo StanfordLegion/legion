@@ -80,15 +80,19 @@ namespace Legion {
       void destroy_index_partition(IndexPartition handle, 
                                    AddressSpaceID source);
     public:
-      ApEvent create_equal_partition(IndexPartition pid, 
+      ApEvent create_equal_partition(Operation *op, 
+                                     IndexPartition pid, 
                                      size_t granularity);
-      ApEvent create_partition_by_union(IndexPartition pid,
+      ApEvent create_partition_by_union(Operation *op,
+                                        IndexPartition pid,
                                         IndexPartition handle1,
                                         IndexPartition handle2);
-      ApEvent create_partition_by_intersection(IndexPartition pid,
+      ApEvent create_partition_by_intersection(Operation *op,
+                                               IndexPartition pid,
                                                IndexPartition handle1,
                                                IndexPartition handle2);
-      ApEvent create_partition_by_difference(IndexPartition pid,
+      ApEvent create_partition_by_difference(Operation *op,
+                                           IndexPartition pid,
                                            IndexPartition handle1,
                                            IndexPartition handle2);
       ApEvent create_cross_product_partitions(IndexPartition base,
@@ -150,13 +154,13 @@ namespace Legion {
                                     const void *realm_color,
                                     TypeTag type_tag,
                                     ApUserEvent &domain_ready);
-      ApEvent compute_pending_space(IndexSpace result,
+      ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     const std::vector<IndexSpace> &handles,
                                     bool is_union);
-      ApEvent compute_pending_space(IndexSpace result,
+      ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     IndexPartition handle,
                                     bool is_union);
-      ApEvent compute_pending_space(IndexSpace result,
+      ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     IndexSpace initial,
                                     const std::vector<IndexSpace> &handles);
     public:
@@ -782,12 +786,12 @@ namespace Legion {
       IndexSpaceAllocator* get_allocator(void);
     public:
       virtual void log_index_space_points(void) const = 0;
-      virtual ApEvent compute_pending_space(
+      virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union) = 0;
-      virtual ApEvent compute_pending_space(IndexPartition handle,
-                                            bool is_union) = 0;
-      virtual ApEvent compute_pending_difference(IndexSpace initial,
-                           const std::vector<IndexSpace> &handles) = 0;
+      virtual ApEvent compute_pending_space(Operation *op,
+                              IndexPartition handle, bool is_union) = 0;
+      virtual ApEvent compute_pending_difference(Operation *op, 
+          IndexSpace initial, const std::vector<IndexSpace> &handles) = 0;
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag) = 0;
       virtual size_t get_volume(void) const = 0;
       virtual IndexSpaceAllocator* create_allocator(void) const = 0;
@@ -812,18 +816,23 @@ namespace Legion {
     public:
       virtual void pack_index_space(Serializer &rez) const = 0;
     public:
-      virtual ApEvent create_equal_children(IndexPartNode *partition, 
+      virtual ApEvent create_equal_children(Operation *op,
+                                            IndexPartNode *partition, 
                                             size_t granularity) = 0;
-      virtual ApEvent create_by_union(IndexPartNode *partition,
+      virtual ApEvent create_by_union(Operation *op,
+                                      IndexPartNode *partition,
                                       IndexPartNode *left,
                                       IndexPartNode *right) = 0;
-      virtual ApEvent create_by_intersection(IndexPartNode *partition,
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
                                              IndexPartNode *left,
                                              IndexPartNode *right) = 0;
-      virtual ApEvent create_by_intersection(IndexPartNode *partition,
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
                                              IndexSpaceNode *left,
                                              IndexPartNode *right) = 0;
-      virtual ApEvent create_by_difference(IndexPartNode *partition,
+      virtual ApEvent create_by_difference(Operation *op,
+                                           IndexPartNode *partition,
                                            IndexPartNode *left,
                                            IndexPartNode *right) = 0;
     public:
@@ -867,12 +876,12 @@ namespace Legion {
         { realm_index_space = value; }
     public:
       virtual void log_index_space_points(void) const;
-      virtual ApEvent compute_pending_space(
+      virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union);
-      virtual ApEvent compute_pending_space(IndexPartition handle,
-                                            bool is_union);
-      virtual ApEvent compute_pending_difference(IndexSpace initial,
-                           const std::vector<IndexSpace> &handles);
+      virtual ApEvent compute_pending_space(Operation *op,
+                             IndexPartition handle, bool is_union);
+      virtual ApEvent compute_pending_difference(Operation *op,
+          IndexSpace initial, const std::vector<IndexSpace> &handles);
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag);
       virtual size_t get_volume(void) const;
       virtual IndexSpaceAllocator* create_allocator(void) const;
@@ -897,18 +906,23 @@ namespace Legion {
     public:
       virtual void pack_index_space(Serializer &rez) const;
     public:
-      virtual ApEvent create_equal_children(IndexPartNode *partition, 
+      virtual ApEvent create_equal_children(Operation *op,
+                                            IndexPartNode *partition, 
                                             size_t granularity);
-      virtual ApEvent create_by_union(IndexPartNode *partition,
+      virtual ApEvent create_by_union(Operation *op,
+                                      IndexPartNode *partition,
                                       IndexPartNode *left,
                                       IndexPartNode *right);
-      virtual ApEvent create_by_intersection(IndexPartNode *partition,
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
                                              IndexPartNode *left,
                                              IndexPartNode *right);
-      virtual ApEvent create_by_intersection(IndexPartNode *partition,
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
                                              IndexSpaceNode *left,
                                              IndexPartNode *right);
-      virtual ApEvent create_by_difference(IndexPartNode *partition,
+      virtual ApEvent create_by_difference(Operation *op,
+                                           IndexPartNode *partition,
                                            IndexPartNode *left,
                                            IndexPartNode *right);
     protected:
@@ -1056,11 +1070,15 @@ namespace Legion {
       void remove_pending_child(const LegionColor child_color);
       static void handle_pending_child_task(const void *args);
     public:
-      ApEvent create_equal_children(size_t granularity);
-      ApEvent create_by_union(IndexPartNode *left, IndexPartNode *right);
-      ApEvent create_by_intersection(IndexPartNode *left, IndexPartNode *right);
-      ApEvent create_by_intersection(IndexSpaceNode *left,IndexPartNode *right);
-      ApEvent create_by_difference(IndexPartNode *left, IndexPartNode *right);
+      ApEvent create_equal_children(Operation *op, size_t granularity);
+      ApEvent create_by_union(Operation *Op,
+                              IndexPartNode *left, IndexPartNode *right);
+      ApEvent create_by_intersection(Operation *op,
+                              IndexPartNode *left, IndexPartNode *right);
+      ApEvent create_by_intersection(Operation *op,
+                              IndexSpaceNode *left,IndexPartNode *right);
+      ApEvent create_by_difference(Operation *op,
+                              IndexPartNode *left, IndexPartNode *right);
     public:
       virtual bool compute_complete(void) = 0;
       virtual bool intersects_with(IndexSpaceNode *other) = 0; 

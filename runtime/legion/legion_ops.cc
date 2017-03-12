@@ -11109,7 +11109,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Perform the partitioning operation
-      ApEvent ready_event = thunk->perform(runtime->forest);
+      ApEvent ready_event = thunk->perform(this, runtime->forest);
       complete_mapping();
       Runtime::trigger_event(completion_event, ready_event);
       need_completion_trigger = false;

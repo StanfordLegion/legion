@@ -105,7 +105,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::compute_pending_space(
+    ApEvent IndexSpaceNodeT<DIM,T>::compute_pending_space(Operation *op,
                           const std::vector<IndexSpace> &handles, bool is_union)
     //--------------------------------------------------------------------------
     {
@@ -116,12 +116,16 @@ namespace Legion {
         IndexSpaceNode *node = context->get_node(handles[idx]);
         if (handles[idx].get_type_tag() != handle.get_type_tag())
         {
+          TaskContext *ctx = op->get_context();
           if (is_union)
-            log_run.error("Dynamic type mismatch in "
-                          "'create_index_space_union'");
+            log_run.error("Dynamic type mismatch in 'create_index_space_union' "
+                          "performed in task %s (UID %lld)",
+                          ctx->get_task_name(), ctx->get_unique_id());
           else
             log_run.error("Dynamic type mismatch in "
-                          "'create_index_space_intersection'");
+                          "'create_index_space_intersection' performed in "
+                          "task %s (UID %lld)", ctx->get_task_name(),
+                          ctx->get_unique_id());
 #ifdef DEBUG_LEGION
           assert(false);
 #endif
@@ -135,82 +139,44 @@ namespace Legion {
       }
       // Kick this off to Realm
       ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::ProfilingRequestSet empty_requests;
       if (is_union)
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                                        op, DEP_PART_UNION_REDUCTION);
         return ApEvent(Realm::ZIndexSpace<DIM,T>::compute_union(
-              spaces, realm_index_space, empty_requests, precondition));
-      else
-        return ApEvent(Realm::ZIndexSpace<DIM,T>::compute_intersection(
-              spaces, realm_index_space, empty_requests, precondition));
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::compute_pending_difference(IndexSpace init,
-                                         const std::vector<IndexSpace> &handles)
-    //--------------------------------------------------------------------------
-    {
-      std::set<ApEvent> preconditions;
-      std::vector<Realm::ZIndexSpace<DIM,T> > spaces(handles.size());
-      for (unsigned idx = 0; idx < handles.size(); idx++)
-      {
-        IndexSpaceNode *node = context->get_node(handles[idx]);
-        if (handles[idx].get_type_tag() != handle.get_type_tag())
-        {
-          log_run.error("Dynamic type mismatch in "
-                        "'create_index_space_difference'");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
-        }
-        IndexSpaceNodeT<DIM,T> *space = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(node);
-        space->get_realm_index_space(spaces[idx]);
-        if (!space->index_space_ready.has_triggered())
-          preconditions.insert(space->index_space_ready);
-      } 
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::ProfilingRequestSet empty_requests;
-      // Compute the union of the handles for the right-hand side
-      Realm::ZIndexSpace<DIM,T> rhs_space;
-      ApEvent rhs_ready(Realm::ZIndexSpace<DIM,T>::compute_union(
-            spaces, rhs_space, empty_requests, precondition));
-      if (init.get_type_tag() != handle.get_type_tag())
-      {
-        log_run.error("Dynamic type mismatch in "
-                      "'create_index_space_difference'");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+              spaces, realm_index_space, requests, precondition));
       }
-      IndexSpaceNodeT<DIM,T> *lhs_node = 
-        static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(init));
-      Realm::ZIndexSpace<DIM,T> lhs_space;
-      lhs_node->get_realm_index_space(lhs_space);
-      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_difference(
-            lhs_space, rhs_space, realm_index_space, empty_requests,
-            Runtime::merge_events(lhs_node->index_space_ready, rhs_ready)));
-      // Destroy the tempory rhs space once the computation is done
-      rhs_space.destroy(result);
-      return result;
+      else
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                                op, DEP_PART_INTERSECTION_REDUCTION);
+        return ApEvent(Realm::ZIndexSpace<DIM,T>::compute_intersection(
+              spaces, realm_index_space, requests, precondition));
+      }
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::compute_pending_space(
+    ApEvent IndexSpaceNodeT<DIM,T>::compute_pending_space(Operation *op,
                                       IndexPartition part_handle, bool is_union)
     //--------------------------------------------------------------------------
     {
       if (part_handle.get_type_tag() != handle.get_type_tag())
       {
+        TaskContext *ctx = op->get_context();
         if (is_union)
-          log_run.error("Dynamic type mismatch in "
-                        "'create_index_space_union'");
+          log_run.error("Dynamic type mismatch in 'create_index_space_union' "
+                        "performed in task %s (UID %lld)",
+                        ctx->get_task_name(), ctx->get_unique_id());
         else
           log_run.error("Dynamic type mismatch in "
-                        "'create_index_space_intersection'");
+                        "'create_index_space_intersection' performed in "
+                        "task %s (UID %lld)", ctx->get_task_name(),
+                        ctx->get_unique_id());
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -248,14 +214,92 @@ namespace Legion {
       }
       // Kick this off to Realm
       ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::ProfilingRequestSet empty_requests;
       if (is_union)
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                                        op, DEP_PART_UNION_REDUCTION);
         return ApEvent(Realm::ZIndexSpace<DIM,T>::compute_union(
-              spaces, realm_index_space, empty_requests, precondition));
+              spaces, realm_index_space, requests, precondition));
+      }
       else
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                                op, DEP_PART_INTERSECTION_REDUCTION);
         return ApEvent(Realm::ZIndexSpace<DIM,T>::compute_intersection(
-              spaces, realm_index_space, empty_requests, precondition));
+              spaces, realm_index_space, requests, precondition));
+      }
     }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::compute_pending_difference(Operation *op,
+                        IndexSpace init, const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      if (init.get_type_tag() != handle.get_type_tag())
+      {
+        TaskContext *ctx = op->get_context();
+        log_run.error("Dynamic type mismatch in "
+                      "'create_index_space_difference' performed in "
+                      "task %s (%lld)", ctx->get_task_name(), 
+                      ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+      }
+      std::set<ApEvent> preconditions;
+      std::vector<Realm::ZIndexSpace<DIM,T> > spaces(handles.size());
+      for (unsigned idx = 0; idx < handles.size(); idx++)
+      {
+        IndexSpaceNode *node = context->get_node(handles[idx]);
+        if (handles[idx].get_type_tag() != handle.get_type_tag())
+        {
+          TaskContext *ctx = op->get_context();
+          log_run.error("Dynamic type mismatch in "
+                        "'create_index_space_difference' performed in "
+                        "task %s (%lld)", ctx->get_task_name(), 
+                        ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+        }
+        IndexSpaceNodeT<DIM,T> *space = 
+          static_cast<IndexSpaceNodeT<DIM,T>*>(node);
+        space->get_realm_index_space(spaces[idx]);
+        if (!space->index_space_ready.has_triggered())
+          preconditions.insert(space->index_space_ready);
+      } 
+      ApEvent precondition = Runtime::merge_events(preconditions);
+      Realm::ProfilingRequestSet union_requests;
+      Realm::ProfilingRequestSet diff_requests;
+      if (context->runtime->profiler != NULL)
+      {
+        context->runtime->profiler->add_partition_request(union_requests,
+                                            op, DEP_PART_UNION_REDUCTION);
+        context->runtime->profiler->add_partition_request(diff_requests,
+                                            op, DEP_PART_DIFFERENCE);
+      }
+      // Compute the union of the handles for the right-hand side
+      Realm::ZIndexSpace<DIM,T> rhs_space;
+      ApEvent rhs_ready(Realm::ZIndexSpace<DIM,T>::compute_union(
+            spaces, rhs_space, union_requests, precondition));
+      IndexSpaceNodeT<DIM,T> *lhs_node = 
+        static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(init));
+      Realm::ZIndexSpace<DIM,T> lhs_space;
+      lhs_node->get_realm_index_space(lhs_space);
+      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_difference(
+            lhs_space, rhs_space, realm_index_space, diff_requests,
+            Runtime::merge_events(lhs_node->index_space_ready, rhs_ready)));
+      // Destroy the tempory rhs space once the computation is done
+      rhs_space.destroy(result);
+      return result;
+    } 
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -494,9 +538,12 @@ namespace Legion {
       IndexSpaceNodeT<DIM,T> *rhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
       rhs_node->get_realm_index_space(rhs_space);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                    (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
-        realm_index_space, rhs_space, intersection, empty_requests,
+        realm_index_space, rhs_space, intersection, requests,
         Runtime::merge_events(index_space_ready, rhs_node->index_space_ready)));
       // Wait for the result to be ready
       if (!ready.has_triggered())
@@ -529,9 +576,12 @@ namespace Legion {
       IndexPartNodeT<DIM,T> *rhs_node = 
         static_cast<IndexPartNodeT<DIM,T>*>(rhs);
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                    (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
-            realm_index_space, rhs_space, intersection, empty_requests,
+            realm_index_space, rhs_space, intersection, requests,
             Runtime::merge_events(index_space_ready, rhs_precondition)));
       if (!ready.has_triggered())
         ready.wait();
@@ -563,9 +613,12 @@ namespace Legion {
       IndexSpaceNodeT<DIM,T> *rhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
       rhs_node->get_realm_index_space(rhs_space);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                      (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
-        rhs_space, realm_index_space, difference, empty_requests,
+        rhs_space, realm_index_space, difference, requests,
         Runtime::merge_events(index_space_ready, rhs_node->index_space_ready)));
       if (!ready.has_triggered())
         ready.wait();
@@ -596,9 +649,12 @@ namespace Legion {
       IndexPartNodeT<DIM,T> *rhs_node = 
         static_cast<IndexPartNodeT<DIM,T>*>(rhs);
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                      (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
-            rhs_space, realm_index_space, difference, empty_requests,
+            rhs_space, realm_index_space, difference, requests,
             Runtime::merge_events(index_space_ready, rhs_precondition)));
       if (!ready.has_triggered())
         ready.wait();
@@ -621,15 +677,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::create_equal_children(
+    ApEvent IndexSpaceNodeT<DIM,T>::create_equal_children(Operation *op,
                                    IndexPartNode *partition, size_t granularity)
     //--------------------------------------------------------------------------
     {
       const size_t count = partition->color_space->get_volume(); 
       std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                                op, DEP_PART_EQUAL);
       ApEvent result(realm_index_space.create_equal_subspaces(count, 
-            granularity, subspaces, empty_requests, index_space_ready));
+            granularity, subspaces, requests, index_space_ready));
       // Enumerate the colors and assign the spaces
       unsigned subspace_index = 0;
       if (partition->total_children == partition->max_linearized_color)
@@ -664,7 +723,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::create_by_union(IndexPartNode *partition,
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_union(Operation *op,
+                                                    IndexPartNode *partition,
                                                     IndexPartNode *left,
                                                     IndexPartNode *right)
     //--------------------------------------------------------------------------
@@ -717,9 +777,12 @@ namespace Legion {
         }
       }
       std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                              op, DEP_PART_UNIONS);
       ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_unions(
-            lhs_spaces, rhs_spaces, subspaces, empty_requests,
+            lhs_spaces, rhs_spaces, subspaces, requests,
             Runtime::merge_events(preconditions)));
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -755,7 +818,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(Operation *op,
                                                       IndexPartNode *partition,
                                                       IndexPartNode *left,
                                                       IndexPartNode *right)
@@ -809,9 +872,12 @@ namespace Legion {
         }
       }
       std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                        op, DEP_PART_INTERSECTIONS);
       ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_intersections(
-            lhs_spaces, rhs_spaces, subspaces, empty_requests,
+            lhs_spaces, rhs_spaces, subspaces, requests,
             Runtime::merge_events(preconditions)));
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -847,7 +913,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(Operation *op,
                                                       IndexPartNode *partition,
                                                       IndexSpaceNode *left,
                                                       IndexPartNode *right)
@@ -896,9 +962,12 @@ namespace Legion {
       if (!left_child->index_space_ready.has_triggered())
         preconditions.insert(left_child->index_space_ready);
       std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                        op, DEP_PART_INTERSECTIONS);
       ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_intersections(
-            left_space, rhs_spaces, subspaces, empty_requests,
+            left_space, rhs_spaces, subspaces, requests,
             Runtime::merge_events(preconditions)));
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -934,7 +1003,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::create_by_difference(
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_difference(Operation *op,
                                                       IndexPartNode *partition,
                                                       IndexPartNode *left,
                                                       IndexPartNode *right)
@@ -988,9 +1057,12 @@ namespace Legion {
         }
       }
       std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                          op, DEP_PART_DIFFERENCES);
       ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_differences(
-            lhs_spaces, rhs_spaces, subspaces, empty_requests,
+            lhs_spaces, rhs_spaces, subspaces, requests,
             Runtime::merge_events(preconditions)));
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -1115,9 +1187,12 @@ namespace Legion {
       ApEvent union_ready = get_union_index_space(union_space);
       static_cast<IndexSpaceNodeT<DIM,T>*>(parent)->get_realm_index_space(
                                                               parent_space);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                      (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
       ApEvent diff_ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
-            parent_space, union_space, difference_space, empty_requests,
+            parent_space, union_space, difference_space, requests,
             Runtime::merge_events(parent->index_space_ready, union_ready)));
       if (!diff_ready.has_triggered())
         diff_ready.wait();
@@ -1147,9 +1222,12 @@ namespace Legion {
       IndexSpaceNodeT<DIM,T> *rhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
       rhs_node->get_realm_index_space(rhs_space);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                    (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
-            lhs_space, rhs_space, intersection, empty_requests,
+            lhs_space, rhs_space, intersection, requests,
             Runtime::merge_events(union_precondition, 
                                   rhs_node->index_space_ready)));
       if (!ready.has_triggered())
@@ -1183,9 +1261,12 @@ namespace Legion {
       IndexPartNodeT<DIM,T> *rhs_node = 
         static_cast<IndexPartNodeT<DIM,T>*>(rhs);
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                    (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
-            lhs_space, rhs_space, intersection, empty_requests,
+            lhs_space, rhs_space, intersection, requests,
             Runtime::merge_events(union_precondition, rhs_precondition)));
       if (!ready.has_triggered())
         ready.wait();
@@ -1218,9 +1299,12 @@ namespace Legion {
       IndexSpaceNodeT<DIM,T> *rhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
       rhs_node->get_realm_index_space(rhs_space);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                        (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
-            rhs_space, union_space, difference, empty_requests,
+            rhs_space, union_space, difference, requests,
             Runtime::merge_events(union_precondition, 
                                   rhs_node->index_space_ready)));
       if (!ready.has_triggered())
@@ -1253,9 +1337,12 @@ namespace Legion {
       IndexPartNodeT<DIM,T> *rhs_node = 
         static_cast<IndexPartNodeT<DIM,T>*>(rhs);
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                      (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
-            rhs_space, union_space, difference, empty_requests,
+            rhs_space, union_space, difference, requests,
             Runtime::merge_events(union_precondition, rhs_precondition))); 
       if (!ready.has_triggered())
         ready.wait();
@@ -1317,10 +1404,13 @@ namespace Legion {
         space = partition_union_space;
         return partition_union_ready;
       }
-      Realm::ProfilingRequestSet empty_requests;
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                  (Operation*)NULL/*op*/, DEP_PART_UNION_REDUCTION);
       partition_union_ready = 
         ApEvent(Realm::ZIndexSpace<DIM,T>::compute_union(subspaces,
-              partition_union_space, empty_requests, 
+              partition_union_space, requests, 
               Runtime::merge_events(preconditions)));
       space = partition_union_space;
       return partition_union_ready;

@@ -244,6 +244,19 @@ namespace Legion {
       TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+6,
     };
 
+    // Realm dependent partitioning kinds
+    enum DepPartOpKind {
+      DEP_PART_UNION, // a single union
+      DEP_PART_UNIONS, // many parallel unions
+      DEP_PART_UNION_REDUCTION, // union reduction to a single space
+      DEP_PART_INTERSECTION, // a single intersection
+      DEP_PART_INTERSECTIONS, // many parallel intersections
+      DEP_PART_INTERSECTION_REDUCTION, // intersection reduction to a space
+      DEP_PART_DIFFERENCE, // a single difference
+      DEP_PART_DIFFERENCES, // many parallel differences
+      DEP_PART_EQUAL, // an equal partition operation
+    };
+
     // Enumeration of Legion runtime tasks
     enum LgTaskID {
       LG_SCHEDULER_ID,

@@ -325,6 +325,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::process_partition(UniqueID op_id,
+                      DepPartOpKind part_op, 
+                      Realm::ProfilingMeasurements::OperationTimeline *timeline)
+    //--------------------------------------------------------------------------
+    {
+      partition_infos.push_back(PartitionInfo());
+      PartitionInfo &info = partition_infos.back();
+      info.op_id = op_id;
+      info.part_op = part_op;
+      info.create = timeline->create_time;
+      info.ready = timeline->ready_time;
+      info.start = timeline->start_time;
+      // use complete_time instead of end_time to include async work
+      info.stop = timeline->complete_time;
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::record_message(Processor proc, MessageKind kind, 
                                             unsigned long long start,
                                             unsigned long long stop)
@@ -476,6 +493,13 @@ namespace Legion {
         log_prof.print("Prof Inst Timeline %llu " IDFMT " %llu %llu",
 		       it->op_id, it->inst.id, it->create, it->destroy);
       }
+      for (std::deque<PartitionInfo>::const_iterator it = 
+            partition_infos.begin(); it != partition_infos.end(); it++)
+      {
+        log_prof.print("Prof Partition Timeline %llu %d %llu %llu %llu %llu",
+                       it->op_id, it->part_op, it->create, 
+                       it->ready, it->start, it->stop);
+      }
       for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
             it != message_infos.end(); it++)
       {
@@ -512,6 +536,7 @@ namespace Legion {
       inst_create_infos.clear();
       inst_usage_infos.clear();
       inst_timeline_infos.clear();
+      partition_infos.clear();
       message_infos.clear();
       mapper_call_infos.clear();
     }
@@ -747,6 +772,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::add_partition_request(
+                                           Realm::ProfilingRequestSet &requests, 
+                                           Operation *op, DepPartOpKind part_op)
+    //--------------------------------------------------------------------------
+    {
+      ProfilingInfo info(LEGION_PROF_PARTITION);
+      // Pass the part_op as the ID
+      info.id = part_op;
+      info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
+                        ? target_proc : Processor::get_executing_processor(),
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                  Realm::ProfilingMeasurements::OperationTimeline>();
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::add_task_request(Realm::ProfilingRequestSet &requests,
                                           TaskID tid, UniqueID uid)
     //--------------------------------------------------------------------------
@@ -843,6 +885,23 @@ namespace Legion {
                         LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::add_partition_request(
+                                           Realm::ProfilingRequestSet &requests,
+                                           UniqueID uid, DepPartOpKind part_op)
+    //--------------------------------------------------------------------------
+    {
+      ProfilingInfo info(LEGION_PROF_PARTITION);
+      // Pass the partition op kind as the ID
+      info.id = part_op;
+      info.op_id = uid;
+      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
+                        ? target_proc : Processor::get_executing_processor(),
+                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+      req.add_measurement<
+                  Realm::ProfilingMeasurements::OperationTimeline>();
     }
 
     //--------------------------------------------------------------------------
@@ -1020,6 +1079,21 @@ namespace Legion {
 								  usage);
 	      delete usage;
 	    }
+            break;
+          }
+        case LEGION_PROF_PARTITION:
+          {
+#ifdef DEBUG_LEGION
+            assert(response.has_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>());
+#endif
+            Realm::ProfilingMeasurements::OperationTimeline *timeline = 
+              response.get_measurement<
+                    Realm::ProfilingMeasurements::OperationTimeline>();
+            thread_local_profiling_instance->process_partition(info->op_id,
+                                        (DepPartOpKind)info->id, timeline);
+            if (timeline != NULL)
+              delete timeline;
             break;
           }
         default:
