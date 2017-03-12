@@ -1871,7 +1871,17 @@ task toplevel()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lpennant", "-lm"}
+  local link_flags = terralib.newlist({"-L" .. root_dir, "-lpennant", "-lm"})
+  if os.getenv('CRAYPE_VERSION') then
+    local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
+    new_flags:insertall(link_flags)
+    for flag in os.getenv('CRAY_UGNI_POST_LINK_OPTS'):gmatch("%S+") do
+      new_flags:insert(flag)
+    end
+    new_flags:insert("-lugni")
+    link_flags = new_flags
+  end
+
   regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
 else
   regentlib.start(toplevel, cpennant.register_mappers)
