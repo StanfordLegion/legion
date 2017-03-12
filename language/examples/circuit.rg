@@ -924,14 +924,15 @@ task toplevel()
   var ts_start = c.legion_get_current_time_in_micros()
   var simulation_success = true
   var steps = conf.steps
-  var num_loops = conf.num_loops
+  var prune = 10
+  var num_loops = conf.num_loops + 2*prune
   __demand(__spmd, __block)
   for j = 0, num_loops do
     -- c.legion_runtime_begin_trace(__runtime(), __context(), 0)
 
     --__demand(__parallel)
     for i = 0, num_pieces do
-      calculate_new_currents(j == 0, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
+      calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
     --__demand(__parallel)
     for i = 0, num_pieces do
@@ -939,7 +940,7 @@ task toplevel()
     end
     --__demand(__parallel)
     for i = 0, num_pieces do
-      update_voltages(j == num_loops - 1, rp_private[i], rp_shared[i])
+      update_voltages(j == num_loops - 1 - prune, rp_private[i], rp_shared[i])
     end
 
     -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
