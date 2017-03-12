@@ -2307,7 +2307,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 		  total_lmb_size >> 20, srcdatapool_size >> 20,
 		  attach_size >> 20);
 #ifdef DEBUG_REALM_STARTUP
-    LegionRuntime::TimeStamp ts("entering gasnet_attach", false);
+    Realm::TimeStamp ts("entering gasnet_attach", false);
     fflush(stdout);
 #endif
   }
@@ -2345,7 +2345,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 
 #ifdef DEBUG_REALM_STARTUP
   if(gasnet_mynode() == 0) {
-    LegionRuntime::TimeStamp ts("exited gasnet_attach", false);
+    Realm::TimeStamp ts("exited gasnet_attach", false);
     fflush(stdout);
   }
 #endif
