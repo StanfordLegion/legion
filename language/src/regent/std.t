@@ -3089,10 +3089,10 @@ function std.setup(main_task, extra_setup_thunk)
   return main, names
 end
 
-function std.start(main_task)
+function std.start(main_task, extra_setup_thunk)
   if std.config["pretty"] then os.exit() end
 
-  local main = std.setup(main_task)
+  local main = std.setup(main_task, extra_setup_thunk)
 
   local args = std.args
   local argc = #args
@@ -3111,14 +3111,17 @@ function std.start(main_task)
   wrapper()
 end
 
-function std.saveobj(main_task, filename, filetype)
-  local main, names = std.setup(main_task)
+function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
+  local main, names = std.setup(main_task, extra_setup_thunk)
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
 
+  local flags = terralib.newlist()
+  if link_flags then flags:insertall(link_flags) end
+  flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
   if filetype ~= nil then
-    terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-llegion_terra"})
+    terralib.saveobj(filename, filetype, names, flags)
   else
-    terralib.saveobj(filename, names, {"-L" .. lib_dir, "-llegion_terra"})
+    terralib.saveobj(filename, names, flags)
   end
 end
 
