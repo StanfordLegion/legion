@@ -1874,19 +1874,18 @@ task toplevel()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local function saveobj(main_task, filename, filetype, extra_setup_thunk)
-    local main, names = regentlib.setup(main_task, extra_setup_thunk)
-    local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
-
-    if filetype ~= nil then
-      terralib.saveobj(filename, filetype, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra", "-lm"})
-    else
-      terralib.saveobj(filename, names, {"-L" .. lib_dir, "-L" .. root_dir, "-lpennant", "-llegion_terra", "-lm"})
+  local link_flags = terralib.newlist({"-L" .. root_dir, "-lpennant", "-lm"})
+  if os.getenv('CRAYPE_VERSION') then
+    local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
+    new_flags:insertall(link_flags)
+    for flag in os.getenv('CRAY_UGNI_POST_LINK_OPTS'):gmatch("%S+") do
+      new_flags:insert(flag)
     end
+    new_flags:insert("-lugni")
+    link_flags = new_flags
   end
 
-  saveobj(toplevel, "pennant", "executable", cpennant.register_mappers)
+  regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
 else
-  cpennant.register_mappers()
-  regentlib.start(toplevel)
+  regentlib.start(toplevel, cpennant.register_mappers)
 end
