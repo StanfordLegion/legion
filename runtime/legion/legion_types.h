@@ -246,15 +246,15 @@ namespace Legion {
 
     // Realm dependent partitioning kinds
     enum DepPartOpKind {
-      DEP_PART_UNION, // a single union
-      DEP_PART_UNIONS, // many parallel unions
-      DEP_PART_UNION_REDUCTION, // union reduction to a single space
-      DEP_PART_INTERSECTION, // a single intersection
-      DEP_PART_INTERSECTIONS, // many parallel intersections
-      DEP_PART_INTERSECTION_REDUCTION, // intersection reduction to a space
-      DEP_PART_DIFFERENCE, // a single difference
-      DEP_PART_DIFFERENCES, // many parallel differences
-      DEP_PART_EQUAL, // an equal partition operation
+      DEP_PART_UNION = 0, // a single union
+      DEP_PART_UNIONS = 1, // many parallel unions
+      DEP_PART_UNION_REDUCTION = 2, // union reduction to a single space
+      DEP_PART_INTERSECTION = 3, // a single intersection
+      DEP_PART_INTERSECTIONS = 4, // many parallel intersections
+      DEP_PART_INTERSECTION_REDUCTION = 5, // intersection reduction to a space
+      DEP_PART_DIFFERENCE = 6, // a single difference
+      DEP_PART_DIFFERENCES = 7, // many parallel differences
+      DEP_PART_EQUAL = 8, // an equal partition operation
     };
 
     // Enumeration of Legion runtime tasks
