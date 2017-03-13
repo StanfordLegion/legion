@@ -62,6 +62,20 @@ namespace Realm {
 					  const std::vector<size_t>& field_sizes,
 					  const ProfilingRequestSet& prs);
 
+    template <int N, typename T>
+    static RegionInstance create_file_instance(const char *file_name,
+                                          const ZIndexSpace<N,T>& space,
+                                          const std::vector<size_t> &field_sizes,
+                                          legion_lowlevel_file_mode_t file_mode,
+                                          const ProfilingRequestSet& prs);
+    template <int N, typename T>
+    static RegionInstance create_hdf5_instance(const char *file_name,
+                                          const ZIndexSpace<N,T>& space,
+                                          const std::vector<size_t> &field_sizes,
+                                          const std::vector<const char*> &field_files,
+                                          bool read_only,
+                                          const ProfilingRequestSet& prs);
+
     void destroy(Event wait_on = Event::NO_EVENT) const;
 
     AddressSpace address_space(void) const;
