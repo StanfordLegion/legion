@@ -582,8 +582,6 @@ namespace Legion {
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
     public:
-      void set_descriptor(FieldDataDescriptor &desc, FieldID field_id) const;
-    public:
       void find_field_reservations(const std::vector<FieldID> &needed_fields,
                                    std::vector<Reservation> &results);
       static void handle_send_atomic_reservation_request(Runtime *runtime,

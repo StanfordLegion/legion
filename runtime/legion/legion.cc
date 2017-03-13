@@ -2538,6 +2538,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::union_index_spaces(Context ctx,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->union_index_spaces(ctx, spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::intersect_index_spaces(Context ctx,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->intersect_index_spaces(ctx, spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::subtract_index_spaces(Context ctx,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->subtract_index_spaces(ctx, left, right);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::destroy_index_space(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {

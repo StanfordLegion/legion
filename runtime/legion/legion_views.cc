@@ -2832,18 +2832,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::set_descriptor(FieldDataDescriptor &desc,
-                                          FieldID field_id) const
-    //--------------------------------------------------------------------------
-    {
-      // Get the low-level index space
-      const Domain &dom = logical_node->get_domain_no_wait();
-      desc.index_space = dom.get_index_space();
-      // Then ask the manager to fill in the rest of the information
-      manager->set_descriptor(desc, field_id);
-    }
-
-    //--------------------------------------------------------------------------
     void MaterializedView::find_field_reservations(
                                     const std::vector<FieldID> &needed_fields, 
                                     std::vector<Reservation> &results)

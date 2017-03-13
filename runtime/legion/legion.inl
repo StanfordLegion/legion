@@ -1861,6 +1861,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::union_index_spaces(Context ctx,
+                                 const std::vector<IndexSpaceT<DIM,T> > &spaces)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<IndexSpace> handles(spaces.size());
+      for (unsigned idx = 0; idx < spaces.size(); idx++)
+        handles[idx] = spaces[idx];
+      return IndexSpaceT<DIM,T>(union_index_spaces(ctx, handles));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::intersect_index_spaces(Context ctx,
+                                 const std::vector<IndexSpaceT<DIM,T> > &spaces)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<IndexSpace> handles(spaces.size());
+      for (unsigned idx = 0; idx < spaces.size(); idx++)
+        handles[idx] = spaces[idx];
+      return IndexSpaceT<DIM,T>(intersect_index_spaces(ctx, handles));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::subtract_index_spaces(Context ctx,
+                              IndexSpaceT<DIM,T> left, IndexSpaceT<DIM,T> right)
+    //--------------------------------------------------------------------------
+    {
+      return IndexSpaceT<DIM,T>(subtract_index_spaces(ctx, 
+                                        IndexSpace(left), IndexSpace(right)));
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T>
     IndexPartition Runtime::create_index_partition(Context ctx,
       IndexSpace parent, const T& mapping, Color part_color /*= AUTO_GENERATE*/)

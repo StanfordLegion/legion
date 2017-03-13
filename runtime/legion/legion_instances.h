@@ -78,8 +78,6 @@ namespace Legion {
       bool match_layout(const LayoutConstraintSet &constraints) const;
       bool match_layout(const LayoutDescription *layout) const;
     public:
-      void set_descriptor(FieldDataDescriptor &desc, FieldID fid) const;
-    public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
       static LayoutDescription* handle_unpack_layout_description(
           Deserializer &derez, AddressSpaceID source, RegionNode *node);
@@ -113,7 +111,7 @@ namespace Legion {
                       LayoutDescription *layout, const PointerConstraint &cons,
                       DistributedID did, AddressSpaceID owner_space, 
                       AddressSpaceID local_space, RegionNode *node,
-                      PhysicalInstance inst, const Domain &intance_domain,
+                      PhysicalInstance inst, IndexSpaceNode *instance_domain,
                       bool own_domain, bool register_now);
       virtual ~PhysicalManager(void);
     public:
@@ -208,7 +206,7 @@ namespace Legion {
       RegionNode *const region_node;
       LayoutDescription *const layout;
       const PhysicalInstance instance;
-      const Domain instance_domain;
+      IndexSpaceNode *instance_domain;
       const bool own_domain;
       const PointerConstraint pointer_constraint;
     protected:
@@ -245,7 +243,7 @@ namespace Legion {
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space, AddressSpaceID local_space,
                       MemoryManager *memory, PhysicalInstance inst, 
-                      const Domain &instance_domain, bool own_domain,
+                      IndexSpaceNode *instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
                       const PointerConstraint &constraint,
                       bool register_now, ApEvent use_event,
@@ -281,10 +279,6 @@ namespace Legion {
                                     const std::vector<unsigned> &src_indexes,
                                     const std::vector<unsigned> &dst_indexes);
     public:
-      
-    public:
-      void set_descriptor(FieldDataDescriptor &desc, unsigned fid_idx) const;
-    public:
       virtual void send_manager(AddressSpaceID target);
       static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
@@ -310,7 +304,7 @@ namespace Legion {
                        MemoryManager *mem, PhysicalInstance inst, 
                        LayoutDescription *description,
                        const PointerConstraint &constraint,
-                       const Domain &inst_domain, bool own_domain,
+                       IndexSpaceNode *inst_domain, bool own_domain,
                        RegionNode *region_node, ReductionOpID redop, 
                        const ReductionOp *op, bool register_now);
       virtual ~ReductionManager(void);
@@ -377,7 +371,7 @@ namespace Legion {
                            MemoryManager *mem, PhysicalInstance inst, 
                            LayoutDescription *description,
                            const PointerConstraint &constraint,
-                           const Domain &inst_domain, bool own_domain,
+                           IndexSpaceNode *inst_domain, bool own_domain,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, Domain dom,
                            bool register_now);
@@ -423,7 +417,7 @@ namespace Legion {
                            MemoryManager *mem, PhysicalInstance inst, 
                            LayoutDescription *description,
                            const PointerConstraint &constraint,
-                           const Domain &inst_dom, bool own_dom,
+                           IndexSpaceNode *inst_dom, bool own_dom,
                            RegionNode *node, ReductionOpID redop, 
                            const ReductionOp *op, ApEvent use_event,
                            bool register_now);
@@ -505,7 +499,7 @@ namespace Legion {
                       const LayoutConstraintSet &cons,
                       MemoryManager *memory, UniqueID cid)
         : regions(regs), constraints(cons), memory_manager(memory),
-          creator_id(cid), ancestor(NULL), instance_domain(Domain::NO_DOMAIN), 
+          creator_id(cid), ancestor(NULL), instance_domain(NULL), 
           own_domain(false), redop_id(0), reduction_op(NULL), valid(false) { }
     public:
       size_t compute_needed_size(RegionTreeForest *forest);
@@ -524,7 +518,7 @@ namespace Legion {
       const UniqueID creator_id;
     protected:
       RegionNode *ancestor;
-      Domain instance_domain;
+      IndexSpaceNode *instance_domain;
       bool own_domain;
       std::vector<std::pair<FieldID,size_t> > field_sizes;
       std::vector<unsigned> mask_index_map;

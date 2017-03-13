@@ -120,6 +120,12 @@ namespace Legion {
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const void *realm_is, 
                                             TypeTag type_tag) = 0;
+      virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
+                           const std::vector<IndexSpace> &spaces) = 0;
+      virtual IndexSpace intersect_index_spaces(RegionTreeForest *forest,
+                           const std::vector<IndexSpace> &spaces) = 0;
+      virtual IndexSpace subtract_index_spaces(RegionTreeForest *forest,
+                           IndexSpace left, IndexSpace right) = 0;
       virtual void destroy_index_space(IndexSpace handle) = 0;
       virtual void destroy_index_partition(IndexPartition handle) = 0;
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
@@ -665,6 +671,12 @@ namespace Legion {
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const void *realm_is, 
                                             TypeTag type_tag);
+      virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
+                           const std::vector<IndexSpace> &spaces);
+      virtual IndexSpace intersect_index_spaces(RegionTreeForest *forest,
+                           const std::vector<IndexSpace> &spaces);
+      virtual IndexSpace subtract_index_spaces(RegionTreeForest *forest,
+                           IndexSpace left, IndexSpace right);
       virtual void destroy_index_space(IndexSpace handle);
       virtual void destroy_index_partition(IndexPartition handle);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
@@ -1134,6 +1146,12 @@ namespace Legion {
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const void *realm_is, 
                                             TypeTag type_tag);
+      virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
+                           const std::vector<IndexSpace> &spaces);
+      virtual IndexSpace intersect_index_spaces(RegionTreeForest *forest,
+                           const std::vector<IndexSpace> &spaces);
+      virtual IndexSpace subtract_index_spaces(RegionTreeForest *forest,
+                           IndexSpace left, IndexSpace right);
       virtual void destroy_index_space(IndexSpace handle);
       virtual void destroy_index_partition(IndexPartition handle);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,
@@ -1421,6 +1439,12 @@ namespace Legion {
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const void *realm_is, 
                                             TypeTag type_tag);
+      virtual IndexSpace union_index_spaces(RegionTreeForest *forest,
+                           const std::vector<IndexSpace> &spaces);
+      virtual IndexSpace intersect_index_spaces(RegionTreeForest *forest,
+                           const std::vector<IndexSpace> &spaces);
+      virtual IndexSpace subtract_index_spaces(RegionTreeForest *forest,
+                           IndexSpace left, IndexSpace right);
       virtual void destroy_index_space(IndexSpace handle);
       virtual void destroy_index_partition(IndexPartition handle);
       virtual IndexPartition create_equal_partition(RegionTreeForest *forest,

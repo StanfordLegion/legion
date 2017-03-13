@@ -84,6 +84,116 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::initialize_union_space(ApUserEvent to_trigger,
+                             TaskOp *op, const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> preconditions;
+      std::vector<Realm::ZIndexSpace<DIM,T> > spaces(handles.size());
+      for (unsigned idx = 0; idx < handles.size(); idx++)
+      {
+        IndexSpaceNode *node = context->get_node(handles[idx]);
+        if (handles[idx].get_type_tag() != handle.get_type_tag())
+        {
+          log_run.error("Dynamic type mismatch in 'union_index_spaces' "
+                        "performed in task %s (UID %lld)",
+                        op->get_task_name(), op->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+        }
+        IndexSpaceNodeT<DIM,T> *space = 
+          static_cast<IndexSpaceNodeT<DIM,T>*>(node);
+        space->get_realm_index_space(spaces[idx]);
+        if (!space->index_space_ready.has_triggered())
+          preconditions.insert(space->index_space_ready);
+      }
+      // Kick this off to Realm
+      ApEvent precondition = Runtime::merge_events(preconditions);
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                      op, DEP_PART_UNION_REDUCTION);
+      ApEvent done(Realm::ZIndexSpace<DIM,T>::compute_union(
+            spaces, realm_index_space, requests, precondition));
+      Runtime::trigger_event(to_trigger, done);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::initialize_intersection_space(
+     ApUserEvent to_trigger, TaskOp *op, const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> preconditions;
+      std::vector<Realm::ZIndexSpace<DIM,T> > spaces(handles.size());
+      for (unsigned idx = 0; idx < handles.size(); idx++)
+      {
+        IndexSpaceNode *node = context->get_node(handles[idx]);
+        if (handles[idx].get_type_tag() != handle.get_type_tag())
+        {
+          log_run.error("Dynamic type mismatch in 'intersect_index_spaces' "
+                        "performed in task %s (UID %lld)",
+                        op->get_task_name(), op->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+        }
+        IndexSpaceNodeT<DIM,T> *space = 
+          static_cast<IndexSpaceNodeT<DIM,T>*>(node);
+        space->get_realm_index_space(spaces[idx]);
+        if (!space->index_space_ready.has_triggered())
+          preconditions.insert(space->index_space_ready);
+      }
+      // Kick this off to Realm
+      ApEvent precondition = Runtime::merge_events(preconditions);
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                      op, DEP_PART_INTERSECTION_REDUCTION);
+      ApEvent done(Realm::ZIndexSpace<DIM,T>::compute_intersection(
+            spaces, realm_index_space, requests, precondition));
+      Runtime::trigger_event(to_trigger, done);
+    }
+    
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::initialize_difference_space(
+          ApUserEvent to_trigger, TaskOp *op, IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      if (left.get_type_tag() != right.get_type_tag())
+      {
+        log_run.error("Dynamic type mismatch in 'subtract_index_spaces' "
+                      "performed in task %s (UID %lld)",
+                      op->get_task_name(), op->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+      }
+      IndexSpaceNodeT<DIM,T> *left_node = 
+        static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(left));
+      IndexSpaceNodeT<DIM,T> *right_node = 
+        static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(right));
+      Realm::ZIndexSpace<DIM,T> left_space, right_space;
+      left_node->get_realm_index_space(left_space);
+      right_node->get_realm_index_space(right_space);
+      ApEvent precondition = Runtime::merge_events(left_node->index_space_ready,
+                                                 right_node->index_space_ready);
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                          op, DEP_PART_DIFFERENCE);
+      ApEvent done(Realm::ZIndexSpace<DIM,T>::compute_difference(
+           left_space, right_space, realm_index_space, requests, precondition));
+      Runtime::trigger_event(to_trigger, done);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::log_index_space_points(void) const
     //--------------------------------------------------------------------------
     {
@@ -335,6 +445,37 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::contains_point(const void *realm_point, 
+                                                TypeTag type_tag) const
+    //--------------------------------------------------------------------------
+    {
+      if (type_tag != handle.get_type_tag())
+      {
+        log_run.error("Dynamic type mismatch in 'safe_cast'");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+      }
+      const Realm::ZPoint<DIM,T> *point = 
+        static_cast<const Realm::ZPoint<DIM,T>*>(realm_point);
+      if (!index_space_ready.has_triggered())
+        index_space_ready.wait();
+      return realm_index_space.contains(*point);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceAllocator* IndexSpaceNodeT<DIM,T>::create_allocator(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!index_space_ready.has_triggered())
+        index_space_ready.wait();
+      return new IndexSpaceAllocator(Domain(realm_index_space));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     LegionColor IndexSpaceNodeT<DIM,T>::get_max_linearized_color(void) const
     //--------------------------------------------------------------------------
     {
@@ -527,6 +668,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rhs->handle.get_type_tag() == handle.get_type_tag());
 #endif
+      if (rhs == this)
+        return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
@@ -602,6 +745,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rhs->handle.get_type_tag() == handle.get_type_tag());
 #endif
+      if (rhs == this)
+        return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         typename std::map<IndexTreeNode*,bool>::const_iterator finder = 
@@ -613,18 +758,25 @@ namespace Legion {
       IndexSpaceNodeT<DIM,T> *rhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
       rhs_node->get_realm_index_space(rhs_space);
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                      (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
-      ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
-        rhs_space, realm_index_space, difference, requests,
-        Runtime::merge_events(index_space_ready, rhs_node->index_space_ready)));
-      if (!ready.has_triggered())
-        ready.wait();
-      bool result = difference.empty();
-      if (!result)
+      bool result = false;
+      if (!realm_index_space.dense() || 
+          !rhs_node->index_space_ready.has_triggered())
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                        (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
+        ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
+          rhs_space, realm_index_space, difference, requests,
+          Runtime::merge_events(index_space_ready, 
+                                rhs_node->index_space_ready)));
+        if (!ready.has_triggered())
+          ready.wait();
+        result = difference.empty();
         difference.destroy();
+      }
+      else // Fast path
+        result = realm_index_space.bounds.contains(rhs_space);
       AutoLock n_lock(node_lock);
       dominators[rhs] = result;
       return result;
@@ -649,18 +801,23 @@ namespace Legion {
       IndexPartNodeT<DIM,T> *rhs_node = 
         static_cast<IndexPartNodeT<DIM,T>*>(rhs);
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                      (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
-      ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
-            rhs_space, realm_index_space, difference, requests,
-            Runtime::merge_events(index_space_ready, rhs_precondition)));
-      if (!ready.has_triggered())
-        ready.wait();
-      bool result = difference.empty();
-      if (!result)
+      bool result = false;
+      if (!realm_index_space.dense() || !rhs_precondition.has_triggered())
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                        (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
+        ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
+              rhs_space, realm_index_space, difference, requests,
+              Runtime::merge_events(index_space_ready, rhs_precondition)));
+        if (!ready.has_triggered())
+          ready.wait();
+        result = difference.empty();
         difference.destroy();
+      }
+      else // Fast path
+        result = realm_index_space.bounds.contains(rhs_space);
       AutoLock n_lock(node_lock);
       dominators[rhs] = result;
       return result;
@@ -1096,6 +1253,231 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(Operation *op,
+                        const std::vector<CopySrcDstField> &src_fields,
+                        const std::vector<CopySrcDstField> &dst_fields,
+                        ApEvent precondition, PredEvent predicate_guard,
+                        IndexTreeNode *intersect/*=NULL*/,
+                        ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
+      Realm::ProfilingRequestSet requests;
+      op->add_copy_profiling_request(requests);
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_copy_request(requests, op);
+      ApEvent result;
+      if (intersect == NULL)
+      {
+        // Include our event precondition if necessary
+        if (!index_space_ready.has_triggered())
+          precondition = Runtime::merge_events(precondition, index_space_ready);
+        // Have to protect against misspeculation
+        if (predicate_guard.exists())
+        {
+          ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                   ApEvent(predicate_guard));
+          result = Runtime::ignorefaults(realm_index_space.copy(src_fields, 
+                dst_fields, requests, pred_pre, redop, reduction_fold));
+        }
+        else
+          result = ApEvent(realm_index_space.copy(src_fields, dst_fields,
+                        requests, precondition, redop, reduction_fold));
+      }
+      else
+      {
+        // This is a copy between the intersection of two nodes
+        Realm::ZIndexSpace<DIM,T> intersection;
+        if (intersect->is_index_space_node())
+        {
+          IndexSpaceNode *intersect_node = intersect->as_index_space_node();
+          if (intersects_with(intersect_node))
+          {
+            AutoLock n_lock(node_lock,1,false/*exclusive*/);
+            typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
+              const_iterator finder = intersections.find(intersect_node);
+#ifdef DEBUG_LEGION
+            assert(finder != intersections.end());
+#endif
+            intersection = finder->second;
+          }
+#ifdef DEBUG_LEGION
+          else
+            assert(false);
+#endif
+        }
+        else
+        {
+          IndexPartNode *intersect_node = intersect->as_index_part_node();
+          if (intersects_with(intersect_node))
+          {
+            AutoLock n_lock(node_lock,1,false/*exclusive*/);
+            typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
+              const_iterator finder = intersections.find(intersect_node);
+#ifdef DEBUG_LEGION
+            assert(finder != intersections.end());
+#endif
+            intersection = finder->second;
+          }
+#ifdef DEBUG_LEGION
+          else
+            assert(false);
+#endif
+        }
+        // Have to protect against misspeculation
+        if (predicate_guard.exists())
+        {
+          ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                   ApEvent(predicate_guard));
+          result = Runtime::ignorefaults(intersection.copy(src_fields, 
+                dst_fields, requests, pred_pre, redop, reduction_fold));
+        }
+        else
+          result = ApEvent(intersection.copy(src_fields, dst_fields,
+                        requests, precondition, redop, reduction_fold));
+      }
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        ApUserEvent new_result = Runtime::create_ap_user_event();
+        Runtime::trigger_event(new_result);
+        result = new_result;
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(Operation *op,
+                        const std::vector<CopySrcDstField> &dst_fields,
+                        const void *fill_value, size_t fill_size,
+                        ApEvent precondition, PredEvent predicate_guard,
+                        IndexTreeNode *intersect)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
+      Realm::ProfilingRequestSet requests;
+      op->add_copy_profiling_request(requests);
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_fill_request(requests, op);
+      ApEvent result;
+      if (intersect == NULL)
+      {
+        // Include our event precondition if necessary
+        if (!index_space_ready.has_triggered())
+          precondition = Runtime::merge_events(precondition, index_space_ready);
+        // Have to protect against misspeculation
+        if (predicate_guard.exists())
+        {
+          ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                   ApEvent(predicate_guard));
+          result = Runtime::ignorefaults(realm_index_space.fill(dst_fields, 
+                requests, fill_value, fill_size, pred_pre));
+        }
+        else
+          result = ApEvent(realm_index_space.fill(dst_fields, requests, 
+                fill_value, fill_size, precondition));
+      }
+      else
+      {
+        // This is a copy between the intersection of two nodes
+        Realm::ZIndexSpace<DIM,T> intersection;
+        if (intersect->is_index_space_node())
+        {
+          IndexSpaceNode *intersect_node = intersect->as_index_space_node();
+          if (intersects_with(intersect_node))
+          {
+            AutoLock n_lock(node_lock,1,false/*exclusive*/);
+            typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
+              const_iterator finder = intersections.find(intersect_node);
+#ifdef DEBUG_LEGION
+            assert(finder != intersections.end());
+#endif
+            intersection = finder->second;
+          }
+#ifdef DEBUG_LEGION
+          else
+            assert(false);
+#endif
+        }
+        else
+        {
+          IndexPartNode *intersect_node = intersect->as_index_part_node();
+          if (intersects_with(intersect_node))
+          {
+            AutoLock n_lock(node_lock,1,false/*exclusive*/);
+            typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
+              const_iterator finder = intersections.find(intersect_node);
+#ifdef DEBUG_LEGION
+            assert(finder != intersections.end());
+#endif
+            intersection = finder->second;
+          }
+#ifdef DEBUG_LEGION
+          else
+            assert(false);
+#endif
+        }
+        // Have to protect against misspeculation
+        if (predicate_guard.exists())
+        {
+          ApEvent pred_pre = Runtime::merge_events(precondition,
+                                                   ApEvent(predicate_guard));
+          result = Runtime::ignorefaults(intersection.fill(dst_fields, 
+                requests, fill_value, fill_size, pred_pre));
+        }
+        else
+          result = ApEvent(intersection.fill(dst_fields, requests, 
+                fill_value, fill_size, precondition));
+      }
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        ApUserEvent new_result = Runtime::create_ap_user_event();
+        Runtime::trigger_event(new_result);
+        result = new_result;
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_instance(Memory target,
+                                       const std::vector<size_t> &field_sizes,
+                                       size_t blocking_factor, UniqueID op_id)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
+      // Have to wait for the index space to be ready if necessary
+      if (!index_space_ready.has_triggered())
+        index_space_ready.wait();
+      Realm::ProfilingRequestSet reqs;
+      if (context->runtime->profiler != NULL)
+      {
+        context->runtime->profiler->add_inst_request(reqs, op_id);
+        PhysicalInstance result = 
+          PhysicalInstance::create_instance(target, realm_index_space,
+                                            field_sizes, reqs);
+        // If the result exists tell the profiler about it in case
+        // it never gets deleted and we never see the profiling feedback
+        if (result.exists())
+        {
+          unsigned long long creation_time = 
+            Realm::Clock::current_time_in_nanoseconds();
+          context->runtime->profiler->record_instance_creation(result, target, 
+                                                        op_id, creation_time);
+        }
+        return result;
+      }
+      else
+        return PhysicalInstance::create_instance(target, realm_index_space,
+                                                 field_sizes, reqs);
+    }
+
     /////////////////////////////////////////////////////////////
     // Templated Index Partition Node 
     /////////////////////////////////////////////////////////////
@@ -1249,6 +1631,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rhs->handle.get_type_tag() == handle.get_type_tag());
 #endif
+      if (rhs == this)
+        return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
@@ -1299,19 +1683,25 @@ namespace Legion {
       IndexSpaceNodeT<DIM,T> *rhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
       rhs_node->get_realm_index_space(rhs_space);
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                        (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
-      ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
-            rhs_space, union_space, difference, requests,
-            Runtime::merge_events(union_precondition, 
-                                  rhs_node->index_space_ready)));
-      if (!ready.has_triggered())
-        ready.wait();
-      bool result = difference.empty();
-      if (!result)
+      bool result = false;
+      if (!union_precondition.has_triggered() || !union_space.dense() ||
+          !rhs_node->index_space_ready.has_triggered())
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                          (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
+        ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
+              rhs_space, union_space, difference, requests,
+              Runtime::merge_events(union_precondition, 
+                                    rhs_node->index_space_ready)));
+        if (!ready.has_triggered())
+          ready.wait();
+        result = difference.empty();
         difference.destroy();
+      }
+      else // Fast path
+        result = union_space.bounds.contains(rhs_space);
       AutoLock n_lock(node_lock);
       dominators[rhs] = result;
       return result;
@@ -1325,6 +1715,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rhs->handle.get_type_tag() == handle.get_type_tag());
 #endif
+      if (rhs == this)
+        return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         typename std::map<IndexTreeNode*,bool>::const_iterator finder = 
@@ -1337,18 +1729,24 @@ namespace Legion {
       IndexPartNodeT<DIM,T> *rhs_node = 
         static_cast<IndexPartNodeT<DIM,T>*>(rhs);
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                      (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
-      ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
-            rhs_space, union_space, difference, requests,
-            Runtime::merge_events(union_precondition, rhs_precondition))); 
-      if (!ready.has_triggered())
-        ready.wait();
-      bool result = difference.empty();
-      if (!result)
+      bool result = false;
+      if (!union_precondition.has_triggered() || !union_space.dense() ||
+          !rhs_precondition.has_triggered())
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                        (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
+        ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
+              rhs_space, union_space, difference, requests,
+              Runtime::merge_events(union_precondition, rhs_precondition))); 
+        if (!ready.has_triggered())
+          ready.wait();
+        result = difference.empty();
         difference.destroy();
+      } 
+      else // Fast path
+        result = union_space.bounds.contains(rhs_space);
       AutoLock n_lock(node_lock);
       dominators[rhs] = result;
       return result;

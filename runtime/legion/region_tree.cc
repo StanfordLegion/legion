@@ -92,6 +92,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::create_union_space(IndexSpace handle, TaskOp *op,
+                                         const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      ApUserEvent to_trigger = Runtime::create_ap_user_event();
+      IndexSpaceNode *node = 
+        create_node(handle, NULL, NULL/*parent*/, 0/*color*/, to_trigger);
+      node->initialize_union_space(to_trigger, op, handles);
+      if (Runtime::legion_spy_enabled)
+      {
+        if (!node->index_space_ready.has_triggered())
+          node->index_space_ready.wait();
+        node->log_index_space_points();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::create_intersection_space(IndexSpace handle,
+                             TaskOp *op, const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      ApUserEvent to_trigger = Runtime::create_ap_user_event();
+      IndexSpaceNode *node = 
+        create_node(handle, NULL, NULL/*parent*/, 0/*color*/, to_trigger);
+      node->initialize_intersection_space(to_trigger, op, handles);
+      if (Runtime::legion_spy_enabled)
+      {
+        if (!node->index_space_ready.has_triggered())
+          node->index_space_ready.wait();
+        node->log_index_space_points();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::create_difference_space(IndexSpace handle,
+                                  TaskOp *op, IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      ApUserEvent to_trigger = Runtime::create_ap_user_event();
+      IndexSpaceNode *node = 
+        create_node(handle, NULL, NULL/*parent*/, 0/*color*/, to_trigger);
+      node->initialize_difference_space(to_trigger, op, left, right);
+      if (Runtime::legion_spy_enabled)
+      {
+        if (!node->index_space_ready.has_triggered())
+          node->index_space_ready.wait();
+        node->log_index_space_points();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent RegionTreeForest::create_pending_partition(IndexPartition pid,
                                                        IndexSpace parent,
                                                        IndexSpace color_space,
@@ -562,6 +613,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::has_index_subspace(IndexPartition parent,
+                                              const void *realm_color,
+                                              TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *parent_node = get_node(parent);
+      return parent_node->color_space->contains_point(realm_color, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::get_index_subspace(IndexPartition parent,
                                                     const void *realm_color,
                                                     TypeTag type_tag)
@@ -704,7 +765,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      return node->get_domain_volume(true/*app query*/); 
+      return node->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -721,6 +782,15 @@ namespace Legion {
     {
       IndexPartNode *node = get_node(p);
       return node->is_complete(true/*app query*/);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::safe_cast(IndexSpace handle, 
+                                     const void *realm_point, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(handle);
+      return node->contains_point(realm_point, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -1009,15 +1079,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RegionNode *node = get_node(handle);
-      Domain d = node->get_domain_blocking();
-      if (d.get_dim() == 0)
-      {
-        const Realm::ElementMask &mask = 
-          d.get_index_space().get_valid_mask();
-        return mask.get_num_elmts();
-      }
-      else
-        return d.get_volume();
+      return node->row_source->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -3802,13 +3864,7 @@ namespace Legion {
     bool RegionTreeForest::are_compatible(IndexSpace left, IndexSpace right)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode *left_node = get_node(left);
-      IndexSpaceNode *right_node = get_node(right);
-      const Domain &left_dom = left_node->get_domain_blocking();
-      const Domain &right_dom = right_node->get_domain_blocking();
-      if (left_dom.get_dim() != right_dom.get_dim())
-        return false;
-      return true;
+      return (left.get_type_tag() == right.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
@@ -3960,35 +4016,6 @@ namespace Legion {
       return depth;
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
-                    Memory target, const std::vector<size_t> &field_sizes, 
-                    size_t blocking_factor, ReductionOpID redop, UniqueID op_id)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REALM_CREATE_INSTANCE_CALL);
-      if (runtime->profiler != NULL)
-      {
-        Realm::ProfilingRequestSet reqs;
-        runtime->profiler->add_inst_request(reqs, op_id);
-        PhysicalInstance result = dom.create_instance(target, field_sizes, 
-                                            blocking_factor, reqs, redop);
-        // If the result exists tell the profiler about it in case
-        // it never gets deleted and we never see the profiling feedback
-        if (result.exists())
-        {
-          unsigned long long creation_time = 
-            Realm::Clock::current_time_in_nanoseconds();
-          runtime->profiler->record_instance_creation(result, target, op_id,
-                                                      creation_time);
-        }
-        return result;
-      }
-      else
-        return dom.create_instance(target, field_sizes, 
-                                   blocking_factor, redop);
-    }
 
     //--------------------------------------------------------------------------
     template<typename T>
@@ -4949,13 +4976,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexSpaceNode::get_index_space_precondition(void)
-    //--------------------------------------------------------------------------
-    {
-      return index_space_ready;
-    }
-
-    //--------------------------------------------------------------------------
     bool IndexSpaceNode::are_disjoint(const LegionColor c1, 
                                       const LegionColor c2)
     //--------------------------------------------------------------------------
@@ -5236,9 +5256,6 @@ namespace Legion {
               IndexSpaceNode *parent, IndexPartNode *left, IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      std::map<LegionColor,IndexSpaceNode*> left_spaces, right_spaces;    
-      left->get_children(left_spaces);
-      right->get_children(right_spaces);
       const bool disjoint = !left->intersects_with(right);
       parent->record_disjointness(disjoint, left->color, right->color);
     }
@@ -7863,6 +7880,7 @@ namespace Legion {
       node->free_fields(fields, source);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     InstanceManager* FieldSpaceNode::create_file_instance(
                                          const std::set<FieldID> &create_fields, 
@@ -7918,6 +7936,7 @@ namespace Legion {
 #endif
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     LayoutDescription* FieldSpaceNode::find_layout_description(
@@ -13037,7 +13056,6 @@ namespace Legion {
       return get_child(c);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     ApEvent RegionNode::issue_copy(Operation *op,
                         const std::vector<CopySrcDstField> &src_fields,
@@ -13047,102 +13065,11 @@ namespace Legion {
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
-      Realm::ProfilingRequestSet requests;
-      op->add_copy_profiling_request(requests);
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_copy_request(requests, op);
-      ApEvent result;
-      if (intersect == NULL)
-      {
-        // This is a normal copy
-        if (row_source->has_component_domains())
-        {
-          ApEvent dom_pre;
-          const std::set<Domain> &doms = 
-            row_source->get_component_domains(dom_pre);
-          if (dom_pre.exists() && !dom_pre.has_triggered())
-            precondition = Runtime::merge_events(precondition, dom_pre);
-          std::set<ApEvent> done_events;
-          if (predicate_guard.exists())
-          {
-            // Have to protect against misspeculation
-            ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                     ApEvent(predicate_guard));
-            for (std::set<Domain>::const_iterator it = doms.begin();
-                  it != doms.end(); it++)
-              done_events.insert(Runtime::ignorefaults(it->copy(
-                      src_fields, dst_fields, requests, pred_pre, 
-                      redop, reduction_fold)));
-          }
-          else
-          {
-            for (std::set<Domain>::const_iterator it = doms.begin();
-                  it != doms.end(); it++)
-              done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
-                                                  requests, precondition,
-                                                  redop, reduction_fold)));
-          }
-          result = Runtime::merge_events(done_events);
-        }
-        else
-        {
-          ApEvent dom_pre;
-          const Domain &dom = row_source->get_domain(dom_pre);
-          if (dom_pre.exists() && !dom_pre.has_triggered())
-            precondition = Runtime::merge_events(precondition, dom_pre);
-          // Have to protect against misspeculation
-          if (predicate_guard.exists())
-          {
-            ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                     ApEvent(predicate_guard));
-            result = Runtime::ignorefaults(dom.copy(src_fields, dst_fields,
-                                requests, pred_pre, redop, reduction_fold));
-          }
-          else
-            result = ApEvent(dom.copy(src_fields, dst_fields, requests, 
-                                      precondition, redop, reduction_fold));
-        }
-      }
-      else
-      {
-        // This is a copy between the intersection of two regions
-        const std::set<Domain> *intersection_doms;
-        if (intersect->is_region())
-          intersection_doms = &(row_source->get_intersection_domains(
-                intersect->as_region_node()->row_source));
-        else
-          intersection_doms = &(row_source->get_intersection_domains(
-                intersect->as_partition_node()->row_source));
-        std::set<ApEvent> done_events;
-        if (predicate_guard.exists())
-        {
-          // have to protect against misspeculation
-          ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                   ApEvent(predicate_guard));
-          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-                it != intersection_doms->end(); it++)
-            done_events.insert(Runtime::ignorefaults(it->copy(
-                    src_fields, dst_fields, requests, pred_pre, 
-                    redop, reduction_fold)));
-        }
-        else
-        {
-          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-                it != intersection_doms->end(); it++)
-            done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
-                                                requests, precondition,
-                                                redop, reduction_fold)));
-        }
-        result = Runtime::merge_events(done_events);
-      }
+      ApEvent result = row_source->issue_copy(op, src_fields, dst_fields,
+          precondition, predicate_guard, 
+          (intersect == NULL) ? NULL : intersect->get_row_source(),
+          redop, reduction_fold);
 #ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
-        result = new_result;
-      }
       LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
                                  precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
@@ -13181,98 +13108,10 @@ namespace Legion {
                         RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
-      Realm::ProfilingRequestSet requests;
-      op->add_copy_profiling_request(requests);
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_fill_request(requests, op);
-      ApEvent result;
-      if (intersect == NULL)
-      {
-        // This is a normal fill 
-        if (row_source->has_component_domains())
-        {
-          ApEvent dom_pre;
-          const std::set<Domain> &doms = 
-            row_source->get_component_domains(dom_pre);
-          if (dom_pre.exists() && !dom_pre.has_triggered())
-            precondition = Runtime::merge_events(precondition, dom_pre);
-          std::set<ApEvent> done_events;
-          if (predicate_guard.exists())
-          {
-            ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                     ApEvent(predicate_guard));
-            // Have to protect against misspeculation
-            for (std::set<Domain>::const_iterator it = doms.begin();
-                  it != doms.end(); it++)
-              done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
-                      requests, fill_value, fill_size, pred_pre)));
-          }
-          else
-          {
-            for (std::set<Domain>::const_iterator it = doms.begin();
-                  it != doms.end(); it++)
-              done_events.insert(ApEvent(it->fill(dst_fields, requests, 
-                                         fill_value, fill_size, precondition)));
-          }
-          result = Runtime::merge_events(done_events);
-        }
-        else
-        {
-          ApEvent dom_pre;
-          const Domain &dom = row_source->get_domain(dom_pre);
-          if (dom_pre.exists() && !dom_pre.has_triggered())
-            precondition = Runtime::merge_events(precondition, dom_pre);
-          // Have to protect against misspeculation
-          if (predicate_guard.exists())
-          {
-            ApEvent pred_pre = Runtime::merge_events(precondition, 
-                                                     ApEvent(predicate_guard));
-            result = ApEvent(Runtime::ignorefaults(dom.fill(dst_fields, 
-                    requests, fill_value, fill_size, pred_pre)));
-          }
-          else
-            result = ApEvent(dom.fill(dst_fields, requests, 
-                                      fill_value, fill_size, precondition));
-        }
-      }
-      else
-      {
-        // This is the fill between the intersection of two regions
-        const std::set<Domain> *intersection_doms;
-        if (intersect->is_region())
-          intersection_doms = &(row_source->get_intersection_domains(
-                intersect->as_region_node()->row_source));
-        else
-          intersection_doms = &(row_source->get_intersection_domains(
-                intersect->as_partition_node()->row_source));
-        std::set<ApEvent> done_events;
-        if (predicate_guard.exists())
-        {
-          ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                   ApEvent(predicate_guard));
-          // Have to protect the against misspeculation
-          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-                it != intersection_doms->end(); it++)
-            done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
-                    requests, fill_value, fill_size, pred_pre)));
-        }
-        else
-        {
-          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-                it != intersection_doms->end(); it++)
-            done_events.insert(ApEvent(it->fill(dst_fields, requests,
-                                       fill_value, fill_size, precondition)));
-        }
-        result = Runtime::merge_events(done_events);
-      }
+      ApEvent result = row_source->issue_fill(op, dst_fields,
+          fill_value, fill_size, precondition, predicate_guard,
+          (intersect == NULL) ? NULL : intersect->get_row_source());
 #ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
-        result = new_result;
-      }
       LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
                                  precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
@@ -13297,7 +13136,6 @@ namespace Legion {
 #endif
       return result;
     }
-#endif
 
     //--------------------------------------------------------------------------
     bool RegionNode::are_children_disjoint(const LegionColor c1, 
@@ -13421,27 +13259,6 @@ namespace Legion {
         }
       }
       return continue_traversal;
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& RegionNode::get_domain_blocking(void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_domain_blocking();
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& RegionNode::get_domain(ApEvent &precondition) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_domain(precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& RegionNode::get_domain_no_wait(void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_domain_no_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -14008,6 +13825,7 @@ namespace Legion {
           ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, targets);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionNode::find_field_descriptors(ContextID ctx, ApEvent term_event,
                                             const RegionUsage &usage,
@@ -14078,6 +13896,7 @@ namespace Legion {
                                               field_data, preconditions);
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
@@ -15179,36 +14998,6 @@ namespace Legion {
         }
       }
       return continue_traversal;
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& PartitionNode::get_domain_blocking(void) const
-    //--------------------------------------------------------------------------
-    {
- #ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif     
-      return parent->get_domain_blocking();
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& PartitionNode::get_domain(ApEvent &precondition) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      return parent->get_domain(precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& PartitionNode::get_domain_no_wait(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      return parent->get_domain_no_wait();
     }
 
     //--------------------------------------------------------------------------

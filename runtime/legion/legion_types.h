@@ -1396,6 +1396,7 @@ namespace Legion {
     friend class Internal::RemoteContext;                   \
     friend class Internal::LeafContext;                     \
     friend class Internal::InlineContext;                   \
+    friend class Internal::InstanceBuilder;                 \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 

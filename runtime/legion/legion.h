@@ -2675,6 +2675,46 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
                                               Realm::ZRect<DIM,COORD_T> bounds);
+
+      /**
+       * Create a new top-level index space by unioning together 
+       * several existing index spaces
+       * @param ctx the enclosing task context
+       * @param spaces the index spaces to union together
+       * @return the handle for the new index space
+       */
+      IndexSpace union_index_spaces(Context ctx, 
+                                    const std::vector<IndexSpace> &spaces);
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> union_index_spaces(Context ctx,
+                     const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces);
+
+      /**
+       * Create a new top-level index space by intersecting 
+       * several existing index spaces
+       * @param ctx the enclosing task context
+       * @param spaces the index spaces to intersect
+       * @return the handle for the new index space
+       */
+      IndexSpace intersect_index_spaces(Context ctx,
+                                        const std::vector<IndexSpace> &spaces);
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> intersect_index_spaces(Context ctx,
+                         const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces);
+
+      /**
+       * Create a new top-level index space by taking the
+       * set difference of two different index spaces
+       */
+      IndexSpace subtract_index_spaces(Context ctx, 
+                                       IndexSpace left, IndexSpace right);
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> subtract_index_spaces(Context ctx,
+           IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right);
+
       /**
        * @deprecated
        * Create a new top-level index space with the maximum number of elements

@@ -2455,6 +2455,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace InnerContext::union_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      if (spaces.empty())
+        return IndexSpace::NO_SPACE;
+      AutoRuntimeCall call(this); 
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(), 
+                        spaces[0].get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+      forest->create_union_space(handle, owner_task, spaces); 
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::intersect_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      if (spaces.empty())
+        return IndexSpace::NO_SPACE;
+      AutoRuntimeCall call(this); 
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(), 
+                        spaces[0].get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+      forest->create_intersection_space(handle, owner_task, spaces); 
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::subtract_index_spaces(RegionTreeForest *forest,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(), 
+                        left.get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+      forest->create_difference_space(handle, owner_task, left, right); 
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::destroy_index_space(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -6642,6 +6706,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace LeafContext::union_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal union index spaces performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::intersect_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal intersect index spaces performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::subtract_index_spaces(RegionTreeForest *forest,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal subtract index spaces performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
     void LeafContext::destroy_index_space(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -7999,6 +8105,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->create_index_space(forest, realm_is, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::union_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->union_index_spaces(forest, spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::intersect_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->intersect_index_spaces(forest, spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::subtract_index_spaces(RegionTreeForest *forest,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->subtract_index_spaces(forest, left, right);
     }
 
     //--------------------------------------------------------------------------

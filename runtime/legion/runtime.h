@@ -1458,6 +1458,12 @@ namespace Legion {
     public:
       IndexSpace create_index_space(Context ctx, const void *realm_is,
                                     TypeTag type_tag);
+      IndexSpace union_index_spaces(Context ctx, 
+                                    const std::vector<IndexSpace> &spaces);
+      IndexSpace intersect_index_spaces(Context ctx,
+                                    const std::vector<IndexSpace> &spaces);
+      IndexSpace subtract_index_spaces(Context ctx,
+                                    IndexSpace left, IndexSpace right);
       void destroy_index_space(Context ctx, IndexSpace handle);
       // Called from deletion op
       void finalize_index_space_destroy(IndexSpace handle);

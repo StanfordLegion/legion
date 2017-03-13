@@ -67,6 +67,12 @@ namespace Legion {
     public:
       IndexSpace create_child_space_name(IndexPartition pid) const;
       void create_index_space(IndexSpace handle, const void *realm_is);
+      void create_union_space(IndexSpace handle, TaskOp *op,
+                              const std::vector<IndexSpace> &sources);
+      void create_intersection_space(IndexSpace handle, TaskOp *op,
+                              const std::vector<IndexSpace> &source);
+      void create_difference_space(IndexSpace handle, TaskOp *op,
+                                   IndexSpace left, IndexSpace right);
       RtEvent create_pending_partition(IndexPartition pid,
                                        IndexSpace parent,
                                        IndexSpace color_space,
@@ -165,6 +171,8 @@ namespace Legion {
                                     const std::vector<IndexSpace> &handles);
     public:
       IndexPartition get_index_partition(IndexSpace parent, Color color); 
+      bool has_index_subspace(IndexPartition parent,
+                              const void *realm_color, TypeTag type_tag);
       IndexSpace get_index_subspace(IndexPartition parent, 
                                     const void *realm_color,
                                     TypeTag type_tag);
@@ -517,18 +525,6 @@ namespace Legion {
                                     LogicalPartition upper);
 #endif
     public:
-#ifdef NEW_INSTANCE_CREATION
-      ApEvent create_instance(const Domain &dom, Memory target,
-                            const std::vector<std::pair<FieldID,size_t> > &fids,
-                            PhysicalInstance &instance,
-                            LegionConstraintSet &constraints);
-#else
-      PhysicalInstance create_instance(const Domain &dom, Memory target,
-                                       const std::vector<size_t> &field_sizes,
-                                       size_t blocking_factor, 
-                                       ReductionOpID redop, UniqueID op_id);
-#endif
-    public:
       template<typename T>
       Color generate_unique_color(const std::map<Color,T> &current_map);
 #ifdef DEBUG_LEGION
@@ -639,9 +635,6 @@ namespace Legion {
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                         const void *buffer, size_t size, bool is_mutable) = 0;
     public:
-      static bool compute_dominates(const std::set<Domain> &left_set,
-                                    const std::set<Domain> &right_set);
-    public:
       RegionTreeForest *const context;
       const unsigned depth;
       const LegionColor color;
@@ -729,15 +722,6 @@ namespace Legion {
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
     public:
-      ApEvent get_index_space_precondition(void);
-      const Domain& get_domain_blocking(void);
-      const Domain& get_domain(ApEvent &ready_event);
-      const Domain& get_domain_no_wait(void);
-      void set_domain(const Domain &dom);
-      void get_domains_blocking(std::vector<Domain> &domains);
-      void get_domains(std::vector<Domain> &domains, ApEvent &precondition);
-      size_t get_domain_volume(bool app_query = false);
-    public:
       bool are_disjoint(const LegionColor c1, const LegionColor c2); 
       void record_disjointness(bool disjoint, 
                                const LegionColor c1, const LegionColor c2);
@@ -785,6 +769,13 @@ namespace Legion {
       inline bool has_allocator(void) const { return (allocator != NULL); }
       IndexSpaceAllocator* get_allocator(void);
     public:
+      virtual void initialize_union_space(ApUserEvent to_trigger,
+              TaskOp *op, const std::vector<IndexSpace> &handles) = 0;
+      virtual void initialize_intersection_space(ApUserEvent to_trigger,
+              TaskOp *op, const std::vector<IndexSpace> &handles) = 0;
+      virtual void initialize_difference_space(ApUserEvent to_trigger,
+              TaskOp *op, IndexSpace left, IndexSpace right) = 0;
+    public:
       virtual void log_index_space_points(void) const = 0;
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union) = 0;
@@ -794,6 +785,8 @@ namespace Legion {
           IndexSpace initial, const std::vector<IndexSpace> &handles) = 0;
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag) = 0;
       virtual size_t get_volume(void) const = 0;
+      virtual bool contains_point(const void *realm_point, 
+                                  TypeTag type_tag) const = 0;
       virtual IndexSpaceAllocator* create_allocator(void) const = 0;
     public:
       virtual LegionColor get_max_linearized_color(void) const = 0;
@@ -836,6 +829,30 @@ namespace Legion {
                                            IndexPartNode *left,
                                            IndexPartNode *right) = 0;
     public:
+      virtual ApEvent issue_copy(Operation *op, 
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  IndexTreeNode *intersect = NULL,
+                  ReductionOpID redop = 0, bool reduction_fold = true) = 0;
+      virtual ApEvent issue_fill(Operation *op,
+                  const std::vector<CopySrcDstField> &dst_fields,
+                  const void *fill_value, size_t fill_size,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  IndexTreeNode *intersect = NULL) = 0;
+    public:
+#ifdef NEW_INSTANCE_CREATION
+      virtual ApEvent create_instance(Memory target,
+                            const std::vector<std::pair<FieldID,size_t> > &fids,
+                            PhysicalInstance &instance,
+                            LegionConstraintSet &constraints) = 0;
+#else
+      virtual PhysicalInstance create_instance(Memory target,
+                                       const std::vector<size_t> &field_sizes,
+                                       size_t blocking_factor, 
+                                       UniqueID op_id) = 0;
+#endif
+    public:
       const IndexSpace handle;
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
@@ -875,6 +892,13 @@ namespace Legion {
       inline void set_realm_index_space(const Realm::ZIndexSpace<DIM,T> &value)
         { realm_index_space = value; }
     public:
+      virtual void initialize_union_space(ApUserEvent to_trigger,
+              TaskOp *op, const std::vector<IndexSpace> &handles);
+      virtual void initialize_intersection_space(ApUserEvent to_trigger,
+              TaskOp *op, const std::vector<IndexSpace> &handles);
+      virtual void initialize_difference_space(ApUserEvent to_trigger,
+              TaskOp *op, IndexSpace left, IndexSpace right);
+    public:
       virtual void log_index_space_points(void) const;
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union);
@@ -884,6 +908,8 @@ namespace Legion {
           IndexSpace initial, const std::vector<IndexSpace> &handles);
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag);
       virtual size_t get_volume(void) const;
+      virtual bool contains_point(const void *realm_point, 
+                                  TypeTag type_tag) const;
       virtual IndexSpaceAllocator* create_allocator(void) const;
     public:
       virtual LegionColor get_max_linearized_color(void) const;
@@ -925,6 +951,29 @@ namespace Legion {
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
                                            IndexPartNode *right);
+    public:
+      virtual ApEvent issue_copy(Operation *op, 
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  IndexTreeNode *intersect = NULL,
+                  ReductionOpID redop = 0, bool reduction_fold = true);
+      virtual ApEvent issue_fill(Operation *op,
+                  const std::vector<CopySrcDstField> &dst_fields,
+                  const void *fill_value, size_t fill_size,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  IndexTreeNode *intersect = NULL);
+    public:
+#ifdef NEW_INSTANCE_CREATION
+      virtual ApEvent create_instance(Memory target,
+                            const std::vector<std::pair<FieldID,size_t> > &fids,
+                            PhysicalInstance &instance,
+                            LegionConstraintSet &constraints);
+#else
+      virtual PhysicalInstance create_instance(Memory target,
+                                       const std::vector<size_t> &field_sizes,
+                                       size_t blocking_factor, UniqueID op_id);
+#endif
     protected:
       void compute_linearization_metadata(void);
     protected:
@@ -1047,7 +1096,6 @@ namespace Legion {
       void add_child(IndexSpaceNode *child);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
-      void get_children(std::map<LegionColor,IndexSpaceNode*> &children);
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
     public:
       void compute_disjointness(RtUserEvent ready_event);
@@ -1773,9 +1821,6 @@ namespace Legion {
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2) = 0;
       virtual bool are_all_children_disjoint(void) = 0;
-      virtual const Domain& get_domain_blocking(void) const = 0;
-      virtual const Domain& get_domain(ApEvent &precondition) const = 0;
-      virtual const Domain& get_domain_no_wait(void) const = 0;
       virtual bool is_complete(void) = 0;
       virtual bool intersects_with(RegionTreeNode *other) = 0;
       virtual bool dominates(RegionTreeNode *other) = 0;
@@ -1916,9 +1961,6 @@ namespace Legion {
       static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual const Domain& get_domain_blocking(void) const;
-      virtual const Domain& get_domain(ApEvent &precondition) const;
-      virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
@@ -2118,9 +2160,6 @@ namespace Legion {
                                             Runtime *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual const Domain& get_domain_blocking(void) const;
-      virtual const Domain& get_domain(ApEvent &precondition) const;
-      virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);

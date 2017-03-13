@@ -3629,7 +3629,7 @@ namespace Legion {
           // and then record the new projection epoch that the close
           // will be a part of
           const Domain &color_space = root_node->as_partition_node()->
-                        row_source->color_space->get_domain_blocking();
+                        row_source->color_space->get_color_space_domain();
           ProjectionInfo &proj_info = 
             normal_close_op->initialize_disjoint_close(disjoint_close_mask,
                                                        color_space);

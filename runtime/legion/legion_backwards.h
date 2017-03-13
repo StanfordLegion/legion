@@ -325,6 +325,7 @@ namespace Legion {
       operator Realm::ZRect<DIM,T>(void) const
       {
         assert(DIM == dim);
+        assert(is_id == 0); // better not be one of these
         Realm::ZRect<DIM,T> result;
         for (int i = 0; i < DIM; i++)
           result.lo[i] = rect_data[i];
@@ -364,7 +365,7 @@ namespace Legion {
       }
 
       // No longer supported
-      Realm::IndexSpace get_index_space(void) const;
+      //Realm::IndexSpace get_index_space(void) const;
 
       bool is_valid(void) const { return exists(); }
 
@@ -752,35 +753,6 @@ namespace Legion {
         bool is_valid, rect_valid;
       };
     public:
-      // simple instance creation for the lazy
-      RegionInstance create_instance(Memory memory, size_t elem_size,
-			             ReductionOpID redop_id = 0) const;
-
-      RegionInstance create_instance(Memory memory,
-				     const std::vector<size_t> &field_sizes,
-				     size_t block_size,
-				     ReductionOpID redop_id = 0) const;
-
-      RegionInstance create_instance(Memory memory, size_t elem_size,
-                                     const ProfilingRequestSet &reqs,
-                                     ReductionOpID redop_id = 0) const;
-
-      RegionInstance create_instance(Memory memory,
-				     const std::vector<size_t> &field_sizes,
-				     size_t block_size,
-                                     const ProfilingRequestSet &reqs,
-				     ReductionOpID redop_id = 0) const;
-
-#ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
-      // Note that the constraints are not const so that Realm can add
-      // to the set with additional constraints describing the exact 
-      // instance that was created.
-      Event create_instance(RegionInstance &result,
-              const std::vector<std::pair<unsigned/*FieldID*/,size_t> > &fields,
-              const Legion::LayoutConstraintSet &constraints, 
-              const ProfilingRequestSet &reqs) const;
-#endif
-
       RegionInstance create_hdf5_instance(const char *file_name,
                                           const std::vector<size_t> &field_sizes,
                                           const std::vector<const char*> &field_files,
@@ -788,50 +760,6 @@ namespace Legion {
       RegionInstance create_file_instance(const char *file_name,
                                           const std::vector<size_t> &field_sizes,
                                           legion_lowlevel_file_mode_t file_mode) const;
-
-      Event fill(const std::vector<Realm::CopySrcDstField> &dsts,
-                 const void *fill_value, size_t fill_value_size,
-                 Event wait_on = Event::NO_EVENT) const;
-
-      Event copy(RegionInstance src_inst, RegionInstance dst_inst,
-		 size_t elem_size, Event wait_on = Event::NO_EVENT,
-		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy(const std::vector<Realm::CopySrcDstField>& srcs,
-		 const std::vector<Realm::CopySrcDstField>& dsts,
-		 Event wait_on = Event::NO_EVENT,
-		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy(const std::vector<Realm::CopySrcDstField>& srcs,
-		 const std::vector<Realm::CopySrcDstField>& dsts,
-		 const ElementMask& mask,
-		 Event wait_on = Event::NO_EVENT,
-		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy_indirect(const Realm::CopySrcDstField& idx,
-			  const std::vector<Realm::CopySrcDstField>& srcs,
-			  const std::vector<Realm::CopySrcDstField>& dsts,
-			  Event wait_on = Event::NO_EVENT,
-			  ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy_indirect(const Realm::CopySrcDstField& idx,
-			  const std::vector<Realm::CopySrcDstField>& srcs,
-			  const std::vector<Realm::CopySrcDstField>& dsts,
-			  const ElementMask& mask,
-			  Event wait_on = Event::NO_EVENT,
-			  ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      // Variants of the above for profiling
-      Event fill(const std::vector<Realm::CopySrcDstField> &dsts,
-                 const ProfilingRequestSet &requests,
-                 const void *fill_value, size_t fill_value_size,
-                 Event wait_on = Event::NO_EVENT) const;
-
-      Event copy(const std::vector<Realm::CopySrcDstField>& srcs,
-		 const std::vector<Realm::CopySrcDstField>& dsts,
-                 const ProfilingRequestSet &reqeusts,
-		 Event wait_on = Event::NO_EVENT,
-		 ReductionOpID redop_id = 0, bool red_fold = false) const;
     protected:
     public:
       IDType is_id;
@@ -842,7 +770,6 @@ namespace Legion {
     inline std::ostream& operator<<(std::ostream& os, Domain d) 
     {
       switch(d.get_dim()) {
-      case 0: return os << d.get_index_space();
       case 1: return os << d.get_rect<1>();
       case 2: return os << d.get_rect<2>();
       case 3: return os << d.get_rect<3>();
@@ -853,9 +780,21 @@ namespace Legion {
 
     class IndexSpaceAllocator {
     public:
-      coord_t alloc(size_t count = 1) const;
-      void reserve(coord_t ptr, size_t count = 1) const;
-      void free(coord_t ptr, size_t count = 1) const;
+      IndexSpaceAllocator(const Domain &d)
+        : iterator(Domain::DomainPointIterator(d)) { assert(d.get_dim() == 1); }
+    public:
+      coord_t alloc(size_t count = 1) const 
+        { assert(iterator); coord_t result = iterator.p[0]; 
+          for (int i = 0; i < count; i++) iterator.step();
+          return result; }
+      void reserve(coord_t ptr, size_t count = 1) const
+        { printf("No backwards compatibility for 'reserve' "
+                 "on index space allocators.\n"); assert(false); }
+      void free(coord_t ptr, size_t count = 1) const
+        { printf("No backwards compatibility for 'free' "
+                 "on index space allocators.\n"); assert(false); }
+    protected:
+      mutable Domain::DomainPointIterator iterator;
     };
 
 }; // namespace Legion

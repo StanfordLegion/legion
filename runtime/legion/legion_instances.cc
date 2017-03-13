@@ -442,21 +442,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::set_descriptor(FieldDataDescriptor &desc,
-                                           FieldID fid) const
-    //--------------------------------------------------------------------------
-    {
-      std::map<FieldID,unsigned>::const_iterator finder = 
-        field_indexes.find(fid);
-#ifdef DEBUG_LEGION
-      assert(finder != field_indexes.end());
-#endif
-      const CopySrcDstField &info = field_infos[finder->second];
-      desc.field_offset = info.offset;
-      desc.field_size = info.size;
-    }
-
-    //--------------------------------------------------------------------------
     void LayoutDescription::pack_layout_description(Serializer &rez,
                                                     AddressSpaceID target)
     //--------------------------------------------------------------------------
@@ -507,7 +492,7 @@ namespace Legion {
                                      AddressSpaceID owner_space,
                                      AddressSpaceID local_space,
                                      RegionNode *node,
-                                     PhysicalInstance inst, const Domain &d, 
+                                     PhysicalInstance inst, IndexSpaceNode *d, 
                                      bool own, bool register_now)
       : DistributedCollectable(ctx->runtime, did, 
                                owner_space, local_space, register_now), 
@@ -532,11 +517,9 @@ namespace Legion {
       if (!is_owner())
         memory_manager->unregister_remote_instance(this);
       // If we own our domain, then we need to delete it now
-      if (own_domain)
-      {
-        Realm::IndexSpace is = instance_domain.get_index_space();
-        is.destroy();
-      }
+      if (own_domain && is_owner())
+        region_node->context->destroy_index_space(instance_domain->handle,
+                                                  runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -820,66 +803,8 @@ namespace Legion {
           continue;
         // Now check to see if our instance domain dominates the region
         IndexSpaceNode *index_node = handle_node->row_source; 
-        std::vector<Domain> to_check;
-        index_node->get_domains_blocking(to_check);
-        switch (instance_domain.get_dim())
-        {
-          case 0:
-            {
-              // For now just check to make sure we have space
-              const size_t space_size = instance_domain.get_index_space().
-                                          get_valid_mask().get_num_elmts();
-              for (unsigned idx = 0; idx < to_check.size(); idx++)
-              {
-                const size_t other_size = to_check[idx].get_index_space().
-                                          get_valid_mask().get_num_elmts();
-                if (space_size < other_size)
-                  return false;
-              }
-              break;
-            }
-          case 1:
-            {
-              LegionRuntime::Arrays::Rect<1> our_rect = 
-                instance_domain.get_rect<1>();
-              for (unsigned idx = 0; idx < to_check.size(); idx++)
-              {
-                LegionRuntime::Arrays::Rect<1> other_rect = 
-                  to_check[idx].get_rect<1>();
-                if (!our_rect.dominates(other_rect))
-                  return false;
-              }
-              break;
-            }
-          case 2:
-            {
-              LegionRuntime::Arrays::Rect<2> our_rect = 
-                instance_domain.get_rect<2>();
-              for (unsigned idx = 0; idx < to_check.size(); idx++)
-              {
-                LegionRuntime::Arrays::Rect<2> other_rect = 
-                  to_check[idx].get_rect<2>();
-                if (!our_rect.dominates(other_rect))
-                  return false;
-              }
-              break;
-            }
-          case 3:
-            {
-              LegionRuntime::Arrays::Rect<3> our_rect = 
-                instance_domain.get_rect<3>();
-              for (unsigned idx = 0; idx < to_check.size(); idx++)
-              {
-                LegionRuntime::Arrays::Rect<3> other_rect = 
-                  to_check[idx].get_rect<3>();
-                if (!our_rect.dominates(other_rect))
-                  return false;
-              }
-              break;
-            }
-          default:
-            assert(false); // unhandled number of dimensions
-        }
+        if (!instance_domain->dominates(index_node))
+          return false;
       }
       return true;
     }
@@ -999,7 +924,7 @@ namespace Legion {
                                      AddressSpaceID owner_space, 
                                      AddressSpaceID local_space,
                                      MemoryManager *mem, PhysicalInstance inst,
-                                     const Domain &instance_domain, bool own,
+                                     IndexSpaceNode *instance_domain, bool own,
                                      RegionNode *node, LayoutDescription *desc, 
                                      const PointerConstraint &constraint,
                                      bool register_now, ApEvent u_event,
@@ -1033,7 +958,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InstanceManager::InstanceManager(const InstanceManager &rhs)
       : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, 0, NULL,
-                    PhysicalInstance::NO_INST, Domain::NO_DOMAIN, false, false),
+                    PhysicalInstance::NO_INST, NULL, false, false),
         use_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -1103,8 +1028,7 @@ namespace Legion {
       assert(layout != NULL);
 #endif
       size_t field_sizes = layout->get_total_field_size();
-      size_t volume = 
-        region_node->row_source->get_domain_blocking().get_volume();
+      size_t volume = instance_domain->get_volume(); 
       return (field_sizes * volume);
     }
 
@@ -1210,17 +1134,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceManager::set_descriptor(FieldDataDescriptor &desc,
-                                         unsigned fid_idx) const
-    //--------------------------------------------------------------------------
-    {
-      // Fill in the information about our instance
-      desc.inst = instance;
-      // Ask the layout to fill in the information about field offset and size
-      layout->set_descriptor(desc, fid_idx);
-    }
-
-    //--------------------------------------------------------------------------
     void InstanceManager::send_manager(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -1234,7 +1147,7 @@ namespace Legion {
         rez.serialize(owner_space);
         rez.serialize(memory_manager->memory);
         rez.serialize(instance);
-        rez.serialize(instance_domain);
+        rez.serialize(instance_domain->handle);
         rez.serialize(region_node->handle);
         rez.serialize(use_event);
         layout->pack_layout_description(rez, target);
@@ -1259,12 +1172,13 @@ namespace Legion {
       derez.deserialize(mem);
       PhysicalInstance inst;
       derez.deserialize(inst);
-      Domain inst_domain;
-      derez.deserialize(inst_domain);
+      IndexSpace inst_handle;
+      derez.deserialize(inst_handle);
       LogicalRegion handle;
       derez.deserialize(handle);
       ApEvent use_event;
       derez.deserialize(use_event);
+      IndexSpaceNode *inst_domain = runtime->forest->get_node(inst_handle);
       RegionNode *target_node = runtime->forest->get_node(handle);
       LayoutDescription *layout = 
         LayoutDescription::handle_unpack_layout_description(derez, source, 
@@ -1313,7 +1227,7 @@ namespace Legion {
                                        MemoryManager *mem,PhysicalInstance inst,
                                        LayoutDescription *desc, 
                                        const PointerConstraint &constraint,
-                                       const Domain &inst_domain, bool own_dom,
+                                       IndexSpaceNode *inst_domain,bool own_dom,
                                        RegionNode *node, ReductionOpID red, 
                                        const ReductionOp *o, bool register_now)
       : PhysicalManager(ctx, mem, desc, constraint, did, owner_space, 
@@ -1360,7 +1274,7 @@ namespace Legion {
         rez.serialize(owner_space);
         rez.serialize(memory_manager->memory);
         rez.serialize(instance);
-        rez.serialize(instance_domain);
+        rez.serialize(instance_domain->handle);
         rez.serialize(redop);
         rez.serialize(region_node->handle);
         rez.serialize<bool>(is_foldable());
@@ -1388,8 +1302,8 @@ namespace Legion {
       derez.deserialize(mem);
       PhysicalInstance inst;
       derez.deserialize(inst);
-      Domain inst_dom;
-      derez.deserialize(inst_dom);
+      IndexSpace inst_handle;
+      derez.deserialize(inst_handle);
       ReductionOpID redop;
       derez.deserialize(redop);
       LogicalRegion handle;
@@ -1400,6 +1314,7 @@ namespace Legion {
       derez.deserialize(ptr_space);
       ApEvent use_event;
       derez.deserialize(use_event);
+      IndexSpaceNode *inst_dom = runtime->forest->get_node(inst_handle);
       RegionNode *target_node = runtime->forest->get_node(handle);
       LayoutDescription *layout = 
         LayoutDescription::handle_unpack_layout_description(derez, source, 
@@ -1602,7 +1517,7 @@ namespace Legion {
                                                PhysicalInstance inst, 
                                                LayoutDescription *desc,
                                                const PointerConstraint &cons,
-                                               const Domain &d, bool own_dom,
+                                               IndexSpaceNode *d, bool own_dom,
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o, 
@@ -1613,6 +1528,9 @@ namespace Legion {
                          red, o, register_now), ptr_space(dom)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(dom.is_id == 0); // shouldn't have a sparsity map for dom
+#endif
       if (!is_owner())
       {
         // Register it with the memory manager, the memory manager
@@ -1629,7 +1547,7 @@ namespace Legion {
     ListReductionManager::ListReductionManager(const ListReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
-                         Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
+                         NULL, false, NULL, 0, NULL, false),
         ptr_space(Domain::NO_DOMAIN)
     //--------------------------------------------------------------------------
     {
@@ -1641,8 +1559,6 @@ namespace Legion {
     ListReductionManager::~ListReductionManager(void)
     //--------------------------------------------------------------------------
     {
-      // Free up our pointer space
-      ptr_space.get_index_space().destroy();
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -1685,16 +1601,7 @@ namespace Legion {
     size_t ListReductionManager::get_instance_size(void) const
     //--------------------------------------------------------------------------
     {
-      size_t result = op->sizeof_rhs;
-      if (ptr_space.get_dim() == 0)
-      {
-        const Realm::ElementMask &mask = 
-          ptr_space.get_index_space().get_valid_mask();
-        result *= mask.get_num_elmts();
-      }
-      else
-        result *= ptr_space.get_volume();
-      return result;
+      return ptr_space.get_volume();
     }
     
     //--------------------------------------------------------------------------
@@ -1759,7 +1666,7 @@ namespace Legion {
                                                PhysicalInstance inst, 
                                                LayoutDescription *desc,
                                                const PointerConstraint &cons,
-                                               const Domain &d, bool own_dom,
+                                               IndexSpaceNode *d, bool own_dom,
                                                RegionNode *node,
                                                ReductionOpID red,
                                                const ReductionOp *o,
@@ -1786,7 +1693,7 @@ namespace Legion {
     FoldReductionManager::FoldReductionManager(const FoldReductionManager &rhs)
       : ReductionManager(NULL, 0, 0, 0, NULL,
                          PhysicalInstance::NO_INST, NULL,rhs.pointer_constraint,
-                         Domain::NO_DOMAIN, false, NULL, 0, NULL, false),
+                         NULL, false, NULL, 0, NULL, false),
         use_event(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -1847,17 +1754,10 @@ namespace Legion {
     size_t FoldReductionManager::get_instance_size(void) const
     //--------------------------------------------------------------------------
     {
-      size_t result = op->sizeof_rhs;
-      const Domain &d = region_node->row_source->get_domain_blocking();
-      if (d.get_dim() == 0)
-      {
-        const Realm::ElementMask &mask = 
-          d.get_index_space().get_valid_mask();
-        result *= mask.get_num_elmts();
-      }
-      else
-        result *= d.get_volume();
-      return result;
+      unsigned field_count = FieldMask::pop_count(layout->allocated_fields);
+      size_t field_size = op->sizeof_rhs;
+      size_t volume = instance_domain->get_volume();
+      return (field_count * field_size * volume);
     }
     
     //--------------------------------------------------------------------------
@@ -1920,7 +1820,7 @@ namespace Legion {
                                    DistributedID did,AddressSpaceID local_space)
       : PhysicalManager(ctx, NULL/*memory*/, desc, constraint, did, local_space,
                         local_space, NULL/*region*/, PhysicalInstance::NO_INST,
-                        Domain::NO_DOMAIN, false/*own domain*/, true/*reg now*/)
+                        NULL, false/*own domain*/, true/*reg now*/)
     //--------------------------------------------------------------------------
     {
     }
@@ -1928,7 +1828,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualManager::VirtualManager(const VirtualManager &rhs)
       : PhysicalManager(NULL, NULL, NULL, rhs.pointer_constraint, 0, 0, 0,
-               NULL, PhysicalInstance::NO_INST, Domain::NO_DOMAIN, false, false)
+                        NULL, PhysicalInstance::NO_INST, NULL, false, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2038,7 +1938,7 @@ namespace Legion {
       size_t total_field_bytes = 0;
       for (unsigned idx = 0; idx < field_sizes.size(); idx++)
         total_field_bytes += field_sizes[idx].second;
-      return (total_field_bytes * instance_domain.get_volume());
+      return (total_field_bytes * instance_domain->get_volume());
     }
 
     //--------------------------------------------------------------------------
@@ -2058,12 +1958,12 @@ namespace Legion {
       // If there are no fields then we are done
 #ifdef NEW_INSTANCE_CREATION
       PhysicalInstance instance = PhysicalInstance::NO_INST;
-      ApEvent ready = forest->create_instance(instance_domain, 
+      ApEvent ready = instance_domain->create_instance( 
                   memory_manager->memory, field_sizes, instance, constraints);
 #else
-      PhysicalInstance instance = forest->create_instance(instance_domain,
+      PhysicalInstance instance = instance_domain->create_instance(
                                        memory_manager->memory, sizes_only, 
-                                       block_size, redop_id, creator_id);
+                                       block_size, creator_id);
       ApEvent ready = ApEvent::NO_AP_EVENT;
 #endif
       // If we couldn't make it then we are done
@@ -2148,11 +2048,14 @@ namespace Legion {
                 fill_fields[idx] = field_sizes[idx].first;
               layout->compute_copy_offsets(fill_fields, instance, dsts);
             }
-            Realm::ProfilingRequestSet requests;
-            if (forest->runtime->profiler != NULL)
-              forest->runtime->profiler->add_fill_request(requests, creator_id);
-            ApEvent filled_and_ready(instance_domain.fill(dsts, requests,
-                                 fill_buffer, reduction_op->sizeof_rhs, ready));
+            ApEvent filled_and_ready =
+              instance_domain->issue_fill(NULL/*op*/, dsts, fill_buffer,
+                                          reduction_op->sizeof_rhs, ready,
+                                          PredEvent::NO_PRED_EVENT
+#ifdef LEGION_SPY
+                                          , 0/*fill uid*/
+#endif
+                                          );
             // We can free the buffer after we've issued the fill
             free(fill_buffer);
             result = legion_new<FoldReductionManager>(forest, did, local_space,
@@ -2200,13 +2103,11 @@ namespace Legion {
       // an empty instance with its ancestor being the root of the region
       // tree so it can satisfy all empty regions in this region tree safely
       std::vector<RegionNode*> non_empty_regions;
-      std::vector<const Domain*> non_empty_domains;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         RegionNode *next = forest->get_node(regions[idx]);
-        const Domain &next_domain = next->get_domain_blocking();
         // Check for empty
-        size_t volume = next_domain.get_volume();
+        size_t volume = next->row_source->get_volume();
         if (volume == 0)
         {
           // Do something special if we know we aren't going to have
@@ -2217,7 +2118,6 @@ namespace Legion {
             // in order to be sound for other parts of the analysis, we need
             // the ancestor to be the root of the region tree so that this
             // instance can be safely used for any empty region in this tree.
-            instance_domain = next_domain;
             while (next->parent != NULL)
               next = next->parent->parent;
             ancestor = next;
@@ -2226,7 +2126,6 @@ namespace Legion {
           continue;
         }
         non_empty_regions.push_back(next);
-        non_empty_domains.push_back(&next_domain);
       }
       // At this point we have at least one non-empty region
 #ifdef DEBUG_LEGION
@@ -2237,80 +2136,26 @@ namespace Legion {
       {
         // Compute an union of the all the index spaces for the basis
         // and the common ancestor of all regions
-        const Domain *first = non_empty_domains[0];
-        switch (first->get_dim())
+        unsigned index = 0;
+        std::vector<IndexSpace> union_spaces(non_empty_regions.size());
+        for (std::vector<RegionNode*>::const_iterator it = 
+              non_empty_regions.begin(); it != 
+              non_empty_regions.end(); it++, index++)
         {
-          case 0:
-            {
-              Realm::ElementMask result = 
-                first->get_index_space().get_valid_mask();
-              for (unsigned idx = 1; idx < non_empty_regions.size(); idx++)
-              {
-                RegionNode *next = non_empty_regions[idx];
-                const Domain *next_domain = non_empty_domains[idx];
-                result |= next_domain->get_index_space().get_valid_mask();
-                // Find the common ancestor
-                ancestor = find_common_ancestor(ancestor, next);
-              }
-              instance_domain = Domain(
-                  Realm::IndexSpace::create_index_space(result));
-              own_domain = true;
-              break;
-            }
-          case 1:
-            {
-              LegionRuntime::Arrays::Rect<1> result = first->get_rect<1>();
-              for (unsigned idx = 1; idx < non_empty_regions.size(); idx++)
-              {
-                RegionNode *next = non_empty_regions[idx];
-                const Domain *next_domain = non_empty_domains[idx];
-                LegionRuntime::Arrays::Rect<1> next_rect = 
-                  next_domain->get_rect<1>();
-                result = result.convex_hull(next_rect);
-                // Find the common ancesstor
-                ancestor = find_common_ancestor(ancestor, next); 
-              }
-              instance_domain = Domain::from_rect<1>(result);
-              break;
-            }
-          case 2:
-            {
-              LegionRuntime::Arrays::Rect<2> result = first->get_rect<2>();
-              for (unsigned idx = 1; idx < non_empty_regions.size(); idx++)
-              {
-                RegionNode *next = non_empty_regions[idx];
-                const Domain *next_domain = non_empty_domains[idx];
-                LegionRuntime::Arrays::Rect<2> next_rect = 
-                  next_domain->get_rect<2>();
-                result = result.convex_hull(next_rect);
-                // Find the common ancesstor
-                ancestor = find_common_ancestor(ancestor, next); 
-              }
-              instance_domain = Domain::from_rect<2>(result);
-              break;
-            }
-          case 3:
-            {
-              LegionRuntime::Arrays::Rect<3> result = first->get_rect<3>();
-              for (unsigned idx = 1; idx < non_empty_regions.size(); idx++)
-              {
-                RegionNode *next = non_empty_regions[idx];
-                const Domain *next_domain = non_empty_domains[idx]; 
-                LegionRuntime::Arrays::Rect<3> next_rect = 
-                  next_domain->get_rect<3>();
-                result = result.convex_hull(next_rect);
-                // Find the common ancesstor
-                ancestor = find_common_ancestor(ancestor, next); 
-              }
-              instance_domain = Domain::from_rect<3>(result);
-              break;
-            }
-          default:
-            assert(false); // unsupported number of dimensions
+          union_spaces[index++] = (*it)->row_source->handle;
+          // Also find the common ancestor
+          if (index > 0)
+            ancestor = find_common_ancestor(ancestor, *it);
         }
+        IndexSpace union_space(forest->runtime->get_unique_index_space_id(),
+                               ancestor->handle.index_space.get_tree_id(),
+                               ancestor->handle.get_type_tag());
+        forest->create_union_space(union_space, NULL/*task op*/, union_spaces);
+        instance_domain = forest->get_node(union_space);
+        own_domain = true;
       }
       else
-        instance_domain = *(non_empty_domains[0]);
+        instance_domain = non_empty_regions[0]->row_source;
     }
 
     //--------------------------------------------------------------------------
@@ -2410,11 +2255,7 @@ namespace Legion {
 #ifndef NEW_INSTANCE_CREATION
             const std::vector<DimensionKind> &ordering = 
                                       constraints.ordering_constraint.ordering;
-            size_t max_block_size = instance_domain.get_volume();
-            // I hate unstructured index spaces
-            if (instance_domain.get_dim() == 0)
-              max_block_size = instance_domain.get_index_space().
-                                              get_valid_mask().get_num_elmts();
+            size_t max_block_size = instance_domain->get_volume();
             // See if we are making an AOS or SOA instance
             if (!ordering.empty())
             {

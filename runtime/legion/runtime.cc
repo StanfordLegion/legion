@@ -9051,6 +9051,54 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace Runtime::union_index_spaces(Context ctx,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create index space!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      return ctx->union_index_spaces(forest, spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::intersect_index_spaces(Context ctx,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context create index space!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      return ctx->intersect_index_spaces(forest, spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::subtract_index_spaces(Context ctx,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context subtract index space!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      return ctx->subtract_index_spaces(forest, left, right);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::destroy_index_space(Context ctx, IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -9542,6 +9590,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool Runtime::has_index_subspace(Context ctx, IndexPartition p,
+                                     const void *realm_color, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      bool result = has_index_subspace(p, realm_color, type_tag); 
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::has_index_subspace(IndexPartition p,
+                                     const void *realm_color, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      return forest->has_index_subspace(p, realm_color, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::get_index_space_domain(Context ctx, IndexSpace handle,
                                          void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
@@ -9617,6 +9686,26 @@ namespace Legion {
       IndexPartNode *part = forest->get_node(p);
       const IndexSpace color_space = part->color_space->handle;
       forest->get_index_space_domain(color_space, realm_is, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_partition_color_space_name(Context ctx,
+                                                             IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx != DUMMY_CONTEXT)
+        ctx->begin_runtime_call();
+      IndexSpace result = get_index_partition_color_space_name(p);
+      if (ctx != DUMMY_CONTEXT)
+        ctx->end_runtime_call();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::get_index_partition_color_space_name(IndexPartition p)
+    //--------------------------------------------------------------------------
+    {
+      return forest->get_index_partition_color_space(p);
     }
 
     //--------------------------------------------------------------------------
