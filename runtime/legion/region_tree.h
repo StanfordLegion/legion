@@ -846,6 +846,13 @@ namespace Legion {
                                        size_t blocking_factor, 
                                        UniqueID op_id) = 0;
 #endif
+      virtual PhysicalInstance create_file_instance(const char *file_name,
+                                   const std::vector<size_t> &field_sizes,
+                                   legion_lowlevel_file_mode_t file_mode) = 0;
+      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<const char*> &field_files,
+                                   bool read_only) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -969,6 +976,13 @@ namespace Legion {
                                        const std::vector<size_t> &field_sizes,
                                        size_t blocking_factor, UniqueID op_id);
 #endif
+      virtual PhysicalInstance create_file_instance(const char *file_name,
+                                   const std::vector<size_t> &field_sizes,
+                                   legion_lowlevel_file_mode_t file_mode);
+      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<const char*> &field_files,
+                                   bool read_only);
     protected:
       void compute_linearization_metadata(void);
     protected:

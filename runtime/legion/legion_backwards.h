@@ -752,14 +752,6 @@ namespace Legion {
         void *is_iterator, *rect_iterator;
         bool is_valid, rect_valid;
       };
-    public:
-      RegionInstance create_hdf5_instance(const char *file_name,
-                                          const std::vector<size_t> &field_sizes,
-                                          const std::vector<const char*> &field_files,
-                                          bool read_only) const;
-      RegionInstance create_file_instance(const char *file_name,
-                                          const std::vector<size_t> &field_sizes,
-                                          legion_lowlevel_file_mode_t file_mode) const;
     protected:
     public:
       IDType is_id;

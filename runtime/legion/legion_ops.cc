@@ -13030,7 +13030,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance AttachOp::create_instance(const Domain &dom,
+    PhysicalInstance AttachOp::create_instance(IndexSpaceNode *node,
              const std::vector<size_t> &sizes, LayoutConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
@@ -13039,7 +13039,7 @@ namespace Legion {
       {
         case EXTERNAL_POSIX_FILE:
           {
-            result = dom.create_file_instance(file_name, sizes, file_mode);
+            result = node->create_file_instance(file_name, sizes, file_mode);
             constraints.specialized_constraint = 
               SpecializedConstraint(GENERIC_FILE_SPECIALIZE);           
             break;
@@ -13055,8 +13055,8 @@ namespace Legion {
               field_files[idx] = it->second;
             }
             // Now ask the low-level runtime to create the instance
-            result = dom.create_hdf5_instance(file_name, sizes, field_files, 
-                                      (file_mode == LEGION_FILE_READ_ONLY));
+            result = node->create_hdf5_instance(file_name, sizes, field_files,
+                                        (file_mode == LEGION_FILE_READ_ONLY));
             constraints.specialized_constraint = 
               SpecializedConstraint(HDF5_FILE_SPECIALIZE);
             break;

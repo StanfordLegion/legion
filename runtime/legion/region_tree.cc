@@ -7868,7 +7868,6 @@ namespace Legion {
       node->free_fields(fields, source);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     InstanceManager* FieldSpaceNode::create_file_instance(
                                          const std::set<FieldID> &create_fields, 
@@ -7887,9 +7886,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < field_sizes.size(); idx++)
         only_sizes[idx] = field_sizes[idx].second;
       LayoutConstraintSet constraints;
-      const Domain &dom = node->get_domain_blocking();
       PhysicalInstance inst = 
-        attach_op->create_instance(dom, only_sizes, constraints);
+        attach_op->create_instance(node->row_source, only_sizes, constraints);
       // Pull out the pointer constraint so that we can use it separately
       // and not have it included in the layout constraints
       PointerConstraint pointer_constraint = constraints.pointer_constraint;
@@ -7914,8 +7912,9 @@ namespace Legion {
       InstanceManager *result = legion_new<InstanceManager>(context, did, 
                                          context->runtime->address_space,
                                          context->runtime->address_space,
-                                         memory, inst, dom, false/*own*/,
-                                         node, layout, pointer_constraint,
+                                         memory, inst, node->row_source, 
+                                         false/*own*/, node, layout, 
+                                         pointer_constraint,
                                          true/*register now*/, 
                                          ApEvent::NO_AP_EVENT,
                                          Reservation::create_reservation());
@@ -7924,7 +7923,6 @@ namespace Legion {
 #endif
       return result;
     }
-#endif
 
     //--------------------------------------------------------------------------
     LayoutDescription* FieldSpaceNode::find_layout_description(

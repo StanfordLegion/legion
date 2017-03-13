@@ -1483,13 +1483,13 @@ namespace Legion {
       // Have to wait for the index space to be ready if necessary
       if (!index_space_ready.has_triggered())
         index_space_ready.wait();
-      Realm::ProfilingRequestSet reqs;
+      Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
       {
-        context->runtime->profiler->add_inst_request(reqs, op_id);
+        context->runtime->profiler->add_inst_request(requests, op_id);
         PhysicalInstance result = 
           PhysicalInstance::create_instance(target, realm_index_space,
-                                            field_sizes, reqs);
+                                            field_sizes, requests);
         // If the result exists tell the profiler about it in case
         // it never gets deleted and we never see the profiling feedback
         if (result.exists())
@@ -1503,7 +1503,44 @@ namespace Legion {
       }
       else
         return PhysicalInstance::create_instance(target, realm_index_space,
-                                                 field_sizes, reqs);
+                                                 field_sizes, requests);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_file_instance(
+                                         const char *file_name,
+                                         const std::vector<size_t> &field_sizes,
+                                         legion_lowlevel_file_mode_t file_mode)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
+      // Have to wait for the index space to be ready if necessary
+      if (!index_space_ready.has_triggered())
+        index_space_ready.wait();
+      // No profiling for these kinds of instances currently
+      Realm::ProfilingRequestSet requests;
+      return PhysicalInstance::create_file_instance(file_name, 
+          realm_index_space, field_sizes, file_mode, requests);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_hdf5_instance(
+                                    const char *file_name,
+                                    const std::vector<size_t> &field_sizes,
+                                    const std::vector<const char*> &field_files,
+                                    bool read_only)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
+      // Have to wait for the index space to be ready if necessary
+      if (!index_space_ready.has_triggered())
+        index_space_ready.wait();
+      // No profiling for these kinds of instances currently
+      Realm::ProfilingRequestSet requests;
+      return PhysicalInstance::create_hdf5_instance(file_name, 
+          realm_index_space, field_sizes, field_files, read_only, requests);
     }
 
     /////////////////////////////////////////////////////////////
