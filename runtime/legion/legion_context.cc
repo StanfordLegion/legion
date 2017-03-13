@@ -2763,12 +2763,11 @@ namespace Legion {
       return pid;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     Color InnerContext::create_cross_product_partition(RegionTreeForest *forest,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
-                                  std::map<DomainPoint,IndexPartition> &handles,
+                                   std::map<IndexSpace,IndexPartition> &handles,
                                                       PartitionKind kind,
                                                       Color color)
     //--------------------------------------------------------------------------
@@ -2794,15 +2793,13 @@ namespace Legion {
         runtime->get_available_pending_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
-      std::map<DomainPoint,IndexPartition> local;
-      forest->create_pending_cross_product(handle1, handle2, local, handles,
-                                           kind, partition_color,
-                                           term_event);
-      part_op->initialize_cross_product(this, handle1, handle2, local);
+      forest->create_pending_cross_product(handle1, handle2, handles, kind, 
+                                           partition_color, term_event);
+      part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return partition_color;
     }
-#endif
 
     //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_field(

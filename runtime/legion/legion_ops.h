@@ -2055,20 +2055,19 @@ namespace Legion {
       };
       class CrossProductThunk : public PendingPartitionThunk {
       public:
-        CrossProductThunk(IndexPartition b, IndexPartition s,
-                          std::map<LegionColor,IndexPartition> &h)
-          : base(b), source(s), handles(h) { }
+        CrossProductThunk(IndexPartition b, IndexPartition s, LegionColor c)
+          : base(b), source(s), part_color(c) { }
         virtual ~CrossProductThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
-        { return forest->create_cross_product_partitions(base, source, 
-                                                         handles); }
+        { return forest->create_cross_product_partitions(op, base, source, 
+                                                         part_color); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition base;
         IndexPartition source;
-        std::map<LegionColor,IndexPartition> handles;
+        LegionColor part_color;
       };
       class ComputePendingSpace : public PendingPartitionThunk {
       public:
@@ -2129,9 +2128,8 @@ namespace Legion {
                                            IndexPartition pid, 
                                            IndexPartition handle1,
                                            IndexPartition handle2);
-      void initialize_cross_product(TaskContext *ctx,
-                                    IndexPartition base, IndexPartition source,
-                                std::map<LegionColor,IndexPartition> &handles);
+      void initialize_cross_product(TaskContext *ctx, IndexPartition base, 
+                                    IndexPartition source, LegionColor color);
       void initialize_index_space_union(TaskContext *ctx, IndexSpace target, 
                                         const std::vector<IndexSpace> &handles);
       void initialize_index_space_union(TaskContext *ctx, IndexSpace target, 

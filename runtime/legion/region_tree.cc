@@ -290,27 +290,40 @@ namespace Legion {
       return new_part->create_by_difference(op, node1, node2);
     }
 
-#if 0 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_cross_product_partitions(
-                                                          IndexPartition base,
-                                                          IndexPartition source,
-                                  std::map<LegionColor,IndexPartition> &handles)
+    ApEvent RegionTreeForest::create_cross_product_partitions(Operation *op,
+                                                         IndexPartition base,
+                                                         IndexPartition source,
+                                                         LegionColor part_color)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base_node = get_node(base);
       IndexPartNode *source_node = get_node(source);
       std::set<ApEvent> ready_events;
-      // Iterate over all our sub-regions and fill in the intersections
-      for (std::map<LegionColor,IndexPartition>::const_iterator it = 
-            handles.begin(); it != handles.end(); it++)
+      if (base_node->total_children == base_node->max_linearized_color)
       {
-        ColorPoint child_color(it->first);
-        IndexSpaceNode *child_node = base_node->get_child(child_color);
-        IndexPartNode *part_node = get_node(it->second);
-        ApEvent ready = part_node->create_by_operation(child_node, source_node,
-                                        Realm::IndexSpace::ISO_INTERSECT);
-        ready_events.insert(ready);
+        for (LegionColor color = 0; color < base_node->total_children; color++)
+        {
+          IndexSpaceNode *child_node = base_node->get_child(color);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = child_node->create_by_intersection(op, part_node, 
+                                                             source_node); 
+          ready_events.insert(ready);
+        }
+      }
+      else
+      {
+        for (LegionColor color = 0; 
+              color < base_node->max_linearized_color; color++)
+        {
+          if (!base_node->color_space->contains_color(color))
+            continue;
+          IndexSpaceNode *child_node = base_node->get_child(color);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = child_node->create_by_intersection(op, part_node, 
+                                                             source_node); 
+          ready_events.insert(ready);
+        }
       }
       return Runtime::merge_events(ready_events);
     }
@@ -318,40 +331,101 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_pending_cross_product(IndexPartition handle1,
                                                         IndexPartition handle2,
-                            std::map<DomainPoint,IndexPartition> &our_handles,
-                            std::map<DomainPoint,IndexPartition> &user_handles,
+                             std::map<IndexSpace,IndexPartition> &user_handles,
                                                         PartitionKind kind,
-                                                        ColorPoint &part_color,
-                                                        ApEvent handle_ready,
+                                                        LegionColor &part_color,
                                                         ApEvent domain_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base = get_node(handle1);
       IndexPartNode *source = get_node(handle2);
-      // Iterate over all our sub-regions and generate partitions
-      for (Domain::DomainPointIterator itr(base->color_space); itr; itr++)
+      // If we're supposed to compute this, but we already know that
+      // the source is disjoint then we can also conlclude the the 
+      // resulting partitions will also be disjoint under intersection
+      if ((kind == COMPUTE_KIND) && source->is_disjoint(true/*from app*/))
+        kind = DISJOINT_KIND;
+      // If we haven't been given a color yet, we need to find
+      // one that will be valid for all the child partitions
+      if (part_color == INVALID_COLOR)
       {
-        ColorPoint child_color(itr.p);
-        IndexSpaceNode *child_node = base->get_child(child_color); 
-        ColorPoint partition_color = part_color;
-        if (!partition_color.is_valid())
-          partition_color = ColorPoint(DomainPoint::from_point<1>(
-              LegionRuntime::Arrays::Point<1>(child_node->generate_color())));
-        IndexPartition pid(runtime->get_unique_index_partition_id(),
-                           handle1.get_tree_id(), handle1.get_type_tag());
-        create_pending_partition(pid, child_node->handle,
-                                 source->color_space, partition_color,
-                                 kind, handle_ready, domain_ready);
-        // Save the handles for ourselves 
-        our_handles[itr.p] = pid;
-        // If the user requested the handle for this point return it
-        std::map<DomainPoint,IndexPartition>::iterator finder = 
-          user_handles.find(itr.p);
-        if (finder != user_handles.end())
-          finder->second = pid;
+        std::set<LegionColor> existing_colors;
+        if (base->total_children == base->max_linearized_color)
+        {
+          for (LegionColor color = 0; color < base->total_children; color++)
+          {
+            IndexSpaceNode *child_node = base->get_child(color);
+            std::vector<LegionColor> colors;
+            child_node->get_colors(colors);
+            if (!colors.empty())
+              existing_colors.insert(colors.begin(), colors.end());
+          }
+        }
+        else
+        {
+          for (LegionColor color = 0; 
+                color < base->max_linearized_color; color++)
+          {
+            if (!base->color_space->contains_color(color))
+              continue;
+            IndexSpaceNode *child_node = base->get_child(color);
+            std::vector<LegionColor> colors;
+            child_node->get_colors(colors);
+            if (!colors.empty())
+              existing_colors.insert(colors.begin(), colors.end());
+          }
+        }
+        // Now we have the existing colors, so just do something dumb
+        // like add our current runtime ID to the last color
+        const unsigned offset = (runtime->address_space == 0) ?
+                      runtime->runtime_stride : runtime->address_space;
+        if (!existing_colors.empty())
+        {
+          LegionColor last = *(existing_colors.rbegin());
+          part_color = last + offset;
+        }
+        else
+          part_color = offset;
+      }
+      // Iterate over all our sub-regions and generate partitions
+      if (base->total_children == base->max_linearized_color)
+      {
+        for (LegionColor color = 0; color < base->total_children; color++)
+        {
+          IndexSpaceNode *child_node = base->get_child(color);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag()); 
+          create_pending_partition(pid, child_node->handle, 
+                                   source->color_space->handle, 
+                                   part_color, kind, domain_ready);
+          // If the user requested the handle for this point return it
+          std::map<IndexSpace,IndexPartition>::iterator finder = 
+            user_handles.find(child_node->handle);
+          if (finder != user_handles.end())
+            finder->second = pid;
+        }
+      }
+      else
+      {
+        for (LegionColor color = 0; color < base->max_linearized_color; color++)
+        {
+          if (!base->color_space->contains_color(color))
+            continue;
+          IndexSpaceNode *child_node = base->get_child(color);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag()); 
+          create_pending_partition(pid, child_node->handle, 
+                                   source->color_space->handle,
+                                   part_color, kind, domain_ready);
+          // If the user requested the handle for this point return it
+          std::map<IndexSpace,IndexPartition>::iterator finder = 
+            user_handles.find(child_node->handle);
+          if (finder != user_handles.end())
+            finder->second = pid;
+        }
       }
     }
 
+#if 0 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_field(RegionTreeContext ctx,
                                                   Operation *op, unsigned index,
@@ -4015,27 +4089,7 @@ namespace Legion {
       }
       return depth;
     }
-#endif
 
-    //--------------------------------------------------------------------------
-    template<typename T>
-    Color RegionTreeForest::generate_unique_color(
-                                          const std::map<Color,T> &current_map)
-    //--------------------------------------------------------------------------
-    {
-      if (current_map.empty())
-        return runtime->get_start_color();
-      unsigned stride = runtime->get_color_modulus();
-      typename std::map<Color,T>::const_reverse_iterator rlast = 
-        current_map.rbegin();
-      Color result = rlast->first + stride;
-#ifdef DEBUG_LEGION
-      assert(current_map.find(result) == current_map.end());
-#endif
-      return result;
-    }
-
-#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void RegionTreeForest::dump_logical_state(LogicalRegion region,
                                               ContextID ctx)
@@ -5176,34 +5230,6 @@ namespace Legion {
       runtime->send_index_space_destruction(handle, target);
     }
 
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::destroy_node(AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // If we've already been destroyed then we are done
-      if (destroyed)
-        return;
-      std::set<RegionNode*> to_destroy;
-      {
-        AutoLock n_lock(node_lock);
-        if (!destroyed)
-        {
-          destroyed = true;
-          if (!creation_set.empty())
-          {
-            DestructionFunctor functor(handle, context->runtime);
-            creation_set.map(functor);
-          }
-          to_destroy = logical_nodes;
-        }
-      }
-      for (std::set<RegionNode*>::const_iterator it = to_destroy.begin();
-            it != to_destroy.end(); it++)
-      {
-        (*it)->destroy_node(source);
-      }
-    }
-
 #if 0
     //--------------------------------------------------------------------------
     ApEvent IndexSpaceNode::create_subspaces_by_field(
@@ -6101,35 +6127,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::destroy_node(AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // If we've already been destroyed then we are done
-      if (destroyed)
-        return;
-      std::set<PartitionNode*> to_destroy;
-      {
-        AutoLock n_lock(node_lock);
-        if (!destroyed)
-        {
-          destroyed = true;
-          if (!creation_set.empty())
-          {
-            DestructionFunctor functor(handle, context->runtime);
-            creation_set.map(functor);
-          }
-          to_destroy = logical_nodes;
-          
-        }
-      }
-      for (std::set<PartitionNode*>::const_iterator it = 
-            to_destroy.begin(); it != to_destroy.end(); it++)
-      {
-        (*it)->destroy_node(source);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void IndexPartNode::add_pending_child(const LegionColor child_color,
                                           ApUserEvent domain_ready)
     //--------------------------------------------------------------------------
@@ -6207,15 +6204,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_intersection(Operation *op,
                                                   IndexPartNode *left,
-                                                  IndexPartNode *right)
-    //--------------------------------------------------------------------------
-    {
-      return parent->create_by_intersection(op, this, left, right);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_by_intersection(Operation *op,
-                                                  IndexSpaceNode *left,
                                                   IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
@@ -14961,7 +14949,7 @@ namespace Legion {
           }
           else
           {
-            for (LegionColor c = 0; c < row_source->total_children; c++)
+            for (LegionColor c = 0; c < row_source->max_linearized_color; c++)
             {
               if (!row_source->color_space->contains_color(c))
                 continue;

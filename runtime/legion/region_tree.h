@@ -101,17 +101,16 @@ namespace Legion {
                                            IndexPartition pid,
                                            IndexPartition handle1,
                                            IndexPartition handle2);
-      ApEvent create_cross_product_partitions(IndexPartition base,
+      ApEvent create_cross_product_partitions(Operation *op,
+                                              IndexPartition base,
                                               IndexPartition source,
-                      std::map<LegionColor,IndexPartition> &handles);
+                                              LegionColor part_color);
     public: 
       void create_pending_cross_product(IndexPartition handle1,
                                         IndexPartition handle2,
-                  std::map<LegionColor,IndexPartition> &our_handles,
-                  std::map<LegionColor,IndexPartition> &user_handles,
+                  std::map<IndexSpace,IndexPartition> &user_handles,
                                            PartitionKind kind,
                                            LegionColor &part_color,
-                                           ApEvent handle_ready,
                                            ApEvent domain_ready);
       ApEvent create_partition_by_field(RegionTreeContext ctx,
                                         Operation *op, unsigned index,
@@ -523,11 +522,6 @@ namespace Legion {
       unsigned get_projection_depth(LogicalRegion result, LogicalRegion upper);
       unsigned get_projection_depth(LogicalRegion result, 
                                     LogicalPartition upper);
-#endif
-    public:
-      template<typename T>
-      Color generate_unique_color(const std::map<Color,T> &current_map);
-#ifdef DEBUG_LEGION
     public:
       // These are debugging methods and are never called from
       // actual code, therefore they never take locks
@@ -731,7 +725,6 @@ namespace Legion {
       void add_instance(RegionNode *inst);
       bool has_instance(RegionTreeID tid);
       void add_creation_source(AddressSpaceID source);
-      void destroy_node(AddressSpaceID source);
     public:
       ApEvent create_subspaces_by_field(
           const std::vector<FieldDataDescriptor> &field_data,
@@ -788,6 +781,7 @@ namespace Legion {
       virtual bool contains_point(const void *realm_point, 
                                   TypeTag type_tag) const = 0;
       virtual IndexSpaceAllocator* create_allocator(void) const = 0;
+      virtual void destroy_node(AddressSpaceID source) = 0;
     public:
       virtual LegionColor get_max_linearized_color(void) const = 0;
       virtual LegionColor linearize_color(const void *realm_color,
@@ -822,7 +816,7 @@ namespace Legion {
                                              IndexPartNode *right) = 0;
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
-                                             IndexSpaceNode *left,
+                                             // Left is implicit "this"
                                              IndexPartNode *right) = 0;
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,
@@ -911,6 +905,7 @@ namespace Legion {
       virtual bool contains_point(const void *realm_point, 
                                   TypeTag type_tag) const;
       virtual IndexSpaceAllocator* create_allocator(void) const;
+      virtual void destroy_node(AddressSpaceID source);
     public:
       virtual LegionColor get_max_linearized_color(void) const;
       virtual LegionColor linearize_color(const void *realm_color,
@@ -945,7 +940,7 @@ namespace Legion {
                                              IndexPartNode *right);
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
-                                             IndexSpaceNode *left,
+                                             // Left is implicit "this"
                                              IndexPartNode *right);
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,
@@ -1109,7 +1104,6 @@ namespace Legion {
       void add_instance(PartitionNode *inst);
       bool has_instance(RegionTreeID tid);
       void add_creation_source(AddressSpaceID source);
-      void destroy_node(AddressSpaceID source);
     public:
       void add_pending_child(const LegionColor child_color,
                             ApUserEvent domain_ready);
@@ -1123,8 +1117,6 @@ namespace Legion {
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_intersection(Operation *op,
                               IndexPartNode *left, IndexPartNode *right);
-      ApEvent create_by_intersection(Operation *op,
-                              IndexSpaceNode *left,IndexPartNode *right);
       ApEvent create_by_difference(Operation *op,
                               IndexPartNode *left, IndexPartNode *right);
     public:
@@ -1133,6 +1125,7 @@ namespace Legion {
       virtual bool intersects_with(IndexPartNode *other) = 0; 
       virtual bool dominates(IndexSpaceNode *other) = 0;
       virtual bool dominates(IndexPartNode *other) = 0;
+      virtual void destroy_node(AddressSpaceID source) = 0;
     public:
       static void handle_disjointness_test(IndexPartNode *parent,
                                            IndexSpaceNode *left,
@@ -1205,6 +1198,7 @@ namespace Legion {
       virtual bool intersects_with(IndexPartNode *other); 
       virtual bool dominates(IndexSpaceNode *other);
       virtual bool dominates(IndexPartNode *other);
+      virtual void destroy_node(AddressSpaceID source);
     public:
       ApEvent get_union_index_space(Realm::ZIndexSpace<DIM,T> &space);
     protected:

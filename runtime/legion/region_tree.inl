@@ -49,10 +49,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::~IndexSpaceNodeT(void)
     //--------------------------------------------------------------------------
-    {
-      for (typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-           iterator it = intersections.begin(); it != intersections.end(); it++)
-        it->second.destroy();
+    { 
     }
 
     //--------------------------------------------------------------------------
@@ -472,6 +469,41 @@ namespace Legion {
       if (!index_space_ready.has_triggered())
         index_space_ready.wait();
       return new IndexSpaceAllocator(Domain(realm_index_space));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
+      std::set<RegionNode*> to_destroy;
+      {
+        AutoLock n_lock(node_lock);
+        if (!destroyed)
+        {
+          destroyed = true;
+          if (!creation_set.empty())
+          {
+            DestructionFunctor functor(handle, context->runtime);
+            creation_set.map(functor);
+          }
+          to_destroy = logical_nodes;
+        }
+      }
+      for (std::set<RegionNode*>::const_iterator it = to_destroy.begin();
+            it != to_destroy.end(); it++)
+      {
+        (*it)->destroy_node(source);
+      }
+      if (get_owner_space() == context->runtime->address_space)
+        realm_index_space.destroy();
+      for (typename std::map<IndexTreeNode*,
+                             Realm::ZIndexSpace<DIM,T> >::iterator it =
+            intersections.begin(); it != intersections.end(); it++)
+        it->second.destroy();
     }
 
     //--------------------------------------------------------------------------
@@ -1072,7 +1104,7 @@ namespace Legion {
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(Operation *op,
                                                       IndexPartNode *partition,
-                                                      IndexSpaceNode *left,
+                                                      // Left is implicit "this"
                                                       IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
@@ -1112,19 +1144,15 @@ namespace Legion {
             preconditions.insert(right_child->index_space_ready);
         }
       }
-      IndexSpaceNodeT<DIM,T> *left_child = 
-        static_cast<IndexSpaceNodeT<DIM,T>*>(left);
-      Realm::ZIndexSpace<DIM,T> left_space;
-      left_child->get_realm_index_space(left_space);
-      if (!left_child->index_space_ready.has_triggered())
-        preconditions.insert(left_child->index_space_ready);
+      if (!index_space_ready.has_triggered())
+        preconditions.insert(index_space_ready);
       std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                         op, DEP_PART_INTERSECTIONS);
       ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_intersections(
-            left_space, rhs_spaces, subspaces, requests,
+            realm_index_space, rhs_spaces, subspaces, requests,
             Runtime::merge_events(preconditions)));
       // Now set the index spaces for the results
       subspace_index = 0;
@@ -1522,12 +1550,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexPartNodeT<DIM,T>::~IndexPartNodeT(void)
     //--------------------------------------------------------------------------
-    {
-      if (has_union_space && !partition_union_space.empty())
-        partition_union_space.destroy();
-      for (typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-           iterator it = intersections.begin(); it != intersections.end(); it++)
-        it->second.destroy();
+    { 
     }
 
     //--------------------------------------------------------------------------
@@ -1812,6 +1835,41 @@ namespace Legion {
               Runtime::merge_events(preconditions)));
       space = partition_union_space;
       return partition_union_ready;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source) 
+    //--------------------------------------------------------------------------
+    {
+      // If we've already been destroyed then we are done
+      if (destroyed)
+        return;
+      std::set<PartitionNode*> to_destroy;
+      {
+        AutoLock n_lock(node_lock);
+        if (!destroyed)
+        {
+          destroyed = true;
+          if (!creation_set.empty())
+          {
+            DestructionFunctor functor(handle, context->runtime);
+            creation_set.map(functor);
+          }
+          to_destroy = logical_nodes;
+          
+        }
+      }
+      for (std::set<PartitionNode*>::const_iterator it = 
+            to_destroy.begin(); it != to_destroy.end(); it++)
+      {
+        (*it)->destroy_node(source);
+      }
+      if (has_union_space && !partition_union_space.empty())
+        partition_union_space.destroy();
+      for (typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
+           iterator it = intersections.begin(); it != intersections.end(); it++)
+        it->second.destroy();
     }
 
   }; // namespace Internal

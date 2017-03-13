@@ -11009,14 +11009,14 @@ namespace Legion {
     void PendingPartitionOp::initialize_cross_product(TaskContext *ctx,
                                                       IndexPartition base,
                                                       IndexPartition source,
-                                  std::map<LegionColor,IndexPartition> &handles)
+                                                      LegionColor part_color)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new CrossProductThunk(base, source, handles);
+      thunk = new CrossProductThunk(base, source, part_color);
       if (Runtime::legion_spy_enabled)
         perform_logging();
     }

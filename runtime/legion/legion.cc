@@ -38,6 +38,7 @@ namespace Legion {
     const RtUserEvent RtUserEvent::NO_RT_USER_EVENT = RtUserEvent();
     const RtBarrier RtBarrier::NO_RT_BARRIER = RtBarrier();
     const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
+    const Domain Domain::NO_DOMAIN = Domain();
 
     /////////////////////////////////////////////////////////////
     // Mappable 
