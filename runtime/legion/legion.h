@@ -3078,6 +3078,53 @@ namespace Legion {
                                   Color color = AUTO_GENERATE_ID);
 
       /**
+       * Create association will construct an injective mapping between
+       * the points of two different index spaces. The mapping will 
+       * be constructed in a field of the domain logical region so that
+       * there is one entry for each point in the index space of the
+       * domain logical region. If the cardinality of domain index
+       * space is larger than the cardinality of the range index space
+       * then some entries in the field may not be written. It is the
+       * responsiblity of the user to have initialized the field with
+       * a "null" value to detect such cases. Users wishing to create
+       * a bi-directional mapping between index spaces can also use
+       * the versions of this method that take a logical region on
+       * the range as well.
+       * @param ctx the enclosing task context
+       * @param domain the region for the results and source index space
+       * @param domain_parent the region from which privileges are derived
+       * @param fid the field of domain in which to place the results
+       * @param range the index space to serve as the range of the mapping
+       */
+      void create_association(Context ctx,
+                              LogicalRegion domain,
+                              LogicalRegion domain_parent,
+                              FieldID domain_fid,
+                              IndexSpace range);
+      void create_bidirectional_association(Context ctx,
+                                            LogicalRegion domain,
+                                            LogicalRegion domain_parent,
+                                            FieldID domain_fid,
+                                            LogicalRegion range,
+                                            LogicalRegion range_parent,
+                                            FieldID range_fid);
+      // Template versions
+      template<int DIM1, typename COORD_T1, int DIM2, typename COORD_T2>
+      void create_association(Context ctx,
+                              LogicalRegionT<DIM1,COORD_T1> domain,
+                              LogicalRegionT<DIM1,COORD_T1> domain_parent,
+                              FieldID domain_fid, // type: ZPoint<DIM2,COORD_T2>
+                              IndexSpaceT<DIM2,COORD_T2> range);
+      template<int DIM1, typename COORD_T1, int DIM2, typename COORD_T2>
+      void create_bidirectional_association(Context ctx,
+                              LogicalRegionT<DIM1,COORD_T1> domain,
+                              LogicalRegionT<DIM1,COORD_T1> domain_parent,
+                              FieldID domain_fid, // type: ZPoint<DIM2,COORD_T2>
+                              LogicalRegionT<DIM2,COORD_T2> range,
+                              LogicalRegionT<DIM2,COORD_T2> range_parent,
+                              FieldID range_fid); // type: ZPoint<DIM1,COORD_T1>
+
+      /**
        * Create partition by restriction will make a new partition of a
        * logical region by computing new restriction bounds for each 
        * of the different subregions. All the sub-regions will have
