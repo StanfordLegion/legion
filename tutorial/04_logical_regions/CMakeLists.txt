@@ -24,3 +24,6 @@ endif()
 
 add_executable(logical_regions logical_regions.cc)
 target_link_libraries(logical_regions Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME logical_regions COMMAND $<TARGET_FILE:logical_regions>) 
+endif()

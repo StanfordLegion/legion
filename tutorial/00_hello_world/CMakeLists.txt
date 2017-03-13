@@ -24,3 +24,6 @@ endif()
 
 add_executable(hello_world hello_world.cc)
 target_link_libraries(hello_world Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME hello_world COMMAND $<TARGET_FILE:hello_world>) 
+endif()

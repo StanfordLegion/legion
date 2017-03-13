@@ -213,6 +213,10 @@ option(Legion_BUILD_APPS "Build Legion sample applications" OFF)
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
 option(Legion_BUILD_TUTORIAL "Build Legion tutorial" OFF)
 option(Legion_BUILD_TESTS "Build Legion tests" OFF)
+option(Legion_ENABLE_TESTING "Build and copy testing stuff" OFF)
+if(Legion_ENABLE_TESTING)
+  enable_testing()
+endif()
 if(Legion_BUILD_APPS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   # Make a namespaced alias so in-build examples can use it the same way as if
   # it were imported

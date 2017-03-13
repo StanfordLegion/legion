@@ -24,3 +24,6 @@ endif()
 
 add_executable(privileges privileges.cc)
 target_link_libraries(privileges Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME privileges COMMAND $<TARGET_FILE:privileges>) 
+endif()
