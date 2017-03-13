@@ -1383,6 +1383,7 @@ namespace Realm {
 
     // true if all points in other are in this rectangle
     bool contains(const ZRect<N,T>& other) const;
+    bool contains(const ZIndexSpace<N,T>& is) const;
 
     // true if there are any points in the intersection of the two rectangles
     bool overlaps(const ZRect<N,T>& other) const;
@@ -1485,7 +1486,6 @@ namespace Realm {
 
     // actual number of points in index space (may be less than volume of bounding box)
     size_t volume(void) const;
-
 
     // approximate versions of the above queries - the approximation is guaranteed to be a supserset,
     //  so if contains_approx returns false, contains would too
