@@ -2239,11 +2239,10 @@ class State(object):
             max_count = len(timepoints)
             statistics = self.calculate_statistics_data(sorted(itertools.chain(*utilizations)), max_count)
             stats_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_stats.tsv")
-            stats_tsv_file = open(stats_tsv_filename, "w")
-            stats_tsv_file.write("time\tcount\n")
-            for stat_point in statistics:
-                stats_tsv_file.write("%.2f\t%.2f\n" % stat_point)
-            stats_tsv_file.close()
+            with open(stats_tsv_filename, "w") as stats_tsv_file:
+                stats_tsv_file.write("time\tcount\n")
+                for stat_point in statistics:
+                    stats_tsv_file.write("%.2f\t%.2f\n" % stat_point)
 
     def emit_interactive_visualization(self, output_dirname, show_procs,
                                        show_channels, show_instances, force):
@@ -2277,8 +2276,6 @@ class State(object):
 
         data_tsv_header = "level\tstart\tend\tcolor\topacity\ttitle\tinitiation\n"
 
-        data_tsv_file = open(data_tsv_file_name, "w")
-        data_tsv_file.write(data_tsv_header)
         tsv_dir = os.path.join(output_dirname, "tsv")
         os.mkdir(tsv_dir)
         if show_procs:
@@ -2286,9 +2283,9 @@ class State(object):
                 if len(proc.tasks) > 0:
                     proc_name = slugify("Proc_" + str(hex(p)))
                     proc_tsv_file_name = os.path.join(tsv_dir, proc_name + ".tsv")
-                    proc_tsv_file = open(proc_tsv_file_name, "w")
-                    proc_tsv_file.write(data_tsv_header)
-                    proc_level = proc.emit_tsv(proc_tsv_file, 0)
+                    with open(proc_tsv_file_name, "w") as proc_tsv_file:
+                        proc_tsv_file.write(data_tsv_header)
+                        proc_level = proc.emit_tsv(proc_tsv_file, 0)
                     base_level += proc_level
                     processor_levels[proc] = {
                         'levels': proc_level-1, 
@@ -2302,9 +2299,9 @@ class State(object):
                 if len(chan.copies) > 0:
                     chan_name = slugify(str(c))
                     chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
-                    chan_tsv_file = open(chan_tsv_file_name, "w")
-                    chan_tsv_file.write(data_tsv_header)
-                    chan_level = chan.emit_tsv(chan_tsv_file, 0)
+                    with open(chan_tsv_file_name, "w") as chan_tsv_file:
+                        chan_tsv_file.write(data_tsv_header)
+                        chan_level = chan.emit_tsv(chan_tsv_file, 0)
                     base_level += chan_level
                     channel_levels[chan] = {
                         'levels': chan_level-1, 
@@ -2318,9 +2315,9 @@ class State(object):
                 if len(mem.instances) > 0:
                     mem_name = slugify("Mem_" + str(hex(m)))
                     mem_tsv_file_name = os.path.join(tsv_dir, mem_name + ".tsv")
-                    mem_tsv_file = open(mem_tsv_file_name, "w")
-                    mem_tsv_file.write(data_tsv_header)
-                    mem_level = mem.emit_tsv(mem_tsv_file, 0)
+                    with open(mem_tsv_file_name, "w") as mem_tsv_file: 
+                        mem_tsv_file.write(data_tsv_header)
+                        mem_level = mem.emit_tsv(mem_tsv_file, 0)
                     base_level += mem_level
                     memory_levels[mem] = {
                         'levels': mem_level-1, 
@@ -2329,7 +2326,6 @@ class State(object):
                     mem_list.append(mem)
 
                     last_time = max(last_time, mem.last_time)
-        data_tsv_file.close()
 
         ops_file = open(ops_file_name, "w")
         ops_file.write("op_id\toperation\n")
