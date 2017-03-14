@@ -2802,6 +2802,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InnerContext::create_association(LogicalRegion domain,
+                                          LogicalRegion domain_parent,
+                                          FieldID domain_fid,
+                                          IndexSpace range)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating association in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      DependentPartitionOp *part_op = 
+        runtime->get_available_dependent_partition_op(true);
+      part_op->initialize_by_association(this, domain, domain_parent, 
+                                         domain_fid, range);
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_association call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_restricted_partition(
                                               RegionTreeForest *forest,
                                               IndexSpace parent,
@@ -6897,6 +6933,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LeafContext::create_association(LogicalRegion domain,
+                                         LogicalRegion domain_parent,
+                                         FieldID domain_fid, IndexSpace range)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create association performed in leaf task "
+                     "%s (ID %lld)", get_task_name(),get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_restricted_partition(
                                                 RegionTreeForest *forest,
                                                 IndexSpace parent,
@@ -8247,6 +8297,16 @@ namespace Legion {
     {
       return enclosing->create_cross_product_partition(forest, handle1, handle2,
                                                        handles, kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::create_association(LogicalRegion domain,
+                                           LogicalRegion domain_parent,
+                                           FieldID domain_fid,
+                                           IndexSpace range)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->create_association(domain, domain_parent, domain_fid, range);
     }
 
     //--------------------------------------------------------------------------

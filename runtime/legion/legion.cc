@@ -3376,6 +3376,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::create_association(Context ctx,
+                                     LogicalRegion domain,
+                                     LogicalRegion domain_parent,
+                                     FieldID domain_fid,
+                                     IndexSpace range)
+    //--------------------------------------------------------------------------
+    {
+      runtime->create_association(ctx, domain, domain_parent, domain_fid,range);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::create_bidirectional_association(Context ctx,
+                                      LogicalRegion domain,
+                                      LogicalRegion domain_parent,
+                                      FieldID domain_fid,
+                                      LogicalRegion range,
+                                      LogicalRegion range_parent,
+                                      FieldID range_fid)
+    //--------------------------------------------------------------------------
+    {
+      // Realm guarantees that creating association in either direction
+      // will produce the same result, so we can do these separately
+      create_association(ctx, domain, domain_parent, domain_fid, 
+                         range.get_index_space());
+      create_association(ctx, range, range_parent, range_fid, 
+                         domain.get_index_space());
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_restricted_partition(Context ctx,
                                                         IndexSpace parent, 
                                                         IndexSpace color_space,

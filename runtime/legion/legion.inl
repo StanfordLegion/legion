@@ -2068,6 +2068,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM1, typename T1, int DIM2, typename T2>
+    void Runtime::create_association(Context ctx,
+                                     LogicalRegionT<DIM1,T1> domain,
+                                     LogicalRegionT<DIM1,T1> domain_parent,
+                                     FieldID domain_fid,
+                                     IndexSpaceT<DIM2,T2> range)
+    //--------------------------------------------------------------------------
+    {
+      create_association(ctx, LogicalRegion(domain), 
+          LogicalRegion(domain_parent), domain_fid, IndexSpace(range));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1, int DIM2, typename T2>
+    void Runtime::create_bidirectional_association(Context ctx,
+                                      LogicalRegionT<DIM1,T1> domain,
+                                      LogicalRegionT<DIM1,T1> domain_parent,
+                                      FieldID domain_fid,
+                                      LogicalRegionT<DIM2,T2> range,
+                                      LogicalRegionT<DIM2,T2> range_parent,
+                                      FieldID range_fid)
+    //--------------------------------------------------------------------------
+    {
+      create_bidirectional_association(ctx, LogicalRegion(domain),
+                                       LogicalRegion(domain_parent), domain_fid,
+                                       LogicalRegion(range),
+                                       LogicalRegion(range_parent), range_fid);
+    }
+
+    //--------------------------------------------------------------------------
     template<int DIM, int COLOR_DIM, typename T>
     IndexPartitionT<DIM,T> Runtime::create_partition_by_restriction(Context ctx,
                                       IndexSpaceT<DIM,T> parent,

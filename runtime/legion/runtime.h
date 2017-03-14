@@ -1497,6 +1497,11 @@ namespace Legion {
                                            IndexPartition handle2,
                               std::map<IndexSpace,IndexPartition> &handles,
                                            PartitionKind kind, Color color);
+      void create_association(Context ctx,
+                              LogicalRegion domain,
+                              LogicalRegion domain_parent,
+                              FieldID domain_fid,
+                              IndexSpace range);
       IndexPartition create_restricted_partition(Context ctx,
                                                  IndexSpace parent,
                                                  IndexSpace color_space,

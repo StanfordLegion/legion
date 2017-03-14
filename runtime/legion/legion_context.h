@@ -163,6 +163,10 @@ namespace Legion {
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
                                             Color color) = 0;
+      virtual void create_association(      LogicalRegion domain,
+                                            LogicalRegion domain_parent,
+                                            FieldID domain_fid,
+                                            IndexSpace range) = 0;
       virtual IndexPartition create_restricted_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -715,6 +719,10 @@ namespace Legion {
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
                                             Color color);
+      virtual void create_association(      LogicalRegion domain,
+                                            LogicalRegion domain_parent,
+                                            FieldID domain_fid,
+                                            IndexSpace range);
       virtual IndexPartition create_restricted_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1191,6 +1199,10 @@ namespace Legion {
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
                                             Color color);
+      virtual void create_association(      LogicalRegion domain,
+                                            LogicalRegion domain_parent,
+                                            FieldID domain_fid,
+                                            IndexSpace range);
       virtual IndexPartition create_restricted_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1485,6 +1497,10 @@ namespace Legion {
                               std::map<IndexSpace,IndexPartition> &handles,
                                             PartitionKind kind,
                                             Color color);
+      virtual void create_association(      LogicalRegion domain,
+                                            LogicalRegion domain_parent,
+                                            FieldID domain_fid,
+                                            IndexSpace range);
       virtual IndexPartition create_restricted_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,

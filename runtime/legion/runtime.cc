@@ -9256,6 +9256,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::create_association(Context ctx, 
+                                     LogicalRegion domain,
+                                     LogicalRegion domain_parent,
+                                     FieldID domain_fid,
+                                     IndexSpace range)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy create association!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->create_association(domain, domain_parent, domain_fid, range);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_restricted_partition(Context ctx,
                                                       IndexSpace parent,
                                                       IndexSpace color_space,

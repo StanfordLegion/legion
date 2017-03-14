@@ -2198,6 +2198,7 @@ namespace Legion {
         BY_IMAGE_RANGE,
         BY_PREIMAGE,
         BY_PREIMAGE_RANGE, 
+        BY_ASSOCIATION, // not really a partition but related
       };
     public:
       DependentPartitionOp(Runtime *rt);
@@ -2225,6 +2226,9 @@ namespace Legion {
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                IndexSpace color_space);
+      void initialize_by_association(TaskContext *ctx, LogicalRegion domain,
+                               LogicalRegion domain_parent, FieldID fid,
+                               IndexSpace range);
       const RegionRequirement& get_requirement(void) const;
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
@@ -2251,7 +2255,8 @@ namespace Legion {
       RestrictInfo restrict_info;
       IndexPartition partition_handle;
       IndexSpace color_space;
-      IndexPartition projection; /* for pre-image only*/
+      IndexPartition projection; // for pre-image only
+      IndexSpace range_space; // for association only
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;

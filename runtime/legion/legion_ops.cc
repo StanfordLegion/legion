@@ -11323,6 +11323,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DependentPartitionOp::initialize_by_association(TaskContext *ctx,
+                        LogicalRegion domain, LogicalRegion domain_parent, 
+                        FieldID fid, IndexSpace range)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      partition_kind = BY_ASSOCIATION;
+      // start-off with non-projection requirement
+      requirement = RegionRequirement(domain, READ_WRITE, 
+                                      EXCLUSIVE, domain_parent);
+      requirement.add_field(fid);
+      range_space = range; 
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_association_operation(parent_ctx->get_unique_id(),
+                                             unique_op_id);
+        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                           true/*region*/,
+                                           requirement.region.index_space.id,
+                                           requirement.region.field_space.id,
+                                           requirement.region.tree_id,
+                                           requirement.privilege,
+                                           requirement.prop,
+                                           requirement.redop,
+                                           requirement.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                          requirement.privilege_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     const RegionRequirement& DependentPartitionOp::get_requirement(void) const
     //--------------------------------------------------------------------------
     {

@@ -372,6 +372,12 @@ namespace Legion {
 		      context, unique_id, pid, kind);
       }
 
+      static inline void log_association_operation(UniqueID context,
+                                                   UniqueID unique_id)
+      {
+        log_spy.print("Association Operation %llu %llu", context, unique_id);
+      }
+
       static inline void log_pending_partition_operation(UniqueID context,
                                                          UniqueID unique_id)
       {
