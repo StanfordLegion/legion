@@ -51,7 +51,7 @@ local emergency = std.config["emergency-gc"]
 local function manual_gc() end
 
 if emergency then
-  local emergency_threshold = 600 * 1024
+  local emergency_threshold = 1024 * 1024
   -- Manually call GC whenever the current heap size exceeds threshold
   manual_gc = function()
     if collectgarbage("count") >= emergency_threshold then
