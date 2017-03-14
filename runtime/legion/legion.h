@@ -6189,7 +6189,9 @@ namespace Legion {
                                       IndexSpace parent,
                                       IndexSpace color_space,
                                       const void *transform,
-                                      const void *extent, TypeTag type_tag,
+                                      size_t transform_size,
+                                      const void *extent, 
+                                      size_t extent_size,
                                       PartitionKind part_kind, Color color);
       IndexSpace create_index_space_union_internal(Context ctx,
                                       IndexPartition parent,

@@ -3380,14 +3380,16 @@ namespace Legion {
                                                         IndexSpace parent, 
                                                         IndexSpace color_space,
                                                         const void *transform,
+                                                        size_t transform_size,
                                                         const void *extent, 
-                                                        TypeTag type_tag,
+                                                        size_t extent_size,
                                                         PartitionKind part_kind,
                                                         Color color)
     //--------------------------------------------------------------------------
     {
       return runtime->create_restricted_partition(ctx, parent, color_space,
-                            transform, extent, type_tag, part_kind, color);
+                            transform, transform_size, extent, extent_size,
+                            part_kind, color);
     }
 
     //--------------------------------------------------------------------------

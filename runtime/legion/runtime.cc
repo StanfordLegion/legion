@@ -9260,8 +9260,9 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexSpace color_space,
                                                       const void *transform,
+                                                      size_t transform_size,
                                                       const void *extent,
-                                                      TypeTag type_tag,
+                                                      size_t extent_size,
                                                       PartitionKind part_kind,
                                                       Color color)
     //--------------------------------------------------------------------------
@@ -9275,7 +9276,8 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_restricted_partition(forest, parent, color_space,
-                                              transform, extent, type_tag,
+                                              transform, transform_size,
+                                              extent, extent_size,
                                               part_kind, color);
     }
 

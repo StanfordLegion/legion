@@ -291,6 +291,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_restriction(
+                                                        IndexPartition pid,
+                                                        const void *transform,
+                                                        const void *extent)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *new_part = get_node(pid);
+      return new_part->create_by_restriction(transform, extent); 
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_cross_product_partitions(Operation *op,
                                                          IndexPartition base,
                                                          IndexPartition source,
@@ -6006,6 +6017,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent->create_by_difference(op, this, left, right);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndexPartNode::create_by_restriction(const void *transform,
+                                                 const void *extent)
+    //--------------------------------------------------------------------------
+    {
+      return color_space->create_by_restriction(this, transform, extent,
+                     NT_TemplateHelper::get_dim(handle.get_type_tag()));
     }
 
     //--------------------------------------------------------------------------

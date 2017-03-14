@@ -2802,6 +2802,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_restricted_partition(
+                                              RegionTreeForest *forest,
+                                              IndexSpace parent,
+                                              IndexSpace color_space,
+                                              const void *transform,
+                                              size_t transform_size,
+                                              const void *extent,
+                                              size_t extent_size,
+                                              PartitionKind part_kind,
+                                              Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating restricted partition in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color; 
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_restricted_partition(this, pid, transform, 
+                                transform_size, extent, extent_size);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space,
+                                       part_color, part_kind, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_field(
                                               RegionTreeForest *forest,
                                               LogicalRegion handle,
@@ -6866,8 +6902,9 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexSpace color_space,
                                                 const void *transform,
+                                                size_t transform_size,
                                                 const void *extent,
-                                                TypeTag type_tag,
+                                                size_t extent_size,
                                                 PartitionKind part_kind,
                                                 Color color)
     //--------------------------------------------------------------------------
@@ -8218,14 +8255,16 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexSpace color_space,
                                                 const void *transform,
+                                                size_t transform_size,
                                                 const void *extent,
-                                                TypeTag type_tag,
+                                                size_t extent_size,
                                                 PartitionKind part_kind,
                                                 Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_restricted_partition(forest, parent, color_space,
-                                 transform, extent, type_tag, part_kind, color);
+                                 transform, transform_size, extent, extent_size,
+                                 part_kind, color);
     }
 
     //--------------------------------------------------------------------------

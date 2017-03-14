@@ -101,6 +101,9 @@ namespace Legion {
                                            IndexPartition pid,
                                            IndexPartition handle1,
                                            IndexPartition handle2);
+      ApEvent create_partition_by_restriction(IndexPartition pid,
+                                              const void *transform,
+                                              const void *extent);
       ApEvent create_cross_product_partitions(Operation *op,
                                               IndexPartition base,
                                               IndexPartition source,
@@ -822,6 +825,11 @@ namespace Legion {
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
                                            IndexPartNode *right) = 0;
+      // Called on color space and not parent
+      virtual ApEvent create_by_restriction(IndexPartNode *partition,
+                                            const void *transform,
+                                            const void *extent,
+                                            int partition_dim) = 0;
     public:
       virtual ApEvent issue_copy(Operation *op, 
                   const std::vector<CopySrcDstField> &src_fields,
@@ -953,6 +961,15 @@ namespace Legion {
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
                                            IndexPartNode *right);
+      // Called on color space and not parent
+      virtual ApEvent create_by_restriction(IndexPartNode *partition,
+                                            const void *transform,
+                                            const void *extent,
+                                            int partition_dim);
+      template<int N>
+      ApEvent create_by_restriction_helper(IndexPartNode *partition,
+                                   const Realm::ZMatrix<N,DIM> &transform,
+                                   const Realm::ZRect<N,T> &extent);
     public:
       virtual ApEvent issue_copy(Operation *op, 
                   const std::vector<CopySrcDstField> &src_fields,
@@ -1133,6 +1150,7 @@ namespace Legion {
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_difference(Operation *op,
                               IndexPartNode *left, IndexPartNode *right);
+      ApEvent create_by_restriction(const void *transform, const void *extent);
     public:
       virtual bool compute_complete(void) = 0;
       virtual bool intersects_with(IndexSpaceNode *other) = 0; 

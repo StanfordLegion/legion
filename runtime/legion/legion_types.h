@@ -1235,7 +1235,9 @@ namespace Legion {
     class RegionTreeForest;
     class IndexTreeNode;
     class IndexSpaceNode;
+    template<int DIM, typename T> class IndexSpaceNodeT;
     class IndexPartNode;
+    template<int DIM, typename T> class IndexPartNodeT;
     class FieldSpaceNode;
     class RegionTreeNode;
     class RegionNode;
@@ -1536,22 +1538,6 @@ namespace Legion {
         int result = 0;
         SUPER::demux<DimHelper>(t, &result);
         return result; 
-      }
-    };
-    struct NTNT_TemplateHelper :
-      public Realm::DynamicTemplates::ListProduct4<Realm::DIMCOUNTS,
-                                                   Realm::DIMTYPES,
-                                                   Realm::DIMCOUNTS,
-                                                   Realm::DIMTYPES> {
-      typedef Realm::DynamicTemplates::ListProduct4<Realm::DIMCOUNTS, 
-                                                    Realm::DIMTYPES,
-                                                    Realm::DIMCOUNTS,
-                                                    Realm::DIMTYPES> SUPER;
-    public:
-      template<int N1, typename T1, int N2, typename T2>
-      static inline TypeTag encode_tag(void) {
-        return SUPER::template encode_tag<Realm::DynamicTemplates::Int<N1>, T1,
-                                        Realm::DynamicTemplates::Int<N2>, T2>();
       }
     };
     // Pull some of the mapper types into the internal space

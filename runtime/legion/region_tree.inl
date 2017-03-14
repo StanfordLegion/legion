@@ -1283,6 +1283,96 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_restriction(
+                                                      IndexPartNode *partition,
+                                                      const void *tran,
+                                                      const void *ext,
+                                                      int partition_dim)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // should be called on the color space
+      assert(this == partition->color_space); 
+#endif
+      switch (partition_dim)
+      {
+        case 1:
+          {
+            const Realm::ZMatrix<1,DIM> *transform = 
+              static_cast<const Realm::ZMatrix<1,DIM>*>(tran);
+            const Realm::ZRect<1,T> *extent = 
+              static_cast<const Realm::ZRect<1,T>*>(ext);
+            return create_by_restriction_helper<1>(partition, 
+                                                   *transform, *extent);
+          }
+        case 2:
+          {
+            const Realm::ZMatrix<2,DIM> *transform = 
+              static_cast<const Realm::ZMatrix<2,DIM>*>(tran);
+            const Realm::ZRect<2,T> *extent = 
+              static_cast<const Realm::ZRect<2,T>*>(ext);
+            return create_by_restriction_helper<2>(partition, 
+                                                   *transform, *extent);
+          }
+        case 3:
+          {
+            const Realm::ZMatrix<3,DIM> *transform = 
+              static_cast<const Realm::ZMatrix<3,DIM>*>(tran);
+            const Realm::ZRect<3,T> *extent = 
+              static_cast<const Realm::ZRect<3,T>*>(ext);
+            return create_by_restriction_helper<3>(partition, 
+                                                   *transform, *extent);
+          }
+        default:
+          assert(false);
+      }
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int N, typename T> template<int M>
+    ApEvent IndexSpaceNodeT<N,T>::create_by_restriction_helper(
+                                          IndexPartNode *partition,
+                                          const Realm::ZMatrix<M,N> &transform,
+                                          const Realm::ZRect<M,T> &extent)
+    //--------------------------------------------------------------------------
+    {
+      // Get the parent index space in case it has a sparsity map
+      IndexSpaceNodeT<M,T> *parent = 
+                      static_cast<IndexSpaceNodeT<M,T>*>(partition->parent);
+      // No need to wait since we'll just be messing with the bounds
+      Realm::ZIndexSpace<M,T> parent_is;
+      parent->get_realm_index_space(parent_is);
+      // Wait for our index space to be ready if necessary
+      if (!index_space_ready.has_triggered())
+        index_space_ready.wait();
+      // Iterate over our points (colors) and fill in the bounds
+      for (Realm::ZIndexSpaceIterator<N,T> rect_itr(realm_index_space); 
+            rect_itr.valid; rect_itr.step())
+      {
+        for (Realm::ZPointInRectIterator<N,T> color_itr(rect_itr.rect); 
+              color_itr.valid; color_itr.step())
+        {
+          // Copy the index space from the parent
+          Realm::ZIndexSpace<M,T> child_is = parent_is;
+          // Compute the new bounds 
+          child_is.bounds = extent + transform * color_itr.p;
+          // Get the legion color
+          LegionColor color = linearize_color(&color_itr.p, 
+                                              handle.get_type_tag());
+          // Get the appropriate child
+          IndexSpaceNodeT<M,T> *child = 
+            static_cast<IndexSpaceNodeT<M,T>*>(partition->get_child(color));
+          // Then set the new index space
+          child->set_realm_index_space(child_is);
+        }
+      }
+      // Our only precondition is that the parent index space is computed
+      return parent->index_space_ready;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(Operation *op,
                         const std::vector<CopySrcDstField> &src_fields,
                         const std::vector<CopySrcDstField> &dst_fields,

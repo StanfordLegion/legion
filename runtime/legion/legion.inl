@@ -2078,9 +2078,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_restricted_partition(ctx,
-        parent, color_space, &transform, &extent, 
-        Internal::NTNT_TemplateHelper::template encode_tag<DIM,T,COLOR_DIM,T>(),
-        part_kind, color));
+        parent, color_space, &transform, sizeof(transform), 
+        &extent, sizeof(extent), part_kind, color));
     }
 
     //--------------------------------------------------------------------------

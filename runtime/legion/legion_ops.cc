@@ -11006,6 +11006,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PendingPartitionOp::initialize_restricted_partition(TaskContext *ctx,
+                                                          IndexPartition pid,
+                                                          const void *transform,
+                                                          size_t transform_size,
+                                                          const void *extent,
+                                                          size_t extent_size)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new RestrictedPartitionThunk(pid, transform, transform_size,
+                                           extent, extent_size);
+      if (Runtime::legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_cross_product(TaskContext *ctx,
                                                       IndexPartition base,
                                                       IndexPartition source,
@@ -11533,6 +11552,7 @@ namespace Legion {
       UNION_PARTITION,
       INTERSECTION_PARTITION,
       DIFFERENCE_PARTITION,
+      RESTRICTED_PARTITION,
     };
     //--------------------------------------------------------------------------
     void PendingPartitionOp::EqualPartitionThunk::perform_logging(
@@ -11568,6 +11588,15 @@ namespace Legion {
     {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           DIFFERENCE_PARTITION);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::RestrictedPartitionThunk::perform_logging(
+                                                         PendingPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          RESTRICTED_PARTITION);
     }
 
     //--------------------------------------------------------------------------

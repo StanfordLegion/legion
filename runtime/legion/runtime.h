@@ -1501,8 +1501,9 @@ namespace Legion {
                                                  IndexSpace parent,
                                                  IndexSpace color_space,
                                                  const void *transform,
+                                                 size_t transform_size,
                                                  const void *extent,
-                                                 TypeTag type_tag,
+                                                 size_t extent_size,
                                                  PartitionKind part_kind,
                                                  Color color);
       IndexPartition create_partition_by_field(Context ctx, 

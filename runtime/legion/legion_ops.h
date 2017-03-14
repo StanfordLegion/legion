@@ -2053,6 +2053,25 @@ namespace Legion {
         IndexPartition handle1;
         IndexPartition handle2;
       };
+      class RestrictedPartitionThunk : public PendingPartitionThunk {
+      public:
+        RestrictedPartitionThunk(IndexPartition id, const void *tran,
+                  size_t tran_size, const void *ext, size_t ext_size)
+          : pid(id), transform(malloc(tran_size)), extent(malloc(ext_size))
+        { memcpy(transform, tran, tran_size); memcpy(extent, ext, ext_size); }
+        virtual ~RestrictedPartitionThunk(void)
+          { free(transform); free(extent); }
+      public:
+        virtual ApEvent perform(PendingPartitionOp *op,
+                                RegionTreeForest *forest)
+        { return forest->create_partition_by_restriction(pid, 
+                                              transform, extent); }
+        virtual void perform_logging(PendingPartitionOp *op);
+      protected:
+        IndexPartition pid;
+        void *const transform;
+        void *const extent;
+      };
       class CrossProductThunk : public PendingPartitionThunk {
       public:
         CrossProductThunk(IndexPartition b, IndexPartition s, LegionColor c)
@@ -2128,6 +2147,12 @@ namespace Legion {
                                            IndexPartition pid, 
                                            IndexPartition handle1,
                                            IndexPartition handle2);
+      void initialize_restricted_partition(TaskContext *ctx,
+                                           IndexPartition pid,
+                                           const void *transform,
+                                           size_t transform_size,
+                                           const void *extent,
+                                           size_t extent_size);
       void initialize_cross_product(TaskContext *ctx, IndexPartition base, 
                                     IndexPartition source, LegionColor color);
       void initialize_index_space_union(TaskContext *ctx, IndexSpace target, 
