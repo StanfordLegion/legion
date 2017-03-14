@@ -607,7 +607,7 @@ namespace Legion {
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
-      virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
+      virtual void send_node(AddressSpaceID target, bool up) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
 #ifdef DEBUG_LEGION
@@ -743,7 +743,7 @@ namespace Legion {
                                            IndexPartNode *left,
                                            IndexPartNode *right);
     public:
-      virtual void send_node(AddressSpaceID target, bool up, bool down);
+      virtual void send_node(AddressSpaceID target, bool up);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -1145,7 +1145,7 @@ namespace Legion {
                                            IndexSpaceNode *left,
                                            IndexSpaceNode *right);
     public:
-      virtual void send_node(AddressSpaceID target, bool up, bool down);
+      virtual void send_node(AddressSpaceID target, bool up);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -2226,7 +2226,6 @@ namespace Legion {
       IndexPartNode *const row_source;
     protected:
       std::map<LegionColor,RegionNode*> color_map;
-      std::map<LegionColor,RegionNode*> valid_map;
     }; 
 
     // some inline implementations

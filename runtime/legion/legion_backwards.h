@@ -210,12 +210,6 @@ namespace Legion {
     class Domain {
     public:
       typedef ::legion_lowlevel_id_t IDType;
-      // For backwards compatibility
-      typedef Realm::ElementMask ElementMask;
-      typedef Realm::RegionInstance RegionInstance;
-      typedef Realm::Event Event;
-      typedef Realm::ProfilingRequestSet ProfilingRequestSet;
-
       // Keep this in sync with legion_lowlevel_domain_max_rect_dim_t
       // in lowlevel_config.h
       enum { MAX_RECT_DIM = ::MAX_RECT_DIM };

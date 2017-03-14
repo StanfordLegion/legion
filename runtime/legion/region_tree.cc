@@ -4504,222 +4504,6 @@ namespace Legion {
       return true;
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    /*static*/ bool IndexTreeNode::compute_dominates(
-            const std::set<Domain> &left_set, const std::set<Domain> &right_set)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!left_set.empty());
-      assert(!right_set.empty());
-#endif
-      // Check to see if the left set of domains dominates the right set
-      bool dominates = false;
-      // Handle the easy case for dimension zero
-      Domain left = *(left_set.begin());
-      if (left.get_dim() == 0)
-      {
-	// We're going to compute the union of the right set members and then
-	//  subtract out the left set members and see if anything is left
-	// If there is, left does NOT dominate right
-	
-	Realm::ElementMask *mask = 0;
-	// We need first to make sure we have an ElementMask that can hold all
-	//  the right_set members, which may have been trimmed
-	if (right_set.size() == 1)
-	{
-	  // just make a copy of the only set member's mask
-	  mask = new Realm::ElementMask(right_set.begin()->get_index_space()
-					   .get_valid_mask());
-	} else {
-	  std::set<Domain>::const_iterator it = right_set.begin();
-	  assert(it != right_set.end());
-	  const Realm::ElementMask *maskp = 
-            &(it->get_index_space().get_valid_mask());
-	  int first_elmt = maskp->first_enabled();
-	  int last_elmt = maskp->last_enabled();
-	  while(++it != right_set.end())
-	  {
-	    maskp = &(it->get_index_space().get_valid_mask());
-	    int new_first = maskp->first_enabled();
-	    int new_last = maskp->last_enabled();
-	    if ((new_first != -1) && 
-                ((first_elmt == -1) || (first_elmt > new_first)))
-	      first_elmt = new_first;
-	    if ((new_last != -1) && (last_elmt < new_last))
-	      last_elmt = new_last;
-	  }
-	  // If there are no elements, right is trivially dominated
-	  if ((first_elmt > last_elmt) || (last_elmt == -1))
-	    return true;
-	  // Now construct the mask
-	  mask = new Realm::ElementMask(last_elmt - first_elmt + 1, first_elmt);
-	  // And copy in the bits from each member set
-	  for (it = right_set.begin(); it != right_set.end(); it++)
-	    *mask |= it->get_index_space().get_valid_mask();
-	}
-
-	// Now go through the left set members and subtract them all ot
-	for (std::set<Domain>::const_iterator it = left_set.begin();
-	     it != left_set.end(); it++)
-	  *mask -= it->get_index_space().get_valid_mask();
-	  
-        // Union left and right together and then test (empty == domainated)
-	dominates = !(*mask);
-
-	// Clean up our working copy
-	delete mask;
-      }
-      else if (left_set.size() == 1)
-      {
-        // This is the easy case where we only have a single domain on the left
-        switch (left.get_dim())
-        {
-          case 1:
-            {
-              LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<1> right = it->get_rect<1>(); 
-                if ((right.intersection(leftr)) != right)
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          case 2:
-            {
-              LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<2> right = it->get_rect<2>(); 
-                if ((right.intersection(leftr)) != right)
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          case 3:
-            {
-              LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<3> right = it->get_rect<3>(); 
-                if ((right.intersection(leftr)) != right)
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          default:
-            assert(false);
-        }
-      }
-      else
-      {
-        // This is the hard case where we have multiple domains on the left
-        switch (left.get_dim())
-        {
-          case 1:
-            {
-              // Construct an interval tree for the left set
-              // and then check to see if all the intervals within
-              // the right set are dominated by an interval in the tree
-              IntervalTree<int,true/*discrete*/> intervals;
-              for (std::set<Domain>::const_iterator it = left_set.begin();
-                    it != left_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<1> left_rect = it->get_rect<1>();
-                intervals.insert(left_rect.lo[0], left_rect.hi[0]);
-              }
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<1> right_rect = it->get_rect<1>();
-                if (!intervals.dominates(right_rect.lo[0], right_rect.hi[0]))
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          case 2:
-            {
-              RectangleSet<int,true/*discrete*/> rectangles;
-              for (std::set<Domain>::const_iterator it = left_set.begin();
-                    it != left_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<2> left_rect = it->get_rect<2>();
-                if (left_rect.volume() > 0)
-                  rectangles.add_rectangle(left_rect.lo[0], left_rect.lo[1],
-                                           left_rect.hi[0], left_rect.hi[1]);
-              }
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<2> right_rect = it->get_rect<2>();
-                if (right_rect.volume() > 0 &&
-                    !rectangles.covers(right_rect.lo[0], right_rect.lo[1],
-                                       right_rect.hi[0], right_rect.hi[1]))
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          case 3:
-            {
-              // TODO: Improve this terrible approximation
-              dominates = true;
-              for (std::set<Domain>::const_iterator rit = right_set.begin();
-                    (rit != right_set.end()) && dominates; rit++)
-              {
-                LegionRuntime::Arrays::Rect<3> right_rect = rit->get_rect<3>();
-                bool has_dominator = false;
-                // See if any of the rectangles on the left dominate it
-                for (std::set<Domain>::const_iterator lit = left_set.begin();
-                      lit != left_set.end(); lit++)
-                {
-                  LegionRuntime::Arrays::Rect<3> left_rect = lit->get_rect<3>();
-                  if (right_rect.intersection(left_rect) == right_rect)
-                  {
-                    has_dominator = true;
-                    break;
-                  }
-                }
-                if (!has_dominator)
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          default:
-            assert(false); // should never get here
-        }
-      }
-      return dominates;
-    }
-#endif
-
     /////////////////////////////////////////////////////////////
     // Index Space Node 
     /////////////////////////////////////////////////////////////
@@ -4956,6 +4740,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // See if we have it locally if not go find it
+      IndexPartition remote_handle = IndexPartition::NO_PART;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         std::map<LegionColor,IndexPartNode*>::const_iterator finder = 
@@ -4967,11 +4752,17 @@ namespace Legion {
 #endif
           return finder->second;
         }
+        std::map<LegionColor,IndexPartition>::const_iterator remote_finder = 
+          remote_colors.find(c);
+        if (remote_finder != remote_colors.end())
+          remote_handle = remote_finder->second;
       }
       // if we make it here, send a request
       AddressSpaceID owner_space = get_owner_space();
       if (owner_space == context->runtime->address_space)
       {
+        if (remote_handle.exists())
+          return context->get_node(remote_handle);
         log_index.error("Unable to find entry for color %lld in "
                         "index space %x.", c, handle.id);
 #ifdef DEBUG_LEGION
@@ -5012,6 +4803,8 @@ namespace Legion {
              (color_map[child->color] == NULL));
 #endif
       color_map[child->color] = child;
+      if (!remote_colors.empty())
+        remote_colors.erase(child->color);
     }
 
     //--------------------------------------------------------------------------
@@ -5158,6 +4951,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexSpaceNode::record_remote_child(IndexPartition pid, 
+                                             LegionColor part_color)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      assert(color_map.find(part_color) == color_map.end());
+      assert(remote_colors.find(part_color) == remote_colors.end());
+      // should only happen on the owner node
+      assert(get_owner_space() == context->runtime->address_space);
+#endif
+      remote_colors[part_color] = pid;
+    }
+
+    //--------------------------------------------------------------------------
     void IndexSpaceNode::get_colors(std::vector<LegionColor> &colors)
     //--------------------------------------------------------------------------
     {
@@ -5287,14 +5095,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::send_node(AddressSpaceID target, bool up, bool down)
+    void IndexSpaceNode::send_node(AddressSpaceID target, bool up)
     //--------------------------------------------------------------------------
     {
       // Go up first so we know those nodes will be there
       if (up && (parent != NULL))
-        parent->send_node(target, true/*up*/, false/*down*/);
-      // Check to see if our creation set includes the target
-      std::map<LegionColor,IndexPartNode*> valid_copy;
+        parent->send_node(target, true/*up*/);
       {
         AutoLock n_lock(node_lock);
         if (!creation_set.contains(target))
@@ -5323,26 +5129,9 @@ namespace Legion {
           context->runtime->send_index_space_node(target, rez); 
           creation_set.add(target);
         }
-        // Also check to see if we need to go down
-        if (down && child_creation.contains(target))
-          down = false;
         if (destroyed)
           // Now we need to send a destruction
           context->runtime->send_index_space_destruction(handle, target);
-        // If we need to go down, make a copy of the valid children
-        if (down)
-          valid_copy = color_map;
-      }
-      if (down)
-      {
-        for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
-              valid_copy.begin(); it != valid_copy.end(); it++)
-        {
-          it->second->send_node(target, false/*up*/, true/*down*/);
-        }
-        // If we sent all our children, then we can record it
-        AutoLock n_lock(node_lock);
-        child_creation.add(target);
       }
     }
 
@@ -5408,7 +5197,7 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexSpaceNode *target = forest->get_node(handle);
-      target->send_node(source, true/*up*/, false/*down*/);
+      target->send_node(source, true/*up*/);
       // Then send back the flush
       Serializer rez;
       rez.serialize(to_trigger);
@@ -6229,16 +6018,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::send_node(AddressSpaceID target, bool up, bool down)
+    void IndexPartNode::send_node(AddressSpaceID target, bool up)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
 #endif
       if (up)
-        parent->send_node(target, true/*up*/, false/*down*/);
+        parent->send_node(target, true/*up*/);
       // Always send the color space ahead of this 
-      color_space->send_node(target, false/*up*/, false/*down*/);
+      color_space->send_node(target, false/*up*/);
       std::map<LegionColor,IndexSpaceNode*> valid_copy;
       {
         // Make sure we know if this is disjoint or not yet
@@ -6275,24 +6064,9 @@ namespace Legion {
           context->runtime->send_index_partition_node(target, rez);
           creation_set.add(target);
         }
-        // See if we need to go down
-        if (down && child_creation.contains(target))
-          down = false;
         if (destroyed)
           // Send the deletion notification
           context->runtime->send_index_partition_destruction(handle, target);
-        if (down)
-          valid_copy = color_map;
-      }
-      if (down)
-      {
-        for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
-              valid_copy.begin(); it != valid_copy.end(); it++)
-        {
-          it->second->send_node(target, false/*up*/, true/*down*/);
-        }
-        AutoLock n_lock(node_lock);
-        child_creation.add(target);
       }
     }
 
@@ -6363,7 +6137,7 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle);
-      target->send_node(source, true/*up*/, false/*down*/);
+      target->send_node(source, true/*up*/);
       Serializer rez;
       rez.serialize(to_trigger);
       forest->runtime->send_index_partition_return(source, rez);
@@ -14720,15 +14494,13 @@ namespace Legion {
       assert(color_map.find(child->row_source->color) == color_map.end());
 #endif
       color_map[child->row_source->color] = child;
-      valid_map[child->row_source->color] = child;
     }
 
     //--------------------------------------------------------------------------
     void PartitionNode::remove_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
-      valid_map.erase(c);
+      // Don't do anything for now
     }
 
     //--------------------------------------------------------------------------
@@ -14963,12 +14735,6 @@ namespace Legion {
           std::map<LegionColor,RegionNode*> children;
           // Need to hold the lock when reading from 
           // the color map or the valid map
-          if (traverser->visit_only_valid())
-          {
-            AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            children = valid_map;
-          }
-          else
           {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
             children = color_map;

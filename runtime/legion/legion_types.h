@@ -1430,7 +1430,6 @@ namespace Legion {
   typedef Realm::CustomSerdezUntyped SerdezOp;
   typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
   typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
-  typedef Realm::ElementMask::Enumerator Enumerator;
   typedef Realm::DynamicTemplates::TagType TypeTag;
   typedef ::legion_lowlevel_coord_t coord_t;
   typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
