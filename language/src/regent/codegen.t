@@ -4802,28 +4802,28 @@ function codegen.expr_dynamic_collective_get_result(cx, node)
   end
 end
 
-local function expr_advance_phase_barrier(cx, value, value_type)
+local function expr_advance_phase_barrier(runtime, context, value, value_type)
   if std.is_phase_barrier(value_type) then
     return quote end, `(value_type {
       impl = c.legion_phase_barrier_advance(
-        [cx.runtime], [cx.context], [value].impl),
+        [runtime], [context], [value].impl),
     })
   elseif std.is_dynamic_collective(value_type) then
     return quote end, `(value_type {
       impl = c.legion_dynamic_collective_advance(
-        [cx.runtime], [cx.context], [value].impl),
+        [runtime], [context], [value].impl),
     })
   else
     assert(false)
   end
 end
 
-local function expr_advance_list(cx, value, value_type)
+local function expr_advance_list_body(runtime, context, value, value_type)
   if std.is_list(value_type) then
     local result = terralib.newsymbol(value_type, "result")
     local element = terralib.newsymbol(value_type.element_type, "element")
-    local inner_actions, inner_value = expr_advance_list(
-      cx, element, value_type.element_type)
+    local inner_actions, inner_value = expr_advance_list_body(
+      runtime, context, element, value_type.element_type)
     local actions = quote
       var data = c.malloc(
         terralib.sizeof([value_type.element_type]) * [value].__size)
@@ -4840,7 +4840,35 @@ local function expr_advance_list(cx, value, value_type)
     end
     return actions, result
   else
-    return expr_advance_phase_barrier(cx, value, value_type)
+    return expr_advance_phase_barrier(runtime, context, value, value_type)
+  end
+end
+
+local expr_advance_list_helper = terralib.memoize(
+  function (value_type)
+    local runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
+    local context = terralib.newsymbol(c.legion_context_t, "context")
+    local value = terralib.newsymbol(value_type, "value")
+    local result_actions, result =
+      expr_advance_list_body(runtime, context, value, value_type)
+    local terra advance_barriers([runtime], [context], [value])
+      [result_actions]
+      return [result]
+    end
+    advance_barriers:setinlined(false)
+    return advance_barriers
+  end)
+
+function expr_advance_list(cx, value, value_type)
+  if std.is_list(value_type) then
+    local helper = expr_advance_list_helper(value_type)
+    local result = terralib.newsymbol(value_type, "result")
+    local actions = quote
+      var [result] = [helper]([cx.runtime], [cx.context], [value])
+    end
+    return actions, result
+  else
+    return expr_advance_phase_barrier(cx.runtime, cx.context, value, value_type)
   end
 end
 
