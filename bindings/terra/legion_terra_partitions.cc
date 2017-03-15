@@ -849,12 +849,21 @@ create_cross_product_shallow_structured_spec(
   extract_ispace_domain_rects<DIM>(runtime, ctx, lhs, lh_rects);
   extract_ispace_domain_rects<DIM>(runtime, ctx, rhs, rh_rects);
 
-  for (size_t i = 0; i < lhs.size(); i++) {
-    Rect<DIM> lh_rect = lh_rects[i];
-    for (size_t j = 0; j < rhs.size(); j++) {
-      Rect<DIM> rh_rect = rh_rects[j];
-      if (lh_rect.overlaps(rh_rect)) {
-        assign_list_list(result, i, j, CObjectWrapper::wrap(rhs[j]));
+#define BLOCK_SIZE 512
+  size_t lhs_size = lhs.size();
+  size_t rhs_size = rhs.size();
+  for (size_t block_i = 0; block_i < lhs_size; block_i += BLOCK_SIZE) {
+    for (size_t block_j = 0; block_j < rhs_size; block_j += BLOCK_SIZE) {
+      size_t block_i_max = std::min(block_i + BLOCK_SIZE, lhs_size);
+      size_t block_j_max = std::min(block_j + BLOCK_SIZE, rhs_size);
+      for (size_t i = block_i; i < block_i_max; i++) {
+        Rect<DIM> lh_rect = lh_rects[i];
+        for (size_t j = block_j; j < block_j_max; j++) {
+          Rect<DIM> rh_rect = rh_rects[j];
+          if (lh_rect.overlaps(rh_rect)) {
+            assign_list_list(result, i, j, CObjectWrapper::wrap(rhs[j]));
+          }
+        }
       }
     }
   }
