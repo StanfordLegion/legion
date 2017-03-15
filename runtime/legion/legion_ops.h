@@ -2192,13 +2192,101 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = DEPENDENT_PARTITION_OP_ALLOC;
     public:
-      enum PartOpKind {
+      enum DepPartKind {
         BY_FIELD,
         BY_IMAGE,
         BY_IMAGE_RANGE,
         BY_PREIMAGE,
         BY_PREIMAGE_RANGE, 
         BY_ASSOCIATION, // not really a partition but related
+      };
+    protected:
+      // Track dependent partition operations as thunks
+      class DepPartThunk {
+      public:
+        virtual ~DepPartThunk(void) { }
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances) = 0;
+        virtual DepPartKind get_kind(void) const = 0;
+      };
+      class ByFieldThunk : public DepPartThunk {
+      public:
+        ByFieldThunk(IndexPartition p)
+          : pid(p) { }
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+        virtual DepPartKind get_kind(void) const { return BY_FIELD; }
+      protected:
+        IndexPartition pid;
+      };
+      class ByImageThunk : public DepPartThunk {
+      public:
+        ByImageThunk(IndexPartition p, IndexPartition proj)
+          : pid(p), projection(proj) { }
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+        virtual DepPartKind get_kind(void) const { return BY_IMAGE; }
+      protected:
+        IndexPartition pid;
+        IndexPartition projection;
+      };
+      class ByImageRangeThunk : public DepPartThunk {
+      public:
+        ByImageRangeThunk(IndexPartition p, IndexPartition proj)
+          : pid(p), projection(proj) { }
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+        virtual DepPartKind get_kind(void) const { return BY_IMAGE_RANGE; }
+      protected:
+        IndexPartition pid;
+        IndexPartition projection;
+      };
+      class ByPreimageThunk : public DepPartThunk {
+      public:
+        ByPreimageThunk(IndexPartition p, IndexPartition proj)
+          : pid(p), projection(proj) { }
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+        virtual DepPartKind get_kind(void) const { return BY_PREIMAGE; }
+      protected:
+        IndexPartition pid;
+        IndexPartition projection;
+      };
+      class ByPreimageRangeThunk : public DepPartThunk {
+      public:
+        ByPreimageRangeThunk(IndexPartition p, IndexPartition proj)
+          : pid(p), projection(proj) { }
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+        virtual DepPartKind get_kind(void) const { return BY_PREIMAGE_RANGE; }
+      protected:
+        IndexPartition pid;
+        IndexPartition projection;
+      };
+      class AssociationThunk : public DepPartThunk {
+      public:
+        AssociationThunk(IndexSpace d, IndexSpace r)
+          : domain(d), range(r) { }
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+        virtual DepPartKind get_kind(void) const { return BY_ASSOCIATION; }
+      protected:
+        IndexSpace domain;
+        IndexSpace range;
       };
     public:
       DependentPartitionOp(Runtime *rt);
@@ -2209,26 +2297,23 @@ namespace Legion {
     public:
       void initialize_by_field(TaskContext *ctx, IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
-                               IndexSpace color_space, FieldID fid); 
+                               FieldID fid); 
       void initialize_by_image(TaskContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
-                               LogicalRegion parent, FieldID fid,
-                               IndexSpace color_space);
+                               LogicalRegion parent, FieldID fid);
       void initialize_by_image_range(TaskContext *ctx, IndexPartition pid,
                                LogicalPartition projection,
-                               LogicalRegion parent, FieldID fid,
-                               IndexSpace color_space);
+                               LogicalRegion parent, FieldID fid);
       void initialize_by_preimage(TaskContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
-                               LogicalRegion parent, FieldID fid,
-                               IndexSpace color_space);
+                               LogicalRegion parent, FieldID fid);
       void initialize_by_preimage_range(TaskContext *ctx, IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
-                               LogicalRegion parent, FieldID fid,
-                               IndexSpace color_space);
+                               LogicalRegion parent, FieldID fid);
       void initialize_by_association(TaskContext *ctx, LogicalRegion domain,
                                LogicalRegion domain_parent, FieldID fid,
                                IndexSpace range);
+      void perform_logging(void) const;
       const RegionRequirement& get_requirement(void) const;
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
@@ -2249,17 +2334,13 @@ namespace Legion {
     protected:
       void compute_parent_index(void);
     protected:
-      PartOpKind partition_kind;
       RegionRequirement requirement;
       VersionInfo version_info;
       RestrictInfo restrict_info;
-      IndexPartition partition_handle;
-      IndexSpace color_space;
-      IndexPartition projection; // for pre-image only
-      IndexSpace range_space; // for association only
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
+      DepPartThunk *thunk;
     };
 
     /**

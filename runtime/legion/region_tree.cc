@@ -436,197 +436,113 @@ namespace Legion {
       }
     }
 
-#if 0 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_field(RegionTreeContext ctx,
-                                                  Operation *op, unsigned index,
-                                                  const RegionRequirement &req,
-                                                  IndexPartition pending,
-                                                  const Domain &color_space,
-                                                  ApEvent term_event,
-                                                  VersionInfo &version_info,
-                                              std::set<RtEvent> &applied_events)
+    ApEvent RegionTreeForest::create_partition_by_field(Operation *op,
+                                                        IndexPartition pending,
+                             const std::vector<FieldDataDescriptor> &instances,
+                                                        ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == REG_PROJECTION);
-      assert(req.privilege_fields.size() == 1);
-#endif
-      IndexPartNode *pending_node = get_node(pending);
-      IndexSpaceNode *parent_node = pending_node->parent;
-      RegionNode *top_node = get_node(req.region);
-      FieldSpaceNode *field_space = top_node->get_column_source();
-      // Get the index for the field
-      FieldID field_id = *(req.privilege_fields.begin());
-      // Traverse the target node and get all the field data descriptors
-      std::set<ApEvent> preconditions;
-      std::vector<FieldDataDescriptor> field_data;
-      {
-        FieldMask user_mask;
-        user_mask.set_bit(field_space->get_field_index(field_id));
-        RegionUsage usage(req);
-        top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                       user_mask, field_id, op, index,
-                                       field_data, preconditions, 
-                                       version_info, applied_events);
-      }
-      // Enumerate the color space so we can get back a different index
-      // for each color in the color space
-      std::map<DomainPoint,Realm::IndexSpace> subspaces;
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        subspaces[itr.p] = Realm::IndexSpace::NO_SPACE;
-      }
-      // Merge preconditions for all the field data descriptors
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      // Ask the parent node to make all the subspaces
-      ApEvent result = parent_node->create_subspaces_by_field(field_data,
-                subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, result);
-#endif
-      // Now update the domains for all the sub-regions
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        IndexSpaceNode *child_node = pending_node->get_child(ColorPoint(itr.p));
-        child_node->set_domain(subspaces[itr.p]);
-      }
-      return result;
+      IndexPartNode *partition = get_node(pending);
+      return partition->parent->create_by_field(op, partition, 
+                                                instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_image(RegionTreeContext ctx,
-                                                  Operation *op, unsigned index,
-                                                  const RegionRequirement &req,
-                                                  IndexPartition pending,
-                                                  const Domain &color_space,
-                                                  ApEvent term_event,
-                                                  VersionInfo &version_info,
-                                              std::set<RtEvent> &applied_events)
+    ApEvent RegionTreeForest::create_partition_by_image(Operation *op,
+                                                        IndexPartition pending,
+                                                        IndexPartition proj,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == PART_PROJECTION);
-      assert(req.privilege_fields.size() == 1);
-#endif
-      IndexPartNode *pending_node = get_node(pending);
-      IndexSpaceNode *parent_node = pending_node->parent;
-      PartitionNode *projection_node = get_node(req.partition);
-      FieldSpaceNode *field_space = projection_node->get_column_source();
-      // Get the index for the field
-      FieldID field_id = *(req.privilege_fields.begin());
-      // Traverse the target node and get all the field data descriptors
-      // Get all the index spaces from the color space in the projection
-      std::set<ApEvent> preconditions;
-      std::vector<FieldDataDescriptor> field_data;
-      std::map<Realm::IndexSpace,Realm::IndexSpace> subspaces;
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        FieldMask user_mask;
-        user_mask.set_bit(field_space->get_field_index(field_id));
-        ColorPoint child_color(itr.p);
-        RegionNode *child_node = projection_node->get_child(child_color);
-        // Get the field data on this child node
-        RegionUsage usage(req);
-        child_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                           user_mask, field_id, op, index,
-                                           field_data, preconditions, 
-                                           version_info, applied_events);
-        ApEvent child_pre;
-        const Domain &child_dom = 
-                        child_node->row_source->get_domain(child_pre);
-        if (child_pre.exists())
-          preconditions.insert(child_pre);
-        subspaces[child_dom.get_index_space()] = Realm::IndexSpace::NO_SPACE;
-      }
-      // Merge the preconditions for all the field descriptors
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      // Ask the parent node to make all the subspaces
-      ApEvent result = parent_node->create_subspaces_by_image(field_data,
-                subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, result);
-#endif
-      // Now update the domains for all the sub-regions
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        ColorPoint child_color(itr.p);
-        RegionNode     *orig_child = projection_node->get_child(child_color);
-        IndexSpaceNode *next_child = pending_node->get_child(child_color);
-        const Domain &orig_dom = orig_child->get_domain_no_wait();
-        next_child->set_domain(subspaces[orig_dom.get_index_space()]);
-      }
-      return result;
+      IndexPartNode *partition = get_node(pending);
+      IndexPartNode *projection = get_node(proj);
+      return partition->parent->create_by_image(op, partition, projection,
+                                        instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_preimage(
-                                                  RegionTreeContext ctx,
-                                                  Operation *op, unsigned index,
-                                                  const RegionRequirement &req,
-                                                  IndexPartition projection,
-                                                  IndexPartition pending,
-                                                  const Domain &color_space,
-                                                  ApEvent term_event,
-                                                  VersionInfo &version_info,
-                                              std::set<RtEvent> &applied_events)
+    ApEvent RegionTreeForest::create_partition_by_image_range(Operation *op,
+                                                      IndexPartition pending,
+                                                      IndexPartition proj,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == REG_PROJECTION);
-      assert(req.privilege_fields.size() == 1);
-#endif
-      IndexPartNode *pending_node = get_node(pending);
-      IndexSpaceNode *parent_node = pending_node->parent;
-      IndexPartNode *projection_node = get_node(projection);
-      RegionNode *top_node = get_node(req.region);
-      FieldSpaceNode *field_space = top_node->get_column_source();
-      // Get the index for the field
-      FieldID field_id = *(req.privilege_fields.begin());
-      // Traverse the target node and get all the field data structures
-      std::set<ApEvent> preconditions;
-      std::vector<FieldDataDescriptor> field_data;
-      {
-        FieldMask user_mask;
-        user_mask.set_bit(field_space->get_field_index(field_id));
-        RegionUsage usage(req);
-        top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                         user_mask, field_id, op, index,
-                                         field_data, preconditions, 
-                                         version_info, applied_events);
-      }
-      // Get all the index spaces from the color space in the projection
-      std::map<Realm::IndexSpace,Realm::IndexSpace> subspaces;
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        IndexSpaceNode *child_node = 
-          projection_node->get_child(ColorPoint(itr.p));
-        ApEvent child_pre;
-        const Domain &child_dom = child_node->get_domain(child_pre);
-        if (child_pre.exists())
-          preconditions.insert(child_pre);
-        subspaces[child_dom.get_index_space()] = Realm::IndexSpace::NO_SPACE;
-      }
-      // Merge the preconditions for all the field descriptors
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      // Ask the parent node to make all the subspaces
-      ApEvent result = parent_node->create_subspaces_by_preimage(field_data,
-                subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, result);
-#endif
-      // Now update the domains for all the sub-regions
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        ColorPoint child_color(itr.p);
-        IndexSpaceNode *orig_child = projection_node->get_child(child_color);
-        IndexSpaceNode *next_child = pending_node->get_child(child_color);
-        const Domain &orig_dom = orig_child->get_domain_no_wait();
-        next_child->set_domain(subspaces[orig_dom.get_index_space()]);
-      }
-      return result;
+      IndexPartNode *partition = get_node(pending);
+      IndexPartNode *projection = get_node(proj);
+      return partition->parent->create_by_image_range(op, partition, projection,
+                                              instances, instances_ready);
     }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_preimage(Operation *op,
+                                                      IndexPartition pending,
+                                                      IndexPartition proj,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *partition = get_node(pending);
+      IndexPartNode *projection = get_node(proj);
+      return partition->parent->create_by_preimage(op, partition, projection,
+                                           instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_preimage_range(Operation *op,
+                                                      IndexPartition pending,
+                                                      IndexPartition proj,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *partition = get_node(pending);
+      IndexPartNode *projection = get_node(proj);
+      return partition->parent->create_by_preimage_range(op, partition, 
+                                projection, instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_association(Operation *op,
+                                                 IndexSpace dom, IndexSpace ran,
+                              const std::vector<FieldDataDescriptor> &instances, 
+                                                 ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *domain = get_node(dom);
+      IndexSpaceNode *range = get_node(ran);
+      return domain->create_association(op, range, instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::check_partition_by_field_size(IndexPartition pid,
+                FieldSpace fs, FieldID fid, bool is_range, bool use_color_space)
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size = get_node(fs)->get_field_size(fid);
+      IndexPartNode *partition = get_node(pid);
+      if (use_color_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(!is_range);
 #endif
+        return partition->color_space->check_field_size(field_size, 
+                                                        false/*range*/);
+      }
+      else
+        return partition->parent->check_field_size(field_size, is_range);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::check_association_field_size(IndexSpace is,
+                                                     FieldSpace fs, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size = get_node(fs)->get_field_size(fid);
+      return get_node(is)->check_field_size(field_size, false/*is range*/);
+    }
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_pending_space(IndexPartition parent,
@@ -5048,53 +4964,6 @@ namespace Legion {
     {
       runtime->send_index_space_destruction(handle, target);
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    ApEvent IndexSpaceNode::create_subspaces_by_field(
-                        const std::vector<FieldDataDescriptor> &field_data,
-                        std::map<DomainPoint, Realm::IndexSpace> &subspaces,
-                        bool mutable_results, ApEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent dom_precondition;
-      const Domain &dom = get_domain(dom_precondition);
-      return ApEvent(dom.get_index_space().create_subspaces_by_field(field_data,
-                                     subspaces, mutable_results, 
-                                     Runtime::merge_events(precondition,
-                                                           dom_precondition)));
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent IndexSpaceNode::create_subspaces_by_image(
-                const std::vector<FieldDataDescriptor> &field_data,
-                std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
-                bool mutable_results, ApEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent dom_precondition;
-      const Domain &dom = get_domain(dom_precondition);
-      return ApEvent(dom.get_index_space().create_subspaces_by_image(field_data,
-                                     subspaces, mutable_results, 
-                                     Runtime::merge_events(precondition,
-                                                          dom_precondition)));
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent IndexSpaceNode::create_subspaces_by_preimage(
-                const std::vector<FieldDataDescriptor> &field_data,
-                std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
-                bool mutable_results, ApEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent dom_precondition;
-      const Domain &dom = get_domain(dom_precondition);
-      return ApEvent(dom.get_index_space().create_subspaces_by_preimage(
-                                     field_data, subspaces, mutable_results, 
-                                     Runtime::merge_events(precondition,
-                                                           dom_precondition)));
-    }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_disjointness_test(
@@ -13604,79 +13473,6 @@ namespace Legion {
       register_region(info, logical_ctx_uid, context, empty_restrict_info, 
           ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, targets);
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void RegionNode::find_field_descriptors(ContextID ctx, ApEvent term_event,
-                                            const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            FieldID field_id, Operation *op,
-                                            unsigned index,
-                                  std::vector<FieldDataDescriptor> &field_data,
-                                            std::set<ApEvent> &preconditions,
-                                            VersionInfo &version_info,
-                                            std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalState *state = get_physical_state(version_info);
-      // First pull down any valid instance views
-      pull_valid_instance_views(ctx, state, user_mask, 
-                                false/*need space*/, version_info);
-      // Now go through the list of valid instances and see if we can find
-      // one that satisfies the field that we need.
-      DeferredView *deferred_view = NULL;
-      const AddressSpaceID local_space = context->runtime->address_space;
-      for (LegionMap<LogicalView*,FieldMask>::track_aligned::const_iterator
-            it = state->valid_views.begin(); 
-            it != state->valid_views.end(); it++)
-      {
-        // Check to see if the instance is valid for our target field
-        if (!!(it->second & user_mask))
-        {
-          // See if this is a composite view or not
-          if (it->first->is_instance_view())
-          {
-#ifdef DEBUG_LEGION
-            assert(it->first->as_instance_view()->is_materialized_view());
-#endif
-            MaterializedView *view = 
-              it->first->as_instance_view()->as_materialized_view(); 
-            // Record the instance and its information
-            field_data.push_back(FieldDataDescriptor());
-            view->set_descriptor(field_data.back(), field_id);
-            // Register ourselves as user of this instance
-            ApEvent ready_event = view->add_user_fused(usage, term_event, 
-              user_mask, op, index, &version_info, local_space, applied_events);
-            if (ready_event.exists())
-              preconditions.insert(ready_event);
-            // We found an actual instance so we are done
-            deferred_view = NULL;
-            break;
-          }
-          else
-          {
-            // Save it as a composite view and keep going
-#ifdef DEBUG_LEGION
-            assert(it->first->is_deferred_view());
-            // There should be at most one composite view for this field
-            assert(deferred_view == NULL);
-#endif
-            deferred_view = it->first->as_deferred_view();
-          }
-        }
-      }
-      if (deferred_view != NULL)
-      {
-        // If this is a fill view, we either need to make a new physical
-        // instance or apply it to all the existing physical instances
-        if (!deferred_view->is_composite_view())
-          assert(false); // TODO: implement this
-        deferred_view->find_field_descriptors(term_event, usage, 
-                                              user_mask, field_id, op, index,
-                                              field_data, preconditions);
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,

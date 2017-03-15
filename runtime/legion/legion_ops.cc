@@ -11173,7 +11173,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(Runtime *rt)
-      : Operation(rt)
+      : Operation(rt), thunk(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -11206,120 +11206,163 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_field(TaskContext *ctx, 
                                                    IndexPartition pid,
-                                    LogicalRegion handle, LogicalRegion parent,
-                                    IndexSpace space, FieldID fid)
+                                                   LogicalRegion handle, 
+                                                   LogicalRegion parent,
+                                                   FieldID fid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid, 
+            handle.get_field_space(), fid, false/*range*/, 
+            true/*use color space*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                      "of the color space elements for 'partition_by_field' "
+                      "call in task %s (UID %lld)", fid, ctx->get_task_name(),
+                      ctx->get_unique_id());
+        assert(false);
+      }
+#endif
       initialize_operation(ctx, true/*track*/); 
-      partition_kind = BY_FIELD;
-      // Projection region requirement since we need the whole sub-tree
-      requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
-                                      EXCLUSIVE, parent);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
-      partition_handle = pid;
-      color_space = space;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ByFieldThunk(pid);
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_dependent_partition_operation(
-            parent_ctx->get_unique_id(),
-            unique_op_id,
-            partition_handle.id,
-            partition_kind);
+        perform_logging();
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_image(TaskContext *ctx, 
                                                    IndexPartition pid,
                                           LogicalPartition projection,
-                                          LogicalRegion parent, FieldID fid, 
-                                          IndexSpace space)
+                                          LogicalRegion parent, FieldID fid) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid, 
+            projection.get_field_space(), fid, false/*range*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                      "of the destination index space elements for "
+                      "'partition_by_image' call in task %s (UID %lld)",
+                      fid, ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+      }
+#endif
       initialize_operation(ctx, true/*track*/);
-      partition_kind = BY_IMAGE;
-      // Projection region requirement since we need the whole sub-tree
-      requirement = RegionRequirement(projection, 0/*id*/, READ_ONLY,
-                                      EXCLUSIVE, parent);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      LogicalRegion proj_parent = 
+        runtime->forest->get_parent_logical_region(projection);
+      requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
       requirement.add_field(fid);
-      partition_handle = pid;
-      color_space = space;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ByImageThunk(pid, projection.get_index_partition());
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_dependent_partition_operation(
-            parent_ctx->get_unique_id(),
-            unique_op_id,
-            partition_handle.id,
-            partition_kind);
+        perform_logging();
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_image_range(TaskContext *ctx, 
                                                          IndexPartition pid,
                                                 LogicalPartition projection,
-                                                LogicalRegion parent, 
-                                                FieldID fid, IndexSpace space)
+                                                LogicalRegion parent,
+                                                FieldID fid) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid, 
+            projection.get_field_space(), fid, true/*range*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                      "of the destination index space elements for "
+                      "'partition_by_image_range' call in task %s (UID %lld)",
+                      fid, ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+      }
+#endif
       initialize_operation(ctx, true/*track*/);
-      partition_kind = BY_IMAGE_RANGE;
-      // Projection region requirement since we need the whole sub-tree
-      requirement = RegionRequirement(projection, 0/*id*/, READ_ONLY,
-                                      EXCLUSIVE, parent);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      LogicalRegion proj_parent = 
+        runtime->forest->get_parent_logical_region(projection);
+      requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
       requirement.add_field(fid);
-      partition_handle = pid;
-      color_space = space;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ByImageRangeThunk(pid, projection.get_index_partition());
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_dependent_partition_operation(
-            parent_ctx->get_unique_id(),
-            unique_op_id,
-            partition_handle.id,
-            partition_kind);
+        perform_logging();
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_preimage(TaskContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, IndexSpace space)
+                                    FieldID fid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid,
+            handle.get_field_space(), fid, false/*range*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                      "of the range index space elements for "
+                      "'partition_by_preimage' call in task %s (UID %lld)",
+                      fid, ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+      }
+#endif
       initialize_operation(ctx, true/*track*/);
-      partition_kind = BY_PREIMAGE;
-      // Projection region requirement since we need the whole sub-tree
-      requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
-                                      EXCLUSIVE, parent);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
-      partition_handle = pid;
-      color_space = space;
-      projection = proj;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ByPreimageThunk(pid, proj);
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_dependent_partition_operation(
-            parent_ctx->get_unique_id(),
-            unique_op_id,
-            partition_handle.id,
-            partition_kind);
+        perform_logging();
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_preimage_range(TaskContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid, IndexSpace space)
+                                    FieldID fid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid,
+            handle.get_field_space(), fid, true/*range*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                     "of the range index space elements for "
+                     "'partition_by_preimage_range' call in task %s (UID %lld)",
+                     fid, ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+      }
+#endif
       initialize_operation(ctx, true/*track*/);
-      partition_kind = BY_PREIMAGE_RANGE;
-      // Projection region requirement since we need the whole sub-tree
-      requirement = RegionRequirement(handle, 0/*idx*/, READ_ONLY, 
-                                      EXCLUSIVE, parent);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
-      partition_handle = pid;
-      color_space = space;
-      projection = proj;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ByPreimageRangeThunk(pid, proj);
       if (Runtime::legion_spy_enabled)
-        LegionSpy::log_dependent_partition_operation(
-            parent_ctx->get_unique_id(),
-            unique_op_id,
-            partition_handle.id,
-            partition_kind);
+        perform_logging();
     }
 
     //--------------------------------------------------------------------------
@@ -11328,29 +11371,47 @@ namespace Legion {
                         FieldID fid, IndexSpace range)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_association_field_size(range,
+            domain.get_field_space(), fid))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                      "of the range index space elements for "
+                      "'create_association' call in task %s (UID %lld)",
+                      fid, ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+      }
+#endif
       initialize_operation(ctx, true/*track*/);
-      partition_kind = BY_ASSOCIATION;
       // start-off with non-projection requirement
       requirement = RegionRequirement(domain, READ_WRITE, 
                                       EXCLUSIVE, domain_parent);
       requirement.add_field(fid);
-      range_space = range; 
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new AssociationThunk(domain.get_index_space(), range);
       if (Runtime::legion_spy_enabled)
-      {
-        LegionSpy::log_association_operation(parent_ctx->get_unique_id(),
-                                             unique_op_id);
-        LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                           true/*region*/,
-                                           requirement.region.index_space.id,
-                                           requirement.region.field_space.id,
-                                           requirement.region.tree_id,
-                                           requirement.privilege,
-                                           requirement.prop,
-                                           requirement.redop,
-                                           requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::perform_logging(void) const
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_dependent_partition_operation(
+          parent_ctx->get_unique_id(), unique_op_id, thunk->get_kind());
+      LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
     }
 
     //--------------------------------------------------------------------------
@@ -11426,55 +11487,13 @@ namespace Legion {
     void DependentPartitionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext physical_ctx = parent_ctx->get_context(); 
-      ApEvent ready_event = ApEvent::NO_AP_EVENT;
-      switch (partition_kind)
-      {
-        case BY_FIELD:
-          {
-            ready_event = 
-              runtime->forest->create_partition_by_field(physical_ctx, 
-                this, 0/*idx*/, requirement, partition_handle, color_space,
-                completion_event, version_info, map_applied_conditions);
-            break;
-          }
-        case BY_IMAGE:
-          {
-            ready_event = 
-              runtime->forest->create_partition_by_image(physical_ctx, 
-                this, 0/*idx*/, requirement, partition_handle, color_space,
-                completion_event, version_info, map_applied_conditions);
-            break;
-          }
-        case BY_IMAGE_RANGE:
-          {
-            ready_event = 
-              runtime->forest->create_partition_by_image_range(physical_ctx,
-                  this, 0/*idx*/, requirement, partition_handle, color_space,
-                  completion_event, version_info, map_applied_conditions);
-            break;
-          }
-        case BY_PREIMAGE:
-          {
-            ready_event = 
-              runtime->forest->create_partition_by_preimage(physical_ctx, 
-                this, 0/*idx*/, requirement, projection, partition_handle,
-                color_space, completion_event, version_info, 
-                map_applied_conditions);
-            break;
-          }
-        case BY_PREIMAGE_RANGE:
-          {
-            ready_event = 
-              runtime->forest->create_partition_by_preimage_range(physical_ctx,
-                  this, 0/*idx*/, requirement, projection, partition_handle,
-                  color_space, completion_event, version_info,
-                  map_applied_conditions);
-            break;
-          }
-        default:
-          assert(false); // should never get here
-      }
+#ifdef DEBUG_LEGION
+      assert(thunk != NULL);
+#endif
+      ApEvent instances_ready;
+      std::vector<FieldDataDescriptor> instances;
+      ApEvent ready_event = thunk->perform(this, runtime->forest, 
+                                           instances_ready, instances);
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
       if (!map_applied_conditions.empty())
@@ -11484,6 +11503,66 @@ namespace Legion {
       Runtime::trigger_event(completion_event, ready_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(ready_event));
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent DependentPartitionOp::ByFieldThunk::perform(
+     DependentPartitionOp *op, RegionTreeForest *forest,
+     ApEvent instances_ready, const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      return forest->create_partition_by_field(op, pid, 
+                                               instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent DependentPartitionOp::ByImageThunk::perform(
+     DependentPartitionOp *op, RegionTreeForest *forest,
+     ApEvent instances_ready, const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      return forest->create_partition_by_image(op, pid, projection, 
+                                               instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent DependentPartitionOp::ByImageRangeThunk::perform(
+     DependentPartitionOp *op, RegionTreeForest *forest,
+     ApEvent instances_ready, const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      return forest->create_partition_by_image_range(op, pid, projection, 
+                                                     instances,instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent DependentPartitionOp::ByPreimageThunk::perform(
+     DependentPartitionOp *op, RegionTreeForest *forest,
+     ApEvent instances_ready, const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      return forest->create_partition_by_preimage(op, pid, projection, 
+                                                  instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent DependentPartitionOp::ByPreimageRangeThunk::perform(
+     DependentPartitionOp *op, RegionTreeForest *forest,
+     ApEvent instances_ready, const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      return forest->create_partition_by_preimage_range(op, pid, projection, 
+                                                  instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent DependentPartitionOp::AssociationThunk::perform(
+     DependentPartitionOp *op, RegionTreeForest *forest,
+     ApEvent instances_ready, const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      return forest->create_association(op, domain, range, 
+                                        instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -11508,6 +11587,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
+      if (thunk != NULL)
+      {
+        delete thunk;
+        thunk = NULL;
+      }
       privilege_path = RegionTreePath();
       version_info.clear();
       restrict_info.clear();

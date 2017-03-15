@@ -870,6 +870,9 @@ namespace Legion {
                                    IndexPartNode *partition, size_t granularity)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
       const size_t count = partition->color_space->get_volume(); 
       std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
       Realm::ProfilingRequestSet requests;
@@ -918,6 +921,9 @@ namespace Legion {
                                                     IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
       const size_t count = partition->color_space->get_volume();
       std::vector<Realm::ZIndexSpace<DIM,T> > lhs_spaces(count);
       std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces(count);
@@ -1013,6 +1019,9 @@ namespace Legion {
                                                       IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
       const size_t count = partition->color_space->get_volume();
       std::vector<Realm::ZIndexSpace<DIM,T> > lhs_spaces(count);
       std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces(count);
@@ -1108,6 +1117,9 @@ namespace Legion {
                                                       IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
       const size_t count = partition->color_space->get_volume();
       std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces(count);
       std::set<ApEvent> preconditions;
@@ -1194,6 +1206,9 @@ namespace Legion {
                                                       IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
       const size_t count = partition->color_space->get_volume();
       std::vector<Realm::ZIndexSpace<DIM,T> > lhs_spaces(count);
       std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces(count);
@@ -1369,6 +1384,622 @@ namespace Legion {
       }
       // Our only precondition is that the parent index space is computed
       return parent->index_space_ready;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_field(Operation *op,
+                                                    IndexPartNode *partition,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                    ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
+      // Demux the color space type to do the actual operations 
+      CreateByFieldHelper creator(this, op, partition, 
+                                  instances, instances_ready);
+      NT_TemplateHelper::demux<CreateByFieldHelper>(
+                   partition->color_space->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T> template<int COLOR_DIM, typename COLOR_T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_field_helper(Operation *op,
+                                                      IndexPartNode *partition,
+                             const std::vector<FieldDataDescriptor> &instances,
+                                                       ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
+       static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
+      // Enumerate the color space
+      if (!color_space->index_space_ready.has_triggered())
+        color_space->index_space_ready.wait();
+      Realm::ZIndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
+      color_space->get_realm_index_space(realm_color_space);
+      const size_t num_colors = realm_color_space.volume();
+      std::vector<Realm::ZPoint<COLOR_DIM,COLOR_T> > colors(num_colors);
+      unsigned index = 0;
+      for (Realm::ZIndexSpaceIterator<COLOR_DIM,COLOR_T> 
+            rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
+      {
+        for (Realm::ZPointInRectIterator<COLOR_DIM,COLOR_T> 
+              itr(rect_iter.rect); itr.valid; itr.step())
+        {
+#ifdef DEBUG_LEGION
+          assert(index < colors.size());
+#endif
+          colors[index++] = itr.p;
+        }
+      }
+      // Translate the instances to realm field data descriptors
+      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM,T>,
+                Realm::ZPoint<COLOR_DIM,COLOR_T> > RealmDescriptor;
+      std::vector<RealmDescriptor> descriptors(instances.size());
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const FieldDataDescriptor &src = instances[idx];
+        RealmDescriptor &dst = descriptors[idx];
+        dst.inst = src.inst;
+        dst.field_offset = src.field_offset;
+        IndexSpaceNodeT<DIM,T> *node = static_cast<IndexSpaceNodeT<DIM,T>*>(
+                                          context->get_node(src.index_space));
+        node->get_realm_index_space(dst.index_space);
+      }
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                            op, DEP_PART_BY_FIELD);
+      // Perform the operation
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(colors.size());
+      ApEvent result = ApEvent(realm_index_space.create_subspaces_by_field(
+            descriptors, colors, subspaces, requests, 
+            Runtime::merge_events(instances_ready, index_space_ready)));
+      // Update the children with the names of their subspaces 
+      for (unsigned idx = 0; idx < colors.size(); idx++)
+      {
+        LegionColor child_color = color_space->linearize_color(&colors[idx],
+                                        color_space->handle.get_type_tag());
+        IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
+                                            partition->get_child(child_color));
+        child->set_realm_index_space(subspaces[idx]);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_image(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *projection,
+                            const std::vector<FieldDataDescriptor> &instances,
+                                                    ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
+      // Demux the projection type to do the actual operations
+      CreateByImageHelper creator(this, op, partition, projection,
+                                  instances, instances_ready);
+      NT_TemplateHelper::demux<CreateByImageHelper>(
+          projection->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1> template<int DIM2, typename T2>
+    ApEvent IndexSpaceNodeT<DIM1,T1>::create_by_image_helper(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *projection,
+                            const std::vector<FieldDataDescriptor> &instances,
+                                                    ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      // Get the index spaces of the projection partition
+      std::vector<Realm::ZIndexSpace<DIM2,T2> > 
+                                sources(projection->color_space->get_volume());
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        // Always use the partitions color space
+        for (LegionColor color = 0; color < partition->total_children; color++)
+        {
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM2,T2> *child = 
+           static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(color));
+          child->get_realm_index_space(sources[color]);
+        }
+      }
+      else
+      {
+        unsigned index = 0;
+        // Always use the partitions color space
+        for (LegionColor color = 0; 
+              color < partition->max_linearized_color; color++)
+        {
+          if (!projection->color_space->contains_color(color))
+            continue;
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM2,T2> *child = 
+           static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(color));
+#ifdef DEBUG_LEGION
+          assert(index < sources.size());
+#endif
+          child->get_realm_index_space(sources[index++]);
+        }
+      }
+      // Translate the descriptors into realm descriptors
+      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM2,T2>,
+                                       Realm::ZPoint<DIM1,T1> > RealmDescriptor;
+      std::vector<RealmDescriptor> descriptors(instances.size());
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const FieldDataDescriptor &src = instances[idx];
+        RealmDescriptor &dst = descriptors[idx];
+        dst.inst = src.inst;
+        dst.field_offset = src.field_offset;
+        IndexSpaceNodeT<DIM2,T2> *node = static_cast<IndexSpaceNodeT<DIM2,T2>*>(
+                                          context->get_node(src.index_space));
+        node->get_realm_index_space(dst.index_space);
+      }
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                            op, DEP_PART_BY_IMAGE);
+      // Perform the operation
+      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(sources.size());
+      ApEvent result(realm_index_space.create_subspaces_by_image(descriptors,
+            sources, subspaces, requests, 
+            Runtime::merge_events(index_space_ready, instances_ready)));
+      // Update the child subspaces of the image
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        for (LegionColor color = 0; color < partition->total_children; color++)
+        {
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM1,T1> *child = 
+           static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
+          child->set_realm_index_space(subspaces[color]);
+        }
+      }
+      else
+      {
+        unsigned index = 0;
+        for (LegionColor color = 0; 
+              color < partition->max_linearized_color; color++)
+        {
+          if (!projection->color_space->contains_color(color))
+            continue;
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM1,T1> *child = 
+           static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
+#ifdef DEBUG_LEGION
+          assert(index < subspaces.size());
+#endif
+          child->set_realm_index_space(subspaces[index++]);
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_image_range(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *projection,
+                            const std::vector<FieldDataDescriptor> &instances,
+                                                    ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
+      // Demux the projection type to do the actual operations
+      CreateByImageRangeHelper creator(this, op, partition, projection,
+                                       instances, instances_ready);
+      NT_TemplateHelper::demux<CreateByImageRangeHelper>(
+          projection->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1> template<int DIM2, typename T2>
+    ApEvent IndexSpaceNodeT<DIM1,T1>::create_by_image_range_helper(
+                                                    Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *projection,
+                            const std::vector<FieldDataDescriptor> &instances,
+                                                    ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      // Get the index spaces of the projection partition
+      std::vector<Realm::ZIndexSpace<DIM2,T2> > 
+                                sources(projection->color_space->get_volume());
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        // Always use the partitions color space
+        for (LegionColor color = 0; color < partition->total_children; color++)
+        {
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM2,T2> *child = 
+           static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(color));
+          child->get_realm_index_space(sources[color]);
+        }
+      }
+      else
+      {
+        unsigned index = 0;
+        // Always use the partitions color space
+        for (LegionColor color = 0; 
+              color < partition->max_linearized_color; color++)
+        {
+          if (!projection->color_space->contains_color(color))
+            continue;
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM2,T2> *child = 
+           static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(color));
+#ifdef DEBUG_LEGION
+          assert(index < sources.size());
+#endif
+          child->get_realm_index_space(sources[index++]);
+        }
+      }
+      // Translate the descriptors into realm descriptors
+      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM2,T2>,
+                                       Realm::ZRect<DIM1,T1> > RealmDescriptor;
+      std::vector<RealmDescriptor> descriptors(instances.size());
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const FieldDataDescriptor &src = instances[idx];
+        RealmDescriptor &dst = descriptors[idx];
+        dst.inst = src.inst;
+        dst.field_offset = src.field_offset;
+        IndexSpaceNodeT<DIM2,T2> *node = static_cast<IndexSpaceNodeT<DIM2,T2>*>(
+                                          context->get_node(src.index_space));
+        node->get_realm_index_space(dst.index_space);
+      }
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                            op, DEP_PART_BY_IMAGE_RANGE);
+      // Perform the operation
+      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(sources.size());
+      ApEvent result(realm_index_space.create_subspaces_by_image(descriptors,
+            sources, subspaces, requests, 
+            Runtime::merge_events(index_space_ready, instances_ready)));
+      // Update the child subspaces of the image
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        for (LegionColor color = 0; color < partition->total_children; color++)
+        {
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM1,T1> *child = 
+           static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
+          child->set_realm_index_space(subspaces[color]);
+        }
+      }
+      else
+      {
+        unsigned index = 0;
+        for (LegionColor color = 0; 
+              color < partition->max_linearized_color; color++)
+        {
+          if (!projection->color_space->contains_color(color))
+            continue;
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM1,T1> *child = 
+           static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
+#ifdef DEBUG_LEGION
+          assert(index < subspaces.size());
+#endif
+          child->set_realm_index_space(subspaces[index++]);
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_preimage(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *projection,
+                            const std::vector<FieldDataDescriptor> &instances,
+                                                    ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
+      // Demux the projection type to do the actual operations
+      CreateByPreimageHelper creator(this, op, partition, projection,
+                                     instances, instances_ready);
+      NT_TemplateHelper::demux<CreateByPreimageHelper>(
+          projection->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1> template<int DIM2, typename T2>
+    ApEvent IndexSpaceNodeT<DIM1,T1>::create_by_preimage_helper(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *projection,
+                            const std::vector<FieldDataDescriptor> &instances,
+                                                    ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      // Get the index spaces of the projection partition
+      std::vector<Realm::ZIndexSpace<DIM2,T2> > 
+                                targets(projection->color_space->get_volume());
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        // Always use the partitions color space
+        for (LegionColor color = 0; color < partition->total_children; color++)
+        {
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM2,T2> *child = 
+           static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(color));
+          child->get_realm_index_space(targets[color]);
+        }
+      }
+      else
+      {
+        unsigned index = 0;
+        // Always use the partitions color space
+        for (LegionColor color = 0; 
+              color < partition->max_linearized_color; color++)
+        {
+          if (!projection->color_space->contains_color(color))
+            continue;
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM2,T2> *child = 
+           static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(color));
+#ifdef DEBUG_LEGION
+          assert(index < targets.size());
+#endif
+          child->get_realm_index_space(targets[index++]);
+        }
+      }
+      // Translate the descriptors into realm descriptors
+      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM1,T1>,
+                                       Realm::ZPoint<DIM2,T2> > RealmDescriptor;
+      std::vector<RealmDescriptor> descriptors(instances.size());
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const FieldDataDescriptor &src = instances[idx];
+        RealmDescriptor &dst = descriptors[idx];
+        dst.inst = src.inst;
+        dst.field_offset = src.field_offset;
+        IndexSpaceNodeT<DIM1,T1> *node = static_cast<IndexSpaceNodeT<DIM1,T1>*>(
+                                          context->get_node(src.index_space));
+        node->get_realm_index_space(dst.index_space);
+      }
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                            op, DEP_PART_BY_PREIMAGE);
+      // Perform the operation
+      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(targets.size());
+      ApEvent result(realm_index_space.create_subspaces_by_preimage(
+            descriptors, targets, subspaces, requests,
+            Runtime::merge_events(index_space_ready, instances_ready)));
+      // Update the child subspace of the preimage
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        for (LegionColor color = 0; color < partition->total_children; color++)
+        {
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM1,T1> *child = 
+           static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
+          child->set_realm_index_space(subspaces[color]);
+        }
+      }
+      else
+      {
+        unsigned index = 0;
+        for (LegionColor color = 0; 
+              color < partition->max_linearized_color; color++)
+        {
+          if (!projection->color_space->contains_color(color))
+            continue;
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM1,T1> *child = 
+           static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
+#ifdef DEBUG_LEGION
+          assert(index < subspaces.size());
+#endif
+          child->set_realm_index_space(subspaces[index++]);
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_preimage_range(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *projection,
+                            const std::vector<FieldDataDescriptor> &instances,
+                                                    ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+#endif
+      // Demux the projection type to do the actual operations
+      CreateByPreimageRangeHelper creator(this, op, partition, projection,
+                                          instances, instances_ready);
+      NT_TemplateHelper::demux<CreateByPreimageRangeHelper>(
+          projection->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1> template<int DIM2, typename T2>
+    ApEvent IndexSpaceNodeT<DIM1,T1>::create_by_preimage_range_helper(
+                                                    Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *projection,
+                            const std::vector<FieldDataDescriptor> &instances,
+                                                    ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      // Get the index spaces of the projection partition
+      std::vector<Realm::ZIndexSpace<DIM2,T2> > 
+                                targets(projection->color_space->get_volume());
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        // Always use the partitions color space
+        for (LegionColor color = 0; color < partition->total_children; color++)
+        {
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM2,T2> *child = 
+           static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(color));
+          child->get_realm_index_space(targets[color]);
+        }
+      }
+      else
+      {
+        unsigned index = 0;
+        // Always use the partitions color space
+        for (LegionColor color = 0; 
+              color < partition->max_linearized_color; color++)
+        {
+          if (!projection->color_space->contains_color(color))
+            continue;
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM2,T2> *child = 
+           static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(color));
+#ifdef DEBUG_LEGION
+          assert(index < targets.size());
+#endif
+          child->get_realm_index_space(targets[index++]);
+        }
+      }
+      // Translate the descriptors into realm descriptors
+      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM1,T1>,
+                                       Realm::ZRect<DIM2,T2> > RealmDescriptor;
+      std::vector<RealmDescriptor> descriptors(instances.size());
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const FieldDataDescriptor &src = instances[idx];
+        RealmDescriptor &dst = descriptors[idx];
+        dst.inst = src.inst;
+        dst.field_offset = src.field_offset;
+        IndexSpaceNodeT<DIM1,T1> *node = static_cast<IndexSpaceNodeT<DIM1,T1>*>(
+                                          context->get_node(src.index_space));
+        node->get_realm_index_space(dst.index_space);
+      }
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                            op, DEP_PART_BY_PREIMAGE_RANGE);
+      // Perform the operation
+      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(targets.size());
+      ApEvent result(realm_index_space.create_subspaces_by_preimage(
+            descriptors, targets, subspaces, requests,
+            Runtime::merge_events(index_space_ready, instances_ready)));
+      // Update the child subspace of the preimage
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        for (LegionColor color = 0; color < partition->total_children; color++)
+        {
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM1,T1> *child = 
+           static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
+          child->set_realm_index_space(subspaces[color]);
+        }
+      }
+      else
+      {
+        unsigned index = 0;
+        for (LegionColor color = 0; 
+              color < partition->max_linearized_color; color++)
+        {
+          if (!projection->color_space->contains_color(color))
+            continue;
+          // Get the child of the projection partition
+          IndexSpaceNodeT<DIM1,T1> *child = 
+           static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(color));
+#ifdef DEBUG_LEGION
+          assert(index < subspaces.size());
+#endif
+          child->set_realm_index_space(subspaces[index++]);
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_association(Operation *op,
+                                                       IndexSpaceNode *range,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                       ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      // Demux the range type to do the actual operation
+      CreateAssociationHelper creator(this, op, range, 
+                                      instances, instances_ready);
+      NT_TemplateHelper::demux<CreateAssociationHelper>(
+          range->handle.get_type_tag(), &creator);
+      return creator.result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM1, typename T1> template<int DIM2, typename T2>
+    ApEvent IndexSpaceNodeT<DIM1,T1>::create_association_helper(Operation *op,
+                                                      IndexSpaceNode *range,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      // Translate the descriptors into realm descriptors
+      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM1,T1>,
+                                       Realm::ZPoint<DIM2,T2> > RealmDescriptor;
+      std::vector<RealmDescriptor> descriptors(instances.size());
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const FieldDataDescriptor &src = instances[idx];
+        RealmDescriptor &dst = descriptors[idx];
+        dst.inst = src.inst;
+        dst.field_offset = src.field_offset;
+        IndexSpaceNodeT<DIM1,T1> *node = static_cast<IndexSpaceNodeT<DIM1,T1>*>(
+                                          context->get_node(src.index_space));
+        node->get_realm_index_space(dst.index_space);
+      }
+      // Get the range index space
+      IndexSpaceNodeT<DIM2,T2> *range_node = 
+        static_cast<IndexSpaceNodeT<DIM2,T2>*>(range);
+      Realm::ZIndexSpace<DIM2,T2> range_space;
+      range_node->get_realm_index_space(range_space);
+      // Get the profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                          op, DEP_PART_ASSOCIATION);
+      // Issue the operation
+      return ApEvent(realm_index_space.create_association(descriptors,
+            range_space, requests, Runtime::merge_events(instances_ready,
+              index_space_ready, range_node->index_space_ready)));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::check_field_size(size_t field_size, bool range)
+    //--------------------------------------------------------------------------
+    {
+      if (range)
+        return (sizeof(Realm::ZRect<DIM,T>) == field_size);
+      else
+        return (sizeof(Realm::ZPoint<DIM,T>) == field_size);
     }
 
     //--------------------------------------------------------------------------

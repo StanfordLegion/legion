@@ -3763,20 +3763,6 @@ namespace Legion {
         postconditions.insert(it->first);
     }
 
-    //--------------------------------------------------------------------------
-    void DeferredView::find_field_descriptors(ApEvent term_event,
-                                          const RegionUsage &usage,
-                                          const FieldMask &user_mask,
-                                          FieldID field_id, Operation *op,
-                                          const unsigned index,
-                                  std::vector<FieldDataDescriptor> &field_data,
-                                          std::set<ApEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: reimplement this for dependent partitioning
-      assert(false);
-    }
-
     /////////////////////////////////////////////////////////////
     // DeferredVersionInfo
     /////////////////////////////////////////////////////////////

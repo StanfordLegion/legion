@@ -255,6 +255,12 @@ namespace Legion {
       DEP_PART_DIFFERENCE = 6, // a single difference
       DEP_PART_DIFFERENCES = 7, // many parallel differences
       DEP_PART_EQUAL = 8, // an equal partition operation
+      DEP_PART_BY_FIELD = 9, // create a partition from a field
+      DEP_PART_BY_IMAGE = 10, // create partition by image
+      DEP_PART_BY_IMAGE_RANGE = 11, // create partition by image range
+      DEP_PART_BY_PREIMAGE = 12, // create partition by preimage
+      DEP_PART_BY_PREIMAGE_RANGE = 13, // create partition by preimage range
+      DEP_PART_ASSOCIATION = 14, // create an association
     };
 
     // Enumeration of Legion runtime tasks
@@ -1303,6 +1309,7 @@ namespace Legion {
     class TreeCloseImpl;
     class TreeClose;
     struct CloseInfo; 
+    struct FieldDataDescriptor;
 
     // legion_spy.h
     class TreeStateLogger;
@@ -1434,7 +1441,6 @@ namespace Legion {
   typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
   typedef Realm::DynamicTemplates::TagType TypeTag;
   typedef ::legion_lowlevel_coord_t coord_t;
-  typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;
   typedef std::map<Realm::ReductionOpID, 

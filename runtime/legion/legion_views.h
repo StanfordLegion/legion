@@ -929,13 +929,6 @@ namespace Legion {
                                   const std::vector<unsigned> &dst_indexes,
                                         ApEvent precondition, PredEvent guard,
                                         std::set<ApEvent> &postconditions);
-      void find_field_descriptors(ApEvent term_event,
-                                  const RegionUsage &usage,
-                                  const FieldMask &user_mask,
-                                  FieldID field_id, Operation *op,
-                                  const unsigned index,
-                          std::vector<FieldDataDescriptor> &field_data,
-                                  std::set<ApEvent> &preconditions);
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,

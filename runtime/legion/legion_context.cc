@@ -2897,8 +2897,7 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_field(this, pid, handle, 
-                                   parent_priv, color_space, fid);
+      part_op->initialize_by_field(this, pid, handle, parent_priv, fid);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
       forest->create_pending_partition(pid, parent, color_space, part_color,
@@ -2949,8 +2948,7 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_image(this, pid, projection,
-                                   parent, fid, color_space);
+      part_op->initialize_by_image(this, pid, projection, parent, fid);
       ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle, color_space, part_color,
@@ -3001,8 +2999,7 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_image_range(this, pid, projection,
-                                         parent, fid, color_space);
+      part_op->initialize_by_image_range(this, pid, projection, parent, fid);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle, color_space, part_color,
@@ -3054,8 +3051,8 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_preimage(this, pid, projection, handle,
-                                      parent, fid, color_space);
+      part_op->initialize_by_preimage(this, pid, projection, handle, 
+                                      parent, fid);
       ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
@@ -3117,7 +3114,7 @@ namespace Legion {
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
-                                            parent, fid, color_space);
+                                            parent, fid);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle.get_index_space(), 

@@ -26,6 +26,18 @@
 
 namespace Legion {
   namespace Internal {
+
+    /**
+     * \struct FieldDataDescriptor
+     * A small helper class for performing dependent
+     * partitioning operations
+     */
+    struct FieldDataDescriptor {
+    public:
+      IndexSpace index_space;
+      PhysicalInstance inst;
+      size_t field_offset;
+    };
     
     /**
      * \class RegionTreeForest
@@ -115,48 +127,41 @@ namespace Legion {
                                            PartitionKind kind,
                                            LegionColor &part_color,
                                            ApEvent domain_ready);
-      ApEvent create_partition_by_field(RegionTreeContext ctx,
-                                        Operation *op, unsigned index,
-                                        const RegionRequirement &req,
+      ApEvent create_partition_by_field(Operation *op,
                                         IndexPartition pending,
-                                        IndexSpace color_space,
-                                        ApEvent term_event,
-                                        VersionInfo &version_info,
-                                        std::set<RtEvent> &applied_events);
-      ApEvent create_partition_by_image(RegionTreeContext ctx,
-                                      Operation *op, unsigned index,
-                                      const RegionRequirement &req,
-                                      IndexPartition pending,
-                                      IndexSpace color_space,
-                                      ApEvent term_event,
-                                      VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
-      ApEvent create_partition_by_image_range(RegionTreeContext ctx,
-                                      Operation *op, unsigned index,
-                                      const RegionRequirement &req,
-                                      IndexPartition pending,
-                                      IndexSpace color_space,
-                                      ApEvent term_event,
-                                      VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
-      ApEvent create_partition_by_preimage(RegionTreeContext ctx,
-                                      Operation *op, unsigned index,
-                                      const RegionRequirement &req,
-                                      IndexPartition projection,
-                                      IndexPartition pending,
-                                      IndexSpace color_space,
-                                      ApEvent term_event,
-                                      VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
-      ApEvent create_partition_by_preimage_range(RegionTreeContext ctx,
-                                      Operation *op, unsigned index,
-                                      const RegionRequirement &req,
-                                      IndexPartition projection,
-                                      IndexPartition pending,
-                                      IndexSpace color_space,
-                                      ApEvent term_event,
-                                      VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
+                    const std::vector<FieldDataDescriptor> &instances,
+                                        ApEvent instances_ready);
+      ApEvent create_partition_by_image(Operation *op,
+                                        IndexPartition pending,
+                                        IndexPartition projection,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                        ApEvent instances_ready);
+      ApEvent create_partition_by_image_range(Operation *op,
+                                              IndexPartition pending,
+                                              IndexPartition projection,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                              ApEvent instances_ready);
+      ApEvent create_partition_by_preimage(Operation *op,
+                                           IndexPartition pending,
+                                           IndexPartition projection,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                           ApEvent instances_ready);
+      ApEvent create_partition_by_preimage_range(Operation *op,
+                                                 IndexPartition pending,
+                                                 IndexPartition projection,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                                 ApEvent instances_ready);
+      ApEvent create_association(Operation *op, 
+                                 IndexSpace domain, IndexSpace range,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                 ApEvent instances_ready);
+    public:
+      bool check_partition_by_field_size(IndexPartition pid,
+                                         FieldSpace fspace, FieldID fid,
+                                         bool is_range,
+                                         bool use_color_space = false);
+      bool check_association_field_size(IndexSpace is,
+                                        FieldSpace fspace, FieldID fid);
     public:
       IndexSpace find_pending_space(IndexPartition parent,
                                     const void *realm_color,
@@ -729,19 +734,6 @@ namespace Legion {
       bool has_instance(RegionTreeID tid);
       void add_creation_source(AddressSpaceID source);
     public:
-      ApEvent create_subspaces_by_field(
-          const std::vector<FieldDataDescriptor> &field_data,
-          std::map<LegionColor, Realm::IndexSpace> &subspaces,
-          bool mutable_results, ApEvent precondition);
-      ApEvent create_subspaces_by_image(
-          const std::vector<FieldDataDescriptor> &field_data,
-          std::map<Realm::IndexSpace, Realm::IndexSpace> &subpsaces,
-          bool mutable_results, ApEvent precondition);
-      ApEvent create_subspaces_by_preimage(
-          const std::vector<FieldDataDescriptor> &field_data,
-          std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
-          bool mutable_results, ApEvent precondition);
-    public:
       static void handle_disjointness_test(IndexSpaceNode *parent,
                                            IndexPartNode *left,
                                            IndexPartNode *right);
@@ -830,6 +822,35 @@ namespace Legion {
                                             const void *transform,
                                             const void *extent,
                                             int partition_dim) = 0;
+      virtual ApEvent create_by_field(Operation *op,
+                                      IndexPartNode *partition,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_image(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_image_range(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_preimage(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_preimage_range(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_association(Operation *op,
+                                      IndexSpaceNode *range,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual bool check_field_size(size_t field_size, bool range) = 0;
     public:
       virtual ApEvent issue_copy(Operation *op, 
                   const std::vector<CopySrcDstField> &src_fields,
@@ -883,7 +904,7 @@ namespace Legion {
      * associated with realm index spaces
      */
     template<int DIM, typename T>
-    class IndexSpaceNodeT : public IndexSpaceNode {
+    class IndexSpaceNodeT : public IndexSpaceNode { 
     public:
       IndexSpaceNodeT(RegionTreeForest *ctx, IndexSpace handle,
                       IndexPartNode *parent, LegionColor color, 
@@ -970,6 +991,69 @@ namespace Legion {
       ApEvent create_by_restriction_helper(IndexPartNode *partition,
                                    const Realm::ZMatrix<N,DIM> &transform,
                                    const Realm::ZRect<N,T> &extent);
+      virtual ApEvent create_by_field(Operation *op,
+                                      IndexPartNode *partition,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int COLOR_DIM, typename COLOR_T>
+      ApEvent create_by_field_helper(Operation *op,
+                                     IndexPartNode *partition,
+                const std::vector<FieldDataDescriptor> &instances,
+                                     ApEvent instances_ready);
+      virtual ApEvent create_by_image(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_by_image_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_by_image_range(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_by_image_range_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_by_preimage(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_by_preimage_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_by_preimage_range(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_by_preimage_range_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_association(Operation *op,
+                                      IndexSpaceNode *range,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_association_helper(Operation *op,
+                                      IndexSpaceNode *range,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual bool check_field_size(size_t field_size, bool range);
     public:
       virtual ApEvent issue_copy(Operation *op, 
                   const std::vector<CopySrcDstField> &src_fields,
@@ -1010,6 +1094,151 @@ namespace Legion {
       Realm::ZPoint<DIM,ptrdiff_t> strides;
       size_t offset;
       bool linearization_ready;
+    public:
+      struct CreateByFieldHelper {
+      public:
+        CreateByFieldHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), instances(i), ready(r) { }
+      public:
+        template<typename COLOR_DIM, typename COLOR_T>
+        static inline void demux(CreateByFieldHelper *creator)
+        {
+          creator->result = 
+           creator->node->template create_by_field_helper<COLOR_DIM::N,COLOR_T>(
+           creator->op, creator->partition, creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateByImageHelper {
+      public:
+        CreateByImageHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), projection(j), 
+            instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateByImageHelper *creator)
+        {
+          creator->result = 
+           creator->node->template create_by_image_helper<DIM2::N,T2>(
+               creator->op, creator->partition, creator->projection,
+               creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        IndexPartNode *projection;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateByImageRangeHelper {
+      public:
+        CreateByImageRangeHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), projection(j), 
+            instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateByImageRangeHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_by_image_range_helper<DIM2::N,T2>(
+               creator->op, creator->partition, creator->projection,
+               creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        IndexPartNode *projection;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateByPreimageHelper {
+      public:
+        CreateByPreimageHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), projection(j), 
+            instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateByPreimageHelper *creator)
+        {
+          creator->result = 
+           creator->node->template create_by_preimage_helper<DIM2::N,T2>(
+               creator->op, creator->partition, creator->projection,
+               creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        IndexPartNode *projection;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateByPreimageRangeHelper {
+      public:
+        CreateByPreimageRangeHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), projection(j), 
+            instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateByPreimageRangeHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_by_preimage_range_helper<DIM2::N,T2>(
+               creator->op, creator->partition, creator->projection,
+               creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        IndexPartNode *projection;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateAssociationHelper {
+      public:
+        CreateAssociationHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexSpaceNode *g,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), range(g), instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateAssociationHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_association_helper<DIM2::N,T2>(
+               creator->op, creator->range, creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexSpaceNode *range;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
     };
 
     /**
@@ -2051,14 +2280,6 @@ namespace Legion {
       void close_state(const TraversalInfo &info, RegionUsage &usage, 
                        UniqueID logical_context_uid, InnerContext *context, 
                        InstanceSet &targets);
-      void find_field_descriptors(ContextID ctx, ApEvent term_event,
-                                  const RegionUsage &usage,
-                                  const FieldMask &user_mask,
-                                  FieldID fid, Operation *op, unsigned index,
-                                  std::vector<FieldDataDescriptor> &field_data,
-                                  std::set<ApEvent> &preconditions,
-                                  VersionInfo &version_info,
-                                  std::set<RtEvent> &applied_events);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size, 
                        UniqueID logical_ctx_uid, InnerContext *context, 

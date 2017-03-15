@@ -365,17 +365,10 @@ namespace Legion {
 
       static inline void log_dependent_partition_operation(UniqueID context,
                                                            UniqueID unique_id,
-                                                           IDType pid,
                                                            int kind)
       {
-        log_spy.print("Dependent Partition Operation %llu %llu " IDFMT " %d",
-		      context, unique_id, pid, kind);
-      }
-
-      static inline void log_association_operation(UniqueID context,
-                                                   UniqueID unique_id)
-      {
-        log_spy.print("Association Operation %llu %llu", context, unique_id);
+        log_spy.print("Dependent Partition Operation %llu %llu %d",
+		      context, unique_id, kind);
       }
 
       static inline void log_pending_partition_operation(UniqueID context,
