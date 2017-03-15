@@ -1602,6 +1602,20 @@ namespace Realm {
 				    std::vector<ZIndexSpace<N,T> >& images,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
+    // range versions
+    template <int N2, typename T2>
+    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& field_data,
+				   const ZIndexSpace<N2,T2>& source,
+				   ZIndexSpace<N,T>& image,
+				   const ProfilingRequestSet &reqs,
+				   Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2>
+    Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& field_data,
+				    const std::vector<ZIndexSpace<N2,T2> >& sources,
+				    std::vector<ZIndexSpace<N,T> >& images,
+				    const ProfilingRequestSet &reqs,
+				    Event wait_on = Event::NO_EVENT) const;
 
     // a common case that is worth optimizing is when the computed image is
     //  going to be restricted by an intersection or difference operation - it
@@ -1636,6 +1650,32 @@ namespace Realm {
 				       std::vector<ZIndexSpace<N,T> >& preimages,
 				       const ProfilingRequestSet &reqs,
 				       Event wait_on = Event::NO_EVENT) const;
+    // range versions
+    template <int N2, typename T2>
+    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
+				                        ZRect<N2,T2> > >& field_data,
+				      const ZIndexSpace<N2,T2>& target,
+				      ZIndexSpace<N,T>& preimage,
+				      const ProfilingRequestSet &reqs,
+				      Event wait_on = Event::NO_EVENT) const;
+
+    template <int N2, typename T2>
+    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
+				                         ZRect<N2,T2> > >& field_data,
+				       const std::vector<ZIndexSpace<N2,T2> >& targets,
+				       std::vector<ZIndexSpace<N,T> >& preimages,
+				       const ProfilingRequestSet &reqs,
+				       Event wait_on = Event::NO_EVENT) const;
+
+    // create association
+    // fill in the instances described by 'field_data' with a mapping
+    // from this index space to the 'range' index space
+    template <int N2, typename T2>
+    Event create_association(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
+                                                      ZPoint<N2,T2> > >& field_data,
+                             const ZIndexSpace<N2,T2> &range,
+                             const ProfilingRequestSet &reqs,
+                             Event wait_on = Event::NO_EVENT) const;
 
     // set operations
 
