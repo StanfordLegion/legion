@@ -31,6 +31,7 @@ local default_options = {
   ["inner"] = true,
   ["mapping"] = true,
   ["vectorize"] = true,
+  ["vectorize-unsafe"] = false,
 
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
