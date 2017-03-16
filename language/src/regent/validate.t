@@ -183,6 +183,13 @@ local function validate_vars_node(cx)
       continuation(node.block)
       cx:pop_local_scope()
 
+    elseif node:is(ast.typed.stat.ForNumVectorized) then
+      continuation(node.values)
+
+      cx:push_local_scope()
+      cx:intern_variable(node, node.symbol)
+      continuation(node.block)
+      cx:pop_local_scope()
     elseif node:is(ast.typed.stat.ForList) then
       continuation(node.value)
 
