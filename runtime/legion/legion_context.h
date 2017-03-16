@@ -166,7 +166,8 @@ namespace Legion {
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
-                                            IndexSpace range) = 0;
+                                            IndexSpace range,
+                                            MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_restricted_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -183,7 +184,8 @@ namespace Legion {
                                             LogicalRegion parent_priv,
                                             FieldID fid,
                                             IndexSpace color_space,
-                                            Color color) = 0;
+                                            Color color,
+                                            MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_partition_by_image(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -192,7 +194,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_partition_by_image_range(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -201,7 +204,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_partition_by_preimage(
                                             RegionTreeForest *forest,
                                             IndexPartition projection,
@@ -210,7 +214,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_partition_by_preimage_range(
                                             RegionTreeForest *forest,
                                             IndexPartition projection,
@@ -219,7 +224,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color) = 0;
+                                            Color color,
+                                            MapperID id, MappingTagID tag) = 0;
       virtual IndexPartition create_pending_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -722,7 +728,8 @@ namespace Legion {
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
-                                            IndexSpace range);
+                                            IndexSpace range,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_restricted_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -739,7 +746,8 @@ namespace Legion {
                                             LogicalRegion parent_priv,
                                             FieldID fid,
                                             IndexSpace color_space,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -748,7 +756,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image_range(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -757,7 +766,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage(
                                             RegionTreeForest *forest,
                                             IndexPartition projection,
@@ -766,7 +776,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage_range(
                                             RegionTreeForest *forest,
                                             IndexPartition projection,
@@ -775,7 +786,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_pending_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1202,7 +1214,8 @@ namespace Legion {
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
-                                            IndexSpace range);
+                                            IndexSpace range,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_restricted_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1219,7 +1232,8 @@ namespace Legion {
                                             LogicalRegion parent_priv,
                                             FieldID fid,
                                             IndexSpace color_space,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -1228,7 +1242,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image_range(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -1237,7 +1252,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage(
                                             RegionTreeForest *forest,
                                             IndexPartition projection,
@@ -1246,7 +1262,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage_range(
                                             RegionTreeForest *forest,
                                             IndexPartition projection,
@@ -1255,7 +1272,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_pending_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1500,7 +1518,8 @@ namespace Legion {
       virtual void create_association(      LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
-                                            IndexSpace range);
+                                            IndexSpace range,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_restricted_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1517,7 +1536,8 @@ namespace Legion {
                                             LogicalRegion parent_priv,
                                             FieldID fid,
                                             IndexSpace color_space,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -1526,7 +1546,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_image_range(
                                             RegionTreeForest *forest,
                                             IndexSpace handle,
@@ -1535,7 +1556,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage(
                                             RegionTreeForest *forest,
                                             IndexPartition projection,
@@ -1544,7 +1566,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_partition_by_preimage_range(
                                             RegionTreeForest *forest,
                                             IndexPartition projection,
@@ -1553,7 +1576,8 @@ namespace Legion {
                                             FieldID fid,
                                             IndexSpace color_space,
                                             PartitionKind part_kind,
-                                            Color color);
+                                            Color color,
+                                            MapperID id, MappingTagID tag);
       virtual IndexPartition create_pending_partition(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,

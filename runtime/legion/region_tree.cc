@@ -1218,6 +1218,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::find_open_complete_partitions(Operation *op,
+                                                         unsigned idx,
+                                                  const RegionRequirement &req,
+                                      std::vector<LogicalPartition> &partitions)
+    //--------------------------------------------------------------------------
+    {
+      TaskContext *context = op->find_logical_context(idx);
+      RegionTreeContext ctx = context->get_context(); 
+#ifdef DEBUG_LEGION
+      assert(ctx.exists());
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *region_node = get_node(req.region);
+      FieldMask user_mask = 
+        region_node->column_source->get_field_mask(req.privilege_fields);
+      region_node->find_open_complete_partitions(ctx.get_id(), user_mask, 
+                                                 partitions);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::send_back_logical_state(RegionTreeContext ctx,
                       UniqueID context_uid, const RegionRequirement &req, 
                       AddressSpaceID target)
@@ -13051,6 +13071,32 @@ namespace Legion {
         }
       }
     } 
+
+    //--------------------------------------------------------------------------
+    void RegionNode::find_open_complete_partitions(ContextID ctx,
+               const FieldMask &mask, std::vector<LogicalPartition> &partitions)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = get_logical_state(ctx);
+      std::set<LogicalPartition> unique_partitions;
+      for (LegionList<FieldState>::aligned::const_iterator sit = 
+            state.field_states.begin(); sit != state.field_states.end(); sit++)
+      {
+        if ((sit->valid_fields * mask) || (sit->is_projection_state()))
+          continue;
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+              sit->open_children.begin(); it != sit->open_children.end(); it++)
+        {
+          if (it->second * mask)
+            continue;
+          PartitionNode *child = get_child(it->first);
+          if (child->is_complete())
+            unique_partitions.insert(child->handle);
+        }
+      }
+      partitions.insert(partitions.end(), 
+                        unique_partitions.begin(), unique_partitions.end());
+    }
 
     //--------------------------------------------------------------------------
     void RegionNode::premap_region(ContextID ctx,

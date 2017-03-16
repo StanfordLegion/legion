@@ -219,6 +219,31 @@ namespace Legion {
                                            Mapper::ReleaseProfilingInfo *input,
                                            bool first_invocation = true,
                                            MappingCallInfo *info = NULL);
+    public: // Partition mapper calls
+      void invoke_select_partition_projection(DependentPartitionOp *op,
+                          Mapper::SelectPartitionProjectionInput *input,
+                          Mapper::SelectPartitionProjectionOutput *output,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
+      void invoke_map_partition(DependentPartitionOp *op,
+                          Mapper::MapPartitionInput *input,
+                          Mapper::MapPartitionOutput *output,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
+      void invoke_select_partition_sources(DependentPartitionOp *op,
+                          Mapper::SelectPartitionSrcInput *input,
+                          Mapper::SelectPartitionSrcOutput *output,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
+      void invoke_partition_create_temporary(DependentPartitionOp *op,
+                          Mapper::CreatePartitionTemporaryInput *input,
+                          Mapper::CreatePartitionTemporaryOutput *output,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
+      void invoke_partition_report_profiling(DependentPartitionOp *op,
+                          Mapper::PartitionProfilingInfo *input,
+                          bool first_invocation = true,
+                          MappingCallInfo *info = NULL);
     public: // Task execution mapper calls
       void invoke_configure_context(TaskOp *task,
                                     Mapper::ContextConfigOutput *output,

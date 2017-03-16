@@ -2805,7 +2805,8 @@ namespace Legion {
     void InnerContext::create_association(LogicalRegion domain,
                                           LogicalRegion domain_parent,
                                           FieldID domain_fid,
-                                          IndexSpace range)
+                                          IndexSpace range,
+                                          MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -2816,7 +2817,7 @@ namespace Legion {
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
       part_op->initialize_by_association(this, domain, domain_parent, 
-                                         domain_fid, range);
+                                         domain_fid, range, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -2880,7 +2881,8 @@ namespace Legion {
                                               LogicalRegion parent_priv,
                                               FieldID fid,
                                               IndexSpace color_space,
-                                              Color color)
+                                              Color color,
+                                              MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -2897,7 +2899,7 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_field(this, pid, handle, parent_priv, fid);
+      part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
       forest->create_pending_partition(pid, parent, color_space, part_color,
@@ -2932,7 +2934,9 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -2948,7 +2952,7 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_image(this, pid, projection, parent, fid);
+      part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
       ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle, color_space, part_color,
@@ -2983,7 +2987,9 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -2999,7 +3005,8 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_image_range(this, pid, projection, parent, fid);
+      part_op->initialize_by_image_range(this, pid, projection, parent, 
+                                         fid, id, tag);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle, color_space, part_color,
@@ -3034,7 +3041,8 @@ namespace Legion {
                                                   FieldID fid,
                                                   IndexSpace color_space,
                                                   PartitionKind part_kind,
-                                                  Color color)
+                                                  Color color,
+                                                  MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -3052,7 +3060,7 @@ namespace Legion {
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
       part_op->initialize_by_preimage(this, pid, projection, handle, 
-                                      parent, fid);
+                                      parent, fid, id, tag);
       ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
@@ -3096,7 +3104,8 @@ namespace Legion {
                                                   FieldID fid,
                                                   IndexSpace color_space,
                                                   PartitionKind part_kind,
-                                                  Color color)
+                                                  Color color,
+                                                  MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
@@ -3114,7 +3123,7 @@ namespace Legion {
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
-                                            parent, fid);
+                                            parent, fid, id, tag);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle.get_index_space(), 
@@ -6932,7 +6941,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void LeafContext::create_association(LogicalRegion domain,
                                          LogicalRegion domain_parent,
-                                         FieldID domain_fid, IndexSpace range)
+                                         FieldID domain_fid, IndexSpace range,
+                                         MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal create association performed in leaf task "
@@ -6972,7 +6982,8 @@ namespace Legion {
                                                 LogicalRegion parent_priv,
                                                 FieldID fid,
                                                 IndexSpace color_space,
-                                                Color color)
+                                                Color color,
+                                                MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by field performed in leaf "
@@ -6993,7 +7004,8 @@ namespace Legion {
                                               FieldID fid,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              Color color)
+                                              Color color,
+                                              MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by image performed in leaf "
@@ -7014,7 +7026,8 @@ namespace Legion {
                                               FieldID fid,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              Color color)
+                                              Color color,
+                                              MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by image range performed in leaf "
@@ -7035,7 +7048,8 @@ namespace Legion {
                                                 FieldID fid,
                                                 IndexSpace color_space,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color,
+                                                MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by preimage performed in leaf "
@@ -7056,7 +7070,8 @@ namespace Legion {
                                                 FieldID fid,
                                                 IndexSpace color_space,
                                                 PartitionKind part_kind,
-                                                Color color)
+                                                Color color,
+                                                MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by preimage range performed in leaf "
@@ -8300,10 +8315,12 @@ namespace Legion {
     void InlineContext::create_association(LogicalRegion domain,
                                            LogicalRegion domain_parent,
                                            FieldID domain_fid,
-                                           IndexSpace range)
+                                           IndexSpace range,
+                                           MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      enclosing->create_association(domain, domain_parent, domain_fid, range);
+      enclosing->create_association(domain, domain_parent, domain_fid, 
+                                    range, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -8331,11 +8348,13 @@ namespace Legion {
                                                       LogicalRegion parent_priv,
                                                       FieldID fid,
                                                       IndexSpace color_space,
-                                                      Color color)
+                                                      Color color,
+                                                      MapperID id, 
+                                                      MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_field(forest, handle, parent_priv,
-                                                  fid, color_space, color);
+                                            fid, color_space, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -8347,11 +8366,13 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,
+                                                    MapperID id,
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_image(forest, handle, projection,
-                                  parent, fid, color_space, part_kind, color);
+                          parent, fid, color_space, part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -8363,11 +8384,13 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_image_range(forest, handle, 
-                projection, parent, fid, color_space, part_kind, color);
+              projection, parent, fid, color_space, part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -8379,11 +8402,13 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,
+                                                    MapperID id,
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_preimage(forest, projection, handle,
-                                   parent, fid, color_space, part_kind, color);
+                           parent, fid, color_space, part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -8395,11 +8420,13 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,
+                                                    MapperID id,
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_preimage_range(forest, projection, 
-                          handle, parent, fid, color_space, part_kind, color);
+                  handle, parent, fid, color_space, part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------

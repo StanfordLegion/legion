@@ -879,6 +879,144 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_partition_projection(
+                          DependentPartitionOp *op,
+                          Mapper::SelectPartitionProjectionInput *input,
+                          Mapper::SelectPartitionProjectionOutput *output,
+                          bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(SELECT_PARTITION_PROJECTION_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+                            Mapper::SelectPartitionProjectionInput,
+                            Mapper::SelectPartitionProjectionOutput, 
+                            &MapperManager::invoke_select_partition_projection>
+                              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_partition_projection(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_map_partition(DependentPartitionOp *op,
+                                  Mapper::MapPartitionInput *input,
+                                  Mapper::MapPartitionOutput *output,
+                                  bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MAP_PARTITION_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+                            Mapper::MapPartitionInput,
+                            Mapper::MapPartitionOutput, 
+                            &MapperManager::invoke_map_partition>
+                              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->map_partition(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_partition_sources(
+                                  DependentPartitionOp *op,
+                                  Mapper::SelectPartitionSrcInput *input,
+                                  Mapper::SelectPartitionSrcOutput *output,
+                                  bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(PARTITION_SELECT_SOURCES_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+                            Mapper::SelectPartitionSrcInput,
+                            Mapper::SelectPartitionSrcOutput, 
+                            &MapperManager::invoke_select_partition_sources>
+                              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_partition_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_partition_create_temporary(
+                                DependentPartitionOp *op,
+                                Mapper::CreatePartitionTemporaryInput *input,
+                                Mapper::CreatePartitionTemporaryOutput *output,
+                                bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(PARTITION_CREATE_TEMPORARY_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+                            Mapper::CreatePartitionTemporaryInput,
+                            Mapper::CreatePartitionTemporaryOutput, 
+                            &MapperManager::invoke_partition_create_temporary>
+                              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->create_partition_temporary_instance(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_partition_report_profiling(
+                                         DependentPartitionOp *op,
+                                         Mapper::PartitionProfilingInfo *input,
+                                         bool first_invocation,
+                                         MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(PARTITION_REPORT_PROFILING_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<DependentPartitionOp, 
+                              Mapper::PartitionProfilingInfo,
+                              &MapperManager::invoke_partition_report_profiling>
+                                continuation(this, op, input, info);
+          continuation.defer(runtime, continuation_precondition, op);  
+          return;
+        }
+      }
+      mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_configure_context(TaskOp *task,
                                          Mapper::ContextConfigOutput *output,
                                          bool first_invocation,

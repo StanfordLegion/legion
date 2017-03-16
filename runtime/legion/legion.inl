@@ -2073,11 +2073,12 @@ namespace Legion {
                                      LogicalRegionT<DIM1,T1> domain,
                                      LogicalRegionT<DIM1,T1> domain_parent,
                                      FieldID domain_fid,
-                                     IndexSpaceT<DIM2,T2> range)
+                                     IndexSpaceT<DIM2,T2> range,
+                                     MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       create_association(ctx, LogicalRegion(domain), 
-          LogicalRegion(domain_parent), domain_fid, IndexSpace(range));
+          LogicalRegion(domain_parent), domain_fid, IndexSpace(range), id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -2088,13 +2089,15 @@ namespace Legion {
                                       FieldID domain_fid,
                                       LogicalRegionT<DIM2,T2> range,
                                       LogicalRegionT<DIM2,T2> range_parent,
-                                      FieldID range_fid)
+                                      FieldID range_fid,
+                                      MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       create_bidirectional_association(ctx, LogicalRegion(domain),
                                        LogicalRegion(domain_parent), domain_fid,
                                        LogicalRegion(range),
-                                       LogicalRegion(range_parent), range_fid);
+                                       LogicalRegion(range_parent), 
+                                       range_fid, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -2119,12 +2122,12 @@ namespace Legion {
                                     LogicalRegionT<DIM,T> parent,
                                     FieldID fid,
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                                    Color color)
+                                    Color color, MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM,T>(create_partition_by_field(ctx,
             LogicalRegion(handle), LogicalRegion(parent), fid, 
-            IndexSpace(color_space), color));
+            IndexSpace(color_space), color, id, tag));
     }
 
     //--------------------------------------------------------------------------
@@ -2136,12 +2139,14 @@ namespace Legion {
                               LogicalRegionT<DIM1,T1> parent,
                               FieldID fid, // type: ZPoint<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                              PartitionKind part_kind, Color color)
+                              PartitionKind part_kind, Color color,
+                              MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM2,T2>(create_partition_by_image(ctx,
         IndexSpace(handle), LogicalPartition(projection),
-        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, color));
+        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
+        color, id, tag));
     }
 
     //--------------------------------------------------------------------------
@@ -2154,12 +2159,14 @@ namespace Legion {
                               LogicalRegionT<DIM1,T1> parent,
                               FieldID fid, // type: ZPoint<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                              PartitionKind part_kind, Color color)
+                              PartitionKind part_kind, Color color,
+                              MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM2,T2>(create_partition_by_image_range(ctx,
         IndexSpace(handle), LogicalPartition(projection),
-        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, color));
+        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
+        color, id, tag));
     }
 
     //--------------------------------------------------------------------------
@@ -2171,12 +2178,14 @@ namespace Legion {
                               LogicalRegionT<DIM1,T1> parent,
                               FieldID fid, // type: ZPoint<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                              PartitionKind part_kind, Color color)
+                              PartitionKind part_kind, Color color,
+                              MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM1,T1>(create_partition_by_preimage(ctx, 
         IndexPartition(projection), LogicalRegion(handle),
-        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, color));
+        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
+        color, id, tag));
     }
 
     //--------------------------------------------------------------------------
@@ -2189,12 +2198,14 @@ namespace Legion {
                               LogicalRegionT<DIM1,T1> parent,
                               FieldID fid, // type: ZRect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
-                              PartitionKind part_kind, Color color)
+                              PartitionKind part_kind, Color color,
+                              MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return IndexPartitionT<DIM1,T1>(create_partition_by_preimage_range(ctx,
         IndexPartition(projection), LogicalRegion(handle), 
-        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, color));
+        LogicalRegion(parent), fid, IndexSpace(color_space), part_kind, 
+        color, id, tag));
     }
 
     //--------------------------------------------------------------------------

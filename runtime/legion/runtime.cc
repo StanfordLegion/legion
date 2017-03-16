@@ -9260,7 +9260,8 @@ namespace Legion {
                                      LogicalRegion domain,
                                      LogicalRegion domain_parent,
                                      FieldID domain_fid,
-                                     IndexSpace range)
+                                     IndexSpace range,
+                                     MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9271,7 +9272,7 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      ctx->create_association(domain, domain_parent, domain_fid, range);
+      ctx->create_association(domain, domain_parent, domain_fid, range, id,tag);
     }
 
     //--------------------------------------------------------------------------
@@ -9306,7 +9307,9 @@ namespace Legion {
                                                       LogicalRegion parent_priv,
                                                       FieldID fid,
                                                       IndexSpace color_space,
-                                                      Color color)
+                                                      Color color,
+                                                      MapperID id, 
+                                                      MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9318,7 +9321,7 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_field(forest, handle, parent_priv, fid,
-                                            color_space, color);
+                                            color_space, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -9329,7 +9332,9 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9341,7 +9346,8 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_image(forest, handle, projection, parent,
-                                            fid, color_space, part_kind, color);
+                                            fid, color_space, part_kind, 
+                                            color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -9352,7 +9358,9 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -9364,7 +9372,8 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_image_range(forest, handle, projection, 
-                                  parent, fid, color_space, part_kind, color);
+                                  parent, fid, color_space, part_kind, 
+                                  color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -9375,7 +9384,9 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     { 
       if (ctx == DUMMY_CONTEXT)
@@ -9387,7 +9398,8 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_preimage(forest, projection, handle,
-                              parent, fid, color_space, part_kind, color);
+                              parent, fid, color_space, part_kind, 
+                              color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -9398,7 +9410,8 @@ namespace Legion {
                                                     FieldID fid,
                                                     IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    Color color)
+                                                    Color color, MapperID id,
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     { 
       if (ctx == DUMMY_CONTEXT)
@@ -9410,7 +9423,8 @@ namespace Legion {
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
       return ctx->create_partition_by_preimage_range(forest, projection, handle,
-                                    parent, fid, color_space, part_kind, color);
+                                    parent, fid, color_space, part_kind, 
+                                    color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -15787,6 +15801,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PointDepPartOp* Runtime::get_available_point_dep_part_op(bool need_cont,
+                                                             bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<PointDepPartOp*,
+                     &Runtime::get_available_point_dep_part_op>
+                       continuation(this, dependent_partition_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(dependent_partition_op_lock,
+                           available_point_dep_part_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     FillOp* Runtime::get_available_fill_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -16140,6 +16173,14 @@ namespace Legion {
     {
       AutoLock p_lock(dependent_partition_op_lock);
       release_operation<false>(available_dependent_partition_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_point_dep_part_op(PointDepPartOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(dependent_partition_op_lock);
+      release_operation<true>(available_point_dep_part_ops, op);
     }
 
     //--------------------------------------------------------------------------

@@ -263,6 +263,10 @@ namespace Legion {
                                      RegionRequirement &req,
                                      RestrictInfo &restrict_info,
                                      RegionTreePath &path);
+      // Used by dependent partition operations
+      void find_open_complete_partitions(Operation *op, unsigned idx,
+                                         const RegionRequirement &req,
+                                     std::vector<LogicalPartition> &partitions);
       // For privileges flowing back across node boundaries
       void send_back_logical_state(RegionTreeContext context,
                                    UniqueID context_uid,
@@ -2260,6 +2264,10 @@ namespace Legion {
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
 #endif
+    public:
+      void find_open_complete_partitions(ContextID ctx,
+                                         const FieldMask &mask,
+                    std::vector<LogicalPartition> &partitions);
     public:
       void premap_region(ContextID ctx, 
                          const RegionRequirement &req,

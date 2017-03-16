@@ -2196,6 +2196,7 @@ namespace Legion {
         RELEASE_MAPPABLE,
         CLOSE_MAPPABLE,
         FILL_MAPPABLE,
+        PARTITION_MAPPABLE,
       };
       virtual MappableType get_mappable_type(void) const = 0;
       virtual const Task* as_task(void) const = 0;
@@ -2205,6 +2206,7 @@ namespace Legion {
       virtual const Release* as_release(void) const = 0;
       virtual const Close* as_close(void) const = 0;
       virtual const Fill* as_fill(void) const = 0;
+      virtual const Partition* as_partition(void) const = 0;
     public:
       MapperID                                  map_id;
       MappingTagID                              tag;
@@ -2234,6 +2236,7 @@ namespace Legion {
       virtual const Release* as_release(void) const { return NULL; }
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
     public:
       // Task argument information
       Processor::TaskFuncID task_id; 
@@ -2285,6 +2288,7 @@ namespace Legion {
       virtual const Release* as_release(void) const { return NULL; }
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
     public:
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
@@ -2321,6 +2325,7 @@ namespace Legion {
       virtual const Release* as_release(void) const { return NULL; }
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
@@ -2349,6 +2354,7 @@ namespace Legion {
       virtual const Release* as_release(void) const { return NULL; }
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
     public:
       // Acquire Launcher arguments
       LogicalRegion                     logical_region;
@@ -2381,6 +2387,7 @@ namespace Legion {
       virtual const Release* as_release(void) const { return this; }
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
     public:
       // Release Launcher arguments
       LogicalRegion                     logical_region;
@@ -2417,6 +2424,7 @@ namespace Legion {
       virtual const Release* as_release(void) const { return NULL; }
       virtual const Close* as_close(void) const { return this; }
       virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
@@ -2445,6 +2453,7 @@ namespace Legion {
       virtual const Release* as_release(void) const { return NULL; }
       virtual const Close* as_close(void) const { return NULL; }
       virtual const Fill* as_fill(void) const { return this; }
+      virtual const Partition* as_partition(void) const { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement               requirement;
@@ -2459,6 +2468,51 @@ namespace Legion {
     public:
       // Parent task for the fill operation
       Task*                           parent_task;
+    };
+
+    /**
+     * \class Partition
+     * This class represents a dependent partition 
+     * operation that is being performed by the
+     * runtime. These will be crated by calls to
+     * the runtime such as 'create_partition_by_field'.
+     */
+    class Partition : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES;
+      Partition(void);
+    public:
+      virtual MappableType get_mappable_type(void) const 
+        { return PARTITION_MAPPABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return this; }
+    public:
+      enum PartitionKind {
+        BY_FIELD, // create partition by field
+        BY_IMAGE, // create partition by image
+        BY_IMAGE_RANGE, // create partition by image range
+        BY_PREIMAGE, // create partition by preimage
+        BY_PREIMAGE_RANGE,  // create partition by preimage range
+        BY_ASSOCIATION,  // create partition by association
+      };
+      virtual PartitionKind get_partition_kind(void) const = 0;
+    public:
+      // Synthesized region requirement
+      RegionRequirement                   requirement;
+    public:
+      // Index partition argument information
+      bool                                is_index_space;
+      Domain                              index_domain;
+      DomainPoint                         index_point;
+    public:
+      // Parent task for the partition operation
+      Task*                               parent_task;
     };
 
     //==========================================================================
@@ -3095,26 +3149,34 @@ namespace Legion {
        * @param domain_parent the region from which privileges are derived
        * @param fid the field of domain in which to place the results
        * @param range the index space to serve as the range of the mapping
+       * @param id the ID of the mapper to use for mapping the fields
+       * @param tag the tag to pass to the mapper for context
        */
       void create_association(Context ctx,
                               LogicalRegion domain,
                               LogicalRegion domain_parent,
                               FieldID domain_fid,
-                              IndexSpace range);
+                              IndexSpace range,
+                              MapperID id = 0,
+                              MappingTagID tag = 0);
       void create_bidirectional_association(Context ctx,
                                             LogicalRegion domain,
                                             LogicalRegion domain_parent,
                                             FieldID domain_fid,
                                             LogicalRegion range,
                                             LogicalRegion range_parent,
-                                            FieldID range_fid);
+                                            FieldID range_fid,
+                                            MapperID id = 0,
+                                            MappingTagID tag = 0);
       // Template versions
       template<int DIM1, typename COORD_T1, int DIM2, typename COORD_T2>
       void create_association(Context ctx,
                               LogicalRegionT<DIM1,COORD_T1> domain,
                               LogicalRegionT<DIM1,COORD_T1> domain_parent,
                               FieldID domain_fid, // type: ZPoint<DIM2,COORD_T2>
-                              IndexSpaceT<DIM2,COORD_T2> range);
+                              IndexSpaceT<DIM2,COORD_T2> range,
+                              MapperID id = 0,
+                              MappingTagID tag = 0);
       template<int DIM1, typename COORD_T1, int DIM2, typename COORD_T2>
       void create_bidirectional_association(Context ctx,
                               LogicalRegionT<DIM1,COORD_T1> domain,
@@ -3122,7 +3184,9 @@ namespace Legion {
                               FieldID domain_fid, // type: ZPoint<DIM2,COORD_T2>
                               LogicalRegionT<DIM2,COORD_T2> range,
                               LogicalRegionT<DIM2,COORD_T2> range_parent,
-                              FieldID range_fid); // type: ZPoint<DIM1,COORD_T1>
+                              FieldID range_fid, // type: ZPoint<DIM1,COORD_T1>
+                              MapperID id = 0,
+                              MappingTagID tag = 0);
 
       /**
        * Create partition by restriction will make a new partition of a
@@ -3175,6 +3239,8 @@ namespace Legion {
        * @param fid the field ID of the logical region containing the coloring
        * @param color_space space of colors for the partition
        * @param color optional new color for the index partition
+       * @param id the ID of the mapper to use for mapping the fields
+       * @param tag the context tag to pass to the mapper
        * @return a new index partition of the index space of the logical region
        */
       IndexPartition create_partition_by_field(Context ctx,
@@ -3182,7 +3248,9 @@ namespace Legion {
                                                LogicalRegion parent,
                                                FieldID fid, 
                                                IndexSpace color_space,
-                                               Color color = AUTO_GENERATE_ID);
+                                               Color color = AUTO_GENERATE_ID,
+                                               MapperID id = 0,
+                                               MappingTagID tag = 0);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_field(Context ctx,
@@ -3190,7 +3258,8 @@ namespace Legion {
                           LogicalRegionT<DIM,COORD_T> parent,
                           FieldID fid, // type: ZPoint<COLOR_DIM,COLOR_COORD_T>
                           IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
-                          Color color = AUTO_GENERATE_ID);
+                          Color color = AUTO_GENERATE_ID,
+                          MapperID id = 0, MappingTagID tag = 0);
 
       /**
        * Create partition by image creates a new index partition from an
@@ -3218,6 +3287,8 @@ namespace Legion {
        * @param color_space the index space of potential colors
        * @param part_kind specify the kind of partition
        * @param color optional new color for the index partition
+       * @param id the ID of the mapper to use for mapping field
+       * @param tag the mapper tag to provide context to the mapper
        * @return a new index partition of the 'handle' index space
        */
       IndexPartition create_partition_by_image(Context ctx,
@@ -3227,7 +3298,8 @@ namespace Legion {
                                          FieldID fid,
                                          IndexSpace color_space,
                                          PartitionKind part_kind = COMPUTE_KIND,
-                                         Color color = AUTO_GENERATE_ID);
+                                         Color color = AUTO_GENERATE_ID,
+                                         MapperID id = 0, MappingTagID tag = 0);
       template<int DIM1, typename COORD_T1, 
                int DIM2, typename COORD_T2, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -3238,7 +3310,8 @@ namespace Legion {
                               FieldID fid, // type: ZPoint<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
-                              Color color = AUTO_GENERATE_ID);
+                              Color color = AUTO_GENERATE_ID,
+                              MapperID id = 0, MappingTagID tag = 0);
       // Range versions of image
       IndexPartition create_partition_by_image_range(Context ctx,
                                          IndexSpace handle,
@@ -3247,7 +3320,8 @@ namespace Legion {
                                          FieldID fid,
                                          IndexSpace color_space,
                                          PartitionKind part_kind = COMPUTE_KIND,
-                                         Color color = AUTO_GENERATE_ID);
+                                         Color color = AUTO_GENERATE_ID,
+                                         MapperID id = 0, MappingTagID tag = 0);
       template<int DIM1, typename COORD_T1, 
                int DIM2, typename COORD_T2, 
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -3259,7 +3333,8 @@ namespace Legion {
                               FieldID fid, // type: ZRect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
-                              Color color = AUTO_GENERATE_ID);
+                              Color color = AUTO_GENERATE_ID,
+                              MapperID id = 0, MappingTagID tag = 0);
                                                
       /**
        * Create partition by premimage performs the opposite operation
@@ -3284,6 +3359,8 @@ namespace Legion {
        * @param color_space the space of colors for the partition
        * @param part_kind specify the kind of partition
        * @param color optional new color for the index partition
+       * @param id the ID of the mapper to use for mapping field
+       * @param tag the mapper tag to provide context to the mapper
        * @return a new index partition of the index space of 'handle'
        */
       IndexPartition create_partition_by_preimage(Context ctx, 
@@ -3293,7 +3370,8 @@ namespace Legion {
                                         FieldID fid,
                                         IndexSpace color_space,
                                         PartitionKind part_kind = COMPUTE_KIND,
-                                        Color color = AUTO_GENERATE_ID);
+                                        Color color = AUTO_GENERATE_ID,
+                                        MapperID id = 0, MappingTagID tag = 0);
       template<int DIM1, typename COORD_T1,
                int DIM2, typename COORD_T2,
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -3304,7 +3382,8 @@ namespace Legion {
                               FieldID fid, // type: ZPoint<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
-                              Color color = AUTO_GENERATE_ID);
+                              Color color = AUTO_GENERATE_ID,
+                              MapperID id = 0, MappingTagID tag = 0);
       // Range versions of preimage 
       IndexPartition create_partition_by_preimage_range(Context ctx, 
                                         IndexPartition projection,
@@ -3313,7 +3392,8 @@ namespace Legion {
                                         FieldID fid,
                                         IndexSpace color_space,
                                         PartitionKind part_kind = COMPUTE_KIND,
-                                        Color color = AUTO_GENERATE_ID);
+                                        Color color = AUTO_GENERATE_ID,
+                                        MapperID id = 0, MappingTagID tag = 0);
       template<int DIM1, typename COORD_T1,
                int DIM2, typename COORD_T2,
                int COLOR_DIM, typename COLOR_COORD_T>
@@ -3325,7 +3405,8 @@ namespace Legion {
                               FieldID fid, // type: ZRect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
-                              Color color = AUTO_GENERATE_ID);
+                              Color color = AUTO_GENERATE_ID,
+                              MapperID id = 0, MappingTagID tag = 0);
     public:
       //------------------------------------------------------------------------
       // Computed Index Spaces and Partitions 

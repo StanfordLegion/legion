@@ -269,6 +269,28 @@ namespace Legion {
       virtual void report_profiling(const MapperContext         ctx,
                                     const Release&              release,
                                     const ReleaseProfilingInfo& input);
+    public: // Partition mapping calls
+      virtual void select_partition_projection(const MapperContext  ctx,
+                          const Partition&                          partition,
+                          const SelectPartitionProjectionInput&     input,
+                                SelectPartitionProjectionOutput&    output);
+      virtual void map_partition(const MapperContext        ctx,
+                                 const Partition&           partition,
+                                 const MapPartitionInput&   input,
+                                       MapPartitionOutput&  output);
+      virtual void select_partition_sources(
+                                   const MapperContext             ctx,
+                                   const Partition&                partition,
+                                   const SelectPartitionSrcInput&  input,
+                                         SelectPartitionSrcOutput& output);
+      virtual void create_partition_temporary_instance(
+                              const MapperContext                   ctx,
+                              const Partition&                      partition,
+                              const CreatePartitionTemporaryInput&  input,
+                                    CreatePartitionTemporaryOutput& output);
+      virtual void report_profiling(const MapperContext              ctx,
+                                    const Partition&                 partition,
+                                    const PartitionProfilingInfo&    input);
     public: // Task execution mapping calls
       virtual void configure_context(const MapperContext         ctx,
                                      const Task&                 task,

@@ -629,6 +629,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplayMapper::select_partition_projection(const MapperContext  ctx,
+                        const Partition&                          partition,
+                        const SelectPartitionProjectionInput&     input,
+                              SelectPartitionProjectionOutput&    output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::map_partition(const MapperContext        ctx,
+                               const Partition&           partition,
+                               const MapPartitionInput&   input,
+                                     MapPartitionOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::select_partition_sources(
+                                     const MapperContext             ctx,
+                                     const Partition&                partition,
+                                     const SelectPartitionSrcInput&  input,
+                                           SelectPartitionSrcOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::create_partition_temporary_instance(
+                            const MapperContext                   ctx,
+                            const Partition&                      partition,
+                            const CreatePartitionTemporaryInput&  input,
+                                  CreatePartitionTemporaryOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapper::report_profiling(const MapperContext              ctx,
+                                  const Partition&                 partition,
+                                  const PartitionProfilingInfo&    input)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
     void ReplayMapper::configure_context(const MapperContext         ctx,
                                          const Task&                 task,
                                                ContextConfigOutput&  output)

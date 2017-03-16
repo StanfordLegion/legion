@@ -11208,7 +11208,8 @@ namespace Legion {
                                                    IndexPartition pid,
                                                    LogicalRegion handle, 
                                                    LogicalRegion parent,
-                                                   FieldID fid)
+                                                   FieldID fid,
+                                                   MapperID id, MappingTagID t)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11223,11 +11224,14 @@ namespace Legion {
         assert(false);
       }
 #endif
+      parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/); 
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
+      map_id = id;
+      tag = t;
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -11240,7 +11244,8 @@ namespace Legion {
     void DependentPartitionOp::initialize_by_image(TaskContext *ctx, 
                                                    IndexPartition pid,
                                           LogicalPartition projection,
-                                          LogicalRegion parent, FieldID fid) 
+                                          LogicalRegion parent, FieldID fid,
+                                          MapperID id, MappingTagID t) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11254,6 +11259,7 @@ namespace Legion {
         assert(false);
       }
 #endif
+      parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
@@ -11261,6 +11267,8 @@ namespace Legion {
         runtime->forest->get_parent_logical_region(projection);
       requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
       requirement.add_field(fid);
+      map_id = id;
+      tag = t;
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -11274,7 +11282,8 @@ namespace Legion {
                                                          IndexPartition pid,
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
-                                                FieldID fid) 
+                                                FieldID fid, MapperID id,
+                                                MappingTagID t) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11288,6 +11297,7 @@ namespace Legion {
         assert(false);
       }
 #endif
+      parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
@@ -11295,6 +11305,8 @@ namespace Legion {
         runtime->forest->get_parent_logical_region(projection);
       requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
       requirement.add_field(fid);
+      map_id = id;
+      tag = t;
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -11307,7 +11319,7 @@ namespace Legion {
     void DependentPartitionOp::initialize_by_preimage(TaskContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid)
+                                    FieldID fid, MapperID id, MappingTagID t)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11321,11 +11333,14 @@ namespace Legion {
         assert(false);
       }
 #endif
+      parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
+      map_id = id;
+      tag = t;
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -11338,7 +11353,7 @@ namespace Legion {
     void DependentPartitionOp::initialize_by_preimage_range(TaskContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
-                                    FieldID fid)
+                                    FieldID fid, MapperID id, MappingTagID t)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11352,11 +11367,14 @@ namespace Legion {
         assert(false);
       }
 #endif
+      parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // Start without the projection requirement, we'll ask
       // the mapper later if it wants to turn this into an index launch
       requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
       requirement.add_field(fid);
+      map_id = id;
+      tag = t;
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -11368,7 +11386,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DependentPartitionOp::initialize_by_association(TaskContext *ctx,
                         LogicalRegion domain, LogicalRegion domain_parent, 
-                        FieldID fid, IndexSpace range)
+                        FieldID fid, IndexSpace range, 
+                        MapperID id, MappingTagID t)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11382,11 +11401,14 @@ namespace Legion {
         assert(false);
       }
 #endif
+      parent_task = ctx->get_task();
       initialize_operation(ctx, true/*track*/);
       // start-off with non-projection requirement
       requirement = RegionRequirement(domain, READ_WRITE, 
                                       EXCLUSIVE, domain_parent);
       requirement.add_field(fid);
+      map_id = id;
+      tag = t;
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
@@ -11401,15 +11423,32 @@ namespace Legion {
     {
       LegionSpy::log_dependent_partition_operation(
           parent_ctx->get_unique_id(), unique_op_id, thunk->get_kind());
-      LegionSpy::log_logical_requirement(unique_op_id,0/*index*/,
-                                         true/*region*/,
-                                         requirement.region.index_space.id,
-                                         requirement.region.field_space.id,
-                                         requirement.region.tree_id,
-                                         requirement.privilege,
-                                         requirement.prop,
-                                         requirement.redop,
-                                         requirement.parent.index_space.id);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::log_requirement(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (requirement.handle_type == PART_PROJECTION)
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                  false/*region*/,
+                                  requirement.partition.index_partition.id,
+                                  requirement.partition.field_space.id,
+                                  requirement.partition.tree_id,
+                                  requirement.privilege,
+                                  requirement.prop,
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
+      else
+        LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
+                                  true/*region*/,
+                                  requirement.region.index_space.id,
+                                  requirement.region.field_space.id,
+                                  requirement.region.tree_id,
+                                  requirement.privilege,
+                                  requirement.prop,
+                                  requirement.redop,
+                                  requirement.parent.index_space.id);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                         requirement.privilege_fields);
     }
@@ -11426,39 +11465,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       compute_parent_index();
-      initialize_privilege_path(privilege_path, requirement);
-      if (Runtime::legion_spy_enabled)
-      { 
-        if (requirement.handle_type == PART_PROJECTION)
-          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
-                                    false/*region*/,
-                                    requirement.partition.index_partition.id,
-                                    requirement.partition.field_space.id,
-                                    requirement.partition.tree_id,
-                                    requirement.privilege,
-                                    requirement.prop,
-                                    requirement.redop,
-                                    requirement.parent.index_space.id);
-        else
-          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
-                                    true/*region*/,
-                                    requirement.region.index_space.id,
-                                    requirement.region.field_space.id,
-                                    requirement.region.tree_id,
-                                    requirement.privilege,
-                                    requirement.prop,
-                                    requirement.redop,
-                                    requirement.parent.index_space.id);
-        LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
-                                          requirement.privilege_fields);
-      }
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      ProjectionInfo projection_info;
+      // Before doing the dependence analysis we have to ask the
+      // mapper whether it would like to make this an index space
+      // operation or a single operation
+      select_partition_projection();
+      // Do thise now that we've picked our region requirement
+      initialize_privilege_path(privilege_path, requirement);
+      if (Runtime::legion_spy_enabled)
+        log_requirement();
+      if (is_index_space)
+        projection_info = ProjectionInfo(runtime, requirement, index_domain);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    restrict_info,
@@ -11468,19 +11490,118 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DependentPartitionOp::select_partition_projection(void)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectPartitionProjectionInput input;
+      Mapper::SelectPartitionProjectionOutput output;
+      // Find the open complete projections, and then invoke the mapper call
+      runtime->forest->find_open_complete_partitions(this, 0/*idx*/, 
+                        requirement, input.open_complete_partitions);
+      // Invoke the mapper
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_partition_projection(this, &input, &output);
+      // Check the output
+      if (output.chosen_partition == LogicalPartition::NO_PART)
+        return;
+      IndexPartNode *partition_node = 
+       runtime->forest->get_node(output.chosen_partition.get_index_partition());
+      // Make sure that it is complete, and then update our information
+      if (!Runtime::unsafe_mapper && !partition_node->is_complete(false))
+      {
+        log_run.error("Invalid mapper output from invocation of "
+                      "'select_partition_projection' on mapper %s."
+                      "Mapper selected a logical partition that is "
+                      "not complete for dependent partitioning operation "
+                      "in task %s (UID %lld).", mapper->get_mapper_name(),
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      // Update the region requirement and other information
+      requirement.partition = output.chosen_partition;
+      requirement.handle_type = PART_PROJECTION;
+      index_domain = partition_node->color_space->get_color_space_domain();
+      is_index_space = true;
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> preconditions;
-      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   privilege_path,
-                                                   version_info,
-                                                   preconditions);
-      if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      // See if this is an index space operation
+      if (is_index_space)
+      {
+#ifdef DEBUG_LEGION
+        assert(requirement.handle_type == PART_PROJECTION);
+#endif
+        // Perform the partial versioning analysis
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     privilege_path,
+                                                     version_info,
+                                                     preconditions,
+                                                     true/*partial*/);
+        // Now enumerate the points and kick them off
+        size_t num_points = index_domain.get_volume();
+#ifdef DEBUG_LEGION
+        assert(num_points > 0);
+#endif
+        unsigned point_idx = 0;
+        points.resize(num_points);
+        for (Domain::DomainPointIterator itr(index_domain); 
+              itr; itr++, point_idx++)
+        {
+          PointDepPartOp *point = 
+            runtime->get_available_point_dep_part_op(false);
+          point->initialize(this, itr.p);
+          points[point_idx] = point;
+        }
+        // Perform the projections
+        ProjectionFunction *function = 
+          runtime->find_projection_function(requirement.projection);
+        std::vector<ProjectionPoint*> projection_points(points.begin(),
+                                                        points.end());
+        function->project_points(this, 0/*idx*/, requirement,
+                                 runtime, projection_points);
+        // No need to check the validity of the points, we know they are good
+        if (Runtime::legion_spy_enabled)
+        {
+          for (std::vector<PointDepPartOp*>::const_iterator it = 
+                points.begin(); it != points.end(); it++)
+            (*it)->log_requirement();
+        }
+        // Launch the points
+        std::set<RtEvent> mapped_preconditions;
+        for (std::vector<PointDepPartOp*>::const_iterator it = 
+              points.begin(); it != points.end(); it++)
+        {
+          mapped_preconditions.insert((*it)->get_mapped_event());
+          (*it)->launch(preconditions);
+        }
+        // We are mapped when all our points are mapped
+        complete_mapping(Runtime::merge_events(mapped_preconditions));
+      }
       else
-        enqueue_ready_operation();
+      {
+        // Path for a non-index space implementation
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     privilege_path,
+                                                     version_info,
+                                                     preconditions);
+        if (!preconditions.empty())
+          enqueue_ready_operation(Runtime::merge_events(preconditions));
+        else
+          enqueue_ready_operation();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11576,10 +11697,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Partition::PartitionKind DependentPartitionOp::get_partition_kind(void) 
+                                                                           const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(thunk != NULL);
+#endif
+      return thunk->get_kind();
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID DependentPartitionOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned DependentPartitionOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    int DependentPartitionOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      is_index_space = false;
+      index_domain = Domain::NO_DOMAIN;
+      parent_req_index = 0;
+      mapper = NULL;
+      outstanding_profiling_requests = 1; // start at 1 to guard
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -11593,9 +11752,18 @@ namespace Legion {
         thunk = NULL;
       }
       privilege_path = RegionTreePath();
+      projection_info.clear();
       version_info.clear();
       restrict_info.clear();
       map_applied_conditions.clear();
+      acquired_instances.clear();
+      restricted_postconditions.clear();
+      // We deactivate all of our point operations
+      for (std::vector<PointDepPartOp*>::const_iterator it = 
+            points.begin(); it != points.end(); it++)
+        (*it)->deactivate();
+      points.clear();
+      profiling_requests.clear();
       runtime->free_dependent_partition_op(this);
     }
 
@@ -11629,10 +11797,124 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DependentPartitionOp::select_sources(const InstanceRef &target,
+                                              const InstanceSet &sources,
+                                              std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectPartitionSrcInput input;
+      Mapper::SelectPartitionSrcOutput output;
+      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(target, input.target);
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_partition_sources(this, &input, &output);
+      compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                          DependentPartitionOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::record_reference_mutation_effect(RtEvent event)
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* DependentPartitionOp::select_temporary_instance(
+           PhysicalManager *dst, unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::CreatePartitionTemporaryInput input;
+      Mapper::CreatePartitionTemporaryOutput output;
+      input.destination_instance = MappingInstance(dst);
+      if (!Runtime::unsafe_mapper)
+      {
+        // Fields and regions must both be met
+        // The instance must be freshly created
+        // Instance must be acquired
+        std::set<PhysicalManager*> previous_managers;
+        // Get the set of previous managers we've made
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              const_iterator it = acquired_instances.begin(); it !=
+              acquired_instances.end(); it++)
+          previous_managers.insert(it->first);
+        // Do the mapper call now
+        mapper->invoke_partition_create_temporary(this, &input, &output);
+        validate_temporary_instance(output.temporary_instance.impl,
+            previous_managers, acquired_instances, needed_fields,
+            requirement.region, mapper, "create_partition_temporary_instance");
+      }
+      else
+        mapper->invoke_partition_create_temporary(this, &input, &output);
+      if (Runtime::legion_spy_enabled)
+        log_temporary_instance(output.temporary_instance.impl, 
+                               index, needed_fields);
+      return output.temporary_instance.impl;
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::record_restrict_postcondition(
+                                                          ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      restricted_postconditions.insert(postcondition);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::add_copy_profiling_request(
+                                           Realm::ProfilingRequestSet &requests)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      Operation *proxy_this = this;
+      Realm::ProfilingRequest &request = requests.add_request( 
+          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
+          &proxy_this, sizeof(proxy_this));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
+      if ((previous == 1) && !profiling_reported.exists())
+        profiling_reported = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapper != NULL);
+#endif
+      Mapping::Mapper::PartitionProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      mapper->invoke_partition_report_profiling(this, &info);
+#ifdef DEBUG_LEGION
+      assert(outstanding_profiling_requests > 0);
+      assert(profiling_reported.exists());
+#endif
+      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      // If this was the last one, we can trigger our events
+      if (remaining == 0)
+        Runtime::trigger_event(profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -11733,6 +12015,80 @@ namespace Legion {
                                                          PendingPartitionOp* op)
     //--------------------------------------------------------------------------
     {
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Point Dependent Partition Op
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointDepPartOp::PointDepPartOp(Runtime *rt)
+      : DependentPartitionOp(rt), owner(NULL)
+    //--------------------------------------------------------------------------
+    {
+      is_index_space = false;
+    }
+
+    //--------------------------------------------------------------------------
+    PointDepPartOp::PointDepPartOp(const PointDepPartOp &rhs)
+      : DependentPartitionOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PointDepPartOp::~PointDepPartOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointDepPartOp& PointDepPartOp::operator=(const PointDepPartOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::initialize(DependentPartitionOp *own, 
+                                    const DomainPoint &p)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(own->get_context(), false/*track*/, 1/*size*/);
+      index_point = p;
+      owner = own;
+      requirement = owner->requirement;
+      parent_task = owner->parent_task;
+      map_id      = owner->map_id;
+      tag         = owner->tag;
+      parent_req_index = owner->parent_req_index;
+      restrict_info = owner->restrict_info;
+      if (Runtime::legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    const DomainPoint& PointDepPartOp::get_domain_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return index_point;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::set_projection_result(unsigned idx, 
+                                               LogicalRegion result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx == 0);
+      assert(requirement.handle_type == PART_PROJECTION);
+#endif
+      requirement.region = result;
+      requirement.handle_type = SINGULAR;
     }
 
     ///////////////////////////////////////////////////////////// 

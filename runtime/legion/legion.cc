@@ -130,6 +130,17 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Partition
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Partition::Partition(void)
+      : Mappable(), parent_task(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // IndexSpace 
     /////////////////////////////////////////////////////////////
 
@@ -3380,10 +3391,12 @@ namespace Legion {
                                      LogicalRegion domain,
                                      LogicalRegion domain_parent,
                                      FieldID domain_fid,
-                                     IndexSpace range)
+                                     IndexSpace range,
+                                     MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      runtime->create_association(ctx, domain, domain_parent, domain_fid,range);
+      runtime->create_association(ctx, domain, domain_parent, domain_fid,
+                                  range, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -3393,15 +3406,16 @@ namespace Legion {
                                       FieldID domain_fid,
                                       LogicalRegion range,
                                       LogicalRegion range_parent,
-                                      FieldID range_fid)
+                                      FieldID range_fid,
+                                      MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       // Realm guarantees that creating association in either direction
       // will produce the same result, so we can do these separately
       create_association(ctx, domain, domain_parent, domain_fid, 
-                         range.get_index_space());
+                         range.get_index_space(), id, tag);
       create_association(ctx, range, range_parent, range_fid, 
-                         domain.get_index_space());
+                         domain.get_index_space(), id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -3424,59 +3438,64 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_field(Context ctx,
                    LogicalRegion handle, LogicalRegion parent, FieldID fid, 
-                   IndexSpace color_space, Color color)
+                   IndexSpace color_space, Color color, 
+                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_field(ctx, handle, parent, fid,
-                                                color_space, color);
+                                                color_space, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_image(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color)
+                  PartitionKind part_kind, Color color,
+                  MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_image(ctx, handle, projection,
                                                 parent, fid, color_space,
-                                                part_kind, color);
+                                                part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_image_range(Context ctx,
                   IndexSpace handle, LogicalPartition projection,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color)
+                  PartitionKind part_kind, Color color, 
+                  MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_image_range(ctx, handle, projection,
                                                       parent, fid, color_space,
-                                                      part_kind, color);
+                                                      part_kind, color, id,tag);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color)
+                  PartitionKind part_kind, Color color,
+                  MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_preimage(ctx, projection, handle,
                                                    parent, fid, color_space,
-                                                   part_kind, color);
+                                                   part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_preimage_range(Context ctx,
                   IndexPartition projection, LogicalRegion handle,
                   LogicalRegion parent, FieldID fid, IndexSpace color_space,
-                  PartitionKind part_kind, Color color)
+                  PartitionKind part_kind, Color color,
+                  MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return runtime->create_partition_by_preimage_range(ctx, projection,handle,
                                                        parent, fid, color_space,
-                                                       part_kind, color);
+                                                       part_kind, color,id,tag);
     }
 
     //--------------------------------------------------------------------------

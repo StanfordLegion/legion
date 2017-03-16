@@ -1501,7 +1501,8 @@ namespace Legion {
                               LogicalRegion domain,
                               LogicalRegion domain_parent,
                               FieldID domain_fid,
-                              IndexSpace range);
+                              IndexSpace range,
+                              MapperID id, MappingTagID tag);
       IndexPartition create_restricted_partition(Context ctx,
                                                  IndexSpace parent,
                                                  IndexSpace color_space,
@@ -1516,7 +1517,8 @@ namespace Legion {
                                                LogicalRegion parent,
                                                FieldID fid,
                                                IndexSpace color_space,
-                                               Color color);
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
       IndexPartition create_partition_by_image(Context ctx,
                                                IndexSpace handle,
                                                LogicalPartition projection,
@@ -1524,7 +1526,8 @@ namespace Legion {
                                                FieldID fid, 
                                                IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               Color color);
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
       IndexPartition create_partition_by_image_range(Context ctx,
                                                IndexSpace handle,
                                                LogicalPartition projection,
@@ -1532,7 +1535,8 @@ namespace Legion {
                                                FieldID fid, 
                                                IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               Color color);
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
       IndexPartition create_partition_by_preimage(Context ctx,
                                                IndexPartition projection,
                                                LogicalRegion handle,
@@ -1540,7 +1544,8 @@ namespace Legion {
                                                FieldID fid,
                                                IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               Color color);
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
       IndexPartition create_partition_by_preimage_range(Context ctx,
                                                IndexPartition projection,
                                                LogicalRegion handle,
@@ -1548,7 +1553,8 @@ namespace Legion {
                                                FieldID fid,
                                                IndexSpace color_space,
                                                PartitionKind part_kind,
-                                               Color color);
+                                               Color color,
+                                               MapperID id, MappingTagID tag);
       IndexPartition create_pending_partition(Context ctx, IndexSpace parent,
                                               IndexSpace color_space,
                                               PartitionKind part_kind,
@@ -2393,6 +2399,8 @@ namespace Legion {
                                                   bool has_lock = false);
       DependentPartitionOp* get_available_dependent_partition_op(bool need_cont,
                                                   bool has_lock = false);
+      PointDepPartOp*       get_available_point_dep_part_op(bool need_cont,
+                                                  bool has_lock = false);
       FillOp*               get_available_fill_op(bool need_cont,
                                                   bool has_lock = false);
       IndexFillOp*          get_available_index_fill_op(bool need_cont,
@@ -2435,6 +2443,7 @@ namespace Legion {
       void free_epoch_op(MustEpochOp *op);
       void free_pending_partition_op(PendingPartitionOp *op);
       void free_dependent_partition_op(DependentPartitionOp* op);
+      void free_point_dep_part_op(PointDepPartOp *op);
       void free_fill_op(FillOp *op);
       void free_index_fill_op(IndexFillOp *op);
       void free_point_fill_op(PointFillOp *op);
@@ -2730,6 +2739,7 @@ namespace Legion {
       std::deque<MustEpochOp*>          available_epoch_ops;
       std::deque<PendingPartitionOp*>   available_pending_partition_ops;
       std::deque<DependentPartitionOp*> available_dependent_partition_ops;
+      std::deque<PointDepPartOp*>       available_point_dep_part_ops;
       std::deque<FillOp*>               available_fill_ops;
       std::deque<IndexFillOp*>          available_index_fill_ops;
       std::deque<PointFillOp*>          available_point_fill_ops;

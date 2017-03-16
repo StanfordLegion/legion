@@ -114,6 +114,7 @@ namespace Legion {
   class Release;
   class Close;
   class Fill;
+  class Partition;
   class Runtime;
   class MPILegionHandshake;
   // For backwards compatibility
@@ -473,6 +474,11 @@ namespace Legion {
       RELEASE_CREATE_TEMPORARY_CALL,
       RELEASE_SPECULATE_CALL,
       RELEASE_REPORT_PROFILING_CALL,
+      SELECT_PARTITION_PROJECTION_CALL,
+      MAP_PARTITION_CALL,
+      PARTITION_SELECT_SOURCES_CALL,
+      PARTITION_CREATE_TEMPORARY_CALL,
+      PARTITION_REPORT_PROFILING_CALL,
       CONFIGURE_CONTEXT_CALL,
       SELECT_TUNABLE_VALUE_CALL,
       MAP_MUST_EPOCH_CALL,
@@ -520,6 +526,11 @@ namespace Legion {
       "release create temporary",                   \
       "speculate (for release)",                    \
       "report_profiling (for release)",             \
+      "select partition projection",                \
+      "map_partition",                              \
+      "select_partition_sources",                   \
+      "partition create temporary",                 \
+      "report_profiling (for partition)",           \
       "configure_context",                          \
       "select_tunable_value",                       \
       "map_must_epoch",                             \
@@ -1183,6 +1194,7 @@ namespace Legion {
     class MustEpochOp;
     class PendingPartitionOp;
     class DependentPartitionOp;
+    class PointDepPartOp;
     class FillOp;
     class IndexFillOp;
     class PointFillOp;
@@ -1359,6 +1371,7 @@ namespace Legion {
     friend class Internal::MustEpochOp;                     \
     friend class Internal::PendingPartitionOp;              \
     friend class Internal::DependentPartitionOp;            \
+    friend class Internal::PointDepPartOp;                  \
     friend class Internal::FillOp;                          \
     friend class Internal::IndexFillOp;                     \
     friend class Internal::PointFillOp;                     \

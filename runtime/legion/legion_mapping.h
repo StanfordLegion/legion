@@ -1161,6 +1161,146 @@ namespace Legion {
                                     const Release&              release,
                                     const ReleaseProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
+    public: // Partition Operations
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Partition Projection
+       * ----------------------------------------------------------------------
+       * Partition operations are usually done with respect to a given
+       * logical region. However, for performance reasons the data for
+       * a logical region might be spread across many subregions from a
+       * previous operation (e.g. in the case of create_partition_by_field
+       * where a previous index space launch filled in the field containing
+       * the colors). In these cases , the mapper may want to specify that
+       * the mapping for the projection operation should not be done with
+       * respect to the region being partitioning, but for each fo the
+       * subregions of a complete partition of the logical region. This
+       * mapper call permits the mapper to decide whether to make the 
+       * partition operation an 'index' operation over the color space
+       * of a complete partition, or whether it should just remain a
+       * 'single' operation that maps the logical region directly.
+       * If the mapper picks a complete partition to return for 
+       * 'chosen_partition' then the partition will become an 'index'
+       * operation, but if it return a NO_PART, then the partition
+       * operation will remain a 'single' operation.
+       */
+      struct SelectPartitionProjectionInput {
+        std::vector<LogicalPartition>           open_complete_partitions;
+      };
+      struct SelectPartitionProjectionOutput {
+        LogicalPartition                        chosen_partition;
+      };
+      //------------------------------------------------------------------------
+      virtual void select_partition_projection(const MapperContext  ctx,
+                          const Partition&                          partition,
+                          const SelectPartitionProjectionInput&     input,
+                                SelectPartitionProjectionOutput&    output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Projection 
+       * ----------------------------------------------------------------------
+       * The map partition mapper call is responsible for handling the mapping
+       * of a dependent partition operation to a specific physical region. The
+       * mapper is given a set of valid physical instances in the 
+       * 'valid_instances' field. The mapper has the option of either ranking
+       * specifying a physical instance from the set of valid instances to 
+       * use in the 'chosen_ranking' field , or providing layout constraints 
+       * for creating a physical instance in 'layout_constraints'. The mapper
+       * can also request profiling information for any copies issued by 
+       * filling in the 'profiling_requests' set.
+       */
+      struct MapPartitionInput {
+        std::vector<PhysicalInstance>           valid_instances; 
+      };
+      struct MapPartitionOutput {
+        std::vector<PhysicalInstance>           chosen_instances;
+        ProfilingRequest                        profiling_requests;
+      };
+      //------------------------------------------------------------------------
+      virtual void map_partition(const MapperContext        ctx,
+                                 const Partition&           partition,
+                                 const MapPartitionInput&   input,
+                                       MapPartitionOutput&  output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Partition Sources 
+       * ----------------------------------------------------------------------
+       * The select partition sources mapper call allows the mapper to select a
+       * ranking for source physical instances when generating copies for an
+       * partition operation. The mapper is given the target physical instance 
+       * in the 'target' field and the set of possible source instances in 
+       * 'source_instances'. The mapper speciefies a ranking of physical 
+       * instances for copies to be issued from until all the fields contain 
+       * valid data. The runtime will also issue copies from any instances not 
+       * placed in the ranking in an unspecified order.
+       */
+      struct SelectPartitionSrcInput {
+        PhysicalInstance                        target;
+        std::vector<PhysicalInstance>           source_instances;
+      };
+      struct SelectPartitionSrcOutput {
+        std::deque<PhysicalInstance>            chosen_ranking;
+      };
+      //------------------------------------------------------------------------
+      virtual void select_partition_sources(
+                                    const MapperContext             ctx,
+                                    const Partition&                partition,
+                                    const SelectPartitionSrcInput&  input,
+                                          SelectPartitionSrcOutput& output) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Create Temporary Instance
+       * ----------------------------------------------------------------------
+       * Occasionaly, the runtime may need to create a temporary instance
+       * in order to correctly create the physical instances associated with
+       * a partition. When these scenarios occur (usually infrequently), this
+       * mapper call will be invoked to request that mapper create an 
+       * instance. It is required that the mapper create a new instance and
+       * not re-use an existing instance. Attempts to call 'find_instance' or
+       * 'find_or_create' runtime calls will raise an error. The resulting 
+       * instance must have sufficient space for all the fields. The runtime 
+       * will also provide the actual target instance where the data will be 
+       * ultimately copied. The mapper can use this instance as a guide for 
+       * where the data will ultimately be placed and laid out.
+       */
+      struct CreatePartitionTemporaryInput {
+        PhysicalInstance                        destination_instance;
+      };
+      struct CreatePartitionTemporaryOutput {
+        PhysicalInstance                        temporary_instance;
+      };
+      //------------------------------------------------------------------------
+      virtual void create_partition_temporary_instance(
+                              const MapperContext                   ctx,
+                              const Partition&                      partition,
+                              const CreatePartitionTemporaryInput&  input,
+                                    CreatePartitionTemporaryOutput& output) = 0;
+      //------------------------------------------------------------------------
+
+      // No speculation for dependent partition operations
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Report Profiling 
+       * ----------------------------------------------------------------------
+       * If the mapper requested profiling information on the copies
+       * generated during a dependent partition operation then this mapper
+       * call will be invoked to inform the mapper of the result.
+       */
+      struct PartitionProfilingInfo {
+	ProfilingResponse                       profiling_responses;
+      };
+      //------------------------------------------------------------------------
+      virtual void report_profiling(const MapperContext              ctx,
+                                    const Partition&                 partition,
+                                    const PartitionProfilingInfo&    input) = 0;
+      //------------------------------------------------------------------------
     public: // Single Task Context 
       /**
        * ----------------------------------------------------------------------

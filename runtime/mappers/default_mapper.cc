@@ -2815,6 +2815,127 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::select_partition_projection(const MapperContext  ctx,
+                        const Partition&                           partition,
+                        const SelectPartitionProjectionInput&      input,
+                              SelectPartitionProjectionOutput&     output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_partition_projection in %s", 
+                      get_mapper_name());
+      // If we have a complete partition then use it
+      if (!input.open_complete_partitions.empty())
+        output.chosen_partition = input.open_complete_partitions[0];
+      else
+        output.chosen_partition = LogicalPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_partition(const MapperContext        ctx,
+                                      const Partition&           partition,
+                                      const MapPartitionInput&   input,
+                                            MapPartitionOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      // No constraints on mapping partitions
+      // Copy over all the valid instances, then try to do an acquire on them
+      // and see which instances are no longer valid
+      output.chosen_instances = input.valid_instances;
+      if (!output.chosen_instances.empty())
+        runtime->acquire_and_filter_instances(ctx, 
+                                          output.chosen_instances);
+      // Now see if we have any fields which we still make space for
+      std::set<FieldID> missing_fields = 
+        partition.requirement.privilege_fields;
+      for (std::vector<PhysicalInstance>::const_iterator it = 
+            output.chosen_instances.begin(); it != 
+            output.chosen_instances.end(); it++)
+      {
+        it->remove_space_fields(missing_fields);
+        if (missing_fields.empty())
+          break;
+      }
+      // If we've satisfied all our fields, then we are done
+      if (missing_fields.empty())
+        return;
+      // Otherwise, let's make an instance for our missing fields
+      Memory target_memory = default_policy_select_target_memory(ctx,
+                                      partition.parent_task->current_proc);
+      bool force_new_instances = false;
+      LayoutConstraintID our_layout_id = 
+       default_policy_select_layout_constraints(ctx, target_memory, 
+                                             partition.requirement, 
+                                             PARTITION_MAPPING,
+                                             true/*needs check*/, 
+                                             force_new_instances);
+      LayoutConstraintSet creation_constraints = 
+              runtime->find_layout_constraints(ctx, our_layout_id);
+      creation_constraints.add_constraint(
+          FieldConstraint(missing_fields, false/*contig*/, false/*inorder*/));
+      output.chosen_instances.resize(output.chosen_instances.size()+1);
+      if (!default_make_instance(ctx, target_memory, creation_constraints,
+            output.chosen_instances.back(), PARTITION_MAPPING, 
+            force_new_instances, true/*meets*/, partition.requirement))
+      {
+        // If we failed to make it that is bad
+        log_mapper.error("Default mapper failed allocation for region "
+                         "requirement of partition in task %s (UID %lld) "
+                         "in memory " IDFMT "for processor " IDFMT ". This "
+                         "means the working set of your application is too big "
+                         "for the allotted capacity of the given memory under "
+                         "the default mapper's mapping scheme. You have three "
+                         "choices: ask Realm to allocate more memory, write a "
+                         "custom mapper to better manage working sets, or find "
+                         "a bigger machine. Good luck!", 
+                         partition.parent_task->get_task_name(),
+                         partition.parent_task->get_unique_id(),
+                         target_memory.id,
+                         partition.parent_task->current_proc.id);
+        assert(false);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_partition_sources(
+                                     const MapperContext             ctx,
+                                     const Partition&                partition,
+                                     const SelectPartitionSrcInput&  input,
+                                           SelectPartitionSrcOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_partition_sources in %s", 
+                      get_mapper_name());
+      default_policy_select_sources(ctx, input.target, input.source_instances,
+                                    output.chosen_ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::create_partition_temporary_instance(
+                            const MapperContext                   ctx,
+                            const Partition&                      partition,
+                            const CreatePartitionTemporaryInput&  input,
+                                  CreatePartitionTemporaryOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default create_partition_temporary_instance in %s",
+                      get_mapper_name());
+      output.temporary_instance = default_policy_create_temporary(ctx,
+            partition.requirement.region, input.destination_instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::report_profiling(const MapperContext              ctx,
+                                         const Partition&             partition,
+                                         const PartitionProfilingInfo&    input)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default report_profiling for Partition in %s", 
+                      get_mapper_name());
+      // We don't ask for any task profiling right now so assert if we see this
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void DefaultMapper::configure_context(const MapperContext         ctx,
                                           const Task&                 task,
                                                 ContextConfigOutput&  output)
