@@ -2317,6 +2317,8 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual ApEvent trigger_thunk(IndexSpace handle,
+                                    const InstanceSet &mapped_instances);
       virtual unsigned find_parent_index(unsigned idx);
       virtual bool is_partition_op(void) const { return true; }
     public:
@@ -2349,6 +2351,12 @@ namespace Legion {
     protected:
       void compute_parent_index(void);
       void select_partition_projection(void);
+      void invoke_mapper(const InstanceSet &valid_instances,
+                               InstanceSet &mapped_instances);
+      void activate_dependent_op(void);
+      void deactivate_dependent_op(void);
+    public:
+      void handle_point_commit(RtEvent point_committed);
     public:
       ProjectionInfo projection_info;
       VersionInfo version_info;
@@ -2363,7 +2371,12 @@ namespace Legion {
       MapperManager *mapper;
     protected:
       // For index versions of this operation
-      std::vector<PointDepPartOp*> points; 
+      std::vector<FieldDataDescriptor>  instances;
+      std::set<ApEvent>                 index_preconditions;
+      std::vector<PointDepPartOp*>      points; 
+      unsigned                          points_committed;
+      bool                              commit_request;
+      std::set<RtEvent>                 commit_preconditions;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                     outstanding_profiling_requests;
@@ -2391,8 +2404,8 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
+      virtual ApEvent trigger_thunk(IndexSpace handle,
+                                    const InstanceSet &mapped_instances);
       virtual void trigger_commit(void);
     public:
       // From ProjectionPoint

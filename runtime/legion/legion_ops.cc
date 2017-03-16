@@ -11610,20 +11610,310 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(thunk != NULL);
+      assert(requirement.handle_type == SINGULAR);
 #endif
-      ApEvent instances_ready;
-      std::vector<FieldDataDescriptor> instances;
-      ApEvent ready_event = thunk->perform(this, runtime->forest, 
-                                           instances_ready, instances);
+      // Perform the mapping call to get the physical isntances
+      InstanceSet valid_instances, mapped_instances;
+      runtime->forest->physical_premap_only(this, 0/*idx*/, requirement,
+                                            version_info, valid_instances);
+      // We have the valid instances so invoke the mapper
+      invoke_mapper(valid_instances, mapped_instances);
+#ifdef DEBUG_LEGION
+      assert(!mapped_instances.empty()); 
+#endif
+      // Then we can register our mapped_instances
+      runtime->forest->physical_register_only(requirement, 
+                                              version_info, restrict_info,
+                                              this, 0/*idx*/,
+                                              completion_event,
+                                              false/*defer add users*/,
+                                              true/*read only locks*/,
+                                              map_applied_conditions,
+                                              mapped_instances
+#ifdef DEBUG_LEGION
+                                              , get_logging_name()
+                                              , unique_op_id
+#endif
+                                              );
+      ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
+                                         mapped_instances);
+      // Apply our changes to the version state
+      version_info.apply_mapping(map_applied_conditions);
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
-      Runtime::trigger_event(completion_event, ready_event);
+      if (!restricted_postconditions.empty())
+      {
+        restricted_postconditions.insert(done_event);
+        done_event = Runtime::merge_events(restricted_postconditions);
+      }
+      Runtime::trigger_event(completion_event, done_event);
       need_completion_trigger = false;
-      complete_execution(Runtime::protect_event(ready_event));
+      complete_execution(Runtime::protect_event(done_event));
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent DependentPartitionOp::trigger_thunk(IndexSpace handle,
+                                                const InstanceSet &mapped_insts)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(requirement.privilege_fields.size() == 1);
+      assert(mapped_insts.size() == 1);
+#endif
+      if (is_index_space)
+      {
+        // Update our data structure and see if we are the ones
+        // to perform the operation
+        bool ready = false;
+        {
+          AutoLock o_lock(op_lock);
+          instances.resize(instances.size() + 1);
+          FieldDataDescriptor &desc = instances.back();
+          const InstanceRef &ref = mapped_insts[0];
+          PhysicalManager *manager = ref.get_manager();
+          desc.index_space = handle;
+          desc.inst = manager->get_instance();
+          desc.field_offset = manager->layout->find_field_info(
+                        *(requirement.privilege_fields.begin())).offset;
+          index_preconditions.insert(ref.get_ready_event());
+#ifdef DEBUG_LEGION
+          assert(!points.empty());
+#endif
+          ready = (instances.size() == points.size());
+        }
+        if (ready)
+        {
+          ApEvent done_event = thunk->perform(this, runtime->forest,
+              Runtime::merge_events(index_preconditions), instances);
+          Runtime::trigger_event(completion_event, done_event);
+          need_completion_trigger = false;
+          complete_execution(Runtime::protect_event(done_event));
+        }
+        return completion_event;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(instances.empty());
+#endif
+        instances.resize(1);
+        FieldDataDescriptor &desc = instances[0];
+        const InstanceRef &ref = mapped_insts[0];
+        PhysicalManager *manager = ref.get_manager();
+        desc.index_space = handle;
+        desc.inst = manager->get_instance();
+        desc.field_offset = manager->layout->find_field_info(
+                      *(requirement.privilege_fields.begin())).offset;
+        ApEvent ready_event = ref.get_ready_event();
+        return thunk->perform(this, runtime->forest, 
+                              ready_event, instances);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::invoke_mapper(const InstanceSet &valid_instances,
+                                             InstanceSet &mapped_instances)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MapPartitionInput input;
+      Mapper::MapPartitionOutput output;
+      if (restrict_info.has_restrictions())
+      {
+        prepare_for_mapping(restrict_info.get_instances(), 
+                            input.valid_instances);
+      }
+      else
+        prepare_for_mapping(valid_instances, input.valid_instances);
+      // Invoke the mapper
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_map_partition(this, &input, &output);
+      if (!output.profiling_requests.empty())
+        filter_copy_request_kinds(mapper,
+            output.profiling_requests.requested_measurements,
+            profiling_requests, true/*warn*/);
+      // Now we have to validate the output
+      // Go through the instances and make sure we got one for every field
+      // Also check to make sure that none of them are composite instances
+      RegionTreeID bad_tree = 0;
+      std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
+      int composite_index = runtime->forest->physical_convert_mapping(this,
+                                requirement, output.chosen_instances, 
+                                mapped_instances, bad_tree, missing_fields,
+                                &acquired_instances, unacquired, 
+                                !Runtime::unsafe_mapper);
+      if (bad_tree > 0)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_partition'"
+                      " on mapper %s. Mapper selected instance from region "
+                      "tree %d to satisfy a region requirement for a partition "
+                      "mapping in task %s (ID %lld) whose logical region is "
+                      "from region tree %d.", mapper->get_mapper_name(),
+                      bad_tree, parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id(), 
+                      requirement.region.get_tree_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!missing_fields.empty())
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_partition'"
+                      " on mapper %s. Mapper failed to specify a physical "
+                      "instance for %zd fields of the region requirement to "
+                      "a partition mapping in task %s (ID %lld). The missing "
+                      "fields are listed below.", mapper->get_mapper_name(),
+                      missing_fields.size(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
+              it != missing_fields.end(); it++)
+        {
+          const void *name; size_t name_size;
+          if (!runtime->retrieve_semantic_information(
+               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               name, name_size, true, false))
+            name = "(no name)";
+          log_run.error("Missing instance for field %s (FieldID: %d)",
+                        static_cast<const char*>(name), *it);
+        }
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!unacquired.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if (acquired_instances.find(*it) == acquired_instances.end())
+          {
+            log_run.error("Invalid mapper output from 'map_partition' "
+                        "invocation on mapper %s. Mapper selected physical "
+                        "instance for partition mapping in task %s (ID %lld) "
+                        "which has already been collected. If the mapper had "
+                        "properly acquired this instance as part of the mapper "
+                        "call it would have detected this. Please update the "
+                        "mapper to abide by proper mapping conventions.", 
+                        mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+        // If we did successfully acquire them, still issue the warning
+        log_run.warning("WARNING: mapper %s faield to acquire instance "
+                        "for partition mapping operation in task %s (ID %lld) "
+                        "in 'map_partition' call. You may experience undefined "
+                        "behavior as a consequence.", mapper->get_mapper_name(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+      }
+      if (composite_index >= 0)
+      {
+        log_run.error("Invalid mapper output from invocation of 'map_partition'"
+                      " on mapper %s. Mapper requested creation of a composite "
+                      "instance for partition mapping in task %s (ID %lld).",
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      } 
+      // If we are doing unsafe mapping, then we can return
+      if (Runtime::unsafe_mapper)
+        return;
+      // Iterate over the instances and make sure they are all valid
+      // for the given logical region which we are mapping
+      std::vector<LogicalRegion> regions_to_check(1, requirement.region);
+      for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+      {
+        if (!mapped_instances[idx].get_manager()->meets_regions(
+                                                        regions_to_check))
+        {
+          log_run.error("Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s. Mapper specified an "
+                        "instance that does not meet the logical region "
+                        "requirement. The inline mapping operation was issued "
+                        "in task %s (ID %lld).", mapper->get_mapper_name(), 
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+      {
+        if (!mapped_instances[idx].get_manager()->is_instance_manager())
+        {
+          log_run.error("Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s. Mapper selected an "
+                        "illegal specialized reduction instance for "
+                        "partition operation in task %s (ID %lld).",
+                        mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      version_info.clear();
+      bool commit_now = false;
+      if (is_index_space)
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!commit_request);
+#endif
+        commit_request = true;
+        commit_now = (points.size() == points_committed);
+      }
+      else
+        commit_now = true;
+      if (commit_now)
+        commit_operation(true/*deactivate*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::handle_point_commit(RtEvent point_committed)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_index_space);
+#endif
+      bool commit_now = false;
+      RtEvent commit_pre;
+      {
+        AutoLock o_lock(op_lock);
+        points_committed++;
+        if (point_committed.exists())
+          commit_preconditions.insert(point_committed);
+        commit_now = commit_request && (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/,
+                          Runtime::merge_events(commit_preconditions));
     }
 
     //--------------------------------------------------------------------------
@@ -11732,17 +12022,34 @@ namespace Legion {
     void DependentPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_dependent_op(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::activate_dependent_op(void)
+    //--------------------------------------------------------------------------
+    {
       activate_operation();
       is_index_space = false;
       index_domain = Domain::NO_DOMAIN;
       parent_req_index = 0;
       mapper = NULL;
+      points_committed = 0;
+      commit_request = false;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_dependent_op(); 
+      runtime->free_dependent_partition_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::deactivate_dependent_op(void)
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
@@ -11763,8 +12070,10 @@ namespace Legion {
             points.begin(); it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
+      instances.clear();
+      index_preconditions.clear();
+      commit_preconditions.clear();
       profiling_requests.clear();
-      runtime->free_dependent_partition_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -11786,14 +12095,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return 1;
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::trigger_commit(void)
-    //--------------------------------------------------------------------------
-    {
-      version_info.clear();
-      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12069,6 +12370,78 @@ namespace Legion {
       restrict_info = owner->restrict_info;
       if (Runtime::legion_spy_enabled)
         perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::launch(const std::set<RtEvent> &index_preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Copy over the version infos from our owner
+      version_info = owner->version_info;
+      // Perform the version analysis for our point
+      std::set<RtEvent> preconditions(index_preconditions);
+      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+      perform_projection_version_analysis(owner->projection_info,
+          owner->requirement, requirement, 0/*idx*/, 
+          logical_context_uid, version_info, preconditions);
+      // Then put ourselves in the queue of operations ready to map
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+      // We can also mark this as having our resolved any predication
+      resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_dependent_op();
+      owner = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_dependent_op();
+      runtime->free_point_dep_part_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PointDepPartOp::trigger_thunk(IndexSpace handle,
+                                          const InstanceSet &mapped_instances)
+    //--------------------------------------------------------------------------
+    {
+      return owner->trigger_thunk(handle, mapped_instances);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDepPartOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      // Tell our owner that we are done
+      owner->handle_point_commit(profiling_reported);
+      // Don't commit this operation until we've reported our profiling
+      // Out index owner will deactivate the operation
+      commit_operation(false/*deactivate*/, profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -13024,7 +13397,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool commit_now = false;
-      RtEvent commit_pre;
       {
         AutoLock o_lock(op_lock);
         points_committed++;
