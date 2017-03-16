@@ -848,7 +848,7 @@ namespace LegionRuntime {
 				   new DeferredCopy(*this, target,
 						    region,
 						    elmt_size,
-						    bytes_to_copy, 
+						    bytes_to_copy,
 						    after_copy));
 	return after_copy;
       }

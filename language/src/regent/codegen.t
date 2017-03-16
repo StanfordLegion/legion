@@ -51,7 +51,7 @@ local emergency = std.config["emergency-gc"]
 local function manual_gc() end
 
 if emergency then
-  local emergency_threshold = 600 * 1024
+  local emergency_threshold = 1024 * 1024
   -- Manually call GC whenever the current heap size exceeds threshold
   manual_gc = function()
     if collectgarbage("count") >= emergency_threshold then
@@ -3256,56 +3256,70 @@ function codegen.expr_static_cast(cx, node)
 end
 
 function codegen.expr_unsafe_cast(cx, node)
-  local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx, value_type)
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
     [value.actions];
     [emit_debuginfo(node)]
   end
 
-  local input = std.implicit_cast(value_type, expr_type.index_type, value.value)
-
   local result = terralib.newsymbol(expr_type, "result")
-  if bounds_checks then
-    local regions = expr_type:bounds()
-    assert(#regions == 1)
-    local region = regions[1]
-    assert(cx:has_region(region))
-    local lr = `([cx:region(region).logical_region].impl)
 
-    if expr_type.index_type:is_opaque() then
-      local check = terralib.newsymbol(c.legion_ptr_t, "check")
-      actions = quote
-        [actions]
-        var [check] = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
-        if c.legion_ptr_is_null([check]) then
-          std.assert_error(false, [get_source_location(node) .. ": pointer " .. tostring(expr_type) .. " is out-of-bounds"])
+  if not std.is_vptr(value_type) then
+    local input = std.implicit_cast(value_type, expr_type.index_type, value.value)
+
+    if bounds_checks then
+      local regions = expr_type:bounds()
+      assert(#regions == 1)
+      local region = regions[1]
+      assert(cx:has_region(region))
+      local lr = `([cx:region(region).logical_region].impl)
+
+      if expr_type.index_type:is_opaque() then
+        local check = terralib.newsymbol(c.legion_ptr_t, "check")
+        actions = quote
+          [actions]
+          var [check] = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
+          if c.legion_ptr_is_null([check]) then
+            std.assert_error(false, [get_source_location(node) .. ": pointer " .. tostring(expr_type) .. " is out-of-bounds"])
+          end
+          var [result] = [expr_type]({ __ptr = [check] })
         end
-        var [result] = [expr_type]({ __ptr = [check] })
+      else
+        local check = terralib.newsymbol(c.legion_domain_point_t, "check")
+        actions = quote
+          [actions]
+          var [check] = c.legion_domain_point_safe_cast([cx.runtime], [cx.context], [input], [lr])
+          if c.legion_domain_point_is_null([check]) then
+            std.assert_error(false, [get_source_location(node) .. ": pointer " .. tostring(expr_type) .. " is out-of-bounds"])
+          end
+          var [result] = [expr_type]({ __ptr = [expr_type.index_type]([check]) })
+        end
       end
     else
-      local check = terralib.newsymbol(c.legion_domain_point_t, "check")
-      actions = quote
-        [actions]
-        var [check] = c.legion_domain_point_safe_cast([cx.runtime], [cx.context], [input], [lr])
-        if c.legion_domain_point_is_null([check]) then
-          std.assert_error(false, [get_source_location(node) .. ": pointer " .. tostring(expr_type) .. " is out-of-bounds"])
+      if expr_type.index_type:is_opaque() then
+        actions = quote
+          [actions]
+          var [result] = [expr_type]({ __ptr = [input].__ptr })
         end
-        var [result] = [expr_type]({ __ptr = [expr_type.index_type]([check]) })
+      else
+        actions = quote
+          [actions]
+          var [result] = [expr_type]({ __ptr = [input] })
+        end
       end
     end
   else
-    if expr_type.index_type:is_opaque() then
-      actions = quote
-        [actions]
-        var [result] = [expr_type]({ __ptr = [input].__ptr })
-      end
-    else
-      actions = quote
-        [actions]
-        var [result] = [expr_type]({ __ptr = [input] })
-      end
+    -- TODO: bounds checks are ignored for vptr
+    assert(#expr_type:bounds() == 1)
+    actions = quote
+      [actions]
+      var [result] = [expr_type]({ __ptr =
+        [expr_type.impl_type] {
+          value = [value.value].__ptr.value
+        }
+      })
     end
   end
 
@@ -4802,28 +4816,28 @@ function codegen.expr_dynamic_collective_get_result(cx, node)
   end
 end
 
-local function expr_advance_phase_barrier(cx, value, value_type)
+local function expr_advance_phase_barrier(runtime, context, value, value_type)
   if std.is_phase_barrier(value_type) then
     return quote end, `(value_type {
       impl = c.legion_phase_barrier_advance(
-        [cx.runtime], [cx.context], [value].impl),
+        [runtime], [context], [value].impl),
     })
   elseif std.is_dynamic_collective(value_type) then
     return quote end, `(value_type {
       impl = c.legion_dynamic_collective_advance(
-        [cx.runtime], [cx.context], [value].impl),
+        [runtime], [context], [value].impl),
     })
   else
     assert(false)
   end
 end
 
-local function expr_advance_list(cx, value, value_type)
+local function expr_advance_list_body(runtime, context, value, value_type)
   if std.is_list(value_type) then
     local result = terralib.newsymbol(value_type, "result")
     local element = terralib.newsymbol(value_type.element_type, "element")
-    local inner_actions, inner_value = expr_advance_list(
-      cx, element, value_type.element_type)
+    local inner_actions, inner_value = expr_advance_list_body(
+      runtime, context, element, value_type.element_type)
     local actions = quote
       var data = c.malloc(
         terralib.sizeof([value_type.element_type]) * [value].__size)
@@ -4840,7 +4854,35 @@ local function expr_advance_list(cx, value, value_type)
     end
     return actions, result
   else
-    return expr_advance_phase_barrier(cx, value, value_type)
+    return expr_advance_phase_barrier(runtime, context, value, value_type)
+  end
+end
+
+local expr_advance_list_helper = terralib.memoize(
+  function (value_type)
+    local runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
+    local context = terralib.newsymbol(c.legion_context_t, "context")
+    local value = terralib.newsymbol(value_type, "value")
+    local result_actions, result =
+      expr_advance_list_body(runtime, context, value, value_type)
+    local terra advance_barriers([runtime], [context], [value])
+      [result_actions]
+      return [result]
+    end
+    advance_barriers:setinlined(false)
+    return advance_barriers
+  end)
+
+function expr_advance_list(cx, value, value_type)
+  if std.is_list(value_type) then
+    local helper = expr_advance_list_helper(value_type)
+    local result = terralib.newsymbol(value_type, "result")
+    local actions = quote
+      var [result] = [helper]([cx.runtime], [cx.context], [value])
+    end
+    return actions, result
+  else
+    return expr_advance_phase_barrier(cx.runtime, cx.context, value, value_type)
   end
 end
 
@@ -6523,6 +6565,36 @@ function codegen.stat_for_num(cx, node)
   end
 end
 
+function codegen.stat_for_num_vectorized(cx, node)
+  local symbol = node.symbol:getsymbol()
+  local cx = cx:new_local_scope()
+  local bounds = codegen.expr_list(cx, node.values):map(function(value) return value:read(cx) end)
+  local cx = cx:new_local_scope()
+  local block = cleanup_after(cx, codegen.block(cx, node.block))
+  local orig_block = cleanup_after(cx, codegen.block(cx, node.orig_block))
+  local vector_width = node.vector_width
+
+  local v1, v2, v3 = unpack(bounds)
+  assert(#bounds == 2)
+  return quote
+    [v1.actions]; [v2.actions]
+    do
+      var [symbol] = [v1.value]
+      var stop = [v2.value]
+
+      while [symbol] + vector_width - 1 < stop do
+        [block]
+        [symbol] = [symbol] + vector_width
+      end
+
+      while [symbol] < stop do
+        [orig_block]
+        [symbol] = [symbol] + 1
+      end
+    end
+  end
+end
+
 function codegen.stat_for_list(cx, node)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
@@ -7855,6 +7927,9 @@ function codegen.stat(cx, node)
 
   elseif node:is(ast.typed.stat.ForNum) then
     return codegen.stat_for_num(cx, node)
+
+  elseif node:is(ast.typed.stat.ForNumVectorized) then
+    return codegen.stat_for_num_vectorized(cx, node)
 
   elseif node:is(ast.typed.stat.ForList) then
     return codegen.stat_for_list(cx, node)

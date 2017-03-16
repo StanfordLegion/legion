@@ -30,6 +30,7 @@
 local ast = require("regent/ast")
 local data = require("common/data")
 local report = require("common/report")
+local std = require("regent/std")
 
 local context = {}
 context.__index = context
@@ -142,7 +143,11 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({"spmd", "trace"}))
 
     elseif node:is(ast.typed.stat.ForNum) then
-      check(cx, node, data.set({"parallel", "spmd", "trace"}))
+      local annotations = {"parallel", "spmd", "trace"}
+      if std.config["vectorize-unsafe"] then
+        annotations[#annotations + 1] = "vectorize"
+      end
+      check(cx, node, data.set(annotations))
 
     elseif node:is(ast.typed.stat.ForList) then
       check(cx, node, data.set({"parallel", "spmd", "trace", "vectorize"}))

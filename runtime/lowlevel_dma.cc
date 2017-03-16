@@ -1,4 +1,5 @@
 /* Copyright 2017 Stanford University, NVIDIA Corporation
+ * Copyright 2017 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +16,7 @@
 
 #include "realm/realm_config.h"
 #include "lowlevel_dma.h"
+#include "channel.h"
 #include "accessor.h"
 #include "realm/threads.h"
 #include <errno.h>
@@ -28,6 +30,7 @@
 #endif
 
 #include <queue>
+#include <algorithm>
 #include <iomanip>
 
 #define CHECK_PTHREAD(cmd) do { \
@@ -61,6 +64,8 @@ namespace LegionRuntime {
     typedef Realm::CoreReservationParameters CoreReservationParameters;
 
     Logger::Category log_dma("dma");
+    Logger::Category log_ib_alloc("ib_alloc");
+    extern Logger::Category log_new_dma;
     Logger::Category log_aio("aio");
 #ifdef EVENT_GRAPH_TRACE
     extern Logger::Category log_event_graph;
@@ -70,7 +75,53 @@ namespace LegionRuntime {
     typedef std::pair<Memory, Memory> MemPair;
     typedef std::pair<RegionInstance, RegionInstance> InstPair;
     typedef std::map<InstPair, OASVec> OASByInst;
+    class IBFence : public Realm::Operation::AsyncWorkItem {
+    public:
+      IBFence(Realm::Operation *op) : Realm::Operation::AsyncWorkItem(op) {}
+      virtual void request_cancellation(void) {
+        // ignored for now
+      }
+      virtual void print(std::ostream& os) const { os << "IBFence"; }
+    };
+
+    struct IBInfo {
+      Memory memory;
+      off_t offset;
+      size_t size;
+      IBFence* fence;
+    };
+    typedef std::vector<IBInfo> IBVec;
+    typedef std::map<InstPair, IBVec> IBByInst;
     typedef std::map<MemPair, OASByInst *> OASByMem;
+
+    class IBAllocRequest {
+    public:
+      IBAllocRequest(gasnet_node_t _owner, void* _req, int _idx,
+                     ID::IDType _src_inst_id, ID::IDType _dst_inst_id,
+                     size_t _ib_size)
+        : owner(_owner), req(_req), idx(_idx), src_inst_id(_src_inst_id),
+          dst_inst_id(_dst_inst_id), ib_size(_ib_size) {ib_offset = -1;}
+    public:
+      gasnet_node_t owner;
+      void* req;
+      int idx;
+      ID::IDType src_inst_id, dst_inst_id;
+      size_t ib_size;
+      off_t ib_offset;
+    };
+
+    class PendingIBQueue {
+    public:
+      PendingIBQueue();
+
+      void enqueue_request(Memory tgt_mem, IBAllocRequest* req);
+
+      void dequeue_request(Memory tgt_mem);
+
+    protected:
+      GASNetHSL queue_mutex;
+      std::map<Memory, std::queue<IBAllocRequest*> *> queues;
+    };
 
     class DmaRequest;
 
@@ -107,6 +158,8 @@ namespace LegionRuntime {
       : Operation(_after_copy, Realm::ProfilingRequestSet()),
 	state(STATE_INIT), priority(_priority)
     {
+      tgt_fetch_completion = Event::NO_EVENT;
+      pthread_mutex_init(&request_lock, NULL);
     }
 
     DmaRequest::DmaRequest(int _priority, Event _after_copy,
@@ -114,10 +167,13 @@ namespace LegionRuntime {
       : Realm::Operation(_after_copy, reqs), state(STATE_INIT),
 	priority(_priority)
     {
+      tgt_fetch_completion = Event::NO_EVENT;
+      pthread_mutex_init(&request_lock, NULL);
     }
 
     DmaRequest::~DmaRequest(void)
     {
+      pthread_mutex_destroy(&request_lock);
     }
 
     void DmaRequest::print(std::ostream& os) const
@@ -138,7 +194,6 @@ namespace LegionRuntime {
     DmaRequest::Waiter::~Waiter(void)
     {
     }
-
 
     // dma requests come in two flavors:
     // 1) CopyRequests, which are per memory pair, and
@@ -173,12 +228,36 @@ namespace LegionRuntime {
       template <unsigned DIM>
       void perform_dma_rect(MemPairCopier *mpc);
 
+      template <unsigned DIM>
+      void perform_new_dma(Memory src_mem, Memory dst_mem);
+
       virtual void perform_dma(void);
 
       virtual bool handler_safe(void) { return(false); }
 
       Domain domain;
       OASByInst *oas_by_inst;
+
+      // <NEW_DMA>
+      void alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx);
+
+      void handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset);
+
+      // operations on ib_by_inst are protected by ib_mutex
+      IBByInst ib_by_inst;
+      GASNetHSL ib_mutex;
+      class IBAllocOp : public Realm::Operation {
+      public:
+        IBAllocOp(Event _completion) : Operation(_completion, Realm::ProfilingRequestSet()) {};
+        ~IBAllocOp() {};
+        void print(std::ostream& os) const {os << "IBAllocOp"; };
+      };
+
+      IBAllocOp* ib_req;
+      Event ib_completion;
+      std::vector<Memory> mem_path;
+      // </NEW_DMA>
+
       Event before_copy;
       Waiter waiter; // if we need to wait on events
     };
@@ -275,6 +354,84 @@ namespace LegionRuntime {
       Event before_fill;
       Waiter waiter;
     };
+
+    static PendingIBQueue *ib_req_queue = 0;
+
+    PendingIBQueue::PendingIBQueue() {}
+
+    void PendingIBQueue::enqueue_request(Memory tgt_mem, IBAllocRequest* req)
+    {
+      AutoHSLLock al(queue_mutex);
+      assert(ID(tgt_mem).memory.owner_node == gasnet_mynode());
+      // If we can allocate in target memory, no need to pend the request
+      off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+      if (ib_offset >= 0) {
+        if (req->owner == gasnet_mynode()) {
+          // local ib alloc request
+          CopyRequest* cr = (CopyRequest*) req->req;
+          RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
+          RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(req->dst_inst_id);
+          InstPair inst_pair(src_impl->me, dst_impl->me);
+          cr->handle_ib_response(req->idx, inst_pair, req->ib_size, ib_offset);
+        } else {
+          // remote ib alloc request
+          RemoteIBAllocResponseAsync::send_request(req->owner, req->req, req->idx,
+              req->src_inst_id, req->dst_inst_id, req->ib_size, ib_offset); 
+        }
+        // Remember to free IBAllocRequest
+        delete req;
+
+        return;
+      }
+      log_ib_alloc.info() << "IBAllocRequest (" << req->src_inst_id << "," 
+        << req->dst_inst_id << "): no enough space in memory" << tgt_mem;
+      std::map<Memory, std::queue<IBAllocRequest*> *>::iterator it = queues.find(tgt_mem);
+      if (it == queues.end()) {
+        std::queue<IBAllocRequest*> *q = new std::queue<IBAllocRequest*>;
+        q->push(req);
+        queues[tgt_mem] = q;
+      } else {
+        it->second->push(req);
+      }
+    }
+
+    void PendingIBQueue::dequeue_request(Memory tgt_mem)
+    {
+      AutoHSLLock al(queue_mutex);
+      assert(ID(tgt_mem).memory.owner_node == gasnet_mynode());
+      std::map<Memory, std::queue<IBAllocRequest*> *>::iterator it = queues.find(tgt_mem);
+      // no pending ib requests
+      if (it == queues.end()) return;
+      while (!it->second->empty()) {
+        IBAllocRequest* req = it->second->front();
+        off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
+        if (ib_offset < 0) break;
+        //printf("req: src_inst_id(%llx) dst_inst_id(%llx) ib_size(%lu) idx(%d)\n", req->src_inst_id, req->dst_inst_id, req->ib_size, req->idx);
+        // deal with the completed ib alloc request
+        log_ib_alloc.info() << "IBAllocRequest (" << req->src_inst_id << "," 
+          << req->dst_inst_id << "): completed!";
+        if (req->owner == gasnet_mynode()) {
+          // local ib alloc request
+          CopyRequest* cr = (CopyRequest*) req->req;
+          RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
+          RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(req->dst_inst_id);
+          InstPair inst_pair(src_impl->me, dst_impl->me);
+          cr->handle_ib_response(req->idx, inst_pair, req->ib_size, ib_offset);
+        } else {
+          // remote ib alloc request
+          RemoteIBAllocResponseAsync::send_request(req->owner, req->req, req->idx,
+              req->src_inst_id, req->dst_inst_id, req->ib_size, ib_offset); 
+        }
+        it->second->pop();
+        // Remember to free IBAllocRequest
+        delete req;
+      }
+      // if queue is empty, delete from list
+      if(it->second->empty()) {
+	delete it->second;
+	queues.erase(it);
+      }
+    }
 
     DmaRequestQueue::DmaRequestQueue(Realm::CoreReservationSet& crs)
       : queue_condvar(queue_mutex)
@@ -387,6 +544,12 @@ namespace LegionRuntime {
 
       oas_by_inst = new OASByInst;
 
+      // <NEW_DMA>
+      ib_completion = GenEventImpl::create_genevent()->current_event();
+      ib_req = new IBAllocOp(ib_completion);
+      ib_by_inst.clear();
+      // </NEW_DMA>
+
       size_t num_pairs = *idata++;
 
       for (unsigned idx = 0; idx < num_pairs; idx++) {
@@ -456,6 +619,11 @@ namespace LegionRuntime {
 	domain(_domain), oas_by_inst(_oas_by_inst),
 	before_copy(_before_copy)
     {
+      // <NEW_DMA>
+      ib_completion = GenEventImpl::create_genevent()->current_event();
+      ib_req = new IBAllocOp(ib_completion);
+      ib_by_inst.clear();
+      // </NEW_DMA>
       log_dma.info() << "dma request " << (void *)this << " created - is="
 		     << domain << " before=" << before_copy << " after=" << get_finish_event();
       for(OASByInst::const_iterator it = oas_by_inst->begin();
@@ -472,6 +640,30 @@ namespace LegionRuntime {
  
     CopyRequest::~CopyRequest(void)
     {
+      //<NEWDMA>
+      // destroy all xfer des
+      std::vector<XferDesID>::iterator it;
+      for (it = path.begin(); it != path.end(); it++) {
+        destroy_xfer_des(*it);
+      }
+      // free intermediate buffers
+      {
+        AutoHSLLock al(ib_mutex);
+        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          IBVec& ib_vec = ib_by_inst[it->first];
+          for (IBVec::iterator it2 = ib_vec.begin(); it2 != ib_vec.end(); it2++) {
+            if(ID(it2->memory).memory.owner_node == gasnet_mynode()) {
+              get_runtime()->get_memory_impl(it2->memory)->free_bytes(it2->offset, it2->size);
+              ib_req_queue->dequeue_request(it2->memory);
+            } else {
+              RemoteIBFreeRequestAsync::send_request(ID(it2->memory).memory.owner_node,
+                  it2->memory, it2->offset, it2->size);
+            }
+          }
+        }
+      }
+      delete ib_req;
+      //</NEWDMA>
       delete oas_by_inst;
     }
 
@@ -568,6 +760,137 @@ namespace LegionRuntime {
       return req->get_finish_event();
     }
 
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class RemoteIBAllocRequestAsync
+    //
+
+    /*static*/ void RemoteIBAllocRequestAsync::handle_request(RequestArgs args)
+    {
+      assert(ID(args.memory).memory.owner_node == gasnet_mynode());
+      IBAllocRequest* ib_req
+          = new IBAllocRequest(args.node, args.req, args.idx,
+                               args.src_inst_id, args.dst_inst_id, args.size);
+      ib_req_queue->enqueue_request(args.memory, ib_req);
+    }
+
+    /*static*/ void RemoteIBAllocRequestAsync::send_request(gasnet_node_t target, Memory tgt_mem, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size)
+    {
+      RequestArgs args;
+      args.node = gasnet_mynode();
+      args.memory = tgt_mem;
+      args.req = req;
+      args.idx = idx;
+      args.src_inst_id = src_inst_id;
+      args.dst_inst_id = dst_inst_id;
+      args.size = ib_size;
+      Message::request(target, args);
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class RemoteIBAllocResponseAsync
+    //
+
+    /*static*/ void RemoteIBAllocResponseAsync::handle_request(RequestArgs args)
+    {
+      CopyRequest* req = (CopyRequest*) args.req;
+      RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(args.src_inst_id);
+      RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(args.dst_inst_id);
+      InstPair inst_pair(src_impl->me, dst_impl->me);
+      req->handle_ib_response(args.idx, inst_pair, args.size, args.offset);
+    }
+
+    /*static*/ void RemoteIBAllocResponseAsync::send_request(gasnet_node_t target, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size, off_t ib_offset)
+    {
+      RequestArgs args;
+      args.req = req;
+      args.idx = idx;
+      args.src_inst_id = src_inst_id;
+      args.dst_inst_id = dst_inst_id;
+      args.size = ib_size;
+      args.offset = ib_offset;
+      Message::request(target, args);
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class RemoteIBFreeRequestAsync
+    //
+
+    /*static*/ void RemoteIBFreeRequestAsync::handle_request(RequestArgs args)
+    {
+      assert(ID(args.memory).memory.owner_node == gasnet_mynode());
+      get_runtime()->get_memory_impl(args.memory)->free_bytes(args.ib_offset, args.ib_size);
+      ib_req_queue->dequeue_request(args.memory);
+    }
+
+    /*static*/ void RemoteIBFreeRequestAsync::send_request(gasnet_node_t target, Memory tgt_mem, off_t ib_offset, size_t ib_size)
+    {
+      RequestArgs args;
+      args.memory = tgt_mem;
+      args.ib_offset = ib_offset;
+      args.ib_size = ib_size;
+      Message::request(target, args);
+    }
+
+
+#define IB_MAX_SIZE (128 * 1024 * 1024)
+
+    void CopyRequest::alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx)
+    {
+      assert(oas_by_inst->find(inst_pair) != oas_by_inst->end());
+      OASVec& oasvec = (*oas_by_inst)[inst_pair];
+      size_t ib_elmnt_size = 0, domain_size = 0;
+      for(OASVec::const_iterator it = oasvec.begin(); it != oasvec.end(); it++) {
+        ib_elmnt_size += it->size;
+      }
+      if (domain.get_dim() == 0) {
+        IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
+        assert(get_runtime()->get_instance_impl(inst_pair.second)->metadata.is_valid());
+        if (ispace->me == get_runtime()->get_instance_impl(inst_pair.second)->metadata.is) {
+          // perform a 1D copy from first_element to last_element
+          Realm::StaticAccess<IndexSpaceImpl> data(ispace);
+          assert(data->num_elmts > 0);
+          Rect<1> new_rect(make_point(data->first_elmt), make_point(data->last_elmt));
+          Domain new_domain = Domain::from_rect<1>(new_rect);
+          domain_size = new_domain.get_volume();
+        } else {
+          domain_size = domain.get_volume();
+        }
+      } else {
+        domain_size = domain.get_volume();
+      }
+      size_t ib_size;
+      if (domain_size * ib_elmnt_size < IB_MAX_SIZE)
+        ib_size = domain_size * ib_elmnt_size;
+      else
+        ib_size = IB_MAX_SIZE;
+      //printf("alloc_ib: src_inst_id(%llx) dst_inst_id(%llx) idx(%d) size(%lu)\n", inst_pair.first.id, inst_pair.second.id, idx, ib_size);
+      if (ID(tgt_mem).memory.owner_node == gasnet_mynode()) {
+        // create local intermediate buffer
+        IBAllocRequest* ib_req
+          = new IBAllocRequest(gasnet_mynode(), this, idx, inst_pair.first.id,
+                               inst_pair.second.id, ib_size);
+        ib_req_queue->enqueue_request(tgt_mem, ib_req);
+      } else {
+        // create remote intermediate buffer
+        RemoteIBAllocRequestAsync::send_request(ID(tgt_mem).memory.owner_node, tgt_mem, this, idx, inst_pair.first.id, inst_pair.second.id, ib_size);
+      }
+    }
+
+    void CopyRequest::handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset)
+    {
+      AutoHSLLock al(ib_mutex);
+      IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
+      assert(ib_it != ib_by_inst.end());
+      IBVec& ibvec = ib_it->second;
+      assert((int)ibvec.size() > idx);
+      ibvec[idx].size = ib_size;
+      ibvec[idx].offset = ib_offset;
+      ibvec[idx].fence->mark_finished(true);
+    }
+
     bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
     {
       if(state == STATE_INIT)
@@ -643,7 +966,69 @@ namespace LegionRuntime {
 	}
 
 	// if we got all the way through, we've got all the metadata we need
-	state = STATE_BEFORE_EVENT;
+	state = STATE_DST_FETCH;
+      }
+
+      // make sure the destination has fetched metadata
+      if(state == STATE_DST_FETCH) {
+        Memory tgt_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
+        gasnet_node_t tgt_node = ID(tgt_mem).memory.owner_node;
+        if ((domain.get_dim() == 0) && (tgt_node != gasnet_mynode())) {
+          if (tgt_fetch_completion == Event::NO_EVENT) {
+            tgt_fetch_completion = GenEventImpl::create_genevent()->current_event();
+            Realm::ValidMaskFetchMessage::send_request(tgt_node,
+                                                domain.get_index_space(),
+                                                tgt_fetch_completion);
+          }
+
+          if (!tgt_fetch_completion.has_triggered()) {
+            if (just_check) return false;
+            waiter.sleep_on_event(tgt_fetch_completion);
+            return false;
+          }
+        }
+        state = STATE_GEN_PATH;
+      }
+
+      if(state == STATE_GEN_PATH) {
+        log_dma.debug("generate paths");
+        Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
+        Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
+        find_shortest_path(src_mem, dst_mem, mem_path);
+        ib_req->mark_ready();
+        ib_req->mark_started();
+        // Pass 1: create IBInfo blocks
+        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          AutoHSLLock al(ib_mutex);
+          IBVec& ib_vec = ib_by_inst[it->first];
+          assert(ib_vec.size() == 0);
+          for (size_t i = 1; i < mem_path.size() - 1; i++) {
+            IBInfo ib_info;
+            ib_info.memory = mem_path[i];
+            ib_info.fence = new IBFence(ib_req);
+            ib_req->add_async_work_item(ib_info.fence); 
+            ib_vec.push_back(ib_info);
+          }
+        }
+        // Pass 2: send ib allocation requests
+        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          for (size_t i = 1; i < mem_path.size() - 1; i++) {
+            alloc_intermediate_buffer(it->first, mem_path[i], i - 1);
+          }
+        }
+        ib_req->mark_finished(true);
+        state = STATE_ALLOC_IB;
+      }
+
+      if(state == STATE_ALLOC_IB) {
+        log_dma.debug("wait for the ib allocations to complete");
+        if (ib_completion.has_triggered()) {
+          state = STATE_BEFORE_EVENT;
+        } else {
+          if (just_check) return false;
+          waiter.sleep_on_event(ib_completion);
+          return false;
+        }
       }
 
       // make sure our functional precondition has occurred
@@ -674,6 +1059,11 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+	// <NEWDMA>
+	mark_ready();
+	perform_dma();
+	return true;
+	// </NEWDMA>
 	assert(rq != 0);
 	log_dma.debug("request %p enqueued", this);
 
@@ -1864,33 +2254,6 @@ namespace LegionRuntime {
       const CustomSerdezUntyped *serdez_op;
     };
     
-    class AsyncFileIOContext {
-    public:
-      AsyncFileIOContext(int _max_depth);
-      ~AsyncFileIOContext(void);
-
-      void enqueue_write(int fd, size_t offset, size_t bytes, const void *buffer);
-      void enqueue_read(int fd, size_t offset, size_t bytes, void *buffer);
-      void enqueue_fence(DmaRequest *req);
-
-      bool empty(void);
-      void make_progress(void);
-
-      class AIOOperation {
-      public:
-	virtual ~AIOOperation(void) {}
-	virtual void launch(void) = 0;
-	virtual bool check_completion(void) = 0;
-	bool completed;
-      };
-
-      int max_depth;
-      std::deque<AIOOperation *> launched_operations, pending_operations;
-      GASNetHSL mutex;
-#ifdef REALM_USE_KERNEL_AIO
-      aio_context_t aio_ctx;
-#endif
-    };
 
     static AsyncFileIOContext *aio_context = 0;
 
@@ -1920,7 +2283,7 @@ namespace LegionRuntime {
     public:
       KernelAIOWrite(aio_context_t aio_ctx,
                      int fd, size_t offset, size_t bytes,
-		     const void *buffer);
+		     const void *buffer, Request* request = NULL);
       virtual void launch(void);
       virtual bool check_completion(void);
 
@@ -1931,7 +2294,7 @@ namespace LegionRuntime {
 
     KernelAIOWrite::KernelAIOWrite(aio_context_t aio_ctx,
 				   int fd, size_t offset, size_t bytes,
-				   const void *buffer)
+				   const void *buffer, Request* request)
     {
       completed = false;
       ctx = aio_ctx;
@@ -1942,6 +2305,7 @@ namespace LegionRuntime {
       cb.aio_buf = (uint64_t)buffer;
       cb.aio_offset = offset;
       cb.aio_nbytes = bytes;
+      req = request;
     }
 
     void KernelAIOWrite::launch(void)
@@ -1965,7 +2329,7 @@ namespace LegionRuntime {
     public:
       KernelAIORead(aio_context_t aio_ctx,
                      int fd, size_t offset, size_t bytes,
-		     void *buffer);
+		     void *buffer, Request* request = NULL);
       virtual void launch(void);
       virtual bool check_completion(void);
 
@@ -1976,7 +2340,7 @@ namespace LegionRuntime {
 
     KernelAIORead::KernelAIORead(aio_context_t aio_ctx,
 				 int fd, size_t offset, size_t bytes,
-				 void *buffer)
+				 void *buffer, Request* request)
     {
       completed = false;
       ctx = aio_ctx;
@@ -1987,6 +2351,7 @@ namespace LegionRuntime {
       cb.aio_buf = (uint64_t)buffer;
       cb.aio_offset = offset;
       cb.aio_nbytes = bytes;
+      req = request;
     }
 
     void KernelAIORead::launch(void)
@@ -2009,7 +2374,7 @@ namespace LegionRuntime {
     class PosixAIOWrite : public AsyncFileIOContext::AIOOperation {
     public:
       PosixAIOWrite(int fd, size_t offset, size_t bytes,
-		    const void *buffer);
+		    const void *buffer, Request* request = NULL);
       virtual void launch(void);
       virtual bool check_completion(void);
 
@@ -2018,7 +2383,7 @@ namespace LegionRuntime {
     };
 
     PosixAIOWrite::PosixAIOWrite(int fd, size_t offset, size_t bytes,
-				 const void *buffer)
+				 const void *buffer, Request* request)
     {
       completed = false;
       memset(&cb, 0, sizeof(cb));
@@ -2026,6 +2391,7 @@ namespace LegionRuntime {
       cb.aio_buf = (void *)buffer;
       cb.aio_offset = offset;
       cb.aio_nbytes = bytes;
+      req = request;
     }
 
     void PosixAIOWrite::launch(void)
@@ -2050,7 +2416,7 @@ namespace LegionRuntime {
     class PosixAIORead : public AsyncFileIOContext::AIOOperation {
     public:
       PosixAIORead(int fd, size_t offset, size_t bytes,
-		   void *buffer);
+		   void *buffer, Request* request = NULL);
       virtual void launch(void);
       virtual bool check_completion(void);
 
@@ -2059,7 +2425,7 @@ namespace LegionRuntime {
     };
 
     PosixAIORead::PosixAIORead(int fd, size_t offset, size_t bytes,
-			       void *buffer)
+			       void *buffer, Request* request)
     {
       completed = false;
       memset(&cb, 0, sizeof(cb));
@@ -2067,6 +2433,7 @@ namespace LegionRuntime {
       cb.aio_buf = buffer;
       cb.aio_offset = offset;
       cb.aio_nbytes = bytes;
+      req = request;
     }
 
     void PosixAIORead::launch(void)
@@ -2156,13 +2523,14 @@ namespace LegionRuntime {
     }
 
     void AsyncFileIOContext::enqueue_write(int fd, size_t offset, 
-					   size_t bytes, const void *buffer)
+					   size_t bytes, const void *buffer,
+                                           Request* req)
     {
 #ifdef REALM_USE_KERNEL_AIO
       KernelAIOWrite *op = new KernelAIOWrite(aio_ctx,
-					      fd, offset, bytes, buffer);
+					      fd, offset, bytes, buffer, req);
 #else
-      PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer);
+      PosixAIOWrite *op = new PosixAIOWrite(fd, offset, bytes, buffer, req);
 #endif
       {
 	AutoHSLLock al(mutex);
@@ -2176,13 +2544,14 @@ namespace LegionRuntime {
     }
 
     void AsyncFileIOContext::enqueue_read(int fd, size_t offset, 
-					  size_t bytes, void *buffer)
+					  size_t bytes, void *buffer,
+                                          Request* req)
     {
 #ifdef REALM_USE_KERNEL_AIO
       KernelAIORead *op = new KernelAIORead(aio_ctx,
-					    fd, offset, bytes, buffer);
+					    fd, offset, bytes, buffer, req);
 #else
-      PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer);
+      PosixAIORead *op = new PosixAIORead(fd, offset, bytes, buffer, req);
 #endif
       {
 	AutoHSLLock al(mutex);
@@ -2215,6 +2584,12 @@ namespace LegionRuntime {
       return launched_operations.empty();
     }
 
+    long AsyncFileIOContext::available(void)
+    {
+      AutoHSLLock al(mutex);
+      return (max_depth - launched_operations.size());
+    }
+
     void AsyncFileIOContext::make_progress(void)
     {
       AutoHSLLock al(mutex);
@@ -2242,6 +2617,13 @@ namespace LegionRuntime {
 	AIOOperation *op = launched_operations.front();
 	if(!op->check_completion()) break;
 	log_aio.debug("aio op completed: op=%p", op);
+        // <NEW_DMA>
+        if (op->req != NULL) {
+          Request* request = (Request*)(op->req);
+          request->xd->notify_request_read_done(request);
+          request->xd->notify_request_write_done(request);
+        }
+        // </NEW_DMA>
 	delete op;
 	launched_operations.pop_front();
       }
@@ -2254,6 +2636,11 @@ namespace LegionRuntime {
 	op->launch();
 	launched_operations.push_back(op);
       }
+    }
+
+    /*static*/
+    AsyncFileIOContext* AsyncFileIOContext::get_singleton() {
+      return aio_context;
     }
 
     // MemPairCopier from disk memory to cpu memory
@@ -2822,6 +3209,362 @@ namespace LegionRuntime {
       }
     }
 
+    bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
+
+    DomainLinearization create_ib_linearization(const Domain& dm)
+    {
+      //std::vector<Layouts::DimKind> kind_vec;
+      std::vector<size_t> size_vec;
+      switch (dm.get_dim()) {
+      case 1:
+      {
+        /*
+        kind_vec.push_back(Layouts::DIM_X);
+        size_vec.push_back(dm.get_rect<1>().dim_size(0));
+        Layouts::SplitDimLinearization<1> cl(dm.get_rect<1>().lo,
+                                             make_point(0),
+                                             kind_vec,
+                                             size_vec);
+        */
+        Arrays::FortranArrayLinearization<1> cl(dm.get_rect<1>(), 0);
+        return DomainLinearization::from_mapping<1>(
+                   Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
+      }
+      case 2:
+      {
+        /*
+        kind_vec.push_back(Layouts::DIM_X);
+        kind_vec.push_back(Layouts::DIM_Y);
+        size_vec.push_back(dm.get_rect<2>().dim_size(0));
+        size_vec.push_back(dm.get_rect<2>().dim_size(1));
+        Layouts::SplitDimLinearization<2> cl(dm.get_rect<2>().lo,
+                                             make_point(0),
+                                             kind_vec,
+                                             size_vec);
+        */
+        Arrays::FortranArrayLinearization<2> cl(dm.get_rect<2>(), 0);
+        return DomainLinearization::from_mapping<2>(
+                   Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
+      }
+      case 3:
+      {
+        /*
+        kind_vec.push_back(Layouts::DIM_X);
+        kind_vec.push_back(Layouts::DIM_Y);
+        kind_vec.push_back(Layouts::DIM_Z);
+        size_vec.push_back(dm.get_rect<3>().dim_size(0));
+        size_vec.push_back(dm.get_rect<3>().dim_size(1));
+        size_vec.push_back(dm.get_rect<3>().dim_size(2));
+        Layouts::SplitDimLinearization<3> cl(dm.get_rect<3>().lo,
+                                             make_point(0),
+                                             kind_vec,
+                                             size_vec);
+        */
+        Arrays::FortranArrayLinearization<3> cl(dm.get_rect<3>(), 0);
+        return DomainLinearization::from_mapping<3>(
+                   Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
+      }
+      default:
+        assert(0);
+      }
+      assert(0);
+      return DomainLinearization();
+    }
+
+    Buffer simple_create_intermediate_buffer(const IBInfo& ib_info, const Domain& domain,
+                                             OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst,
+                                             DomainLinearization linearization)
+    {
+      oasvec_src.clear();
+      oasvec_dst.clear();
+      std::sort(oasvec.begin(), oasvec.end(), oas_sort_by_dst);
+      off_t ib_elmnt_size = 0;
+      for (unsigned i = 0; i < oasvec.size(); i++) {
+        OffsetsAndSize oas_src, oas_dst;
+        oas_src.src_offset = oasvec[i].src_offset;
+        oas_src.dst_offset = ib_elmnt_size;
+        oas_src.size = oasvec[i].size;
+        oas_dst.src_offset = ib_elmnt_size;
+        oas_dst.dst_offset = oasvec[i].dst_offset;
+        oas_dst.size = oasvec[i].size;
+        ib_elmnt_size += oasvec[i].size;
+        oasvec_src.push_back(oas_src);
+        oasvec_dst.push_back(oas_dst);
+      }
+      size_t ib_size; /*size of ib (bytes)*/
+      if (domain.get_volume() * ib_elmnt_size < IB_MAX_SIZE)
+        ib_size = domain.get_volume() * ib_elmnt_size;
+      else
+        ib_size = IB_MAX_SIZE;
+      // Make sure the size we want here matches our previous allocation
+      assert(ib_size == ib_info.size);
+      //off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
+      //assert(ib_offset >= 0);
+      // Create a new linearization order x->y in Domain
+      DomainLinearization dl;
+      if (domain.get_dim() == 0)
+        dl = linearization;
+      else
+        dl = create_ib_linearization(domain);
+      Buffer ib_buf(ib_info.offset, true, domain.get_volume(), ib_elmnt_size, ib_info.size, dl, ib_info.memory);
+      return ib_buf;
+    }
+
+    inline bool is_cpu_mem(Memory::Kind kind)
+    {
+      return (kind == Memory::REGDMA_MEM || kind == Memory::LEVEL3_CACHE || kind == Memory::LEVEL2_CACHE
+              || kind == Memory::LEVEL1_CACHE || kind == Memory::SYSTEM_MEM || kind == Memory::SOCKET_MEM
+              || kind == Memory::Z_COPY_MEM);
+    }
+
+    XferDes::XferKind get_xfer_des(Memory src_mem, Memory dst_mem)
+    {
+      Memory::Kind src_ll_kind = get_runtime()->get_memory_impl(src_mem)->lowlevel_kind;
+      Memory::Kind dst_ll_kind = get_runtime()->get_memory_impl(dst_mem)->lowlevel_kind;
+      if(ID(src_mem).memory.owner_node == ID(dst_mem).memory.owner_node) {
+        switch(src_ll_kind) {
+        case Memory::GLOBAL_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_GASNET_READ;
+          else
+            return XferDes::XFER_NONE;
+        case Memory::REGDMA_MEM:
+        case Memory::LEVEL3_CACHE:
+        case Memory::LEVEL2_CACHE:
+        case Memory::LEVEL1_CACHE:
+        case Memory::SYSTEM_MEM:
+        case Memory::SOCKET_MEM:
+        case Memory::Z_COPY_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_MEM_CPY;
+          else if (dst_ll_kind == Memory::GLOBAL_MEM)
+            return XferDes::XFER_GASNET_WRITE;
+          else if (dst_ll_kind == Memory::GPU_FB_MEM) {
+            std::set<Memory> visible_mems;
+            Machine::get_machine().get_visible_memories(dst_mem, visible_mems);
+            if (visible_mems.count(src_mem) == 0)
+              return XferDes::XFER_NONE;
+            return XferDes::XFER_GPU_TO_FB;
+          }
+          else if (dst_ll_kind == Memory::DISK_MEM)
+            return XferDes::XFER_DISK_WRITE;
+          else if (dst_ll_kind == Memory::HDF_MEM)
+            return XferDes::XFER_HDF_WRITE;
+          else if (dst_ll_kind == Memory::FILE_MEM)
+            return XferDes::XFER_FILE_WRITE;
+          assert(0);
+          break;
+        case Memory::GPU_FB_MEM:
+        {
+          std::set<Memory> visible_mems;
+          Machine::get_machine().get_visible_memories(src_mem, visible_mems);
+          if (dst_ll_kind == Memory::GPU_FB_MEM) {
+            if (src_mem == dst_mem)
+              return XferDes::XFER_GPU_IN_FB;
+            else if (visible_mems.count(dst_mem) != 0)
+              return XferDes::XFER_GPU_PEER_FB;
+            return XferDes::XFER_NONE;
+          }
+          else if (is_cpu_mem(dst_ll_kind) && visible_mems.count(dst_mem) != 0)
+              return XferDes::XFER_GPU_FROM_FB;
+          else
+            return XferDes::XFER_NONE;
+        }
+        case Memory::DISK_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_DISK_READ;
+          else
+            return XferDes::XFER_NONE;
+        case Memory::FILE_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_FILE_READ;
+          else
+            return XferDes::XFER_NONE;
+        case Memory::HDF_MEM:
+          if (is_cpu_mem(dst_ll_kind))
+            return XferDes::XFER_HDF_READ;
+          else
+            return XferDes::XFER_NONE;
+        default:
+          assert(0);
+        }
+      } else {
+        if (is_cpu_mem(src_ll_kind) && dst_ll_kind == Memory::REGDMA_MEM)
+          return XferDes::XFER_REMOTE_WRITE;
+        else
+          return XferDes::XFER_NONE;
+      }
+      return XferDes::XFER_NONE;
+    }
+
+    void find_shortest_path(Memory src_mem, Memory dst_mem, std::vector<Memory>& path)
+    {
+      std::map<Memory, std::vector<Memory> > dist;
+      std::set<Memory> all_mem;
+      std::queue<Memory> active_nodes;
+      all_mem.insert(src_mem);
+      all_mem.insert(dst_mem);
+      Node* node = &(get_runtime()->nodes[ID(src_mem).memory.owner_node]);
+      for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
+           it != node->ib_memories.end(); it++) {
+        all_mem.insert((*it)->me);
+      }
+      node = &(get_runtime()->nodes[ID(dst_mem).memory.owner_node]);
+      for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
+           it != node->ib_memories.end(); it++) {
+        all_mem.insert((*it)->me);
+      }
+      for (std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
+        if (get_xfer_des(src_mem, *it) != XferDes::XFER_NONE) {
+          dist[*it] = std::vector<Memory>();
+          dist[*it].push_back(src_mem);
+          dist[*it].push_back(*it);
+          active_nodes.push(*it);
+        }
+      }
+      while (!active_nodes.empty()) {
+        Memory cur = active_nodes.front();
+        active_nodes.pop();
+        std::vector<Memory> sub_path = dist[cur];
+        for(std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it ++) {
+          if (get_xfer_des(cur, *it) != XferDes::XFER_NONE) {
+            if (dist.find(*it) == dist.end()) {
+              dist[*it] = sub_path;
+              dist[*it].push_back(*it);
+              active_nodes.push(*it);
+            }
+          }
+        }
+      }
+      assert(dist.find(dst_mem) != dist.end());
+      path = dist[dst_mem];
+    }
+
+    template<unsigned DIM>
+    void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
+    {
+      //mark_started();
+      //std::vector<Memory> mem_path;
+      //find_shortest_path(src_mem, dst_mem, mem_path);
+      for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+        std::vector<XferDesID> sub_path;
+        for (unsigned idx = 0; idx < mem_path.size() - 1; idx ++) {
+          XferDesID new_xdid = get_xdq_singleton()->get_guid(ID(mem_path[idx]).memory.owner_node);
+          sub_path.push_back(new_xdid);
+          path.push_back(new_xdid);
+        }
+        RegionInstance src_inst = it->first.first;
+        RegionInstance dst_inst = it->first.second;
+        OASVec oasvec = it->second, oasvec_src, oasvec_dst;
+        IBByInst::iterator ib_it = ib_by_inst.find(it->first);
+        assert(ib_it != ib_by_inst.end());
+        IBVec& ibvec = ib_it->second;
+        RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(src_inst);
+        RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst_inst);
+
+        //MemoryImpl::MemoryKind src_kind = get_runtime()->get_memory_impl(src_mem)->kind;
+        //MemoryImpl::MemoryKind dst_kind = get_runtime()->get_memory_impl(dst_mem)->kind;
+
+        //Memory::Kind dst_ll_kind = get_runtime()->get_memory_impl(dst_mem)->lowlevel_kind;
+
+        // We don't need to care about deallocation of Buffer class
+        // This will be handled by XferDes destruction
+        Buffer src_buf(&src_impl->metadata, src_mem);
+        Buffer dst_buf(&dst_impl->metadata, dst_mem);
+        Buffer pre_buf;
+        assert(mem_path.size() - 1 == sub_path.size());
+        for (unsigned idx = 0; idx < mem_path.size(); idx ++) {
+          log_new_dma.info("mem_path[%d]: node(%llu), memory(%d)", idx, ID(mem_path[idx]).memory.owner_node, mem_path[idx].kind());
+          if (idx == 0) {
+            pre_buf = src_buf;
+          } else {
+            XferDesID xd_guid = sub_path[idx - 1];
+            XferDesID pre_xd_guid = idx == 1 ? XferDes::XFERDES_NO_GUID : sub_path[idx - 2];
+            XferDesID next_xd_guid = idx == sub_path.size() ? XferDes::XFERDES_NO_GUID : sub_path[idx];
+            bool mark_started = ((idx == 1) && (it == oas_by_inst->begin())) ? true : false;
+            Buffer cur_buf;
+            XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
+            XferOrder::Type order;
+            if (mem_path.size() == 2)
+              order = XferOrder::ANY_ORDER;
+            else
+              order = idx == 1 ? XferOrder::DST_FIFO : XferOrder::SRC_FIFO;
+            RegionInstance attach_inst;
+            if ((kind == XferDes::XFER_HDF_READ)
+              ||(kind == XferDes::XFER_FILE_READ))
+              attach_inst = src_inst;
+            else if ((kind == XferDes::XFER_HDF_WRITE)
+              ||(kind == XferDes::XFER_FILE_WRITE))
+              attach_inst = dst_inst;
+            else
+              attach_inst = RegionInstance::NO_INST;
+
+            
+            XferDesFence* complete_fence = new XferDesFence(this);
+            add_async_work_item(complete_fence);
+            if (DIM == 0) {
+              // Need to do something special for unstructured data: we perform a 1D copy from first_elemnt to last_elemnt
+              // First we should make sure destination instance space's index space match what we're copying
+              IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
+              assert(get_runtime()->get_instance_impl(dst_inst)->metadata.is_valid());
+              if (ispace->me == get_runtime()->get_instance_impl(dst_inst)->metadata.is) {
+                // perform a 1D copy from first_element to last_element
+                Realm::StaticAccess<IndexSpaceImpl> data(ispace);
+                assert(data->num_elmts > 0);
+                Rect<1> new_rect(make_point(data->first_elmt), make_point(data->last_elmt));
+                Domain new_domain = Domain::from_rect<1>(new_rect);
+                if (idx != mem_path.size() - 1) {
+                  cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
+                              new_domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+                } else {
+                  cur_buf = dst_buf;
+                  oasvec_src = oasvec;
+                  oasvec.clear();
+                }
+                create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
+                                   next_xd_guid, mark_started, pre_buf, cur_buf,
+                                   new_domain, oasvec_src,
+                                   16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
+                                   priority, order, kind, complete_fence, attach_inst);
+              } else {
+                if (idx != mem_path.size() - 1) {
+                  cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
+                              domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+                } else {
+                  cur_buf = dst_buf;
+                  oasvec_src = oasvec;
+                  oasvec.clear();
+                }
+                create_xfer_des<0>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
+                                   next_xd_guid, mark_started, pre_buf, cur_buf,
+                                   domain, oasvec_src,
+                                   16 * 1024 * 1024 /*max_req_size*/, 100/*max_nr*/,
+                                   priority, order, kind, complete_fence, attach_inst);
+              }
+            }
+            else {
+              if (idx != mem_path.size() - 1) {
+                cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
+                            domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+              } else {
+                cur_buf = dst_buf;
+                oasvec_src = oasvec;
+                oasvec.clear();
+              }
+              create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
+                                   next_xd_guid, mark_started, pre_buf, cur_buf,
+                                   domain, oasvec_src,
+                                   16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
+                                   priority, order, kind, complete_fence, attach_inst);
+            }
+            pre_buf = cur_buf;
+            oasvec = oasvec_dst;
+          }
+        }
+      }
+      mark_finished(true/*successful*/);
+    }
+
     template <unsigned DIM>
     void CopyRequest::perform_dma_rect(MemPairCopier *mpc)
     {
@@ -2930,6 +3673,48 @@ namespace LegionRuntime {
       // create a copier for the memory used by all of these instance pairs
       Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
       Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
+
+      // <NEWDMA>
+      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+        const InstPair &pair = oas_by_inst->begin()->first;
+        size_t total_field_size = 0;
+        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+          for (size_t i = 0; i < it->second.size(); i++) {
+            total_field_size += it->second[i].size;
+          }
+        }
+
+        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        usage.source = pair.first.get_location();
+        usage.target = pair.second.get_location();
+        usage.size = total_field_size * domain.get_volume();
+        measurements.add_measurement(usage);
+      }
+
+      switch (domain.get_dim()) {
+      case 0:
+        perform_new_dma<0>(src_mem, dst_mem);
+        break;
+      case 1:
+        perform_new_dma<1>(src_mem, dst_mem);
+        break;
+      case 2:
+        perform_new_dma<2>(src_mem, dst_mem);
+        break;
+      case 3:
+        perform_new_dma<3>(src_mem, dst_mem);
+        break;
+      default:
+        assert(0);
+      }
+
+      log_dma.info() << "dma request " << (void *)this << " finished - is="
+                     << domain << " before=" << before_copy << " after=" << get_finish_event();
+      return;
+      // </NEWDMA>
+
+      // MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem);
+
       CustomSerdezID serdez_id = oas_by_inst->begin()->second.begin()->serdez_id;
       // for now we launches an individual copy request for every serdez copy
       assert(serdez_id == 0 || (oas_by_inst->size() == 1 && oas_by_inst->begin()->second.size() == 1));
@@ -3523,6 +4308,19 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+#ifdef REDUCE_IN_NEW_DMA
+	// <NEWDMA>
+	mark_ready();
+	bool ok_to_run = mark_started();
+	if (ok_to_run) {
+	  perform_dma();
+	  mark_finished(true/*successful*/);
+	} else {
+	  mark_finished(false/*!successful*/);
+	}
+	return true;
+	// </NEWDMA>
+#endif
 	assert(rq != 0);
 	log_dma.debug("request %p enqueued", this);
 
@@ -4089,6 +4887,19 @@ namespace LegionRuntime {
 	if(just_check) return true;
 
 	state = STATE_QUEUED;
+#ifdef FILL_IN_NEW_DMA
+	// <NEWDMA>
+	mark_ready();
+	bool ok_to_run = mark_started();
+	if (ok_to_run) {
+	  perform_dma();
+	  mark_finished(true/*successful*/);
+	} else {
+	  mark_finished(false/*!successful*/);
+	}
+	return true;
+	// </NEWDMA>
+#endif
 	assert(rq != 0);
 	log_dma.debug("request %p enqueued", this);
 
@@ -4307,7 +5118,7 @@ namespace LegionRuntime {
 
     // for now we use a single queue for all (local) dmas
     static DmaRequestQueue *dma_queue = 0;
-
+    
     void DmaRequestQueue::worker_thread_loop(void)
     {
       log_dma.info("dma worker thread created");
@@ -4350,7 +5161,6 @@ namespace LegionRuntime {
     
     void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs)
     {
-      aio_context = new AsyncFileIOContext(256);
       dma_queue = new DmaRequestQueue(crs);
       dma_queue->start_workers(count);
     }
@@ -4360,10 +5170,24 @@ namespace LegionRuntime {
       dma_queue->shutdown_queue();
       delete dma_queue;
       dma_queue = 0;
+    }
+
+    void start_dma_system(int count, int max_nr, Realm::CoreReservationSet& crs)
+    {
+      //log_dma.add_stream(&std::cerr, Logger::Category::LEVEL_DEBUG, false, false);
+      aio_context = new AsyncFileIOContext(256);
+      start_channel_manager(count, max_nr, crs);
+      ib_req_queue = new PendingIBQueue();
+    }
+
+    void stop_dma_system(void)
+    {
+      stop_channel_manager();
+      delete ib_req_queue;
+      ib_req_queue = 0;
       delete aio_context;
       aio_context = 0;
     }
-
   };
 };
 
@@ -4553,6 +5377,7 @@ namespace Realm {
     {
       if(redop_id == 0) {
 	// not a reduction, so sort fields by src/dst mem pairs
+        //log_new_dma.info("Performing copy op");
 
 	OASByMem oas_by_mem;
 
@@ -4715,6 +5540,7 @@ namespace Realm {
 	// final event is merge of all individual copies' events
 	return GenEventImpl::merge_events(finish_events, false /*!ignore faults*/);
       } else {
+        log_new_dma.info("Performing reduction op redop_id(%d)", redop_id);
 	// we're doing a reduction - the semantics require that all source fields be pulled
 	//  together and applied as a "structure" to the reduction op
 

@@ -21,6 +21,7 @@
 #include "realm/event_impl.h"
 
 #include "lowlevel_dma.h"
+#include "channel.h"
 
 #include "realm/cuda/cudart_hijack.h"
 
@@ -47,7 +48,6 @@ namespace Realm {
     extern Logger log_event_graph;
 #endif
     Logger log_stream("gpustream");
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -389,6 +389,79 @@ namespace Realm {
                    dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind);
     }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GPUMemcpy3D
+    GPUMemcpy3D::GPUMemcpy3D(GPU *_gpu,
+                             void *_dst, const void *_src,
+                             off_t _dst_stride, off_t _src_stride,
+                             off_t _dst_height, off_t _src_height,
+                             size_t _bytes, size_t _height, size_t _depth,
+                             GPUMemcpyKind _kind,
+                             GPUCompletionNotification *_notification)
+       : GPUMemcpy(_gpu, _kind), dst(_dst), src(_src),
+	dst_stride((_dst_stride < (off_t)_bytes) ? _bytes : _dst_stride), 
+	src_stride((_src_stride < (off_t)_bytes) ? _bytes : _src_stride),
+        dst_height((_dst_height < (off_t)_height) ? _height : _dst_height),
+        src_height((_src_height < (off_t)_height) ? _height : _src_height),
+	bytes(_bytes), height(_height), depth(_depth),
+        notification(_notification)
+    {}
+
+    GPUMemcpy3D::~GPUMemcpy3D(void)
+    {}
+    
+    void GPUMemcpy3D::execute(GPUStream *stream)
+    {
+      log_gpudma.info("gpu memcpy 3d: dst=%p src=%p"
+                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
+                      "bytes=%ld height=%ld depth=%ld kind=%d",
+                      dst, src, (long)dst_stride, (long)src_stride,
+                      (long)dst_height, (long)src_height, bytes, height,
+                      depth, kind);
+      CUDA_MEMCPY3D copy_info;
+      if (kind == GPU_MEMCPY_PEER_TO_PEER) {
+        // If we're doing peer to peer, just let unified memory it deal with it
+        copy_info.srcMemoryType = CU_MEMORYTYPE_UNIFIED;
+        copy_info.dstMemoryType = CU_MEMORYTYPE_UNIFIED;
+      } else {
+        // otherwise we know the answers here 
+        copy_info.srcMemoryType = (kind == GPU_MEMCPY_HOST_TO_DEVICE) ?
+          CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+        copy_info.dstMemoryType = (kind == GPU_MEMCPY_DEVICE_TO_HOST) ? 
+          CU_MEMORYTYPE_HOST : CU_MEMORYTYPE_DEVICE;
+      }
+      copy_info.srcDevice = (CUdeviceptr)src;
+      copy_info.srcHost = src;
+      copy_info.srcPitch = src_stride;
+      copy_info.srcHeight = src_height;
+      copy_info.srcY = 0;
+      copy_info.srcZ = 0;
+      copy_info.srcXInBytes = 0;
+      copy_info.srcLOD = 0;
+      copy_info.dstDevice = (CUdeviceptr)dst;
+      copy_info.dstHost = dst;
+      copy_info.dstPitch = dst_stride;
+      copy_info.dstHeight = dst_height;
+      copy_info.dstY = 0;
+      copy_info.dstZ = 0;
+      copy_info.dstXInBytes = 0;
+      copy_info.dstLOD = 0;
+      copy_info.WidthInBytes = bytes;
+      copy_info.Height = height;
+      copy_info.Depth = depth;
+      CHECK_CU( cuMemcpy3DAsync(&copy_info, stream->get_stream()) );
+
+      if(notification)
+        stream->add_notification(notification);
+
+       log_gpudma.info("gpu memcpy 3d complete: dst=%p src=%p"
+                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
+                      "bytes=%ld height=%ld depth=%ld kind=%d",
+                      dst, src, (long)dst_stride, (long)src_stride,
+                      (long)dst_height, (long)src_height, bytes, height,
+                      depth, kind);
+    }
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -766,6 +839,13 @@ namespace Realm {
 
     void GPU::create_dma_channels(Realm::RuntimeImpl *r)
     {
+      // <NEW_DMA>
+      // Not a good design choice
+      // For now, channel_manager will creates all channels
+      // for GPUs in dma_all_gpus
+      LegionRuntime::LowLevel::register_gpu_in_dma_systems(this);
+      // </NEW_DMA>
+
       // if we don't have any framebuffer memory, we can't do any DMAs
       if(!fbmem)
 	return;
@@ -1162,6 +1242,21 @@ namespace Realm {
       host_to_device_stream->add_copy(copy);
     }
 
+    void GPU::copy_to_fb_3d(off_t dst_offset, const void *src,
+                            off_t dst_stride, off_t src_stride,
+                            off_t dst_height, off_t src_height,
+                            size_t bytes, size_t height, size_t depth,
+                            GPUCompletionNotification *notification /* = 0*/)
+    {
+      GPUMemcpy *copy = new GPUMemcpy3D(this,
+					(void *)(fbmem->base + dst_offset),
+					src, dst_stride, src_stride,
+                                        dst_height, src_height,
+                                        bytes, height, depth,
+					GPU_MEMCPY_HOST_TO_DEVICE, notification);
+      host_to_device_stream->add_copy(copy);
+    }
+
     void GPU::copy_from_fb_2d(void *dst, off_t src_offset,
 			      off_t dst_stride, off_t src_stride,
 			      size_t bytes, size_t lines,
@@ -1170,6 +1265,21 @@ namespace Realm {
       GPUMemcpy *copy = new GPUMemcpy2D(this, dst,
 					(const void *)(fbmem->base + src_offset),
 					dst_stride, src_stride, bytes, lines,
+					GPU_MEMCPY_DEVICE_TO_HOST, notification);
+      device_to_host_stream->add_copy(copy);
+    }
+
+    void GPU::copy_from_fb_3d(void *dst, off_t src_offset,
+                              off_t dst_stride, off_t src_stride,
+                              off_t dst_height, off_t src_height,
+                              size_t bytes, size_t height, size_t depth,
+                              GPUCompletionNotification *notification /*= 0*/)
+    {
+      GPUMemcpy *copy = new GPUMemcpy3D(this, dst,
+					(const void *)(fbmem->base + src_offset),
+					dst_stride, src_stride,
+                                        dst_height, src_height,
+                                        bytes, height, depth,
 					GPU_MEMCPY_DEVICE_TO_HOST, notification);
       device_to_host_stream->add_copy(copy);
     }
@@ -1183,6 +1293,22 @@ namespace Realm {
 					(void *)(fbmem->base + dst_offset),
 					(const void *)(fbmem->base + src_offset),
 					dst_stride, src_stride, bytes, lines,
+					GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
+      device_to_device_stream->add_copy(copy);
+    }
+
+    void GPU::copy_within_fb_3d(off_t dst_offset, off_t src_offset,
+                                off_t dst_stride, off_t src_stride,
+                                off_t dst_height, off_t src_height,
+                                size_t bytes, size_t height, size_t depth,
+                                GPUCompletionNotification *notification /*= 0*/)
+    {
+      GPUMemcpy *copy = new GPUMemcpy3D(this,
+					(void *)(fbmem->base + dst_offset),
+					(const void *)(fbmem->base + src_offset),
+					dst_stride, src_stride,
+                                        dst_height, src_height,
+                                        bytes, height, depth,
 					GPU_MEMCPY_DEVICE_TO_DEVICE, notification);
       device_to_device_stream->add_copy(copy);
     }
@@ -1208,6 +1334,22 @@ namespace Realm {
 					(void *)(dst->fbmem->base + dst_offset),
 					(const void *)(fbmem->base + src_offset),
 					dst_stride, src_stride, bytes, lines,
+					GPU_MEMCPY_PEER_TO_PEER, notification);
+      peer_to_peer_stream->add_copy(copy);
+    }
+
+    void GPU::copy_to_peer_3d(GPU *dst, off_t dst_offset, off_t src_offset,
+                              off_t dst_stride, off_t src_stride,
+                              off_t dst_height, off_t src_height,
+                              size_t bytes, size_t height, size_t depth,
+                              GPUCompletionNotification *notification /*= 0*/)
+    {
+      GPUMemcpy *copy = new GPUMemcpy3D(this,
+					(void *)(dst->fbmem->base + dst_offset),
+					(const void *)(fbmem->base + src_offset),
+					dst_stride, src_stride,
+                                        dst_height, src_height,
+                                        bytes, height, depth,
 					GPU_MEMCPY_PEER_TO_PEER, notification);
       peer_to_peer_stream->add_copy(copy);
     }
@@ -2136,6 +2278,7 @@ namespace Realm {
     CudaModule::CudaModule(void)
       : Module("cuda")
       , cfg_zc_mem_size_in_mb(64)
+      , cfg_zc_ib_size_in_mb(256)
       , cfg_fb_mem_size_in_mb(256)
       , cfg_num_gpus(0)
       , cfg_gpu_streams(12)
@@ -2144,7 +2287,7 @@ namespace Realm {
       , cfg_pin_sysmem(true)
       , cfg_fences_use_callbacks(false)
       , cfg_suppress_hijack_warning(false)
-      , shared_worker(0), zcmem_cpu_base(0), zcmem(0)
+      , shared_worker(0), zcmem_cpu_base(0), zcib_cpu_base(0), zcmem(0)
     {}
       
     CudaModule::~CudaModule(void)
@@ -2222,6 +2365,7 @@ namespace Realm {
 
 	cp.add_option_int("-ll:fsize", m->cfg_fb_mem_size_in_mb)
 	  .add_option_int("-ll:zsize", m->cfg_zc_mem_size_in_mb)
+	  .add_option_int("-ll:ib_zsize", m->cfg_zc_ib_size_in_mb)
 	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
 	  .add_option_int("-ll:streams", m->cfg_gpu_streams)
 	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
@@ -2335,6 +2479,42 @@ namespace Realm {
 	  }
 	}
       }
+
+      // allocate intermediate buffers in ZC memory for DMA engine
+      if ((cfg_zc_ib_size_in_mb > 0) && !gpus.empty()) {
+        CUdeviceptr zcib_gpu_base;
+        {
+          AutoGPUContext agc(gpus[0]);
+          CHECK_CU( cuMemHostAlloc(&zcib_cpu_base,
+                                   cfg_zc_ib_size_in_mb << 20,
+                                   CU_MEMHOSTALLOC_PORTABLE | CU_MEMHOSTALLOC_DEVICEMAP) );
+          CHECK_CU( cuMemHostGetDevicePointer(&zcib_gpu_base,
+                                              zcib_cpu_base, 0) );
+          // right now there are asssumptions in several places that unified addressing keeps
+          //  the CPU and GPU addresses the same
+          assert(zcib_cpu_base == (void *)zcib_gpu_base); 
+        }
+        Memory m = runtime->next_local_ib_memory_id();
+        GPUZCMemory* ib_mem;
+        ib_mem = new GPUZCMemory(m, zcib_gpu_base, zcib_cpu_base,
+                                 cfg_zc_ib_size_in_mb << 20);
+        runtime->add_ib_memory(ib_mem);
+        // add the ZC memory as a pinned memory to all GPUs
+        for (unsigned i = 0; i < gpus.size(); i++) {
+          CUdeviceptr gpuptr;
+          CUresult ret;
+          {
+            AutoGPUContext agc(gpus[i]);
+            ret = cuMemHostGetDevicePointer(&gpuptr, zcib_cpu_base, 0);
+          }
+          if ((ret == CUDA_SUCCESS) && (gpuptr == zcib_gpu_base)) {
+            gpus[i]->pinned_sysmems.insert(ib_mem->me);
+          } else {
+            log_gpu.warning() << "GPU #" << i << "has an unexpected mapping for"
+            << " intermediate buffers in ZC memory!";
+          }
+        }
+      }
     }
 
     // create any processors provided by the module (default == do nothing)
@@ -2359,8 +2539,14 @@ namespace Realm {
       //  we can register with CUDA
       if(cfg_pin_sysmem && !gpus.empty()) {
 	std::vector<MemoryImpl *>& local_mems = runtime->nodes[gasnet_mynode()].memories;
-	for(std::vector<MemoryImpl *>::iterator it = local_mems.begin();
-	    it != local_mems.end();
+	// <NEW_DMA> also add intermediate buffers into local_mems
+	std::vector<MemoryImpl *>& local_ib_mems = runtime->nodes[gasnet_mynode()].ib_memories;
+	std::vector<MemoryImpl *> all_local_mems;
+	all_local_mems.insert(all_local_mems.end(), local_mems.begin(), local_mems.end());
+	all_local_mems.insert(all_local_mems.end(), local_ib_mems.begin(), local_ib_mems.end());
+	// </NEW_DMA>
+	for(std::vector<MemoryImpl *>::iterator it = all_local_mems.begin();
+	    it != all_local_mems.end();
 	    it++) {
 	  // ignore FB/ZC memories or anything that doesn't have a "direct" pointer
 	  if(((*it)->kind == MemoryImpl::MKIND_GPUFB) ||

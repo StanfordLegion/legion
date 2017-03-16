@@ -817,6 +817,16 @@ function pretty.stat_for_num(cx, node)
   return text.Lines { lines = result }
 end
 
+function pretty.stat_for_num_vectorized(cx, node)
+  local result = terralib.newlist()
+  result:insert(join({"for", tostring(node.symbol),
+                      ":", tostring(node.symbol:gettype()),
+                      "=", pretty.expr_list(cx, node.values), "do -- vectorized"}, true))
+  result:insert(pretty.block(cx, node.block))
+  result:insert(text.Line { value = "end" })
+  return text.Lines { lines = result }
+end
+
 function pretty.stat_for_list(cx, node)
   local result = terralib.newlist()
   result:insert(join({"for", tostring(node.symbol),
@@ -968,6 +978,9 @@ function pretty.stat(cx, node)
 
   elseif node:is(ast.typed.stat.ForNum) then
     return pretty.stat_for_num(cx, node)
+
+  elseif node:is(ast.typed.stat.ForNumVectorized) then
+    return pretty.stat_for_num_vectorized(cx, node)
 
   elseif node:is(ast.typed.stat.ForList) then
     return pretty.stat_for_list(cx, node)

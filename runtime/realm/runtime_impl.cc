@@ -46,6 +46,21 @@ namespace Realm {
   typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
 };
 
+// create xd message and update bytes read/write messages
+#include "channel.h"
+namespace Realm {
+  typedef LegionRuntime::LowLevel::XferDesRemoteWriteMessage XferDesRemoteWriteMessage;
+  typedef LegionRuntime::LowLevel::XferDesRemoteWriteAckMessage XferDesRemoteWriteAckMessage;
+  typedef LegionRuntime::LowLevel::XferDesCreateMessage XferDesCreateMessage;
+  typedef LegionRuntime::LowLevel::XferDesDestroyMessage XferDesDestroyMessage;
+  typedef LegionRuntime::LowLevel::NotifyXferDesCompleteMessage NotifyXferDesCompleteMessage;
+  typedef LegionRuntime::LowLevel::UpdateBytesWriteMessage UpdateBytesWriteMessage;
+  typedef LegionRuntime::LowLevel::UpdateBytesReadMessage UpdateBytesReadMessage;
+  typedef LegionRuntime::LowLevel::RemoteIBAllocRequestAsync RemoteIBAllocRequestAsync;
+  typedef LegionRuntime::LowLevel::RemoteIBAllocResponseAsync RemoteIBAllocResponseAsync;
+  typedef LegionRuntime::LowLevel::RemoteIBFreeRequestAsync RemoteIBFreeRequestAsync;
+}
+
 #include <unistd.h>
 #include <signal.h>
 
@@ -558,7 +573,8 @@ namespace Realm {
 	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
 	core_map(0), core_reservations(0),
 	sampling_profiler(true /*system default*/),
-	num_local_memories(0), num_local_processors(0),
+	num_local_memories(0), num_local_ib_memories(0),
+	num_local_processors(0),
 	module_registrar(this)
     {
       machine = new MachineImpl;
@@ -578,6 +594,13 @@ namespace Realm {
       return m;
     }
 
+    Memory RuntimeImpl::next_local_ib_memory_id(void)
+    {
+      Memory m = ID::make_ib_memory(gasnet_mynode(),
+                                    num_local_ib_memories++).convert<Memory>();
+      return m;
+    }
+
     Processor RuntimeImpl::next_local_processor_id(void)
     {
       Processor p = ID::make_processor(gasnet_mynode(), 
@@ -593,6 +616,16 @@ namespace Realm {
       assert(id.memory.mem_idx == nodes[gasnet_mynode()].memories.size());
 
       nodes[gasnet_mynode()].memories.push_back(m);
+    }
+
+    void RuntimeImpl::add_ib_memory(MemoryImpl *m)
+    {
+      // right now expect this to always be for the current node and the next memory ID
+      ID id(m->me);
+      assert(id.memory.owner_node == gasnet_mynode());
+      assert(id.memory.mem_idx == nodes[gasnet_mynode()].ib_memories.size());
+
+      nodes[gasnet_mynode()].ib_memories.push_back(m);
     }
 
     void RuntimeImpl::add_processor(ProcessorImpl *p)
@@ -693,6 +726,11 @@ namespace Realm {
       LegionRuntime::Arrays::Mapping<2,1>::register_mapping<LegionRuntime::Arrays::FortranArrayLinearization<2> >();
       LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Arrays::FortranArrayLinearization<3> >();
       LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Arrays::Translation<1> >();
+      // we also register split dim linearization
+      //LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<1> >();
+      //LegionRuntime::Arrays::Mapping<2,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<2> >();
+      //LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<3> >();
+
 
       DetailedTimer::init_timers();
 
@@ -797,8 +835,10 @@ namespace Realm {
       // low-level runtime parameters
 #ifdef USE_GASNET
       size_t gasnet_mem_size_in_mb = 256;
+      size_t reg_ib_mem_size_in_mb = 256;
 #else
       size_t gasnet_mem_size_in_mb = 0;
+      size_t reg_ib_mem_size_in_mb = 0;
 #endif
       size_t reg_mem_size_in_mb = 0;
       size_t disk_mem_size_in_mb = 0;
@@ -826,6 +866,7 @@ namespace Realm {
       CommandLineParser cp;
       cp.add_option_int("-ll:gsize", gasnet_mem_size_in_mb)
 	.add_option_int("-ll:rsize", reg_mem_size_in_mb)
+	.add_option_int("-ll:ib_rsize", reg_ib_mem_size_in_mb)
 	.add_option_int("-ll:dsize", disk_mem_size_in_mb)
 	.add_option_int("-ll:stacksize", stack_size_in_mb)
 	.add_option_int("-ll:dma", dma_worker_threads)
@@ -935,6 +976,7 @@ namespace Realm {
       hcount += RemoteFillMessage::add_handler_entries(&handlers[hcount], "Remote Fill AM");
       hcount += ValidMaskRequestMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
       hcount += ValidMaskDataMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Data AM");
+      hcount += ValidMaskFetchMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Fetch AM");
 #ifdef DETAILED_TIMING
       hcount += TimerDataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Request AM");
       hcount += TimerDataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Data AM");
@@ -957,6 +999,13 @@ namespace Realm {
       hcount += MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
       hcount += MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
       hcount += MetadataInvalidateAckMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Inval Ack AM");
+      hcount += XferDesRemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "XferDes Remote Write AM");
+      hcount += XferDesRemoteWriteAckMessage::Message::add_handler_entries(&handlers[hcount], "XferDes Remote Write Ack AM");
+      hcount += XferDesCreateMessage::Message::add_handler_entries(&handlers[hcount], "Create XferDes Request AM");
+      hcount += XferDesDestroyMessage::Message::add_handler_entries(&handlers[hcount], "Destroy XferDes Request AM");
+      hcount += NotifyXferDesCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Notify XferDes Completion Request AM");
+      hcount += UpdateBytesWriteMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Write AM");
+      hcount += UpdateBytesReadMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Read AM");
       hcount += RegisterTaskMessage::Message::add_handler_entries(&handlers[hcount], "Register Task AM");
       hcount += RegisterTaskCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Register Task Complete AM");
       hcount += RemoteMicroOpMessage::Message::add_handler_entries(&handlers[hcount], "Remote Micro Op AM");
@@ -967,6 +1016,9 @@ namespace Realm {
       hcount += SetContribCountMessage::Message::add_handler_entries(&handlers[hcount], "Set Contrib Count AM");
       hcount += RemoteIDRequestMessage::Message::add_handler_entries(&handlers[hcount], "Remote ID Request AM");
       hcount += RemoteIDResponseMessage::Message::add_handler_entries(&handlers[hcount], "Remote ID Response AM");
+      hcount += RemoteIBAllocRequestAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Alloc Request AM");
+      hcount += RemoteIBAllocResponseAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Alloc Response AM");
+      hcount += RemoteIBFreeRequestAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Free Request AM");
       //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount], "Test 2 AM");
 
@@ -985,7 +1037,7 @@ namespace Realm {
       }
 
       init_endpoints(handlers, hcount, 
-		     gasnet_mem_size_in_mb, reg_mem_size_in_mb,
+		     gasnet_mem_size_in_mb, reg_mem_size_in_mb, reg_ib_mem_size_in_mb,
 		     *core_reservations,
 		     *argc, (const char **)*argv);
 
@@ -1054,7 +1106,7 @@ namespace Realm {
       LegionRuntime::LowLevel::create_builtin_dma_channels(this);
 
       LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
-							*core_reservations);
+                                                        *core_reservations);
 
       PartitioningOpQueue::start_worker_threads(*core_reservations);
 
@@ -1105,30 +1157,47 @@ namespace Realm {
 	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, gasnet_nodes()) );
 	char *regmem_base = ((char *)(seginfos[gasnet_mynode()].addr)) + (gasnet_mem_size_in_mb << 20);
 	delete[] seginfos;
-	regmem = new LocalCPUMemory(ID::make_memory(gasnet_mynode(),
-						    n->memories.size()).convert<Memory>(),
+	Memory m = get_runtime()->next_local_memory_id();
+	regmem = new LocalCPUMemory(m,
 				    reg_mem_size_in_mb << 20,
 				    regmem_base,
 				    true);
-	n->memories.push_back(regmem);
+	get_runtime()->add_memory(regmem);
       } else
 	regmem = 0;
+
+      LocalCPUMemory *reg_ib_mem;
+      if(reg_ib_mem_size_in_mb > 0) {
+	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[gasnet_nodes()];
+	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, gasnet_nodes()) );
+	char *reg_ib_mem_base = ((char *)(seginfos[gasnet_mynode()].addr)) + (gasnet_mem_size_in_mb << 20)
+                                + (reg_mem_size_in_mb << 20);
+	delete[] seginfos;
+	Memory m = get_runtime()->next_local_ib_memory_id();
+	reg_ib_mem = new LocalCPUMemory(m,
+				        reg_ib_mem_size_in_mb << 20,
+				        reg_ib_mem_base,
+				        true);
+	get_runtime()->add_ib_memory(reg_ib_mem);
+      } else
+        reg_ib_mem = 0;
 
       // create local disk memory
       DiskMemory *diskmem;
       if(disk_mem_size_in_mb > 0) {
-        diskmem = new DiskMemory(ID::make_memory(gasnet_mynode(),
-						 n->memories.size()).convert<Memory>(),
+        char file_name[30];
+        sprintf(file_name, "disk_file%d.tmp", gasnet_mynode());
+        Memory m = get_runtime()->next_local_memory_id();
+        diskmem = new DiskMemory(m,
                                  disk_mem_size_in_mb << 20,
-                                 "disk_file.tmp");
-        n->memories.push_back(diskmem);
+                                 std::string(file_name));
+        get_runtime()->add_memory(diskmem);
       } else
         diskmem = 0;
 
       FileMemory *filemem;
-      filemem = new FileMemory(ID::make_memory(gasnet_mynode(),
-					       n->memories.size()).convert<Memory>());
-      n->memories.push_back(filemem);
+      filemem = new FileMemory(get_runtime()->next_local_memory_id());
+      get_runtime()->add_memory(filemem);
 
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
@@ -1139,6 +1208,11 @@ namespace Realm {
 	  it != modules.end();
 	  it++)
 	(*it)->create_code_translators(this);
+      
+      // start dma system at the very ending of initialization
+      // since we need list of local gpus to create channels
+      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads, 100
+                                                ,*core_reservations);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -1279,6 +1353,7 @@ namespace Realm {
 
 	unsigned num_procs = 0;
 	unsigned num_memories = 0;
+	unsigned num_ib_memories = 0;
 
 	// announce each processor
 	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
@@ -1357,6 +1432,21 @@ namespace Realm {
 	    }
 	  }
 
+        for (std::vector<MemoryImpl *>::const_iterator it = n->ib_memories.begin();
+             it != n->ib_memories.end();
+             it++)
+          if(*it) {
+            Memory m = (*it)->me;
+            Memory::Kind k = (*it)->me.kind();
+
+            num_ib_memories++;
+            adata[apos++] = NODE_ANNOUNCE_IB_MEM;
+            adata[apos++] = m.id;
+            adata[apos++] = k;
+            adata[apos++] = (*it)->size;
+            adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
+          }
+
 	adata[apos++] = NODE_ANNOUNCE_DONE;
 	assert(apos < ADATA_SIZE);
 
@@ -1373,6 +1463,7 @@ namespace Realm {
 	    NodeAnnounceMessage::send_request(i,
 						     num_procs,
 						     num_memories,
+						     num_ib_memories,
 						     adata, apos*sizeof(adata[0]),
 						     PAYLOAD_COPY);
 
@@ -1788,6 +1879,7 @@ namespace Realm {
       // threads that cause inter-node communication have to stop first
       PartitioningOpQueue::stop_worker_threads();
       LegionRuntime::LowLevel::stop_dma_worker_threads();
+      LegionRuntime::LowLevel::stop_dma_system();
       stop_activemsg_threads();
 
       sampling_profiler.shutdown();
@@ -1966,6 +2058,9 @@ namespace Realm {
 	  return null_check(nodes[id.memory.owner_node].memories[id.memory.mem_idx]);
       }
 
+      if(id.is_ib_memory()) {
+        return null_check(nodes[id.ib_memory.owner_node].ib_memories[id.ib_memory.mem_idx]);
+      }
 #ifdef TODO
       if(id.is_allocator()) {
 	if(id.allocator.owner_node > ID::MAX_NODE_ID)

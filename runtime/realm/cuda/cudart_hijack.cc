@@ -237,6 +237,15 @@ namespace Realm {
 	return cudaErrorMemoryAllocation;
       }
 
+      cudaError_t cudaHostAlloc(void **ptr, size_t size, unsigned int flags)
+      {
+        get_gpu_or_die("cudaHostAlloc");
+        CUresult ret = cuMemHostAlloc(ptr, size, flags);
+        if (ret == CUDA_SUCCESS) return cudaSuccess;
+        assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
+        return cudaErrorMemoryAllocation;
+      }
+
       cudaError_t cudaFree(void *ptr)
       {
 	/*GPUProcessor *p =*/ get_gpu_or_die("cudaFree");
@@ -245,6 +254,15 @@ namespace Realm {
 	if(ret == CUDA_SUCCESS) return cudaSuccess;
 	assert(ret == CUDA_ERROR_INVALID_VALUE);
 	return cudaErrorInvalidDevicePointer;
+      }
+
+      cudaError_t cudaFreeHost(void *ptr)
+      {
+        get_gpu_or_die("cudaFreeHost");
+        CUresult ret = cuMemFreeHost(ptr);
+        if (ret == CUDA_SUCCESS) return cudaSuccess;
+        assert(ret == CUDA_ERROR_INVALID_VALUE);
+        return cudaErrorInvalidHostPointer;
       }
 
       cudaError_t cudaMemcpy(void *dst, const void *src, 

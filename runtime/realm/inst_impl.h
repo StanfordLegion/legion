@@ -99,7 +99,7 @@ namespace Realm {
 
       Metadata metadata;
 
-      static const unsigned MAX_LINEARIZATION_LEN = 16;
+      static const unsigned MAX_LINEARIZATION_LEN = 32;
 
       ReservationImpl lock;
     };

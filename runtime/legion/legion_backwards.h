@@ -771,7 +771,7 @@ namespace Legion {
     public:
       coord_t alloc(size_t count = 1) const 
         { assert(iterator); coord_t result = iterator.p[0]; 
-          for (int i = 0; i < count; i++) iterator.step();
+          for (size_t i = 0; i < count; i++) iterator.step();
           return result; }
       void reserve(coord_t ptr, size_t count = 1) const
         { printf("No backwards compatibility for 'reserve' "

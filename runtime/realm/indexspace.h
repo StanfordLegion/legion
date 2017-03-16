@@ -380,6 +380,8 @@ namespace Realm {
         return point_data[index];
       }
 
+      
+        
       struct STLComparator {
 	bool operator()(const DomainPoint& a, const DomainPoint& b) const
 	{
@@ -601,7 +603,7 @@ namespace Realm {
       protected:
 	int dim;
 	void *lptr;
-      };
+    };
 
     struct CopySrcDstField {
     public:

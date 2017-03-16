@@ -117,8 +117,8 @@ namespace Realm {
 			       Memory restrict_mem2 = Memory::NO_MEMORY,
 			       bool local_only = true) const;
       
-      void parse_node_announce_data(int node_id,
-				    unsigned num_procs, unsigned num_memories,
+      void parse_node_announce_data(int node_id, unsigned num_procs,
+				    unsigned num_memories, unsigned num_ib_memories,
 				    const void *args, size_t arglen,
 				    bool remote);
 
@@ -325,6 +325,7 @@ namespace Realm {
     NODE_ANNOUNCE_DONE = 0,
     NODE_ANNOUNCE_PROC, // PROC id kind
     NODE_ANNOUNCE_MEM,  // MEM id size
+    NODE_ANNOUNCE_IB_MEM, // IB_MEM id size
     NODE_ANNOUNCE_PMA,  // PMA proc_id mem_id bw latency
     NODE_ANNOUNCE_MMA,  // MMA mem1_id mem2_id bw latency
   };
@@ -334,6 +335,7 @@ namespace Realm {
       gasnet_node_t node_id;
       unsigned num_procs;
       unsigned num_memories;
+      unsigned num_ib_memories;
     };
 
     static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -342,8 +344,8 @@ namespace Realm {
 				       RequestArgs,
 				       handle_request> Message;
 
-    static void send_request(gasnet_node_t target,
-			     unsigned num_procs, unsigned num_memories,
+    static void send_request(gasnet_node_t target, unsigned num_procs,
+			     unsigned num_memories, unsigned num_ib_memories,
 			     const void *data, size_t datalen, int payload_mode);
 
     static void await_all_announcements(void);
