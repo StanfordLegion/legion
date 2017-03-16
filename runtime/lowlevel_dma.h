@@ -25,6 +25,64 @@ namespace Realm {
 
 namespace LegionRuntime {
   namespace LowLevel {
+    struct RemoteIBAllocRequestAsync {
+      struct RequestArgs {
+        int node;
+        Memory memory;
+        void* req;
+        int idx;
+        ID::IDType src_inst_id, dst_inst_id;
+        size_t size;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_IB_ALLOC_REQUEST_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, Memory tgt_mem, void* req,
+                               int idx, ID::IDType src_id, ID::IDType dst_id, size_t size);
+    };
+
+    struct RemoteIBAllocResponseAsync {
+      struct RequestArgs {
+        void* req;
+        int idx;
+        ID::IDType src_inst_id, dst_inst_id;
+        size_t size;
+        off_t offset;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_IB_ALLOC_RESPONSE_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, void* req, int idx, ID::IDType src_id,
+                               ID::IDType dst_id, size_t ib_size, off_t ib_offset);
+    };
+
+    struct RemoteIBFreeRequestAsync {
+      struct RequestArgs {
+        Memory memory;
+        off_t ib_offset;
+        size_t ib_size;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<REMOTE_IB_FREE_REQUEST_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, Memory tgt_mem,
+                               off_t ib_offset, size_t ib_size);
+    };
+
+    void find_shortest_path(Memory src_mem, Memory dst_mem, std::vector<Memory>& path);
+
     struct RemoteCopyArgs : public BaseMedium {
       ReductionOpID redop_id;
       bool red_fold;
@@ -61,6 +119,9 @@ namespace LegionRuntime {
     extern void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs);
     extern void stop_dma_worker_threads(void);
 
+    extern void start_dma_system(int count, int max_nr, Realm::CoreReservationSet& crs);
+
+    extern void stop_dma_system(void);
     extern void create_builtin_dma_channels(Realm::RuntimeImpl *r);
 
     /*
@@ -85,9 +146,9 @@ namespace LegionRuntime {
 
     void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
 			  size_t size, off_t& field_start, int& field_size);
-
+    
     class DmaRequestQueue;
-
+    typedef unsigned long long XferDesID;
     class DmaRequest : public Realm::Operation {
     public:
       DmaRequest(int _priority, Event _after_copy);
@@ -111,6 +172,9 @@ namespace LegionRuntime {
       enum State {
 	STATE_INIT,
 	STATE_METADATA_FETCH,
+	STATE_DST_FETCH,
+	STATE_GEN_PATH,
+	STATE_ALLOC_IB,
 	STATE_BEFORE_EVENT,
 	STATE_INST_LOCK,
 	STATE_READY,
@@ -120,6 +184,24 @@ namespace LegionRuntime {
 
       State state;
       int priority;
+      // <NEWDMA>
+      pthread_mutex_t request_lock;
+      std::vector<XferDesID> path;
+      std::set<XferDesID> complete_xd;
+
+      // Returns true if all xfer des of this DmaRequest
+      // have been marked completed
+      // This return val is a signal for delete this DmaRequest
+      bool notify_xfer_des_completion(XferDesID guid)
+      {
+        pthread_mutex_lock(&request_lock);
+        complete_xd.insert(guid);
+        bool all_completed = (complete_xd.size() == path.size());
+        pthread_mutex_unlock(&request_lock);
+        return all_completed;
+      }
+      Event tgt_fetch_completion;
+      // </NEWDMA>
 
       class Waiter : public EventWaiter {
       public:
@@ -250,6 +332,38 @@ namespace LegionRuntime {
       std::string name;
     };
 
+    class Request;
+    class AsyncFileIOContext {
+    public:
+      AsyncFileIOContext(int _max_depth);
+      ~AsyncFileIOContext(void);
+
+      void enqueue_write(int fd, size_t offset, size_t bytes, const void *buffer, Request* req = NULL);
+      void enqueue_read(int fd, size_t offset, size_t bytes, void *buffer, Request* req = NULL);
+      void enqueue_fence(DmaRequest *req);
+
+      bool empty(void);
+      long available(void);
+      void make_progress(void);
+
+      static AsyncFileIOContext* get_singleton(void);
+
+      class AIOOperation {
+      public:
+	virtual ~AIOOperation(void) {}
+	virtual void launch(void) = 0;
+	virtual bool check_completion(void) = 0;
+	bool completed;
+        void* req;
+      };
+
+      int max_depth;
+      std::deque<AIOOperation *> launched_operations, pending_operations;
+      GASNetHSL mutex;
+#ifdef REALM_USE_KERNEL_AIO
+      aio_context_t aio_ctx;
+#endif
+    };
   };
 };
 

@@ -1,4 +1,5 @@
 # Copyright 2017 Stanford University, NVIDIA Corporation
+# Copyright 2017 Los Alamos National Laboratory 
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +14,13 @@
 # limitations under the License.
 #
 
+ifeq ($(shell uname -s),Darwin)
+DARWIN = 1
+CC_FLAGS += -DDARWIN
+else
+#use disk unless on DARWIN 
+CC_FLAGS += -DUSE_DISK 
+endif
 
 # If using the general low-level runtime
 # select a target GPU architecture
@@ -73,6 +81,12 @@ endif
 ifeq ($(shell uname -n),n0003)
 CONDUIT=ibv
 GPU_ARCH=fermi
+endif
+ifeq ($(findstring xs,$(shell uname -n)), xs)
+GPU_ARCH=k80
+GASNET=/home/stanford/aaiken/users/zhihao/tools/gasnet/release/
+CONDUIT=ibv#not sure if this is true
+CUDA=${CUDA_HOME}
 endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
 GASNET=/nics/d/home/sequoia/gasnet-1.20.2-openmpi
@@ -226,10 +240,10 @@ NVCC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -g -O0
 else
 NVCC_FLAGS	+= -O2
 endif
-ifneq ($(shell uname -s),Darwin)
-LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
-else
+ifeq ($(strip $(DARWIN)),1)
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcuda
+else
+LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
 endif
 # CUDA arch variables
 ifeq ($(strip $(GPU_ARCH)),fermi)
@@ -264,11 +278,11 @@ endif
 ifeq ($(strip $(USE_GASNET)),1)
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
-  ifneq ($(shell uname -s),Darwin)
-    LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
-  else
+  ifeq ($(strip $(DARWIN)),1)
     LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lm
-  endif 
+  else
+    LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
+  endif
   CC_FLAGS	+= -DUSE_GASNET
   # newer versions of gasnet seem to need this
   CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
@@ -367,6 +381,8 @@ ASM_SRC		?=
 # Set the source files
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
+	           $(LG_RT_DIR)/channel.cc \
+	           $(LG_RT_DIR)/channel_disk.cc \
 	           $(LG_RT_DIR)/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \

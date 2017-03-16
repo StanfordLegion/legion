@@ -513,6 +513,21 @@ function vectorize.stat_for_list(cx, node)
   }
 end
 
+function vectorize.stat_for_num(cx, node)
+  local simd_width = min_simd_width.block(cx, SIMD_REG_SIZE, node.block)
+  assert(simd_width >= 1)
+  local body = flip_types.block(cx, simd_width, node.symbol, node.block)
+  return ast.typed.stat.ForNumVectorized {
+    symbol = node.symbol,
+    values = node.values,
+    block = body,
+    orig_block = node.block,
+    vector_width = simd_width,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 local function get_bounds(ty)
   if std.is_ref(ty) then
     return ty:bounds():map(function(bound)
@@ -578,9 +593,11 @@ end
 -- reject an aliasing between the read set and write set
 function check_vectorizability.has_aliasing(cx, write_set)
   -- ignore write accesses directly to the region being iterated over
-  cx.loop_symbol:gettype():bounds():map(function(r)
-    write_set[r] = nil
-  end)
+  if std.is_bounded_type(cx.loop_symbol:gettype()) then
+    cx.loop_symbol:gettype():bounds():map(function(r)
+      write_set[r] = nil
+    end)
+  end
   for ty, fields in pairs(write_set) do
     if cx.read_set[ty] then
       for field_hash, pair in pairs(fields) do
@@ -1065,7 +1082,17 @@ function vectorize_loops.stat_while(node)
 end
 
 function vectorize_loops.stat_for_num(node)
-  return node { block = vectorize_loops.block(node.block) }
+  local cx = context:new_global_scope(node.symbol)
+  cx:assign(node.symbol, C)
+  cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
+  assert(cx.demanded)
+
+  local vectorizable = check_vectorizability.block(cx, node.block)
+  if vectorizable and not bounds_checks then
+    return vectorize.stat_for_num(cx, node)
+  else
+    return node { block = vectorize_loops.block(node.block) }
+  end
 end
 
 function vectorize_loops.stat_for_list(node)
@@ -1102,7 +1129,12 @@ function vectorize_loops.stat(node)
     return vectorize_loops.stat_while(node)
 
   elseif node:is(ast.typed.stat.ForNum) then
-    return vectorize_loops.stat_for_num(node)
+    if node.annotations.vectorize:is(ast.annotation.Demand) then
+      assert(std.config["vectorize-unsafe"])
+      return vectorize_loops.stat_for_num(node)
+    else
+      return node { block = vectorize_loops.block(node.block) }
+    end
 
   elseif node:is(ast.typed.stat.ForList) then
     if std.is_bounded_type(node.symbol:gettype()) then

@@ -455,6 +455,8 @@ ast.typed.stat:leaf("If", {"cond", "then_block", "elseif_blocks", "else_block"})
 ast.typed.stat:leaf("Elseif", {"cond", "block"})
 ast.typed.stat:leaf("While", {"cond", "block"})
 ast.typed.stat:leaf("ForNum", {"symbol", "values", "block"})
+ast.typed.stat:leaf("ForNumVectorized", {"symbol", "values", "block",
+                                         "orig_block", "vector_width"})
 ast.typed.stat:leaf("ForList", {"symbol", "value", "block"})
 ast.typed.stat:leaf("ForListVectorized", {"symbol", "value", "block",
                                           "orig_block", "vector_width"})

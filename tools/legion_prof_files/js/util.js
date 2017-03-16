@@ -222,38 +222,44 @@ function filterAndMergeBlocks(state) {
             if (count > 1) {
               state.dataToDraw.push({
                 id: d.id,
-                proc: index,
-                level: d.level + timelineElement.base,
+                proc: timelineElement,
+                level: d.level,
                 start: d.start,
                 end: end,
                 color: "#808080",
-                title: count + " merged tasks"
+                title: count + " merged tasks",
+                in: [],
+                out: []
               });
               i += (count - 1);
             } else {
               state.dataToDraw.push({
                 id: d.id,
-                proc: index,
-                level: d.level + timelineElement.base,
+                proc: timelineElement,
+                level: d.level,
                 start: d.start,
                 end: d.end,
                 color: d.color,
                 initiation: d.initiation,
-                title: d.title + " (expanded for visibility)"
+                title: d.title + " (expanded for visibility)",
+                in: d.in,
+                out: d.out
               });
             }
           } else {
             state.dataToDraw.push({
               id: d.id,
-              proc: index,
-              level: d.level + timelineElement.base,
+              proc: timelineElement,
+              level: d.level,
               start: d.start,
               end: d.end,
               opacity: d.opacity,
               color: d.color,
               opacity: d.opacity,
               initiation: d.initiation,
-              title: d.title
+              title: d.title,
+              in: d.in,
+              out: d.out
             });
           }
         }
@@ -261,6 +267,3 @@ function filterAndMergeBlocks(state) {
     }
   }
 }
-
-
-

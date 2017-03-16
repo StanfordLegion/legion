@@ -29,7 +29,11 @@
 #include "utilities.h"
 #include "accessor.h"
 #include "arrays.h"
+//#include "layouts.h"
 #include "lowlevel_config.h"
+#ifdef USE_HDF
+#include <hdf5.h>
+#endif
 
 // just include the new Realm header and import a bunch of stuff into the
 //  old C++ namespace
