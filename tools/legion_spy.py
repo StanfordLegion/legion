@@ -9604,17 +9604,18 @@ class State(object):
             print('ERROR: Unable to find file '+file_name)
             print('Legion Spy will now exit')
             sys.exit(1)
-        matches = 0
-        skipped = 0
-        for line in log:
-            if parse_legion_spy_line(line, self):
-                matches += 1
-            else:
-                skipped += 1
-                # always print a skipped line if it looks like it should have been matched
-                if self.verbose or (prefix_pat.match(line) is not None):
-                    print('Skipping line: ' + line.strip())
-        log.close()
+        else:
+            with log:
+                matches = 0
+                skipped = 0
+                for line in log:
+                    if parse_legion_spy_line(line, self):
+                        matches += 1
+                    else:
+                        skipped += 1
+                        # always print a skipped line if it looks like it should have been matched
+                        if self.verbose or (prefix_pat.match(line) is not None):
+                            print('Skipping line: ' + line.strip())
         if matches == 0:
             print('WARNING: file %s contained no valid lines!' % file_name)
             #if self.assert_on_warning:
@@ -9990,86 +9991,85 @@ class State(object):
     def make_replay_file(self):
         file_name = 'legion.rp'
         print('Emitting replay file '+file_name)
-        replay_file = open(file_name,'wb')  
-        # Write out processors
-        replay_file.write(struct.pack('I',len(self.processors)))
-        for proc in self.processors.itervalues():
-            replay_file.write(struct.pack('Q', proc.uid))    
-            replay_file.write(struct.pack('I', proc.kind_num))
-        # Write out memories
-        replay_file.write(struct.pack('I',len(self.memories)))
-        for mem in self.memories.itervalues():
-            replay_file.write(struct.pack('Q', mem.uid))
-            replay_file.write(struct.pack('I', mem.kind_num))
-        # Write out the instances
-        assert len(self.instances) > 0
-        # Skip the virtual instance
-        replay_file.write(struct.pack('I',len(self.instances)-1))
-        for inst in self.instances.itervalues():
-            if inst.is_virtual():
-                continue
-            inst.pack_inst_replay_info(replay_file)
-        # Find all the sets of operations
-        total_index = 0
-        single_tasks = set()
-        index_tasks = set()
-        inlines = set()
-        copies = set()
-        closes = set()
-        releases = set()
-        for op in self.ops.itervalues():
-            if op.kind == SINGLE_TASK_KIND:
-                # If it doesn't have a task and a processor, then it's not real
-                if not op.task or op.task.processor is None:
+        with open(file_name,'wb') as replay_file:
+            # Write out processors
+            replay_file.write(struct.pack('I',len(self.processors)))
+            for proc in self.processors.itervalues():
+                replay_file.write(struct.pack('Q', proc.uid))    
+                replay_file.write(struct.pack('I', proc.kind_num))
+            # Write out memories
+            replay_file.write(struct.pack('I',len(self.memories)))
+            for mem in self.memories.itervalues():
+                replay_file.write(struct.pack('Q', mem.uid))
+                replay_file.write(struct.pack('I', mem.kind_num))
+            # Write out the instances
+            assert len(self.instances) > 0
+            # Skip the virtual instance
+            replay_file.write(struct.pack('I',len(self.instances)-1))
+            for inst in self.instances.itervalues():
+                if inst.is_virtual():
                     continue
-                # Dont' count points in index space tasks
-                if op.index_owner:
-                    continue
-                # If it was merged we don't count it
-                if op.merged:
-                    continue
-                single_tasks.add(op)
-            if op.kind == INDEX_TASK_KIND:
-                index_tasks.add(op) 
-                assert op.points is not None
-                total_index += len(op.points)
-            elif op.kind == MAP_OP_KIND:
-                inlines.add(op)
-            elif op.kind == COPY_OP_KIND:
-                copies.add(op)
-            elif op.kind == INTER_CLOSE_OP_KIND:
-                closes.add(op)
-            elif op.kind == RELEASE_OP_KIND:
-                releases.add(op)
-        # Write out the ID of the top-level task
-        replay_file.write(struct.pack('Q',self.top_level_uid))
-        # Write out the tasks first 
-        replay_file.write(struct.pack('I',len(single_tasks)+total_index))
-        for op in single_tasks:
-            op.task.pack_task_replay_info(replay_file, op.uid)
-        actual_index_tasks = 0
-        for task in index_tasks:
-            for point in task.points.itervalues():
-                point.pack_task_replay_info(replay_file, task.uid)
-                actual_index_tasks += 1
-        assert actual_index_tasks == total_index
-        # Write out the inlines
-        replay_file.write(struct.pack('I',len(inlines)))
-        for op in inlines:
-            op.pack_inline_replay_info(replay_file)
-        # Write out the copies
-        replay_file.write(struct.pack('I',len(copies)))
-        for op in copies:
-            op.pack_copy_replay_info(replay_file)
-        # Write out the closes
-        replay_file.write(struct.pack('I',len(closes)))
-        for op in closes:
-            op.pack_close_replay_info(replay_file)
-        # Write out the releases
-        replay_file.write(struct.pack('I',len(releases)))
-        for op in releases:
-            op.pack_release_replay_info(replay_file)
-        replay_file.close()
+                inst.pack_inst_replay_info(replay_file)
+            # Find all the sets of operations
+            total_index = 0
+            single_tasks = set()
+            index_tasks = set()
+            inlines = set()
+            copies = set()
+            closes = set()
+            releases = set()
+            for op in self.ops.itervalues():
+                if op.kind == SINGLE_TASK_KIND:
+                    # If it doesn't have a task and a processor, then it's not real
+                    if not op.task or op.task.processor is None:
+                        continue
+                    # Dont' count points in index space tasks
+                    if op.index_owner:
+                        continue
+                    # If it was merged we don't count it
+                    if op.merged:
+                        continue
+                    single_tasks.add(op)
+                if op.kind == INDEX_TASK_KIND:
+                    index_tasks.add(op) 
+                    assert op.points is not None
+                    total_index += len(op.points)
+                elif op.kind == MAP_OP_KIND:
+                    inlines.add(op)
+                elif op.kind == COPY_OP_KIND:
+                    copies.add(op)
+                elif op.kind == INTER_CLOSE_OP_KIND:
+                    closes.add(op)
+                elif op.kind == RELEASE_OP_KIND:
+                    releases.add(op)
+            # Write out the ID of the top-level task
+            replay_file.write(struct.pack('Q',self.top_level_uid))
+            # Write out the tasks first 
+            replay_file.write(struct.pack('I',len(single_tasks)+total_index))
+            for op in single_tasks:
+                op.task.pack_task_replay_info(replay_file, op.uid)
+            actual_index_tasks = 0
+            for task in index_tasks:
+                for point in task.points.itervalues():
+                    point.pack_task_replay_info(replay_file, task.uid)
+                    actual_index_tasks += 1
+            assert actual_index_tasks == total_index
+            # Write out the inlines
+            replay_file.write(struct.pack('I',len(inlines)))
+            for op in inlines:
+                op.pack_inline_replay_info(replay_file)
+            # Write out the copies
+            replay_file.write(struct.pack('I',len(copies)))
+            for op in copies:
+                op.pack_copy_replay_info(replay_file)
+            # Write out the closes
+            replay_file.write(struct.pack('I',len(closes)))
+            for op in closes:
+                op.pack_close_replay_info(replay_file)
+            # Write out the releases
+            replay_file.write(struct.pack('I',len(releases)))
+            for op in releases:
+                op.pack_release_replay_info(replay_file)
 
     def print_instance_descriptions(self):
         for inst in self.instances.itervalues():
