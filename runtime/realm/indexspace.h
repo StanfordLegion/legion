@@ -1860,6 +1860,15 @@ namespace Realm {
     bool step(void);
   };
 
+  // Privileges for using an accessor
+  enum AccessorPrivilege {
+    ACCESSOR_PRIV_NONE   = 0x00000000,
+    ACCESSOR_PRIV_READ   = 0x00000001,
+    ACCESSOR_PRIV_WRITE  = 0x00000002,
+    ACCESSOR_PRIV_REDUCE = 0x00000004,
+    ACCESSOR_PRIV_ALL    = 0x00000007,
+  };
+
   // an instance accessor based on an affine linearization of an index space
   template <typename FT, int N, typename T = int>
   class AffineAccessor {
@@ -1872,6 +1881,13 @@ namespace Realm {
 
     // limits domain to a subrectangle
     AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+
+    // for higher-level interfaces to use, the INST type must implement the following methods
+    // - RegionInstance get_instance(unsigned field_id, ptrdiff_t &field_offset)
+    // - ZIndexSpace<N,T> get_bounds(void)
+    // - AccessorPrivilege get_accessor_privileges(void)
+    template<typename INST>
+    AffineAccessor(const INST &instance, unsigned field_id);
 
     ~AffineAccessor(void);
 
@@ -1892,6 +1908,12 @@ namespace Realm {
 #endif
     intptr_t base;
     ZPoint<N, ptrdiff_t> strides;
+#ifdef PRIVILEGE_CHECKS
+    AccessorPrivilege privileges;
+#endif
+#ifdef BOUNDS_CHECKS
+    ZIndexSpace<N,T> bounds;
+#endif
   };
 
   template <typename FT, int N, typename T>

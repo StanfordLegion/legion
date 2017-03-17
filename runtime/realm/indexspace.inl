@@ -1288,6 +1288,33 @@ namespace Realm {
 #endif
   }
 
+  template <typename FT, int N, typename T> template <typename INST>
+  inline AffineAccessor<FT,N,T>::AffineAccessor(const INST &inst, unsigned fid)
+  {
+    ptrdiff_t field_offset = 0;
+    RegionInstance instance = inst.template get_instance<N,T>(fid, field_offset);
+    const AffineLinearizedIndexSpace<N,T>& alis = 
+      dynamic_cast<const AffineLinearizedIndexSpace<N,T>&>(instance);
+    ptrdiff_t element_stride;
+    instance.get_strided_access_parameters(0, alis.volume, field_offset,
+                                           sizeof(FT), base, element_stride);
+    // base offset is currently done in get_strided_access_parameters, 
+    //   since we're piggybacking on the old-style linearizers for now
+    // base -= element_stride * alis.offset;
+    for(int i = 0; i < N; i++)
+      strides[i] = element_stride * alis.strides[i];
+#ifdef REALM_ACCESSOR_DEBUG
+    dbg_inst = inst;
+    dbg_bounds = alis.dbg_bounds;
+#endif
+#ifdef PRIVILEGE_CHECKS
+    privileges = inst.get_accessor_privileges();
+#endif
+#ifdef BOUNDS_CHECKS
+    bounds = inst.get_bounds();
+#endif
+  }
+
   template <typename FT, int N, typename T>
   inline AffineAccessor<FT,N,T>::~AffineAccessor(void)
   {}
@@ -1308,6 +1335,12 @@ namespace Realm {
   template <typename FT, int N, typename T>
   inline FT *AffineAccessor<FT,N,T>::ptr(const ZPoint<N,T>& p) const
   {
+#ifdef PRIVILEGE_CHECKS
+    assert(privileges & ACCESSOR_PRIV_ALL);
+#endif
+#ifdef BOUNDS_CHECKS
+    assert(bounds.contains(p));
+#endif
     intptr_t rawptr = base;
     for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];
     return reinterpret_cast<FT *>(rawptr);
@@ -1316,12 +1349,24 @@ namespace Realm {
   template <typename FT, int N, typename T>
   inline FT AffineAccessor<FT,N,T>::read(const ZPoint<N,T>& p) const
   {
+#ifdef PRIVILEGE_CHECKS
+    assert(privileges & ACCESSOR_PRIV_READ);
+#endif
+#ifdef BOUNDS_CHECKS
+    assert(bounds.contains(p));
+#endif
     return *(this->ptr(p));
   }
 
   template <typename FT, int N, typename T>
   inline void AffineAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval) const
   {
+#ifdef PRIVILEGE_CHECKS
+    assert(privileges & ACCESSOR_PRIV_WRITE);
+#endif
+#ifdef BOUNDS_CHECKS
+    assert(bounds.contains(p));
+#endif
     *(ptr(p)) = newval;
   }
 
