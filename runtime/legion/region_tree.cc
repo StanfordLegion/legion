@@ -1218,12 +1218,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::allocate_field(FieldSpace handle, size_t field_size,
-                              FieldID fid, CustomSerdezID serdez_id, bool local)
+                                          FieldID fid, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = get_node(handle);
-      if (local && node->has_field(fid))
-        return true;
       RtEvent ready = node->allocate_field(fid, field_size, serdez_id);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();

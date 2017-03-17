@@ -93,7 +93,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ResourceTracker::pack_privilege_state(Serializer &rez, 
-                                               AddressSpaceID target) const
+                                    AddressSpaceID target, bool returning) const
     //--------------------------------------------------------------------------
     {
       // Shouldn't need the lock here since we only do this
@@ -117,14 +117,41 @@ namespace Legion {
           rez.serialize(*it);
         }
       }
-      rez.serialize<size_t>(created_fields.size());
-      if (!created_fields.empty())
+      if (returning)
       {
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
+        // Only non-local fields get returned
+        size_t non_local = 0;
+        for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
               created_fields.begin(); it != created_fields.end(); it++)
         {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
+          if (it->second)
+            continue;
+          non_local++;
+        }
+        rez.serialize(non_local);
+        if (non_local > 0)
+        {
+          for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
+                created_fields.begin(); it != created_fields.end(); it++)
+          {
+            rez.serialize(it->first.first);
+            rez.serialize(it->first.second);
+            rez.serialize<bool>(it->second);
+          }
+        }
+      }
+      else
+      {
+        rez.serialize<size_t>(created_fields.size());
+        if (!created_fields.empty())
+        {
+          for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
+                created_fields.begin(); it != created_fields.end(); it++)
+          {
+            rez.serialize(it->first.first);
+            rez.serialize(it->first.second);
+            rez.serialize<bool>(it->second);
+          }
         }
       }
       rez.serialize<size_t>(deleted_fields.size());
@@ -237,14 +264,15 @@ namespace Legion {
       derez.deserialize(num_created_fields);
       if (num_created_fields > 0)
       {
-        std::set<std::pair<FieldSpace,FieldID> > created_fields;
+        std::map<std::pair<FieldSpace,FieldID>,bool> created_fields;
         for (unsigned idx = 0; idx < num_created_fields; idx++)
         {
           FieldSpace sp;
           derez.deserialize(sp);
           FieldID fid;
           derez.deserialize(fid);
-          created_fields.insert(std::pair<FieldSpace,FieldID>(sp,fid));
+          derez.deserialize<bool>(
+              created_fields[std::pair<FieldSpace,FieldID>(sp,fid)]);
         }
         target->register_field_creations(created_fields);
       }
@@ -5439,7 +5467,7 @@ namespace Legion {
       rez.serialize(orig_task);
       RezCheck z(rez);
       // Pack the privilege state
-      execution_context->pack_privilege_state(rez, target);
+      execution_context->pack_privilege_state(rez, target, true/*returning*/);
       // Then pack the future result
       {
         RezCheck z2(rez);
@@ -8381,7 +8409,7 @@ namespace Legion {
       RezCheck z(rez);
       rez.serialize<size_t>(points.size());
       // Serialize the privilege state
-      pack_privilege_state(rez, target); 
+      pack_privilege_state(rez, target, true/*returning*/); 
       // Now pack up the future results
       if (redop != 0)
       {
@@ -8465,15 +8493,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::register_field_creations(
-                        const std::set<std::pair<FieldSpace,FieldID> > &fields)
+                     const std::map<std::pair<FieldSpace,FieldID>,bool> &fields)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+      for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it = 
             fields.begin(); it != fields.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(created_fields.find(*it) == created_fields.end());
+        assert(created_fields.find(it->first) == created_fields.end());
 #endif
         created_fields.insert(*it);
       }
