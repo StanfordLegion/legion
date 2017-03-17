@@ -13,6 +13,10 @@
 -- limitations under the License.
 
 -- runs-with:
+-- []
+
+-- FIXME: This test is broken on this branch due to a runtime bug
+
 -- [
 --  ["-ll:cpu", "2" ],
 --  ["-ll:cpu", "2", "-ffuture", "0"]

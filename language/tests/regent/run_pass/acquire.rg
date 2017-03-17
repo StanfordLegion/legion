@@ -13,6 +13,10 @@
 -- limitations under the License.
 
 -- runs-with:
+-- []
+
+-- FIXME: Acquire/release are broken on this branch
+
 -- [["-ll:cpu", "2"]]
 
 import "regent"

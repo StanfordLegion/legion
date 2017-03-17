@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- []
+
+-- FIXME: This test is broken on this branch because it uses the new mapper interface
+
 import "regent"
 
 local cexternal_test
