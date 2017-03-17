@@ -1917,6 +1917,9 @@ namespace Legion {
         LegionRuntime::Accessor::AccessorType::Generic> 
           get_accessor(bool silience_warnings = false) const;
       /**
+       * @deprecated
+       * You should be able to create accessors by passing this
+       * object directly to the constructor of an accessor
        * Return a field accessor for a specific field within the region.
        * You can silence warnings regarding this blocking call with
        * the 'silence_warnings' parameter.
@@ -1933,6 +1936,21 @@ namespace Legion {
        * Return a list of fields that the physical region contains.
        */
       void get_fields(std::vector<FieldID>& fields) const;
+    public:
+      // These methods implement the interface needed by 
+      // templated type constructors for Realm accessors.
+      // This allows the user to pass a PhysicalRegion directly
+      // to a Realm accessor constructor.
+      // Get the physical instance and offset for a particular field
+      Realm::RegionInstance get_instance(unsigned field_id, 
+          ptrdiff_t &field_offset, bool silence_warnings = false) const;
+      // Get the bounding index space for the instance
+      template<int DIM, typename COORD_T>
+      Realm::ZIndexSpace<DIM,COORD_T> get_bounds(void) const;
+      // Get the privileges with which the accessor can be used 
+      Realm::AccessorPrivilege get_accessor_privileges(void) const;
+    protected:
+      void get_bounds(void *realm_is, TypeTag type_tag) const;
     };
 
     /**

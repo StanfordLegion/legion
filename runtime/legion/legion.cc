@@ -2087,6 +2087,28 @@ namespace Legion {
       impl->get_fields(fields);
     }
 
+    //--------------------------------------------------------------------------
+    Realm::RegionInstance PhysicalRegion::get_instance(unsigned field_id,
+                                 ptrdiff_t &offset, bool silence_warnings) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->get_instance(field_id, offset, silence_warnings);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::get_bounds(void *realm_is, TypeTag type_tag) const 
+    //--------------------------------------------------------------------------
+    {
+      impl->get_bounds(realm_is, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    Realm::AccessorPrivilege PhysicalRegion::get_accessor_privileges(void) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->get_accessor_privileges();
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Iterator  
     /////////////////////////////////////////////////////////////

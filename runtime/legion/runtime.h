@@ -326,6 +326,11 @@ namespace Legion {
       bool contains_point(const DomainPoint &dp) const;
 #endif
     public:
+      PhysicalInstance get_instance(unsigned field_id,
+          ptrdiff_t &field_offset, bool silence_warnings);
+      void get_bounds(void *realm_is, TypeTag type_tag);
+      Realm::AccessorPrivilege get_accessor_privileges(void);
+    public:
       Runtime *const runtime;
       TaskContext *const context;
       const MapperID map_id;

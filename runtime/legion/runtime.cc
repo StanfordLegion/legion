@@ -1490,6 +1490,116 @@ namespace Legion {
       return bounds.contains(dp);
     }
 #endif
+    
+    //--------------------------------------------------------------------------
+    PhysicalInstance PhysicalRegionImpl::get_instance(unsigned fid,
+                                 ptrdiff_t &field_offset, bool silence_warnings)
+    //--------------------------------------------------------------------------
+    {
+      if (context != NULL)
+      {
+        if (context->is_inner_context())
+        {
+          log_run.warning("ERROR: Illegal accessor construction inside "
+            "task %s (UID %lld) for a variant that was labeled as an 'inner' "
+            "variant.", context->get_task_name(), context->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INNER_TASK_VIOLATION);
+        }
+        else if (Runtime::runtime_warnings && !silence_warnings &&
+                  !context->is_leaf_context())
+          log_run.warning("WARNING: Accessor construction in non-leaf "
+              "task %s (UID %lld) is a blocking operation in violation of "
+              "Legion's deferred execution model best practices. You may "
+              "notice a severe performance degradation.", 
+              context->get_task_name(), context->get_unique_id());
+      }
+      // If this physical region isn't mapped, then we have to
+      // map it before we can return an accessor
+      if (!mapped)
+      {
+        if (virtual_mapped)
+        {
+          log_run.error("Illegal implicit mapping of a virtual mapped region "
+                        "in task %s (UID %lld)", context->get_task_name(),
+                        context->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_ILLEGAL_IMPLICIT_MAPPING);
+        }
+        if (Runtime::runtime_warnings && !silence_warnings)
+          log_run.warning("WARNING: Accessor construction was "
+                          "performed on an unmapped region in task %s "
+                          "(UID %lld). Legion is mapping it for you. "
+                          "Please try to be more careful.",
+                          context->get_task_name(), context->get_unique_id());
+        runtime->remap_region(context, PhysicalRegion(this));
+        // At this point we should have a new ready event
+        // and be mapped
+#ifdef DEBUG_LEGION
+        assert(mapped);
+#endif 
+      }
+      // Wait until we are valid before returning the accessor
+      wait_until_valid(silence_warnings, 
+                       Runtime::runtime_warnings, "Accessor Construction");
+#ifdef DEBUG_LEGION
+      if (req.privilege_fields.find(fid) == req.privilege_fields.end())
+      {
+        log_inst.error("Accessor construction for field %d "
+                       "without privileges!", fid);
+        assert(false);
+        exit(ERROR_INVALID_FIELD_PRIVILEGES);
+      }
+#endif
+      made_accessor = true;
+      for (unsigned idx = 0; idx < references.size(); idx++)
+      {
+        const InstanceRef &ref = references[idx];
+        if (ref.is_field_set(fid))
+        {
+          PhysicalManager *manager = ref.get_manager();
+          field_offset = manager->layout->find_field_info(fid).offset;
+          return manager->get_instance();
+        }
+      }
+      // should never get here at worst there should have been an
+      // error raised earlier in this function
+      assert(false);
+      return PhysicalInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::get_bounds(void *realm_is, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      runtime->get_index_space_domain(req.region.get_index_space(),
+                                      realm_is, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    Realm::AccessorPrivilege PhysicalRegionImpl::get_accessor_privileges(void)
+    //--------------------------------------------------------------------------
+    {
+      switch (req.privilege)
+      {
+        case NO_ACCESS:
+          return Realm::ACCESSOR_PRIV_NONE;
+        case READ_ONLY:
+          return Realm::ACCESSOR_PRIV_READ;
+        case READ_WRITE:
+        case WRITE_DISCARD:
+          return Realm::ACCESSOR_PRIV_ALL;
+        case REDUCE:
+          return Realm::ACCESSOR_PRIV_REDUCE;
+        default:
+          assert(false); // should never get here
+      }
+      return Realm::ACCESSOR_PRIV_NONE;
+    }
 
     /////////////////////////////////////////////////////////////
     // Grant Impl 
