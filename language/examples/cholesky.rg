@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,9 +14,11 @@
 
 -- runs-with:
 -- [
---   ["-verify", "-ll:cpu", "4"],
---   ["-p", "1", "-verify"]
+--   ["-verify", "-ll:cpu", "4", "-fflow", "0"],
+--   ["-p", "1", "-verify", "-fflow", "0"]
 -- ]
+
+-- FIXME: Breaks RDIR
 
 import "regent"
 

@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 local parsing = require("parsing")
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
 
 local parser = {}
@@ -57,6 +57,8 @@ function parser.annotation_name(p, required)
   if p:nextif("__cuda") then
     local values = p:annotation_values()
     return "cuda", values
+  elseif p:nextif("__external") then
+    return "external"
   elseif p:nextif("__inline") then
     return "inline"
   elseif p:nextif("__parallel") then
@@ -173,6 +175,7 @@ end
 function parser.region_root(p)
   local start = ast.save(p)
   local region_name = p:expect(p.name).value
+  p:ref(region_name)
   local fields = false -- sentinel for all fields
   if p:nextif(".") then
     fields = p:region_fields()
@@ -202,6 +205,7 @@ end
 function parser.region_bare(p)
   local start = ast.save(p)
   local region_name = p:expect(p.name).value
+  p:ref(region_name)
   return ast.unspecialized.region.Bare {
     region_name = region_name,
     span = ast.span(start, p),
@@ -220,6 +224,7 @@ end
 function parser.condition_variable(p)
   local start = ast.save(p)
   local name = p:expect(p.name).value
+  p:ref(name)
   return ast.unspecialized.ConditionVariable {
     name = name,
     span = ast.span(start, p),
@@ -241,14 +246,13 @@ end
 function parser.privilege_kind(p)
   local start = ast.save(p)
   if p:nextif("reads") then
-    return ast.unspecialized.privilege_kind.Reads { span = ast.span(start, p) }
+    return ast.privilege_kind.Reads {}
   elseif p:nextif("writes") then
-    return ast.unspecialized.privilege_kind.Writes { span = ast.span(start, p) }
+    return ast.privilege_kind.Writes {}
   elseif p:nextif("reduces") then
     local op = p:reduction_op()
-    return ast.unspecialized.privilege_kind.Reduces {
+    return ast.privilege_kind.Reduces {
       op = op,
-      span = ast.span(start, p),
     }
   else
     p:error("expected privilege")
@@ -263,21 +267,13 @@ end
 function parser.coherence_kind(p)
   local start = ast.save(p)
   if p:nextif("exclusive") then
-    return ast.unspecialized.coherence_kind.Exclusive {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Exclusive {}
   elseif p:nextif("atomic") then
-    return ast.unspecialized.coherence_kind.Atomic {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Atomic {}
   elseif p:nextif("simultaneous") then
-    return ast.unspecialized.coherence_kind.Simultaneous {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Simultaneous {}
   elseif p:nextif("relaxed") then
-    return ast.unspecialized.coherence_kind.Relaxed {
-      span = ast.span(start, p),
-    }
+    return ast.coherence_kind.Relaxed {}
   else
     p:error("expected coherence mode")
   end
@@ -290,9 +286,7 @@ end
 function parser.flag_kind(p)
   local start = ast.save(p)
   if p:nextif("no_access_flag") then
-    return ast.unspecialized.flag_kind.NoAccessFlag {
-      span = ast.span(start, p),
-    }
+    return ast.flag_kind.NoAccessFlag {}
   else
     p:error("expected flag")
   end
@@ -348,13 +342,9 @@ end
 function parser.condition_kind(p)
   local start = ast.save(p)
   if p:nextif("arrives") then
-    return ast.unspecialized.condition_kind.Arrives {
-      span = ast.span(start, p),
-    }
+    return ast.condition_kind.Arrives {}
   elseif p:nextif("awaits") then
-    return ast.unspecialized.condition_kind.Awaits {
-      span = ast.span(start, p),
-    }
+    return ast.condition_kind.Awaits {}
   else
     p:error("expected condition")
   end
@@ -400,13 +390,9 @@ end
 function parser.constraint_kind(p)
   local start = ast.save(p)
   if p:nextif("<=") then
-    return ast.unspecialized.constraint_kind.Subregion {
-      span = ast.span(start, p),
-    }
+    return ast.constraint_kind.Subregion {}
   elseif p:nextif("*") then
-    return ast.unspecialized.constraint_kind.Disjointness {
-      span = ast.span(start, p),
-    }
+    return ast.constraint_kind.Disjointness {}
   else
     p:error("unexpected token in constraint")
   end
@@ -432,16 +418,23 @@ end
 function parser.disjointness_kind(p)
   local start = ast.save(p)
   if p:nextif("aliased") then
-    return ast.unspecialized.disjointness_kind.Aliased {
-      span = ast.span(start, p),
-    }
+    return ast.disjointness_kind.Aliased {}
   elseif p:nextif("disjoint") then
-    return ast.unspecialized.disjointness_kind.Disjoint {
-      span = ast.span(start, p),
-    }
+    return ast.disjointness_kind.Disjoint {}
   else
     p:error("expected disjointness")
   end
+end
+
+function parser.effect(p)
+  local start = ast.save(p)
+  p:expect("[")
+  local effect_expr = p:luaexpr()
+  p:expect("]")
+  return ast.unspecialized.Effect {
+    expr = effect_expr,
+    span = ast.span(start, p),
+  }
 end
 
 function parser.expr_prefix(p)
@@ -633,8 +626,7 @@ function parser.expr_prefix(p)
     p:expect(",")
     local extent = p:expr()
     local start_at = false
-    if not p:matches(")") then
-      p:expect(",")
+    if p:nextif(",") then
       start_at = p:expr()
     end
     p:expect(")")
@@ -866,6 +858,16 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("list_ispace") then
+    p:expect("(")
+    local ispace = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListIspace {
+      ispace = ispace,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("phase_barrier") then
     p:expect("(")
     local value = p:expr()
@@ -907,6 +909,19 @@ function parser.expr_prefix(p)
     local value = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.Advance {
+      value = value,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("adjust") then
+    p:expect("(")
+    local barrier = p:expr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Adjust {
+      barrier = barrier,
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),
@@ -1017,6 +1032,36 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("attach") then
+    p:expect("(")
+    p:expect("hdf5")
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(",")
+    local filename = p:expr()
+    p:expect(",")
+    local mode = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.AttachHDF5 {
+      region = region,
+      filename = filename,
+      mode = mode,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("detach") then
+    p:expect("(")
+    p:expect("hdf5")
+    p:expect(",")
+    local region = p:expr_region_root()
+    p:expect(")")
+    return ast.unspecialized.expr.DetachHDF5 {
+      region = region,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("allocate_scratch_fields") then
     p:expect("(")
     local region = p:expr_region_root()
@@ -1061,14 +1106,26 @@ function parser.field(p)
   elseif p:nextif("[") then
     local name_expr = p:luaexpr()
     p:expect("]")
-    p:expect("=")
-    local value = p:expr()
-    return ast.unspecialized.expr.CtorRecField {
-      name_expr = name_expr,
-      value = value,
-      annotations = ast.default_annotations(),
-      span = ast.span(start, p),
-    }
+    if p:nextif("=") then
+      local value = p:expr()
+      return ast.unspecialized.expr.CtorRecField {
+        name_expr = name_expr,
+        value = value,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    else
+      local value = ast.unspecialized.expr.Escape {
+        expr = name_expr,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+      return ast.unspecialized.expr.CtorListField {
+        value = value,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
+    end
 
   else
     local value = p:expr()
@@ -1599,6 +1656,25 @@ function parser.stat_raw_delete(p, annotations)
   }
 end
 
+function parser.stat_parallelize_with(p, annotations)
+  local start = ast.save(p)
+  p:expect("__parallelize_with")
+  local hints = terralib.newlist()
+  hints:insert(p:expr())
+  while p:nextif(",") do
+    hints:insert(p:expr())
+  end
+  p:expect("do")
+  local block = p:block()
+  p:expect("end")
+  return ast.unspecialized.stat.ParallelizeWith {
+    hints = hints,
+    block = block,
+    annotations = annotations,
+    span = ast.span(start, p),
+  }
+end
+
 function parser.stat_expr_assignment(p, start, first_lhs, annotations)
   local lhs = terralib.newlist()
   lhs:insert(first_lhs)
@@ -1732,6 +1808,9 @@ function parser.stat(p)
   elseif p:matches("__delete") then
     return p:stat_raw_delete(annotations)
 
+  elseif p:matches("__parallelize_with") then
+    return p:stat_parallelize_with(annotations)
+
   else
     return p:stat_expr(annotations)
   end
@@ -1781,27 +1860,25 @@ function parser.top_task_return(p)
 end
 
 function parser.top_task_effects(p)
-  local privileges = terralib.newlist()
-  local coherence_modes = terralib.newlist()
-  local flags = terralib.newlist()
-  local conditions = terralib.newlist()
-  local constraints = terralib.newlist()
+  local effect_exprs = terralib.newlist()
   if p:nextif("where") then
     repeat
-      if p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
+      if p:matches("[") then
+        effect_exprs:insert(p:effect())
+      elseif p:is_privilege_kind() or p:is_coherence_kind() or p:is_flag_kind() then
         local privilege, coherence, flag = p:privilege_coherence_flags()
-        privileges:insert(privilege)
-        coherence_modes:insert(coherence)
-        flags:insert(flag)
+        effect_exprs:insert(privilege)
+        effect_exprs:insert(coherence)
+        effect_exprs:insert(flag)
       elseif p:is_condition_kind() then
-        conditions:insert(p:condition())
+        effect_exprs:insert(p:condition())
       else
-        constraints:insert(p:constraint())
+        effect_exprs:insert(p:constraint())
       end
     until not p:nextif(",")
     p:expect("do")
   end
-  return privileges, coherence_modes, flags, conditions, constraints
+  return effect_exprs
 end
 
 function parser.top_task(p, annotations)
@@ -1810,8 +1887,7 @@ function parser.top_task(p, annotations)
   local name = p:top_task_name()
   local params = p:top_task_params()
   local return_type = p:top_task_return()
-  local privileges, coherence_modes, flags, conditions, constraints =
-    p:top_task_effects()
+  local effects = p:top_task_effects()
   local body = p:block()
   p:expect("end")
 
@@ -1819,11 +1895,7 @@ function parser.top_task(p, annotations)
     name = name,
     params = params,
     return_type_expr = return_type,
-    privileges = privileges,
-    coherence_modes = coherence_modes,
-    flags = flags,
-    conditions = conditions,
-    constraints = constraints,
+    effect_exprs = effects,
     body = body,
     annotations = annotations,
     span = ast.span(start, p),

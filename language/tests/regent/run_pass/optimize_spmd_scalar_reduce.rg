@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,7 +15,8 @@
 -- runs-with:
 -- [
 --   ["-ll:cpu", "4", "-fflow-spmd", "1"],
---   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"],
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "3"]
 -- ]
 
 import "regent"
@@ -96,8 +97,6 @@ task main()
   c.legion_coloring_destroy(cq)
 
   var i = 0
-  -- Note: This test hits a bug in the vectorizer if vectorization is allowed.
-  __forbid(__vectorize)
   for x in r do
     x.a = 10000 + 10 * i
     x.b = 0

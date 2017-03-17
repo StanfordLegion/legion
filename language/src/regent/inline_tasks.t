@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 -- Regent Task Inliner
 
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
-local log = require("regent/log")
+local report = require("common/report")
 local symbol_table = require("regent/symbol_table")
 
 local inline_tasks = {}
@@ -158,20 +158,36 @@ local function check_valid_inline_task(task)
   local body = task.body
   local num_returns = count_returns(body)
   if num_returns > 1 then
-    log.error(task, "inline tasks cannot have multiple return statements")
+    report.error(task, "inline tasks cannot have multiple return statements")
   end
   if num_returns == 1 and not body.stats[#body.stats]:is(ast.typed.stat.Return) then
-    log.error(task, "the return statement in an inline task should be the last statement")
+    report.error(task, "the return statement in an inline task should be the last statement")
   end
 
   if find_self_recursion(task.prototype, body) then
-    log.error(task, "inline tasks cannot be recursive")
+    report.error(task, "inline tasks cannot be recursive")
+  end
+end
+
+local function check_rf_type(ty)
+  if std.is_ispace(ty) or std.is_region(ty) or
+     std.is_partition(ty) or std.is_cross_product(ty) then
+     return true
+  elseif std.is_fspace_instance(ty) then
+    for _, field in ipairs(ty:getentries()) do
+      if not check_rf_type(field.type) then
+        return false
+      end
+      return true
+    end
+  else
+    return false
   end
 end
 
 local function check_rf(node)
-  if node:is(ast.typed.expr.ID) then return true
-  elseif node:is(ast.typed.expr.Constant) then return true
+  if node:is(ast.typed.expr.ID) then
+    return check_rf_type(std.as_read(node.expr_type))
   elseif node:is(ast.typed.expr.FieldAccess) then
     return check_rf(node.value)
   elseif node:is(ast.typed.expr.IndexAccess) then

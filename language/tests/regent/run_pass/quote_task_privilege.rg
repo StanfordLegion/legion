@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,16 +12,23 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- annotations_call_parallel.rg:25: option __demand(__parallel) is not permitted
---   __demand(__parallel, f())
---                          ^
-
 import "regent"
 
-task f() end
-
-task g()
-  __demand(__parallel, f())
+local r = regentlib.newsymbol(region(int), "r")
+local reads_r = regentlib.privilege(regentlib.reads, r)
+task f([r])
+where [reads_r] do
+  var t = 0
+  for x in r do
+    t += @x
+  end
+  return t
 end
-g:compile()
+
+task main()
+  var r = region(ispace(ptr, 5), int)
+  new(ptr(int, r), 3)
+  fill(r, 10)
+  regentlib.assert(f(r) == 30, "test failed")
+end
+regentlib.start(main)

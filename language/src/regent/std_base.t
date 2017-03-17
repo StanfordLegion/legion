@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 -- Regent Standard Library - Base Layer
 
-local data = require("regent/data")
+local data = require("common/data")
 
 local base = {}
 
@@ -147,6 +147,14 @@ end
 
 function base.task:getcuda()
   return self.cuda
+end
+
+function base.task:setexternal(external)
+  self.external = external
+end
+
+function base.task:getexternal()
+  return self.external
 end
 
 function base.task:setinline(inline)
@@ -290,6 +298,12 @@ function base.task:setname(name)
     assert(false)
   end
   self.name = name
+  if self:get_parallel_variant() then
+    self:get_parallel_variant():setname(name .. data.newtuple("parallelized"))
+  end
+  if self:get_cuda_variant() then
+    self:get_cuda_variant():setname(name)
+  end
 end
 
 function base.task:getdefinition()
@@ -333,6 +347,22 @@ end
 function base.task:get_source_variant()
   assert(self.source_variant)
   return self.source_variant
+end
+
+function base.task:set_parallel_variant(task)
+  self.parallel_variant = task
+end
+
+function base.task:get_parallel_variant()
+  return self.parallel_variant
+end
+
+function base.task:set_cuda_variant(task)
+  self.cuda_variant = task
+end
+
+function base.task:get_cuda_variant()
+  return self.cuda_variant
 end
 
 function base.task:make_variant()
@@ -386,6 +416,7 @@ do
       ast = false,
       definition = false,
       cuda = false,
+      external = false,
       inline = false,
       cudakernels = false,
       param_symbols = false,
@@ -407,6 +438,8 @@ do
       source_variant = false,
       complete_thunk = false,
       is_complete = false,
+      parallel_variant = false,
+      cuda_variant = false,
     }, base.task)
   end
 end

@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,11 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-ll:cpu", "4", "-fbounds-checks", "1"]]
+-- [
+--  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
+--   "-fparallelize-dop", "5"],
+--  ["-ll:cpu", "4", "-fparallelize-dop", "10"]
+-- ]
 
 import "regent"
 
@@ -30,7 +34,7 @@ __demand(__parallel)
 task init(r : region(ispace(int2d), fs))
 where reads writes(r)
 do
-  for e in r do e.f = c.drand48() end
+  for e in r do e.f = 0.3 * (e.x + 1) + 0.7 * (e.y + 1) end
   for e in r do e.g = 0 end
   for e in r do e.h = 0 end
 end
@@ -72,8 +76,6 @@ task test(size : int)
   c.srand48(12345)
   var is = ispace(int2d, {size, size})
   var primary_region = region(is, fs)
-  var np = 2
-  var primary_partition = partition(equal, primary_region, ispace(int2d, {np, np}))
   init(primary_region)
   stencil(primary_region)
   stencil_serial(primary_region)

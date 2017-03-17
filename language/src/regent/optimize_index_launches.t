@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 -- space task launches.
 
 local ast = require("regent/ast")
-local data = require("regent/data")
-local log = require("regent/log")
+local data = require("common/data")
+local report = require("common/report")
 local std = require("regent/std")
 
 local context = {}
@@ -55,18 +55,20 @@ function context:is_loop_variable(variable)
   return self.loop_variables[variable]
 end
 
-local function check_privilege_noninterference(cx, task, region_type,
-                                         other_region_type, mapping)
-  local param_region_type = mapping[region_type]
-  local other_param_region_type = mapping[other_region_type]
+local function check_privilege_noninterference(cx, task, arg,
+                                         other_arg, mapping)
+  local region_type = std.as_read(arg.expr_type)
+  local other_region_type = std.as_read(other_arg.expr_type)
+  local param_region_type = mapping[arg]
+  local other_param_region_type = mapping[other_arg]
   assert(param_region_type and other_param_region_type)
 
-  local privileges_by_field_path =
+  local privileges_by_field_path, coherence_modes_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
         param_region_type, task:getprivileges(),
         task:get_coherence_modes(), task:get_flags()))
-  local other_privileges_by_field_path =
+  local other_privileges_by_field_path, other_coherence_modes_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
         other_param_region_type,
@@ -79,7 +81,9 @@ local function check_privilege_noninterference(cx, task, region_type,
         not privilege or privilege == "none" or
         not other_privilege or other_privilege == "none" or
         (privilege == "reads" and other_privilege == "reads") or
-        (std.is_reduction_op(privilege) and privilege == other_privilege))
+        (std.is_reduction_op(privilege) and privilege == other_privilege) or
+        (coherence_modes_by_field_path[field_path] == "simultaneous" and
+         other_coherence_modes_by_field_path[field_path] == "simultaneous"))
     then
       return false
     end
@@ -88,17 +92,18 @@ local function check_privilege_noninterference(cx, task, region_type,
 end
 
 local function analyze_noninterference_previous(
-    cx, task, region_type, regions_previously_used, mapping)
-  for i, other_region_type in pairs(regions_previously_used) do
-    local constraint = {
-      lhs = region_type,
-      rhs = other_region_type,
-      op = "*"
-    }
+    cx, task, arg, regions_previously_used, mapping)
+  local region_type = std.as_read(arg.expr_type)
+  for i, other_arg in pairs(regions_previously_used) do
+    local other_region_type = std.as_read(other_arg.expr_type)
+    local constraint = std.constraint(
+      region_type,
+      other_region_type,
+      std.disjointness)
 
     if std.type_maybe_eq(region_type.fspace_type, other_region_type.fspace_type) and
       not std.check_constraint(cx, constraint) and
-      not check_privilege_noninterference(cx, task, region_type, other_region_type, mapping)
+      not check_privilege_noninterference(cx, task, arg, other_arg, mapping)
     then
       return false, i
     end
@@ -107,22 +112,26 @@ local function analyze_noninterference_previous(
 end
 
 local function analyze_noninterference_self(
-    cx, task, region_type, partition_type, mapping)
+    cx, task, arg, partition_type, mapping)
+  local region_type = std.as_read(arg.expr_type)
   if partition_type and partition_type:is_disjoint() then
     return true
   end
 
-  local param_region_type = mapping[region_type]
+  local param_region_type = mapping[arg]
   assert(param_region_type)
-  local privileges, privilege_field_paths = std.find_task_privileges(
+  local privileges, privilege_field_paths, privilege_field_types,
+        privilege_coherence_modes, privilege_flags = std.find_task_privileges(
     param_region_type, task:getprivileges(),
     task:get_coherence_modes(), task:get_flags())
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
+    local coherence = privilege_coherence_modes[i]
     if not (
         privilege == "none" or
         privilege == "reads" or
         std.is_reduction_op(privilege) or
+        coherence == "simultaneous" or
         #field_paths == 0)
     then
       return false
@@ -158,6 +167,7 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
@@ -165,6 +175,7 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
+      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Deref)
     then
       return false
@@ -191,7 +202,6 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary)
     then
@@ -203,7 +213,8 @@ local function analyze_is_side_effect_free_node(cx)
 
     -- Miscellaneous:
     elseif node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind)
     then
       return true
 
@@ -246,6 +257,7 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
@@ -253,6 +265,7 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
       node:is(ast.typed.expr.AllocateScratchFields) or
+      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Deref)
     then
       return false
@@ -280,7 +293,6 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.Advance) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
-      node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary)
     then
@@ -288,7 +300,8 @@ local function analyze_is_loop_invariant_node(cx)
 
     -- Miscellaneous:
     elseif node:is(ast.location) or
-      node:is(ast.annotation)
+      node:is(ast.annotation) or
+      node:is(ast.condition_kind)
     then
       return true
 
@@ -309,9 +322,9 @@ local optimize_index_launch = {}
 
 local function ignore(...) end
 
-local function optimize_loop_body(cx, node, log_pass, log_fail)
+local function optimize_loop_body(cx, node, report_pass, report_fail)
   if #node.block.stats == 0 then
-    log_fail(node, "loop optimization failed: body is empty")
+    report_fail(node, "loop optimization failed: body is empty")
     return
   end
 
@@ -319,66 +332,91 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
   loop_cx:add_loop_variable(node.symbol)
 
   local preamble = terralib.newlist()
+  local call_stat
   for i = 1, #node.block.stats - 1 do
     local stat = node.block.stats[i]
     if not stat:is(ast.typed.stat.Var) then
-      log_fail(stat, "loop optimization failed: preamble statement is not a variable")
+      report_fail(stat, "loop optimization failed: preamble statement is not a variable")
       return
     end
     if not analyze_is_side_effect_free(cx, stat) then
-      log_fail(stat, "loop optimization failed: preamble statement is not side-effect free")
-      return
-    end
-
-    for i, symbol in ipairs(stat.symbols) do
-      local value = stat.values[i]
-      if value and not analyze_is_loop_invariant(loop_cx, value) then
-        loop_cx:add_loop_variable(symbol)
+      if not (i == #node.block.stats - 1 and
+              #stat.values == 1 and
+              stat.values[1]:is(ast.typed.expr.Call)) then
+        report_fail(stat, "loop optimization failed: preamble statement is not side-effect free")
+        return
+      else
+        call_stat = stat
       end
     end
 
-    preamble:insert(stat)
+    if call_stat == nil then
+      for i, symbol in ipairs(stat.symbols) do
+        local value = stat.values[i]
+        if value and not analyze_is_loop_invariant(loop_cx, value) then
+          loop_cx:add_loop_variable(symbol)
+        end
+      end
+
+      preamble:insert(stat)
+    end
   end
 
   local body = node.block.stats[#node.block.stats]
   local call
   local reduce_lhs, reduce_op = false, false
-  if body:is(ast.typed.stat.Expr) and
-    body.expr:is(ast.typed.expr.Call)
-  then
-    call = body.expr
-  elseif body:is(ast.typed.stat.Reduce) and
-    #body.lhs == 1 and
-    #body.rhs == 1 and
-    body.rhs[1]:is(ast.typed.expr.Call)
-  then
-    call = body.rhs[1]
-    reduce_lhs = body.lhs[1]
-    reduce_op = body.op
+  if call_stat ~= nil then
+    if body:is(ast.typed.stat.Reduce) and
+      #body.lhs == 1 and
+      #body.rhs == 1 and
+      body.rhs[1]:is(ast.typed.expr.ID) and
+      call_stat.symbols[1] == body.rhs[1].value
+    then
+      call = call_stat.values[1]
+      reduce_lhs = body.lhs[1]
+      reduce_op = body.op
+    else
+      report_fail(call_stat, "loop optimization failed: preamble statement is not side-effect free")
+      return
+    end
   else
-    log_fail(body, "loop optimization failed: body is not a function call")
-    return
+    if body:is(ast.typed.stat.Expr) and
+      body.expr:is(ast.typed.expr.Call)
+    then
+      call = body.expr
+    elseif body:is(ast.typed.stat.Reduce) and
+      #body.lhs == 1 and
+      #body.rhs == 1 and
+      body.rhs[1]:is(ast.typed.expr.Call)
+    then
+      call = body.rhs[1]
+      reduce_lhs = body.lhs[1]
+      reduce_op = body.op
+    else
+      report_fail(body, "loop optimization failed: body is not a function call")
+      return
+    end
   end
 
   local task = call.fn.value
   if not std.is_task(task) then
-    log_fail(call, "loop optimization failed: function is not a task")
+    report_fail(call, "loop optimization failed: function is not a task")
     return
   end
 
   if #call.conditions > 0 then
-    log_fail(call, "FIXME: handle analysis of ad-hoc conditions")
+    report_fail(call, "FIXME: handle analysis of ad-hoc conditions")
     return
   end
 
   if reduce_lhs then
     local reduce_as_type = std.as_read(call.expr_type)
     if not std.reduction_op_ids[reduce_op][reduce_as_type] then
-      log_fail(body, "loop optimization failed: reduction over " .. tostring(reduce_op) .. " " .. tostring(reduce_as_type) .. " not supported")
+      report_fail(body, "loop optimization failed: reduction over " .. tostring(reduce_op) .. " " .. tostring(reduce_as_type) .. " not supported")
     end
 
     if not analyze_is_side_effect_free(cx, reduce_lhs) then
-      log_fail(body, "loop optimization failed: reduction is not side-effect free")
+      report_fail(body, "loop optimization failed: reduction is not side-effect free")
     end
   end
 
@@ -431,7 +469,7 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
   local mapping = {}
   for i, arg in ipairs(args) do
     if not analyze_is_side_effect_free(cx, arg) then
-      log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
+      report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not side-effect free")
       return
     end
 
@@ -441,7 +479,10 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
     local partition_type
 
     local arg_type = std.as_read(arg.expr_type)
-    mapping[arg_type] = param_types[i]
+    -- XXX: This will break again if arg isn't unique for each argument,
+    --      which can happen when de-duplicating AST nodes.
+    assert(mapping[arg] == nil)
+    mapping[arg] = param_types[i]
     -- Tests for conformance to index launch requirements.
     if std.is_ispace(arg_type) or std.is_region(arg_type) then
       if arg:is(ast.typed.expr.IndexAccess) and
@@ -459,7 +500,7 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
       end
 
       if not (arg_variant or arg_invariant) then
-        log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably variant or invariant")
+        report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably variant or invariant")
         return
       end
     end
@@ -469,7 +510,7 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
       if not arg_invariant then
         for _, variables in pairs(task:get_conditions()) do
           if variables[i] then
-            log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably invariant")
+            report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is not provably invariant")
             return
           end
         end
@@ -480,7 +521,7 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
       -- FIXME: Deoptimize lists of regions for the moment. Lists
       -- would have to be (at a minimum) invariant though other
       -- restrictions may apply.
-      log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is a list of regions")
+      report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " is a list of regions")
       return
     end
 
@@ -488,18 +529,18 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
     if std.is_region(arg_type) then
       do
         local passed, failure_i = analyze_noninterference_previous(
-          cx, task, arg_type, regions_previously_used, mapping)
+          cx, task, arg, regions_previously_used, mapping)
         if not passed then
-          log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with argument " .. tostring(failure_i))
+          report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with argument " .. tostring(failure_i))
           return
         end
       end
 
       do
         local passed = analyze_noninterference_self(
-          cx, task, arg_type, partition_type, mapping)
+          cx, task, arg, partition_type, mapping)
         if not passed then
-          log_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with itself")
+          report_fail(call, "loop optimization failed: argument " .. tostring(i) .. " interferes with itself")
           return
         end
       end
@@ -510,11 +551,11 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
 
     regions_previously_used[i] = nil
     if std.is_region(arg_type) then
-      regions_previously_used[i] = arg_type
+      regions_previously_used[i] = arg
     end
   end
 
-  log_pass("loop optimization succeeded")
+  report_pass("loop optimization succeeded")
   return {
     preamble = preamble,
     call = call,
@@ -525,22 +566,26 @@ local function optimize_loop_body(cx, node, log_pass, log_fail)
 end
 
 function optimize_index_launch.stat_for_num(cx, node)
-  local log_pass = ignore
-  local log_fail = ignore
+  local report_pass = ignore
+  local report_fail = report.info
   if node.annotations.parallel:is(ast.annotation.Demand) then
-    log_pass = ignore -- log.warn
-    log_fail = log.error
+    report_pass = ignore
+    report_fail = report.error
+  end
+
+  if node.annotations.parallel:is(ast.annotation.Forbid) then
+    return node
   end
 
   if node.values[3] and not (
     node.values[3]:is(ast.typed.expr.Constant) and
     node.values[3].value == 1)
   then
-    log_fail(node, "loop optimization failed: stride not equal to 1")
+    report_fail(node, "loop optimization failed: stride not equal to 1")
     return node
   end
 
-  local body = optimize_loop_body(cx, node, log_pass, log_fail)
+  local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
     return node
   end
@@ -559,20 +604,24 @@ function optimize_index_launch.stat_for_num(cx, node)
 end
 
 function optimize_index_launch.stat_for_list(cx, node)
-  local log_pass = ignore
-  local log_fail = ignore
+  local report_pass = ignore
+  local report_fail = report.info
   if node.annotations.parallel:is(ast.annotation.Demand) then
-    log_pass = ignore -- log.warn
-    log_fail = log.error
+    report_pass = ignore
+    report_fail = report.error
+  end
+
+  if node.annotations.parallel:is(ast.annotation.Forbid) then
+    return node
   end
 
   local value_type = std.as_read(node.value.expr_type)
   if not (std.is_ispace(value_type) or std.is_region(value_type)) then
-    log_fail(node, "loop optimization failed: domain is not a ispace or region")
+    report_fail(node, "loop optimization failed: domain is not a ispace or region")
     return node
   end
 
-  local body = optimize_loop_body(cx, node, log_pass, log_fail)
+  local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
     return node
   end

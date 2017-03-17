@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,19 +12,33 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- Legion Logging
+-- Error Reporting
 
-local log = {}
+local ast = require("common/ast")
 
-log.warn = function(node, ...)
+local report = {}
+
+report.info = function(node, ...)
+  -- This should be called with an AST node containing a span. The
+  -- span is used to determine the source location of the warning.
+  assert(node.span:is(ast.location))
+
+  -- Right now, don't actually do anything on info messages.
+end
+
+report.warn = function(node, ...)
+  -- This should be called with an AST node containing a span. The
+  -- span is used to determine the source location of the warning.
+  assert(node.span:is(ast.location))
+
   io.stderr:write(...)
   io.stderr:write("\n")
 end
 
-log.error = function(node, ...)
-  if node == nil then
-    node = { span = { source = "internal", start = { line = 0, offset = 0 } } }
-  end
+report.error = function(node, ...)
+  -- This should be called with an AST node containing a span. The
+  -- span is used to determine the source location of the error.
+  assert(node.span:is(ast.location))
 
   -- The compiler cannot handle running past an error anyway, so just
   -- build the diagnostics object here and don't bother reusing it.
@@ -39,4 +53,4 @@ log.error = function(node, ...)
   assert(false) -- unreachable
 end
 
-return log
+return report

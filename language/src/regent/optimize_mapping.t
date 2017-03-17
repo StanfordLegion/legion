@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 -- Attempts to place map/unmap calls to avoid thrashing inline mappings.
 
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
 
 local context = {}
@@ -64,11 +64,10 @@ local function uses(cx, region_type, polarity)
   local usage = { [region_type] = polarity }
   for other_region_type, _ in pairs(cx.region_universe) do
     if std.is_region(other_region_type) then -- Skip lists of regions
-      local constraint = {
-        lhs = region_type,
-        rhs = other_region_type,
-        op = "*"
-      }
+      local constraint = std.constraint(
+        region_type,
+        other_region_type,
+        std.disjointness)
       if std.type_maybe_eq(region_type:fspace(), other_region_type:fspace()) and
         not std.check_constraint(cx, constraint)
       then
@@ -180,6 +179,12 @@ local function analyze_usage_node(cx)
       local region_type = std.as_read(node.region.expr_type)
       return uses(cx, region_type, remote)
     elseif node:is(ast.typed.expr.Release) then
+      local region_type = std.as_read(node.region.expr_type)
+      return uses(cx, region_type, remote)
+    elseif node:is(ast.typed.expr.AttachHDF5) then
+      local region_type = std.as_read(node.region.expr_type)
+      return uses(cx, region_type, remote)
+    elseif node:is(ast.typed.expr.DetachHDF5) then
       local region_type = std.as_read(node.region.expr_type)
       return uses(cx, region_type, remote)
     elseif node:is(ast.typed.expr.Region) then

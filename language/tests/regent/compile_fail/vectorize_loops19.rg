@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ where
 do
   __demand(__vectorize)
   for e in r do
-    var t = 0
+    var t : float
     for idx = 0, 10 do
       e.p1.v += t
       t = e.p2.v

@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -28,8 +28,9 @@
 -- these properties.
 
 local ast = require("regent/ast")
-local data = require("regent/data")
-local log = require("regent/log")
+local data = require("common/data")
+local report = require("common/report")
+local std = require("regent/std")
 
 local context = {}
 context.__index = context
@@ -58,7 +59,7 @@ local function check(cx, node, allowed_set)
     if ast.is_node(value) and not value:is(ast.annotation.Allow) and
       not allowed_set[option]
     then
-      log.error(node, "option " .. render_option(option, value) ..
+      report.error(node, "option " .. render_option(option, value) ..
                   " is not permitted")
     end
   end
@@ -68,7 +69,7 @@ local function check_annotations_node(cx)
   return function(node)
     -- Expressions:
     if node:is(ast.typed.expr.Call) then
-      check(cx, node, data.set({"inline"}))
+      check(cx, node, data.set({"parallel", "inline"}))
 
     elseif node:is(ast.typed.expr.ID) or
       node:is(ast.typed.expr.Constant) or
@@ -107,23 +108,28 @@ local function check_annotations_node(cx)
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.ListInvert) or
       node:is(ast.typed.expr.ListRange) or
+      node:is(ast.typed.expr.ListIspace) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
       node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
       node:is(ast.typed.expr.Fill) or
       node:is(ast.typed.expr.Acquire) or
       node:is(ast.typed.expr.Release) or
+      node:is(ast.typed.expr.AttachHDF5) or
+      node:is(ast.typed.expr.DetachHDF5) or
       node:is(ast.typed.expr.AllocateScratchFields) or
       node:is(ast.typed.expr.WithScratchFields) or
       node:is(ast.typed.expr.RegionRoot) or
       node:is(ast.typed.expr.Condition) or
       node:is(ast.typed.expr.Unary) or
       node:is(ast.typed.expr.Binary) or
-      node:is(ast.typed.expr.Deref)
+      node:is(ast.typed.expr.Deref) or
+      node:is(ast.typed.expr.ParallelizerConstraint)
     then
       check(cx, node, data.set({}))
 
@@ -137,7 +143,11 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({"spmd", "trace"}))
 
     elseif node:is(ast.typed.stat.ForNum) then
-      check(cx, node, data.set({"parallel", "spmd", "trace"}))
+      local annotations = {"parallel", "spmd", "trace"}
+      if std.config["vectorize-unsafe"] then
+        annotations[#annotations + 1] = "vectorize"
+      end
+      check(cx, node, data.set(annotations))
 
     elseif node:is(ast.typed.stat.ForList) then
       check(cx, node, data.set({"parallel", "spmd", "trace", "vectorize"}))
@@ -158,7 +168,8 @@ local function check_annotations_node(cx)
       node:is(ast.typed.stat.Assignment) or
       node:is(ast.typed.stat.Reduce) or
       node:is(ast.typed.stat.Expr) or
-      node:is(ast.typed.stat.RawDelete)
+      node:is(ast.typed.stat.RawDelete) or
+      node:is(ast.typed.stat.ParallelizeWith)
     then
       check(cx, node, data.set({}))
 
@@ -167,12 +178,18 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({}))
 
     elseif node:is(ast.typed.top.Task) then
-      check(cx, node, data.set({"cuda", "inline", "parallel"}))
+      check(cx, node, data.set({"cuda", "external", "inline", "parallel"}))
 
     -- Miscellaneous:
     elseif node:is(ast.typed.Block) or
       node:is(ast.location) or
       node:is(ast.annotation) or
+      node:is(ast.constraint_kind) or
+      node:is(ast.privilege_kind) or
+      node:is(ast.condition_kind) or
+      node:is(ast.disjointness_kind) or
+      node:is(ast.constraint) or
+      node:is(ast.privilege) or
       node:is(ast.TaskConfigOptions)
     then
       -- Pass

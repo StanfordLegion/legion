@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 -- runs-with:
 -- [
 --   ["-ll:cpu", "4"],
---   ["-ll:cpu", "2", "-fflow-spmd-shardsize", "2"]
+--   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
 -- ]
 
 import "regent"
@@ -706,8 +706,9 @@ terra create_colorings(conf : Config)
   return coloring
 end
 
-task create_ghost_node_map(conf         : Config,
-                           ghost_ranges : region(ghost_range))
+task create_ghost_partition(conf         : Config,
+                            all_shared   : region(node),
+                            ghost_ranges : region(ghost_range))
 where
   reads(ghost_ranges)
 do
@@ -726,7 +727,7 @@ do
     idx += 1
   end
 
-  return ghost_node_map
+  return partition(aliased, all_shared, ghost_node_map)
 end
 
 task toplevel()
@@ -796,8 +797,7 @@ task toplevel()
     end
   end
 
-  var ghost_node_map = create_ghost_node_map(conf, ghost_ranges)
-  var rp_ghost = partition(aliased, all_shared, ghost_node_map)
+  var rp_ghost = create_ghost_partition(conf, all_shared, ghost_ranges)
 
   --var last_shared = region(ispace(ptr, num_pieces * num_pieces), int)
   --new(ptr(int, last_shared), num_pieces * num_pieces)
@@ -918,7 +918,17 @@ end
 
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lcircuit"}
+  local link_flags = terralib.newlist({"-L" .. root_dir, "-lcircuit", "-lm"})
+  if os.getenv('CRAYPE_VERSION') then
+    local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
+    new_flags:insertall(link_flags)
+    for flag in os.getenv('CRAY_UGNI_POST_LINK_OPTS'):gmatch("%S+") do
+      new_flags:insert(flag)
+    end
+    new_flags:insert("-lugni")
+    link_flags = new_flags
+  end
+
   regentlib.saveobj(toplevel, "circuit", "executable", ccircuit.register_mappers, link_flags)
 else
   regentlib.start(toplevel, ccircuit.register_mappers)

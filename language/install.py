@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2016 Stanford University
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -89,7 +89,7 @@ your mind at any time by re-running this script with the "--rdir"
 parameter.
 '''
 
-def install_rdir(rdir, regent_dir):
+def install_rdir(rdir, legion_dir, regent_dir):
     config_filename = os.path.join(regent_dir, '.rdir.json')
     if rdir is None:
         rdir = load_json_config(config_filename)
@@ -99,12 +99,13 @@ def install_rdir(rdir, regent_dir):
         print(prompt_text)
         while rdir not in ['auto', 'manual', 'never']:
             rdir = _input('Enable RDIR? (auto/manual/never) ')
-    assert rdir in ['auto', 'manual', 'never']
+    assert rdir in ['auto', 'manual', 'skip', 'never']
 
     if rdir == 'auto':
-        git_submodule_update(regent_dir)
+        git_submodule_update(legion_dir)
 
-    dump_json_config(config_filename, rdir)
+    if rdir != 'skip':
+        dump_json_config(config_filename, rdir)
 
 def build_terra(terra_dir, thread_count):
     subprocess.check_call(
@@ -132,13 +133,11 @@ def install_terra(terra_dir, external_terra_dir, thread_count):
             print(external_terra_dir, terra_dir)
             os.symlink(external_terra_dir, terra_dir)
         return
-    else:
-        if os.path.islink(terra_dir):
-            print('Error: Attempting build with internal Terra when external Terra')
-            print('already exists. Please remove the following symlink to continue with')
-            print('an internal Terra installation.')
-            print('    %s' % terra_dir)
-            sys.exit(1)
+    elif os.path.islink(terra_dir):
+        print('Reusing existing external Terra:')
+        print('    %s' % os.path.realpath(terra_dir))
+        print()
+        return
 
     if not os.path.exists(terra_dir):
         git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
@@ -151,7 +150,8 @@ def symlink(from_path, to_path):
         os.symlink(from_path, to_path)
 
 def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
-                     cuda, gasnet, gasnet_dir, clean_first, thread_count, extra_flags):
+                     cuda, hdf, spy, gasnet, gasnet_dir, conduit,
+                     clean_first, thread_count, extra_flags):
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
         ('TERRA_DIR', terra_dir),                           # for bindings
@@ -162,9 +162,12 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
          'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1),
          'USE_CUDA=%s' % (1 if cuda else 0),
          'USE_GASNET=%s' % (1 if gasnet else 0),
+         'USE_HDF=%s' % (1 if hdf else 0),
+         'USE_SPY=%s' % (1 if spy else 0),
          ] +
         extra_flags +
         (['GASNET=%s' % gasnet_dir] if gasnet_dir is not None else []) +
+        (['CONDUIT=%s' % conduit] if conduit is not None else []) +
         (['GCC=%s' % os.environ['CXX']] if 'CXX' in os.environ else []))
 
     if clean_first:
@@ -201,9 +204,9 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
              '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
              os.path.join(bindings_dir, 'liblegion_terra.so')])
 
-def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
-            rdir=None, external_terra_dir=None, gasnet_dir=None, debug=False,
-            clean_first=True, thread_count=None, extra_flags=[]):
+def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False, hdf=False,
+            spy=False, conduit=None, rdir=None, external_terra_dir=None, gasnet_dir=None,
+            debug=False, clean_first=True, thread_count=None, extra_flags=[]):
     if shared_llr:
         raise Exception('Shared LLR is deprecated. Please use general LLR.')
 
@@ -214,6 +217,12 @@ def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
 
     if cuda and not general:
         raise Exception('General LLR is required for CUDA.')
+
+    if spy and not debug:
+        raise Exception('Debugging mode is required for detailed Legion Spy.')
+
+    if conduit is not None and not gasnet:
+        raise Exception('GASNet is required for conduit option.')
 
     thread_count = thread_count
     if thread_count is None:
@@ -228,15 +237,15 @@ def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False,
     if 'LG_RT_DIR' in os.environ:
         runtime_dir = os.path.realpath(os.environ['LG_RT_DIR'])
 
-    install_rdir(rdir, regent_dir)
+    install_rdir(rdir, legion_dir, regent_dir)
 
     terra_dir = os.path.join(regent_dir, 'terra')
     install_terra(terra_dir, external_terra_dir, thread_count)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
-                     general, cuda, gasnet, gasnet_dir, clean_first,
-                     thread_count, extra_flags)
+                     general, cuda, hdf, spy, gasnet, gasnet_dir, conduit,
+                     clean_first, thread_count, extra_flags)
 
 def driver():
     parser = argparse.ArgumentParser(
@@ -262,8 +271,20 @@ def driver():
         default = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1',
         help = 'Build Legion with CUDA.')
     parser.add_argument(
+        '--hdf5', '--hdf', dest = 'hdf', action = 'store_true', required = False,
+        default = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1',
+        help = 'Build Legion with HDF.')
+    parser.add_argument(
+        '--spy', dest = 'spy', action = 'store_true', required = False,
+        default = 'USE_SPY' in os.environ and os.environ['USE_SPY'] == '1',
+        help = 'Build Legion with detailed Legion Spy enabled.')
+    parser.add_argument(
+        '--conduit', dest = 'conduit', action = 'store', required = False,
+        default = os.environ['CONDUIT'] if 'CONDUIT' in os.environ else None,
+        help = 'Build Legion with specified GASNet conduit.')
+    parser.add_argument(
         '--rdir', dest = 'rdir', required = False,
-        choices = ['prompt', 'auto', 'manual', 'never'], default = None,
+        choices = ['prompt', 'auto', 'manual', 'skip', 'never'], default = None,
         help = 'Enable RDIR compiler plugin.')
     parser.add_argument(
         '--noclean', dest = 'clean_first', action = 'store_false', required = False,

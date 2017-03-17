@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -138,7 +138,12 @@ end
 function data.flatmap(fn, list)
   local result = terralib.newlist()
   for i, elt in ipairs(list) do
-    result:insertall(fn(elt))
+    elt = fn(elt)
+    if terralib.islist(elt) then
+      result:insertall(elt)
+    else
+      result:insert(elt)
+    end
   end
   return result
 end

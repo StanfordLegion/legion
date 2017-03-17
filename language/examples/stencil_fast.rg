@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,9 +12,15 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "4"],
+--  ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "8", "-map_locally"]]
+
 -- Inspired by https://github.com/ParRes/Kernels/tree/master/LEGION/Stencil
 
 import "regent"
+
+local common = require("stencil_common")
 
 local DTYPE = double
 local RADIUS = 2
@@ -54,6 +60,54 @@ if USE_FOREIGN then
                               "-DRADIUS=" .. tostring(RADIUS)})
 end
 
+local map_locally = false
+do
+  local cstring = terralib.includec("string.h")
+  for _, arg in ipairs(arg) do
+    if cstring.strcmp(arg, "-map_locally") == 0 then
+      map_locally = true
+      break
+    end
+  end
+end
+
+do
+  local root_dir = arg[0]:match(".*/") or "./"
+  local runtime_dir = root_dir .. "../../runtime/"
+  local legion_dir = runtime_dir .. "legion/"
+  local mapper_dir = runtime_dir .. "mappers/"
+  local realm_dir = runtime_dir .. "realm/"
+  local mapper_cc = root_dir .. "stencil_mapper.cc"
+  if os.getenv('SAVEOBJ') == '1' then
+    mapper_so = root_dir .. "libstencil_mapper.so"
+  else
+    mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
+  end
+  local cxx = os.getenv('CXX') or 'c++'
+
+  local cxx_flags = "-O2 -Wall -Werror"
+  if map_locally then cxx_flags = cxx_flags .. " -DMAP_LOCALLY " end
+  if os.execute('test "$(uname)" = Darwin') == 0 then
+    cxx_flags =
+      (cxx_flags ..
+         " -dynamiclib -single_module -undefined dynamic_lookup -fPIC")
+  else
+    cxx_flags = cxx_flags .. " -shared -fPIC"
+  end
+
+  local cmd = (cxx .. " " .. cxx_flags .. " -I " .. runtime_dir .. " " ..
+                 " -I " .. mapper_dir .. " " .. " -I " .. legion_dir .. " " ..
+                 " -I " .. realm_dir .. " " .. mapper_cc .. " -o " .. mapper_so)
+  if os.execute(cmd) ~= 0 then
+    print("Error: failed to compile " .. mapper_cc)
+    assert(false)
+  end
+  terralib.linklibrary(mapper_so)
+  cmapper = terralib.includec("stencil_mapper.h", {"-I", root_dir, "-I", runtime_dir,
+                                                   "-I", mapper_dir, "-I", legion_dir,
+                                                   "-I", realm_dir})
+end
+
 local min = regentlib.fmin
 local max = regentlib.fmax
 
@@ -69,16 +123,16 @@ terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
   }
 end
 
-task make_tile_partition(points : region(ispace(int2d), point),
-                         tiles : ispace(int1d),
-                         n : int64, nt : int64, radius : int64)
+task make_private_partition(points : region(ispace(int2d), point),
+                            tiles : ispace(int1d),
+                            n : int2d, nt : int2d, radius : int64)
   var coloring = c.legion_domain_point_coloring_create()
-  var npoints = n + 2*nt*radius
-  for ix = 0, nt do
-    for iy = 0, nt do
-      var i = int1d(iy*nt + ix)
-      var lo = int2d { x = ix*npoints/nt, y = iy*npoints/nt }
-      var hi = int2d { x = (ix+1)*npoints/nt - 1, y = (iy+1)*npoints/nt - 1 }
+  var npoints = n + nt*{ 2*radius, 2*radius }
+  for ix = 0, nt.x do
+    for iy = 0, nt.y do
+      var i = int1d(iy*nt.x + ix)
+      var lo = int2d { x = ix*npoints.x/nt.x, y = iy*npoints.y/nt.y }
+      var hi = int2d { x = (ix+1)*npoints.x/nt.x - 1, y = (iy+1)*npoints.y/nt.y - 1 }
       var rect = to_rect(lo, hi)
       c.legion_domain_point_coloring_color_domain(
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
@@ -91,14 +145,14 @@ end
 
 task make_interior_partition(points : region(ispace(int2d), point),
                              tiles : ispace(int1d),
-                             n : int64, nt : int64, radius : int64)
+                             n : int2d, nt : int2d, radius : int64)
   var coloring = c.legion_domain_point_coloring_create()
-  var npoints = n + 2*nt*radius
-  for ix = 0, nt do
-    for iy = 0, nt do
-      var i = int1d(iy*nt + ix)
-      var lo = int2d { x = ix*npoints/nt + radius, y = iy*npoints/nt + radius }
-      var hi = int2d { x = (ix+1)*npoints/nt - 1 - radius, y = (iy+1)*npoints/nt - 1 - radius }
+  var npoints = n + nt*{ 2*radius, 2*radius }
+  for ix = 0, nt.x do
+    for iy = 0, nt.y do
+      var i = int1d(iy*nt.x + ix)
+      var lo = int2d { x = ix*npoints.x/nt.x + radius, y = iy*npoints.y/nt.y + radius }
+      var hi = int2d { x = (ix+1)*npoints.x/nt.x - 1 - radius, y = (iy+1)*npoints.y/nt.y - 1 - radius }
       var rect = to_rect(lo, hi)
       c.legion_domain_point_coloring_color_domain(
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
@@ -111,23 +165,23 @@ end
 
 task make_exterior_partition(points : region(ispace(int2d), point),
                              tiles : ispace(int1d),
-                             n : int64, nt : int64, radius : int64)
+                             n : int2d, nt : int2d, radius : int64)
   var coloring = c.legion_domain_point_coloring_create()
-  var npoints = n + 2*nt*radius
-  for ix = 0, nt do
-    for iy = 0, nt do
-      var i = int1d(iy*nt + ix)
+  var npoints = n + nt*{ 2*radius, 2*radius }
+  for ix = 0, nt.x do
+    for iy = 0, nt.y do
+      var i = int1d(iy*nt.x + ix)
 
       var loffx, loffy = radius, radius
       if ix == 0 then loffx = 0 end
       if iy == 0 then loffy = 0 end
 
       var hoffx, hoffy = radius, radius
-      if ix == nt - 1 then hoffx = 0 end
-      if iy == nt - 1 then hoffy = 0 end
+      if ix == nt.x - 1 then hoffx = 0 end
+      if iy == nt.y - 1 then hoffy = 0 end
 
-      var lo = int2d { x = ix*npoints/nt + loffx, y = iy*npoints/nt + loffy }
-      var hi = int2d { x = (ix+1)*npoints/nt - 1 - hoffx, y = (iy+1)*npoints/nt - 1 - hoffy }
+      var lo = int2d { x = ix*npoints.x/nt.x + loffx, y = iy*npoints.y/nt.y + loffy }
+      var hi = int2d { x = (ix+1)*npoints.x/nt.x - 1 - hoffx, y = (iy+1)*npoints.y/nt.y - 1 - hoffy }
       var rect = to_rect(lo, hi)
       c.legion_domain_point_coloring_color_domain(
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
@@ -142,44 +196,71 @@ terra clamp(val : int64, lo : int64, hi : int64)
   return min(max(val, lo), hi)
 end
 
-task make_ghost_x_partition(points : region(ispace(int2d), point),
-                            tiles : ispace(int1d),
-                            n : int64, nt : int64, radius : int64, dir : int64)
-  var coloring = c.legion_domain_point_coloring_create()
-  for ix = 0, nt do
-    for iy = 0, nt do
-      var i = int1d(iy*nt + ix)
 
-      var lo = int2d { x = clamp((ix+dir)*radius, 0, nt*radius), y = iy*n/nt }
-      var hi = int2d { x = clamp((ix+1+dir)*radius - 1, -1, nt*radius - 1), y = (iy+1)*n/nt - 1 }
-      var rect = to_rect(lo, hi)
-      c.legion_domain_point_coloring_color_domain(
-        coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+function make_ghost_x_partition(is_complete)
+  local task ghost_x_partition(points : region(ispace(int2d), point),
+                               tiles : ispace(int1d),
+                               n : int2d, nt : int2d, radius : int64,
+                               dir : int64)
+    var coloring = c.legion_domain_point_coloring_create()
+    for ix = 0, nt.x do
+      for iy = 0, nt.y do
+        var i = int1d(iy*nt.x + ix)
+
+        var lo = int2d { x = clamp((ix+dir)*radius, 0, nt.x*radius), y = iy*n.y/nt.y }
+        var hi = int2d { x = clamp((ix+1+dir)*radius - 1, -1, nt.x*radius - 1), y = (iy+1)*n.y/nt.y - 1 }
+        var rect = to_rect(lo, hi)
+        c.legion_domain_point_coloring_color_domain(
+          coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+      end
     end
+    var p = [(
+        function()
+          if is_complete then
+            return rexpr partition(disjoint, points, coloring, tiles) end
+          else
+            -- Hack: Since the compiler does not track completeness as
+            -- a static property, mark incomplete partitions as aliased.
+            return rexpr partition(aliased, points, coloring, tiles) end
+          end
+        end)()]
+    c.legion_domain_point_coloring_destroy(coloring)
+    return p
   end
-  var p = partition(disjoint, points, coloring, tiles)
-  c.legion_domain_point_coloring_destroy(coloring)
-  return p
+  return ghost_x_partition
 end
 
-task make_ghost_y_partition(points : region(ispace(int2d), point),
-                            tiles : ispace(int1d),
-                            n : int64, nt : int64, radius : int64, dir : int64)
-  var coloring = c.legion_domain_point_coloring_create()
-  for ix = 0, nt do
-    for iy = 0, nt do
-      var i = int1d(iy*nt + ix)
+function make_ghost_y_partition(is_complete)
+  local task ghost_y_partition(points : region(ispace(int2d), point),
+                               tiles : ispace(int1d),
+                               n : int2d, nt : int2d, radius : int64,
+                               dir : int64)
+    var coloring = c.legion_domain_point_coloring_create()
+    for ix = 0, nt.x do
+      for iy = 0, nt.y do
+        var i = int1d(iy*nt.x + ix)
 
-      var lo = int2d { x = ix*n/nt, y = clamp((iy+dir)*radius, 0, nt*radius) }
-      var hi = int2d { x = (ix+1)*n/nt - 1, y = clamp((iy+1+dir)*radius - 1, -1, nt*radius - 1) }
-      var rect = to_rect(lo, hi)
-      c.legion_domain_point_coloring_color_domain(
-        coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+        var lo = int2d { x = ix*n.x/nt.x, y = clamp((iy+dir)*radius, 0, nt.y*radius) }
+        var hi = int2d { x = (ix+1)*n.x/nt.x - 1, y = clamp((iy+1+dir)*radius - 1, -1, nt.y*radius - 1) }
+        var rect = to_rect(lo, hi)
+        c.legion_domain_point_coloring_color_domain(
+          coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
+      end
     end
+    var p = [(
+        function()
+          if is_complete then
+            return rexpr partition(disjoint, points, coloring, tiles) end
+          else
+            -- Hack: Since the compiler does not track completeness as
+            -- a static property, mark incomplete partitions as aliased.
+            return rexpr partition(aliased, points, coloring, tiles) end
+          end
+        end)()]
+    c.legion_domain_point_coloring_destroy(coloring)
+    return p
   end
-  var p = partition(disjoint, points, coloring, tiles)
-  c.legion_domain_point_coloring_destroy(coloring)
-  return p
+  return ghost_y_partition
 end
 
 local function off(i, x, y)
@@ -271,13 +352,13 @@ local function make_stencil_interior(private, interior, radius)
 end
 
 local function make_stencil(radius)
-  local task st(private : region(ispace(int2d), point),
-                interior : region(ispace(int2d), point),
-                xm : region(ispace(int2d), point),
-                xp : region(ispace(int2d), point),
-                ym : region(ispace(int2d), point),
-                yp : region(ispace(int2d), point),
-                print_ts : bool)
+  local task stencil(private : region(ispace(int2d), point),
+                     interior : region(ispace(int2d), point),
+                     xm : region(ispace(int2d), point),
+                     xp : region(ispace(int2d), point),
+                     ym : region(ispace(int2d), point),
+                     yp : region(ispace(int2d), point),
+                     print_ts : bool)
   where
     reads writes(private.{input, output}),
     reads(xm.input, xp.input, ym.input, yp.input)
@@ -315,7 +396,7 @@ local function make_stencil(radius)
 
     [make_stencil_interior(private, interior, radius)]
   end
-  return st
+  return stencil
 end
 local stencil = make_stencil(RADIUS)
 
@@ -365,13 +446,13 @@ where reads(private.{input, output}) do
   var expect_out = init
   for i in interior do
     if private[i].input ~= expect_in then
-      c.printf("input (%lld,%lld): %.0f should be %lld\n",
+      c.printf("input (%lld,%lld): %.3f should be %lld\n",
                i.x, i.y, private[i].input, expect_in)
     end
   end
   for i in interior do
     if private[i].output ~= expect_out then
-      c.printf("output (%lld,%lld): %.0f should be %lld\n",
+      c.printf("output (%lld,%lld): %.3f should be %lld\n",
                i.x, i.y, private[i].output, expect_out)
     end
   end
@@ -382,37 +463,45 @@ where reads(private.{input, output}) do
   c.printf("check completed successfully\n")
 end
 
+task fill_(r : region(ispace(int2d), point), v : DTYPE)
+where reads writes(r.{input, output}) do
+  -- fill(r.{input, output}, v)
+  for x in r do x.input = v end
+  for x in r do x.output = v end
+end
+
 task main()
-  var nbloated : int64 = 12 -- Grid size along each dimension, including border.
-  var nt : int64 = 4
-  var tsteps : int64 = 10
-  var init : int64 = 1000
+  var conf = common.read_config()
+
+  var nbloated = int2d { conf.nx, conf.ny } -- Grid size along each dimension, including border.
+  var nt = int2d { conf.ntx, conf.nty } -- Number of tiles to make in each dimension.
+  var init : int64 = conf.init
 
   var radius : int64 = RADIUS
-  var n : int64 = nbloated - 2*radius -- Grid size, minus the border.
+  var n = nbloated - { 2*radius, 2*radius } -- Grid size, minus the border.
   regentlib.assert(n >= nt, "grid too small")
 
-  var grid = ispace(int2d, { x = n + 2*nt*radius, y = n + 2*nt*radius })
-  var nt2 = nt*nt
+  var grid = ispace(int2d, n + nt*{ 2*radius, 2*radius })
+  var nt2 = nt.x*nt.y
   var tiles = ispace(int1d, nt2)
 
   var points = region(grid, point)
-  var private = make_tile_partition(points, tiles, n, nt, radius)
+  var private = make_private_partition(points, tiles, n, nt, radius)
   var interior = make_interior_partition(points, tiles, n, nt, radius)
   var exterior = make_exterior_partition(points, tiles, n, nt, radius)
 
-  var xm = region(ispace(int2d, { x = nt*radius, y = n }), point)
-  var xp = region(ispace(int2d, { x = nt*radius, y = n }), point)
-  var ym = region(ispace(int2d, { x = n, y = nt*radius }), point)
-  var yp = region(ispace(int2d, { x = n, y = nt*radius }), point)
-  var pxm_in = make_ghost_x_partition(xm, tiles, n, nt, radius, -1)
-  var pxp_in = make_ghost_x_partition(xp, tiles, n, nt, radius,  1)
-  var pym_in = make_ghost_y_partition(ym, tiles, n, nt, radius, -1)
-  var pyp_in = make_ghost_y_partition(yp, tiles, n, nt, radius,  1)
-  var pxm_out = make_ghost_x_partition(xm, tiles, n, nt, radius, 0)
-  var pxp_out = make_ghost_x_partition(xp, tiles, n, nt, radius, 0)
-  var pym_out = make_ghost_y_partition(ym, tiles, n, nt, radius, 0)
-  var pyp_out = make_ghost_y_partition(yp, tiles, n, nt, radius, 0)
+  var xm = region(ispace(int2d, { x = nt.x*radius, y = n.y }), point)
+  var xp = region(ispace(int2d, { x = nt.x*radius, y = n.y }), point)
+  var ym = region(ispace(int2d, { x = n.x, y = nt.y*radius }), point)
+  var yp = region(ispace(int2d, { x = n.x, y = nt.y*radius }), point)
+  var pxm_in = [make_ghost_x_partition(false)](xm, tiles, n, nt, radius, -1)
+  var pxp_in = [make_ghost_x_partition(false)](xp, tiles, n, nt, radius,  1)
+  var pym_in = [make_ghost_y_partition(false)](ym, tiles, n, nt, radius, -1)
+  var pyp_in = [make_ghost_y_partition(false)](yp, tiles, n, nt, radius,  1)
+  var pxm_out = [make_ghost_x_partition(true)](xm, tiles, n, nt, radius, 0)
+  var pxp_out = [make_ghost_x_partition(true)](xp, tiles, n, nt, radius, 0)
+  var pym_out = [make_ghost_y_partition(true)](ym, tiles, n, nt, radius, 0)
+  var pyp_out = [make_ghost_y_partition(true)](yp, tiles, n, nt, radius, 0)
 
   fill(points.{input, output}, init)
   fill(xm.{input, output}, init)
@@ -420,20 +509,52 @@ task main()
   fill(ym.{input, output}, init)
   fill(yp.{input, output}, init)
 
-  __demand(__spmd)
-  for t = 0, tsteps do
-    -- __demand(__parallel)
-    for i = 0, nt2 do
-      stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == 0)
-    end
-    -- __demand(__parallel)
-    for i = 0, nt2 do
-      increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - 1)
-    end
-  end
+  var tsteps : int64 = conf.tsteps
+  var tprune : int64 = conf.tprune
+  regentlib.assert(tsteps > 2*tprune, "too few time steps")
 
-  for i = 0, nt2 do
-    check(private[i], interior[i], tsteps, init)
+  -- __demand(__spmd)
+  -- do
+  --   for i = 0, nt2 do
+  --     fill_(pxm_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pxp_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pym_out[i], init)
+  --   end
+  --   for i = 0, nt2 do
+  --     fill_(pyp_out[i], init)
+  --   end
+  -- end
+
+  __demand(__spmd)
+  do
+    -- for i = 0, nt2 do
+    --   fill_(private[i], init)
+    -- end
+
+    for t = 0, tsteps do
+      -- __demand(__parallel)
+      for i = 0, nt2 do
+        stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == tprune)
+      end
+      -- __demand(__parallel)
+      for i = 0, nt2 do
+        increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - tprune - 1)
+      end
+    end
+
+    for i = 0, nt2 do
+      check(private[i], interior[i], tsteps, init)
+    end
   end
 end
-regentlib.start(main)
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local link_flags = {"-L" .. root_dir, "-lstencil", "-lstencil_mapper"}
+  regentlib.saveobj(main, "stencil", "executable", cmapper.register_mappers, link_flags)
+else
+  regentlib.start(main, cmapper.register_mappers)
+end

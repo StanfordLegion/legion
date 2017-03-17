@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 local std = require("bishop/std")
 local ast = require("bishop/ast")
 local regex = require("bishop/regex")
-local data = require("regent/data")
+local data = require("common/data")
 
 local function epsilon()
   return { epsilon = true }

@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 local ast = require("bishop/ast")
 local log = require("bishop/log")
 local std = require("bishop/std")
-local data = require("regent/data")
+local data = require("common/data")
 local automata = require("bishop/automata")
 local regex = require("bishop/regex")
 

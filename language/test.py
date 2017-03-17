@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2016 Stanford University
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,14 +16,14 @@
 #
 
 from __future__ import print_function
-import argparse, codecs, itertools, json, multiprocessing, os, optparse, re, subprocess, sys, tempfile, traceback
+import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, re, shutil, subprocess, sys, tempfile, traceback
 from collections import OrderedDict
 import regent
 
 _version = sys.version_info.major
 
 if _version == 2: # Python 2.x:
-    def glob(path):
+    def _glob(path):
         def visit(result, dirname, filenames):
             for filename in filenames:
                 result.append(os.path.join(dirname, filename))
@@ -31,7 +31,7 @@ if _version == 2: # Python 2.x:
         os.path.walk(path, visit, result)
         return result
 elif _version == 3: # Python 3.x:
-    def glob(path):
+    def _glob(path):
         return [os.path.join(dirname, filename)
                 for dirname, _, filenames in os.walk(path)
                 for filename in filenames]
@@ -48,6 +48,7 @@ def run(filename, debug, verbose, flags, env):
     args = ((['-mg'] if debug else []) +
             [os.path.basename(filename)] + flags +
             ([] if verbose else ['-level', '5']))
+    if verbose: print('Running', ' '.join(args))
     proc = regent.regent(
         args,
         stdout=None if verbose else subprocess.PIPE,
@@ -59,9 +60,17 @@ def run(filename, debug, verbose, flags, env):
     if retcode != 0:
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
 
-def run_spy(logfile, verbose):
+def run_spy(logfiles, verbose):
     cmd = ['pypy', os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
-           '-lpa', logfile]
+           '--logical',
+           '--physical',
+           '--cycle',
+           # '--sanity', # FIXME: This breaks on several test cases.
+           '--leaks',
+           # '--geometry', # FIXME: This is *very* slow.
+           '--assert-error',
+           '--assert-warning'] + logfiles
+    if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
         stdout=None if verbose else subprocess.PIPE,
@@ -98,23 +107,18 @@ def test_compile_fail(filename, debug, verbose, flags, env):
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
 
+    runs_with = find_labeled_flags(filename, 'runs-with')
     try:
-        run(filename, debug, False, flags, env)
+        for params in runs_with:
+            run(filename, debug, False, flags + params, env)
     except TestFailure as e:
-        lines = (line.strip() for line in e.output.strip().split('\n')
-                 if len(line.strip()) > 0)
-        lines = itertools.dropwhile(
-            (lambda line: 'Errors reported during' in line),
-            lines)
-        lines = itertools.takewhile(
-            (lambda line: line != 'stack traceback:' and
-             'Caught a fatal signal:' not in line and
-             '----------' not in line),
-            lines)
-        lines = OrderedDict((line, True) for line in lines).keys()
-        failure = '\n'.join(lines)
-        if failure != expected_failure:
-            raise Exception('Expected failure:\n%s\n\nInstead got:\n%s' % (expected_failure, failure))
+        failure = e.output
+        lines = set(line.strip() for line in failure.strip().split('\n')
+                    if len(line.strip()) > 0)
+        expected_lines = expected_failure.split('\n')
+        for expected_line in expected_lines:
+            if expected_line not in lines:
+                raise Exception('Command failed:\n%s\n\nExpected failure:\n%s\n\nInstead got:\n%s' % (e.command, expected_failure, failure))
     else:
         raise Exception('Expected failure, but test passed')
 
@@ -127,19 +131,21 @@ def test_run_pass(filename, debug, verbose, flags, env):
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
 def test_spy(filename, debug, verbose, flags, env):
-    spy_fd, spy_log = tempfile.mkstemp()
-    os.close(spy_fd)
+    spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
+    spy_log = os.path.join(spy_dir, 'spy_%.log')
     spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
 
     runs_with = find_labeled_flags(filename, 'runs-with')
     try:
         for params in runs_with:
             run(filename, debug, verbose, flags + params + spy_flags, env)
-            run_spy(spy_log, verbose)
+            spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
+            assert len(spy_logs) > 0
+            run_spy(spy_logs, verbose)
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
     finally:
-        os.remove(spy_log)
+        shutil.rmtree(spy_dir)
 
 red = "\033[1;31m"
 green = "\033[1;32m"
@@ -173,45 +179,59 @@ class Counter:
         self.failed = 0
 
 
-def get_test_specs(include_spy):
+def get_test_specs(only_spy, only_hdf5, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
-        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'], {})),
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'] + extra_flags, {})),
          (os.path.join('tests', 'regent', 'compile_fail'),
           os.path.join('tests', 'bishop', 'compile_fail'),
          )),
-        ('pretty', (test_run_pass, (['-fpretty', '1'], {})),
+        ('pretty', (test_run_pass, (['-fpretty', '1'] + extra_flags, {})),
          (os.path.join('tests', 'regent', 'run_pass'),
-          os.path.join('examples'),
-          os.path.join('..', 'tutorial'),
-         )),
-        ('run_pass', (test_run_pass, ([], {'REALM_BACKTRACE': '1'})),
-         (os.path.join('tests', 'regent', 'run_pass'),
+          os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
+         )),
+        ('run_pass', (test_run_pass, ([] + extra_flags, {'REALM_BACKTRACE': '1'})),
+         (os.path.join('tests', 'regent', 'run_pass'),
+          os.path.join('tests', 'regent', 'perf'),
+          os.path.join('tests', 'bishop', 'run_pass'),
+          os.path.join('examples'),
+          os.path.join('..', 'tutorial'),
+          os.path.join('tests', 'runtime', 'bugs'),
          )),
     ]
     spy = [
-        ('spy', (test_spy, ([], {})),
+        ('spy', (test_spy, ([] + extra_flags, {})),
          (os.path.join('tests', 'regent', 'run_pass'),
+          os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
          )),
     ]
-    if include_spy:
+    hdf5 = [
+        ('run_pass', (test_run_pass, ([] + extra_flags, {})),
+         (os.path.join('tests', 'hdf5', 'run_pass'),
+         )),
+    ]
+
+    if only_spy:
         return spy
+    elif only_hdf5:
+        return hdf5
     else:
         return base
 
-def run_all_tests(thread_count, debug, spy, verbose, quiet):
+def run_all_tests(thread_count, debug, spy, hdf5, extra_flags, verbose, quiet,
+                  only_patterns, skip_patterns):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
     # Run tests asynchronously.
-    tests = get_test_specs(spy)
+    tests = get_test_specs(spy, hdf5, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -219,11 +239,15 @@ def run_all_tests(thread_count, debug, spy, verbose, quiet):
                 test_paths.append(test_dir)
             else:
                 test_paths.extend(
-                    path for path in sorted(glob(test_dir))
+                    path for path in sorted(_glob(test_dir))
                     if os.path.isfile(path) and os.path.splitext(path)[1] in ('.rg', '.md'))
 
         for test_path in test_paths:
-            results.append(thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path)))
+            if only_patterns and not(any(re.search(p,test_path) for p in only_patterns)):
+                continue
+            if skip_patterns and any(re.search(p,test_path) for p in skip_patterns):
+                continue
+            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path))))
 
     thread_pool.close()
 
@@ -234,8 +258,16 @@ def run_all_tests(thread_count, debug, spy, verbose, quiet):
 
     all_saved_temps = []
     try:
-        for result in results:
-            test_name, filename, saved_temps, outcome, output = result.get()
+        for test_name, filename, result in results:
+            while True:
+                try:
+                    _test_name, _filename, saved_temps, outcome, output = result.get(timeout=60)
+                    assert _test_name == test_name and _filename == filename
+                except multiprocessing.TimeoutError:
+                    print('Potential Hang: (%s) %s' % (test_name, filename))
+                    sys.stdout.flush()
+                else:
+                    break
             if len(saved_temps) > 0:
                 all_saved_temps.append((test_name, filename, saved_temps))
             if outcome == PASS:
@@ -279,11 +311,11 @@ def run_all_tests(thread_count, debug, spy, verbose, quiet):
         for test_name, test_counter in test_counters.items():
             test_total = test_counter.passed + test_counter.failed
             if test_total > 0:
-                print('%24s: Passed %3d of %3d tests (%5.1f%%)' % (
+                print('%24s: Passed %4d of %4d tests (%5.1f%%)' % (
                     '%s' % test_name, test_counter.passed, test_total,
                     float(100*test_counter.passed)/test_total))
         print('    ' + '~'*54)
-        print('%24s: Passed %3d of %3d tests (%5.1f%%)' % (
+        print('%24s: Passed %4d of %4d tests (%5.1f%%)' % (
             'total', global_counter.passed, global_total,
             (float(100*global_counter.passed)/global_total)))
 
@@ -306,8 +338,18 @@ def test_driver(argv):
                         dest='debug')
     parser.add_argument('--spy', '-s',
                         action='store_true',
-                        help='enable Legion Spy mode',
+                        help='run Legion Spy tests',
                         dest='spy')
+    parser.add_argument('--hdf', '--hdf5',
+                        action='store_true',
+                        help='run HDF5 tests',
+                        dest='hdf5')
+    parser.add_argument('--extra',
+                        action='append',
+                        required=False,
+                        default=[],
+                        help='extra flags to use for each test',
+                        dest='extra_flags')
     parser.add_argument('-v',
                         action='store_true',
                         help='display verbose output',
@@ -316,14 +358,28 @@ def test_driver(argv):
                         action='store_true',
                         help='suppress passing test results',
                         dest='quiet')
+    parser.add_argument('--only',
+                        action='append',
+                        default=[],
+                        help='only run tests matching pattern',
+                        dest='only_patterns')
+    parser.add_argument('--skip',
+                        action='append',
+                        default=[],
+                        help='skip tests matching pattern',
+                        dest='skip_patterns')
     args = parser.parse_args(argv[1:])
 
     run_all_tests(
         args.thread_count,
         args.debug,
         args.spy,
+        args.hdf5,
+        args.extra_flags,
         args.verbose,
-        args.quiet)
+        args.quiet,
+        args.only_patterns,
+        args.skip_patterns)
 
 if __name__ == '__main__':
     test_driver(sys.argv)

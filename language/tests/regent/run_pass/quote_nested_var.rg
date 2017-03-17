@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,16 +12,21 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_partition_equal3.rg:25: type mismatch in argument 2: expected ispace with 1 dimensions but got ispace(int2d)
---   var p = partition(equal, r, c)
---                   ^
-
 import "regent"
 
+-- This tests a bug where a double-nested quote with a var was being
+-- alpha-converted prematurely (causing an undefined variable).
+
+local x = regentlib.newsymbol()
+local v = rquote var [x] = 123 end
+local q = rquote [v] end
+
 task f()
-  var r = region(ispace(int1d, 5), int)
-  var c = ispace(int2d, { x = 2, y = 2 })
-  var p = partition(equal, r, c)
+  [q]
+  return [x]
 end
-f:compile()
+
+task main()
+  regentlib.assert(f() == 123, "test failed")
+end
+regentlib.start(main)

@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 --
 
 local ast = require("regent/ast")
-local data = require("regent/data")
-local log = require("regent/log")
+local data = require("common/data")
+local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 
@@ -56,9 +56,16 @@ local S = {}
 S.__index = S
 function S:__tostring() return "scalar" end
 setmetatable(S, S)
+local C = {}
+C.__index = C
+function C:__tostring() return "vector-contiguous" end
+setmetatable(C, C)
 
 local function join(fact1, fact2)
-  if fact1 == fact2 then return fact1 else return V end
+  if fact1 == S then return fact2
+  elseif fact2 == S then return fact1
+  elseif fact1 == V or fact2 == V then return V
+  else assert(fact1 == C and fact2 == C) return C end
 end
 
 local context = {}
@@ -114,7 +121,7 @@ function context:join_expr_type(node, fact)
 end
 
 function context:report_error_when_demanded(node, error_msg)
-  if self.demanded then log.error(node, error_msg) end
+  if self.demanded then report.error(node, error_msg) end
 end
 
 function context:add_substitution(from, to)
@@ -148,11 +155,20 @@ function flip_types.stat(cx, simd_width, symbol, node)
     local values = terralib.newlist()
 
     for i = 1, #node.symbols do
-      types:insert(flip_types.type(simd_width, node.types[i]))
-      symbols:insert(std.newsymbol(types[i], node.symbols[i]:hasname() and node.symbols[i]:getname() .. "_vectorized"))
-      cx:add_substitution(node.symbols[i], symbols[i])
-      if i <= #node.values then
-        values:insert(flip_types.expr(cx, simd_width, symbol, node.values[i]))
+      local symbol = node.symbols[i]
+      if node.values[i] == nil or
+         cx:lookup_expr_type(node.values[i]) == V then
+        types:insert(flip_types.type(simd_width, node.types[i]))
+        symbols:insert(std.newsymbol(types[i],
+          symbol:hasname() and symbol:getname() .. "_vectorized"))
+        cx:add_substitution(symbol, symbols[i])
+        if i <= #node.values then
+          values:insert(flip_types.expr(cx, simd_width, symbol, node.values[i]))
+        end
+      else
+        types:insert(node.types[i])
+        symbols:insert(symbol)
+        if i <= #node.values then values:insert(node.values[i]) end
       end
     end
 
@@ -199,12 +215,16 @@ function flip_types.stat(cx, simd_width, symbol, node)
 end
 
 function flip_types.expr(cx, simd_width, symbol, node)
+  if cx:lookup_expr_type(node) == C then return node end
   local new_node = node:get_fields()
   if node:is(ast.typed.expr.FieldAccess) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
 
   elseif node:is(ast.typed.expr.IndexAccess) then
     new_node.value = flip_types.expr(cx, simd_width, symbol, node.value)
+    if cx:lookup_expr_type(node.index) == V then
+      new_node.index = flip_types.expr(cx, simd_width, symbol, node.index)
+    end
 
   elseif node:is(ast.typed.expr.Binary) then
     new_node.lhs = flip_types.expr(cx, simd_width, symbol, new_node.lhs)
@@ -282,7 +302,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
     end
 
   elseif node:is(ast.typed.expr.ID) then
-    if cx:lookup_expr_type(node) == V and not (node.value == symbol) then
+    if cx:lookup_expr_type(node) == V then
       local sym = cx:find_replacement(node.value)
       new_node.value = sym
     end
@@ -293,9 +313,7 @@ function flip_types.expr(cx, simd_width, symbol, node)
     assert(false, "unexpected node type " .. tostring(node:type()))
 
   end
-  if cx:lookup_expr_type(node) == V and
-    not (node:is(ast.typed.expr.ID) and node.value == symbol)
-  then
+  if cx:lookup_expr_type(node) == V then
     new_node.expr_type = flip_types.type(simd_width, new_node.expr_type)
   end
   return node:type()(new_node)
@@ -401,7 +419,7 @@ end
 
 function min_simd_width.expr(cx, reg_size, node)
   local simd_width = reg_size
-  if cx:lookup_expr_type(node) == V then
+  if cx:lookup_expr_type(node) ~= S then
     simd_width = min_simd_width.type(reg_size, std.as_read(node.expr_type))
   end
 
@@ -495,6 +513,21 @@ function vectorize.stat_for_list(cx, node)
   }
 end
 
+function vectorize.stat_for_num(cx, node)
+  local simd_width = min_simd_width.block(cx, SIMD_REG_SIZE, node.block)
+  assert(simd_width >= 1)
+  local body = flip_types.block(cx, simd_width, node.symbol, node.block)
+  return ast.typed.stat.ForNumVectorized {
+    symbol = node.symbol,
+    values = node.values,
+    block = body,
+    orig_block = node.block,
+    vector_width = simd_width,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 local function get_bounds(ty)
   if std.is_ref(ty) then
     return ty:bounds():map(function(bound)
@@ -558,11 +591,13 @@ function check_vectorizability.block(cx, node)
 end
 
 -- reject an aliasing between the read set and write set
-function check_vectorizability.check_aliasing(cx, write_set)
+function check_vectorizability.has_aliasing(cx, write_set)
   -- ignore write accesses directly to the region being iterated over
-  cx.loop_symbol:gettype():bounds():map(function(r)
-    write_set[r] = nil
-  end)
+  if std.is_bounded_type(cx.loop_symbol:gettype()) then
+    cx.loop_symbol:gettype():bounds():map(function(r)
+      write_set[r] = nil
+    end)
+  end
   for ty, fields in pairs(write_set) do
     if cx.read_set[ty] then
       for field_hash, pair in pairs(fields) do
@@ -577,11 +612,12 @@ function check_vectorizability.check_aliasing(cx, write_set)
           end
           cx:report_error_when_demanded(node, error_prefix ..
             "aliasing update of path " ..  tostring(ty) .. path)
-          return false
+          return true
         end
       end
     end
   end
+  return false
 end
 
 function check_vectorizability.stat(cx, node)
@@ -590,9 +626,11 @@ function check_vectorizability.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Var) then
     for i, symbol in pairs(node.symbols) do
+      local fact = V
       if #node.values > 0 then
         local value = node.values[i]
         if not check_vectorizability.expr(cx, value) then return false end
+        fact = cx:lookup_expr_type(value)
       end
 
       local ty = node.types[i]
@@ -604,7 +642,7 @@ function check_vectorizability.stat(cx, node)
           error_prefix .. "a variable declaration of an inadmissible type")
         return type_vectorizable
       end
-      cx:assign(symbol, V)
+      cx:assign(symbol, fact)
       node.values:map(function(value)
         collect_bounds(value):map(function(pair)
           local ty, field = unpack(pair)
@@ -673,7 +711,9 @@ function check_vectorizability.stat(cx, node)
           write_set[ty][field_hash] = data.newtuple(field, node)
         end
       end)
-      check_vectorizability.check_aliasing(cx, write_set)
+      if check_vectorizability.has_aliasing(cx, write_set) then
+        return false
+      end
     end
 
     return true
@@ -754,6 +794,9 @@ function check_vectorizability.stat(cx, node)
     elseif node:is(ast.typed.stat.EndTrace) then
       cx:report_error_when_demanded(node, error_prefix .. "a trace statement")
 
+    elseif node:is(ast.typed.stat.IndexLaunchList) then
+      cx:report_error_when_demanded(node, error_prefix .. "an inner loop")
+
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
     end
@@ -771,6 +814,12 @@ function check_vectorizability.expr(cx, node)
 
   elseif node:is(ast.typed.expr.FieldAccess) then
     if not check_vectorizability.expr(cx, node.value) then return false end
+    if cx:lookup_expr_type(node.value) == C and
+       not std.is_ref(node.expr_type) then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "an access to loop indicies")
+      return false
+    end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
     return true
 
@@ -786,16 +835,32 @@ function check_vectorizability.expr(cx, node)
       return false
     end
 
-    if not std.is_bounded_type(node.index.expr_type) and
-       cx:lookup_expr_type(node.index) ~= S then
-      cx:report_error_when_demanded(node,
-        error_prefix .. "an array access with a non-scalar index")
-      return false
+    if cx:lookup_expr_type(node.index) == V then
+      local value_type = std.as_read(node.value.expr_type)
+      -- TODO: We currently don't support scattered reads from structured regions
+      if std.is_region(value_type) and not value_type:is_opaque() then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "a scattered read from a structured region")
+        return false
+      -- TODO: This should be supported
+      elseif std.is_region(value_type) and value_type:is_opaque() and
+             not data.all(unpack(std.as_read(node.index.expr_type):bounds():map(function(ty)
+                   return std.type_eq(ty, value_type) end)))
+      then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "a scattered read from a different region")
+        return false
+      elseif value_type:isarray() then
+        cx:report_error_when_demanded(node,
+          error_prefix .. "an array access with non-contiguous values")
+        return false
+      end
     end
 
-    cx:assign_expr_type(node,
-      join(cx:lookup_expr_type(node.value),
-           cx:lookup_expr_type(node.index)))
+    local fact =
+      join(cx:lookup_expr_type(node.value), cx:lookup_expr_type(node.index))
+    if fact == C then fact = V end
+    cx:assign_expr_type(node, fact)
     return true
 
   elseif node:is(ast.typed.expr.Unary) then
@@ -816,9 +881,13 @@ function check_vectorizability.expr(cx, node)
       return false
     end
 
-    cx:assign_expr_type(node,
-      join(cx:lookup_expr_type(node.lhs),
-           cx:lookup_expr_type(node.rhs)))
+    local fact =
+      join(cx:lookup_expr_type(node.lhs), cx:lookup_expr_type(node.rhs))
+    if std.is_index_type(std.as_read(node.expr_type)) and
+       node.op == "%" and fact ~= S then
+       fact = V
+    end
+    cx:assign_expr_type(node, fact)
     return true
 
   elseif node:is(ast.typed.expr.Ctor) then
@@ -860,7 +929,15 @@ function check_vectorizability.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Deref) then
     if not check_vectorizability.expr(cx, node.value) then return false end
-    cx:assign_expr_type(node, cx:lookup_expr_type(node.value))
+    local fact = cx:lookup_expr_type(node.value)
+    if fact == C then fact = V
+    -- TODO: We currently don't support scattered reads from structured regions
+    elseif fact == V and not std.as_read(node.value.expr_type).index_type:is_opaque() then
+      cx:report_error_when_demanded(node, error_prefix ..
+        "a scattered read from a structured region")
+      return false
+    end
+    cx:assign_expr_type(node, fact)
     return true
 
   else
@@ -914,6 +991,14 @@ function check_vectorizability.expr(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "a raw operator")
 
+    elseif node:is(ast.typed.expr.Future) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a future creation")
+
+    elseif node:is(ast.typed.expr.FutureGetResult) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a future access")
+
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
     end
@@ -948,7 +1033,8 @@ function check_vectorizability.binary_op(op, arg_type)
      not (arg_type == float or arg_type == double) then
     return false
   end
-  return arg_type:isprimitive()
+  return arg_type:isprimitive() or
+         std.is_index_type(arg_type)
 end
 
 -- check if the type is admissible to vectorizer
@@ -996,13 +1082,23 @@ function vectorize_loops.stat_while(node)
 end
 
 function vectorize_loops.stat_for_num(node)
-  return node { block = vectorize_loops.block(node.block) }
+  local cx = context:new_global_scope(node.symbol)
+  cx:assign(node.symbol, C)
+  cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
+  assert(cx.demanded)
+
+  local vectorizable = check_vectorizability.block(cx, node.block)
+  if vectorizable and not bounds_checks then
+    return vectorize.stat_for_num(cx, node)
+  else
+    return node { block = vectorize_loops.block(node.block) }
+  end
 end
 
 function vectorize_loops.stat_for_list(node)
   if node.annotations.vectorize:is(ast.annotation.Forbid) then return node end
   local cx = context:new_global_scope(node.symbol)
-  cx:assign(node.symbol, V)
+  cx:assign(node.symbol, C)
   cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
 
   local vectorizable = check_vectorizability.block(cx, node.block)
@@ -1033,10 +1129,15 @@ function vectorize_loops.stat(node)
     return vectorize_loops.stat_while(node)
 
   elseif node:is(ast.typed.stat.ForNum) then
-    return vectorize_loops.stat_for_num(node)
+    if node.annotations.vectorize:is(ast.annotation.Demand) then
+      assert(std.config["vectorize-unsafe"])
+      return vectorize_loops.stat_for_num(node)
+    else
+      return node { block = vectorize_loops.block(node.block) }
+    end
 
   elseif node:is(ast.typed.stat.ForList) then
-    if std.is_bounded_type(node.symbol:gettype()) and node.symbol:gettype().dim <= 1 then
+    if std.is_bounded_type(node.symbol:gettype()) then
       return vectorize_loops.stat_for_list(node)
     else
       return node { block = vectorize_loops.block(node.block) }

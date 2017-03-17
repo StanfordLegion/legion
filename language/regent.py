@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright 2016 Stanford University
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -51,9 +51,12 @@ else:
 cuda_include_dir = os.path.join(cuda_dir, 'include') if cuda_dir is not None else None
 
 # Find RDIR.
-rdir_config_filename = os.path.join(regent_dir, '.rdir.json')
-rdir = load_json_config(rdir_config_filename)
-use_rdir = '1' if rdir in ['auto', 'manual'] else '0'
+if 'USE_RDIR' in os.environ:
+    use_rdir = os.environ['USE_RDIR']
+else:
+    rdir_config_filename = os.path.join(regent_dir, '.rdir.json')
+    rdir = load_json_config(rdir_config_filename)
+    use_rdir = '1' if rdir in ['auto', 'manual'] else '0'
 
 include_path = [
     bindings_dir,
@@ -108,6 +111,9 @@ def regent(args, env = {}, **kwargs):
         'LG_RT_DIR': runtime_dir,
         'USE_RDIR': use_rdir,
     }
+
+    if cuda_dir is not None:
+        terra_env['CUDA_HOME'] = cuda_dir
 
     cmd = []
     if 'LAUNCHER' in os.environ:

@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 -- directly rather than blocking in order to obtain a concrete value.
 
 local ast = require("regent/ast")
-local data = require("regent/data")
+local data = require("common/data")
 local std = require("regent/std")
 
 local context = {}
@@ -206,6 +206,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.ListRange) then
     return nil
 
+  elseif node:is(ast.typed.expr.ListIspace) then
+    return nil
+
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return nil
 
@@ -216,6 +219,9 @@ function analyze_var_flow.expr(cx, node)
     return analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
 
   elseif node:is(ast.typed.expr.Advance) then
+    return nil
+
+  elseif node:is(ast.typed.expr.Adjust) then
     return nil
 
   elseif node:is(ast.typed.expr.Arrive) then
@@ -234,6 +240,12 @@ function analyze_var_flow.expr(cx, node)
     return nil
 
   elseif node:is(ast.typed.expr.Release) then
+    return nil
+
+  elseif node:is(ast.typed.expr.AttachHDF5) then
+    return nil
+
+  elseif node:is(ast.typed.expr.DetachHDF5) then
     return nil
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
@@ -806,6 +818,13 @@ function optimize_futures.expr_list_range(cx, node)
   }
 end
 
+function optimize_futures.expr_list_ispace(cx, node)
+  local ispace = concretize(optimize_futures.expr(cx, node.ispace))
+  return node {
+    ispace = ispace,
+  }
+end
+
 function optimize_futures.expr_phase_barrier(cx, node)
   local value = concretize(optimize_futures.expr(cx, node.value))
   return node {
@@ -831,6 +850,15 @@ end
 function optimize_futures.expr_advance(cx, node)
   local value = concretize(optimize_futures.expr(cx, node.value))
   return node {
+    value = value,
+  }
+end
+
+function optimize_futures.expr_adjust(cx, node)
+  local barrier = concretize(optimize_futures.expr(cx, node.barrier))
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node {
+    barrier = barrier,
     value = value,
   }
 end
@@ -900,6 +928,24 @@ function optimize_futures.expr_release(cx, node)
   return node {
     region = region,
     conditions = conditions,
+  }
+end
+
+function optimize_futures.expr_attach_hdf5(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  local filename = concretize(optimize_futures.expr(cx, node.filename))
+  local mode = concretize(optimize_futures.expr(cx, node.mode))
+  return node {
+    region = region,
+    filename = filename,
+    mode = mode,
+  }
+end
+
+function optimize_futures.expr_detach_hdf5(cx, node)
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
+  return node {
+    region = region,
   }
 end
 
@@ -1069,6 +1115,9 @@ function optimize_futures.expr(cx, node)
   elseif node:is(ast.typed.expr.ListRange) then
     return optimize_futures.expr_list_range(cx, node)
 
+  elseif node:is(ast.typed.expr.ListIspace) then
+    return optimize_futures.expr_list_ispace(cx, node)
+
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return optimize_futures.expr_phase_barrier(cx, node)
 
@@ -1080,6 +1129,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Advance) then
     return optimize_futures.expr_advance(cx, node)
+
+  elseif node:is(ast.typed.expr.Adjust) then
+    return optimize_futures.expr_adjust(cx, node)
 
   elseif node:is(ast.typed.expr.Arrive) then
     return optimize_futures.expr_arrive(cx, node)
@@ -1098,6 +1150,12 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Release) then
     return optimize_futures.expr_release(cx, node)
+
+  elseif node:is(ast.typed.expr.AttachHDF5) then
+    return optimize_futures.expr_attach_hdf5(cx, node)
+
+  elseif node:is(ast.typed.expr.DetachHDF5) then
+    return optimize_futures.expr_detach_hdf5(cx, node)
 
   elseif node:is(ast.typed.expr.AllocateScratchFields) then
     return optimize_futures.expr_allocate_scratch_fields(cx, node)

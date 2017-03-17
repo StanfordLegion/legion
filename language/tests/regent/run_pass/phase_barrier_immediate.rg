@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@ import "regent"
 
 task main()
   var x = phase_barrier(2)
+  arrive(x)
+  adjust(x, 1) -- Add one more arriver.
   arrive(x)
   arrive(x)
   x = advance(x)

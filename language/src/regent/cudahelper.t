@@ -1,4 +1,4 @@
--- Copyright 2016 Stanford University
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 local config = require("regent/config")
-local log = require("regent/log")
+local report = require("common/report")
 
 local cudahelper = {}
 cudahelper.check_cuda_available = function() return false end
@@ -41,6 +41,7 @@ end
 --
 
 local ef = terralib.externfunction
+local externcall_builtin = terralib.externfunction
 
 local RuntimeAPI = terralib.includec("cuda_runtime.h")
 local HijackAPI = terralib.includec("legion_terra_cudart_hijack.h")
@@ -122,7 +123,7 @@ local terra init_cuda() : int32
     r = DriverAPI.cuCtxGetDevice(&d)
     assert(r == 0, "CUDA error in cuCtxGetDevice")
   else
-    var stderr = C.fdopen(2, "w")
+    r = DriverAPI.cuDeviceGet(&d, 0)
     assert(r == 0, "CUDA error in cuDeviceGet")
     r = DriverAPI.cuCtxCreate_v2(&cx, 0, d)
     assert(r == 0, "CUDA error in cuCtxCreate_v2")
@@ -154,7 +155,7 @@ local terra register_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) :
   fat_bin.magic = 1234
   fat_bin.versions = 5678
   fat_bin.data = C.malloc(ptxSize + 1)
-  C.memcpy(fat_bin.data, ptxc, ptxSize + 1)
+  fat_bin.data = ptxc
   var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
   return handle
 end
@@ -170,15 +171,33 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   end
   local device = init_cuda()
   local version = get_cuda_version(device)
+  local libdevice =
+    terralib.cudahome..
+    string.format("/nvvm/libdevice/libdevice.compute_%d.10.bc",
+                  tonumber(version))
+  local llvmbc = terralib.linkllvm(libdevice)
+  externcall_builtin = function(name, ftype)
+    return llvmbc:extern(name, ftype)
+  end
   local ptx = cudalib.toptx(module, nil, version)
-  local handle = register_ptx(ptx, #ptx, version)
+
+  local ptxc = terralib.constant(ptx)
+  local handle = terralib.newsymbol(&&opaque, "handle")
+  local register = quote
+    var [handle] = register_ptx(ptxc, [ptx:len() + 1], [version])
+  end
 
   for k, v in pairs(kernels) do
-    register_function(handle, k, v.name)
+    register = quote
+      [register]
+      register_function([handle], [k], [v.name])
+    end
   end
+
+  return register
 end
 
-function cudahelper.codegen_kernel_call(kernel_id, count, args, N, T)
+function cudahelper.codegen_kernel_call(kernel_id, counts, args)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -191,16 +210,83 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, N, T)
     offset = offset + size
   end
 
+  local grid = terralib.newsymbol(RuntimeAPI.dim3, "grid")
+  local block = terralib.newsymbol(RuntimeAPI.dim3, "block")
+  local launch_domain_init
+
+  local function round_exp(v, n)
+    return `((v + (n - 1)) / n)
+  end
+
+  -- TODO: Make this handle different thread block sizes and access strides
+  if #counts == 1 then
+    local threadSizeX = 128
+    launch_domain_init = quote
+      [grid].x, [grid].y, [grid].z =
+        [round_exp(counts[1], threadSizeX)], 1, 1
+      [block].x, [block].y, [block].z =
+        threadSizeX, 1, 1
+    end
+  elseif #counts == 2 then
+    local threadSizeX = 16
+    local threadSizeY = 16
+    launch_domain_init = quote
+      [grid].x, [grid].y, [grid].z =
+        [round_exp(counts[1], threadSizeX)],
+        [round_exp(counts[2], threadSizeY)], 1
+      [block].x, [block].y, [block].z =
+        [threadSizeX], [threadSizeY], 1
+    end
+  elseif #counts == 3 then
+    local threadSizeX = 16
+    local threadSizeY = 8
+    local threadSizeZ = 2
+    launch_domain_init = quote
+      [grid].x, [grid].y, [grid].z =
+        [round_exp(counts[1], threadSizeX)],
+        [round_exp(counts[2], threadSizeY)],
+        [round_exp(counts[3], threadSizeZ)]
+      [block].x, [block].y, [block].z =
+        [threadSizeX], [threadSizeY], [threadSizeZ]
+    end
+  else
+    assert(false, "Indexspaces more than 3 dimensions are not supported")
+  end
+
   return quote
-    var grid : RuntimeAPI.dim3, block : RuntimeAPI.dim3
-    var threadsPerBlock : uint = T -- hard-coded for the moment
-    var numBlocks : uint = (([count] + (N - 1)) / N + (threadsPerBlock - 1)) / threadsPerBlock
-    grid.x, grid.y, grid.z = numBlocks, 1, 1
-    block.x, block.y, block.z = threadsPerBlock, 1, 1
-    RuntimeAPI.cudaConfigureCall(grid, block, 0, nil)
-    [setupArguments];
+    var [grid], [block]
+    [launch_domain_init]
+    RuntimeAPI.cudaConfigureCall([grid], [block], 0, nil)
+    [setupArguments]
     RuntimeAPI.cudaLaunch([&int8](kernel_id))
   end
+end
+
+local builtin_gpu_fns = {
+  acos  = externcall_builtin("__nv_acos"  , double -> double),
+  asin  = externcall_builtin("__nv_asin"  , double -> double),
+  atan  = externcall_builtin("__nv_atan"  , double -> double),
+  cbrt  = externcall_builtin("__nv_cbrt"  , double -> double),
+  ceil  = externcall_builtin("__nv_ceil"  , double -> double),
+  cos   = externcall_builtin("__nv_cos"   , double -> double),
+  fabs  = externcall_builtin("__nv_fabs"  , double -> double),
+  floor = externcall_builtin("__nv_floor" , double -> double),
+  fmod  = externcall_builtin("__nv_fmod"  , {double, double} -> double),
+  log   = externcall_builtin("__nv_log"   , double -> double),
+  pow   = externcall_builtin("__nv_pow"   , {double, double} -> double),
+  sin   = externcall_builtin("__nv_sin"   , double -> double),
+  sqrt  = externcall_builtin("__nv_sqrt"  , double -> double),
+  tan   = externcall_builtin("__nv_tan"   , double -> double),
+}
+
+local cpu_fn_to_gpu_fn = {}
+
+function cudahelper.register_builtin(name, cpu_fn)
+  cpu_fn_to_gpu_fn[cpu_fn] = builtin_gpu_fns[name]
+end
+
+function cudahelper.replace_with_builtin(fn)
+  return cpu_fn_to_gpu_fn[fn] or fn
 end
 
 return cudahelper
