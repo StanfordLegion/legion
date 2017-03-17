@@ -1953,6 +1953,10 @@ namespace Legion {
       // so that users can easily iterate over the points
       template<int DIM, typename COORD_T>
       operator Realm::ZIndexSpace<DIM,COORD_T>(void) const;
+      // They can implicitly cast to a rectangle if there is no
+      // sparsity map, runtime will check for this
+      template<int DIM, typename COORD_T>
+      operator Realm::ZRect<DIM,COORD_T>(void) const;
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
     };

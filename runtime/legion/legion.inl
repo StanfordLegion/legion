@@ -1842,6 +1842,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalRegion::operator Realm::ZRect<DIM,T>(void) const
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> result;
+      get_bounds(&result, Internal::NT_TemplateHelper::encode_tag<DIM,T>());
+#ifdef DEBUG_LEGION
+      assert(result.dense());
+#endif
+      return result.bounds;
+    }
+
+    //--------------------------------------------------------------------------
     inline bool IndexIterator::has_next(void) const
     //--------------------------------------------------------------------------
     {
