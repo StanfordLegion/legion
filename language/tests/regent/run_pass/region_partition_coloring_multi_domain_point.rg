@@ -40,7 +40,9 @@ task f() : int
   c.legion_multi_domain_point_coloring_destroy(rc)
   var r0 = p[0]
 
-  fill(r, 1)
+  -- FIXME: Fills are buggy in this branch so use loops to set these values
+  -- fill(r, 1)
+  for i in r do r[i] = 1 end
   fill(r0, 10)
 
   var t = 0
