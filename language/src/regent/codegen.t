@@ -5500,6 +5500,7 @@ local function expr_acquire_setup_list(
 end
 
 function codegen.expr_acquire(cx, node)
+  assert(false, "acquire doesn't work on this branch, please don't use it")
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
   local conditions = node.conditions:map(
@@ -5628,6 +5629,7 @@ local function expr_release_setup_list(
 end
 
 function codegen.expr_release(cx, node)
+  assert(false, "release doesn't work on this branch, please don't use it")
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
   local conditions = node.conditions:map(
