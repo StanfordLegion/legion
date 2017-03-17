@@ -1949,6 +1949,10 @@ namespace Legion {
       Realm::ZIndexSpace<DIM,COORD_T> get_bounds(void) const;
       // Get the privileges with which the accessor can be used 
       Realm::AccessorPrivilege get_accessor_privileges(void) const;
+      // We'll also allow this to implicitly cast to a realm index space
+      // so that users can easily iterate over the points
+      template<int DIM, typename COORD_T>
+      operator Realm::ZIndexSpace<DIM,COORD_T>(void) const;
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
     };
