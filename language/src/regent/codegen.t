@@ -3430,7 +3430,7 @@ function codegen.expr_region(cx, node)
 
   local field_paths, field_types = std.flatten_struct_fields(fspace_type)
   local field_privileges = field_paths:map(function(_) return "reads_writes" end)
-  local field_id = 100
+  local field_id = 10000
   local field_ids = field_paths:map(
     function(_)
       field_id = field_id + 1
