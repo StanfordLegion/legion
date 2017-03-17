@@ -1292,9 +1292,9 @@ namespace Realm {
   inline AffineAccessor<FT,N,T>::AffineAccessor(const INST &inst, unsigned fid)
   {
     ptrdiff_t field_offset = 0;
-    RegionInstance instance = inst.template get_instance<N,T>(fid, field_offset);
+    RegionInstance instance = inst.get_instance(fid, field_offset);
     const AffineLinearizedIndexSpace<N,T>& alis = 
-      dynamic_cast<const AffineLinearizedIndexSpace<N,T>&>(instance);
+      dynamic_cast<const AffineLinearizedIndexSpace<N,T>&>(instance.get_lis());
     ptrdiff_t element_stride;
     instance.get_strided_access_parameters(0, alis.volume, field_offset,
                                            sizeof(FT), base, element_stride);
@@ -1304,14 +1304,14 @@ namespace Realm {
     for(int i = 0; i < N; i++)
       strides[i] = element_stride * alis.strides[i];
 #ifdef REALM_ACCESSOR_DEBUG
-    dbg_inst = inst;
+    dbg_inst = instance;
     dbg_bounds = alis.dbg_bounds;
 #endif
 #ifdef PRIVILEGE_CHECKS
     privileges = inst.get_accessor_privileges();
 #endif
 #ifdef BOUNDS_CHECKS
-    bounds = inst.get_bounds();
+    bounds = inst.template get_bounds<N,T>();
 #endif
   }
 
