@@ -51,7 +51,7 @@ namespace Legion {
                           const std::set<LogicalRegion> &regions) = 0;
     public:
       virtual void register_field_creations(
-                const std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
+            const std::map<std::pair<FieldSpace,FieldID>,bool> &fields) = 0;
       virtual void register_field_deletions(
                 const std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
     public:
@@ -71,12 +71,14 @@ namespace Legion {
                           const std::set<IndexPartition> &parts) = 0;
     public:
       void return_privilege_state(ResourceTracker *target) const;
-      void pack_privilege_state(Serializer &rez, AddressSpaceID target) const;
+      void pack_privilege_state(Serializer &rez, 
+                                AddressSpaceID target, bool returning) const;
       static void unpack_privilege_state(Deserializer &derez,
                                          ResourceTracker *target);
     protected:
       std::set<LogicalRegion>                   created_regions;
-      std::set<std::pair<FieldSpace,FieldID> >  created_fields;
+      std::map<std::pair<FieldSpace,FieldID>,
+               bool/*local*/>                   created_fields;
       std::set<FieldSpace>                      created_field_spaces;
       std::set<IndexSpace>                      created_index_spaces;
       std::set<IndexPartition>                  created_index_partitions;
@@ -988,7 +990,7 @@ namespace Legion {
                           const std::set<LogicalRegion> &regions);
     public:
       virtual void register_field_creations(
-                const std::set<std::pair<FieldSpace,FieldID> > &fields);
+            const std::map<std::pair<FieldSpace,FieldID>,bool> &fields);
       virtual void register_field_deletions(
                 const std::set<std::pair<FieldSpace,FieldID> > &fields);
     public:

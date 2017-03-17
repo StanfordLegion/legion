@@ -34,25 +34,6 @@ namespace Legion {
     class TaskContext : public ContextInterface, 
                         public ResourceTracker, public Collectable {
     public:
-      // A struct for keeping track of local field information
-      struct LocalFieldInfo {
-      public:
-        LocalFieldInfo(void)
-          : handle(FieldSpace::NO_SPACE), fid(0),
-            field_size(0), reclaim_event(RtEvent::NO_RT_EVENT),
-            serdez_id(0) { }
-        LocalFieldInfo(FieldSpace sp, FieldID f,
-                       size_t size, RtEvent reclaim,
-                       CustomSerdezID sid)
-          : handle(sp), fid(f), field_size(size),
-            reclaim_event(reclaim), serdez_id(sid) { }
-      public:
-        FieldSpace     handle;
-        FieldID        fid;
-        size_t         field_size;
-        RtEvent        reclaim_event;
-        CustomSerdezID serdez_id;
-      }; 
       struct ReclaimLocalFieldArgs : public LgTaskArgs<ReclaimLocalFieldArgs> {
       public:
         static const LgTaskID TASK_ID = LG_RECLAIM_LOCAL_FIELD_ID;
@@ -407,7 +388,7 @@ namespace Legion {
                           const std::set<LogicalRegion> &regions);
     public:
       virtual void register_field_creations(
-                const std::set<std::pair<FieldSpace,FieldID> > &fields);
+            const std::map<std::pair<FieldSpace,FieldID>,bool> &fields);
       virtual void register_field_deletions(
                 const std::set<std::pair<FieldSpace,FieldID> > &fields);
     public:
@@ -429,8 +410,8 @@ namespace Legion {
       void register_region_creation(LogicalRegion handle);
       void register_region_deletion(LogicalRegion handle);
     public:
-      void register_field_creation(FieldSpace space, FieldID fid);
-      void register_field_creations(FieldSpace space, 
+      void register_field_creation(FieldSpace space, FieldID fid, bool local);
+      void register_field_creations(FieldSpace space, bool local,
                                     const std::vector<FieldID> &fields);
       void register_field_deletions(FieldSpace space,
                                     const std::set<FieldID> &to_free);
@@ -449,14 +430,6 @@ namespace Legion {
     public:
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
-    public:
-      void add_local_field(FieldSpace handle, FieldID fid, 
-                           size_t size, CustomSerdezID serdez_id);
-      void add_local_fields(FieldSpace handle, 
-                            const std::vector<FieldID> &fields,
-                            const std::vector<size_t> &fields_sizes,
-                            CustomSerdezID serdez_id);
-      void allocate_local_field(const LocalFieldInfo &info);
     public:
       ptr_t perform_safe_cast(IndexSpace is, ptr_t pointer);
       DomainPoint perform_safe_cast(IndexSpace is, const DomainPoint &point);
@@ -542,9 +515,6 @@ namespace Legion {
       void remap_unmapped_regions(LegionTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions);
     public:
-      // Override by RemoteContext to avoid unnecessary recursion
-      virtual void find_enclosing_local_fields(
-        LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
       void perform_inlining(TaskContext *ctx, VariantImpl *variant); 
     public:
       Runtime *const runtime;
@@ -580,7 +550,6 @@ namespace Legion {
       // Resources that can build up over a task's lifetime
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
       LegionDeque<ApBarrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
-      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked local_fields;
     protected:
       // Some help for performing fast safe casts
       std::map<IndexSpace,Domain> safe_cast_domains;   
@@ -1114,9 +1083,6 @@ namespace Legion {
                                                AddressSpaceID source);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, VersionInfo &version_info);
-    public:
-      virtual void find_enclosing_local_fields(
-        LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos);
     protected:
       UniqueID parent_context_uid;
       TaskContext *parent_ctx;
