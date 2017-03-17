@@ -477,9 +477,10 @@ do
         var e = s
 
         var p1_pxp = p1.pxp
-        e.exp = 0.5*(p1_pxp + p2.pxp)
+        e.exp = vec2_mul_lhs(0.5, vec2_add(p1_pxp, p2.pxp))
 
-        z.zxp += p1_pxp
+        z.zxp.x += p1_pxp.x
+        z.zxp.y += p1_pxp.y
       end
     else
       __demand(__vectorize)
@@ -492,22 +493,23 @@ do
         var e = s
 
         var p1_pxp = p1.pxp
-        e.exp = 0.5*(p1_pxp + p2.pxp)
+        e.exp = vec2_mul_lhs(0.5, vec2_add(p1_pxp, p2.pxp))
 
-        z.zxp += p1_pxp
+        z.zxp.x += p1_pxp.x
+        z.zxp.y += p1_pxp.y
       end
     end
     __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
-      z.zxp.x = z.zxp.x/double(z.znump) -- FIXME: This fails with /=
+      z.zxp.x *= 1 / [double](z.znump)
     end
     __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
-      z.zxp.y = z.zxp.y/double(z.znump) -- FIXME: This fails with /=
+      z.zxp.y *= 1 / [double](z.znump)
     end
 
     -- Compute volumes of zones and sides.
@@ -526,7 +528,7 @@ do
     end
     if s_span.internal then
       var numsbad = 0
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -536,11 +538,11 @@ do
 
         var p1_pxp = p1.pxp
         var p2_pxp = p2.pxp
-        var sa = 0.5 * cross(p2_pxp - p1_pxp, z.zxp - p1_pxp)
+        var sa = 0.5 * vec2_cross(vec2_sub(p2_pxp, p1_pxp), vec2_sub(z.zxp, p1_pxp))
         var sv = sa * (p1_pxp.x + p2_pxp.x + z.zxp.x)
         s.sareap = sa
         -- s.svolp = sv
-        s.elen = length(p2_pxp - p1_pxp)
+        s.elen = vec2_length(vec2_sub(p2_pxp, p1_pxp))
 
         z.zareap += sa
         z.zvolp += sv
@@ -550,7 +552,7 @@ do
       regentlib.assert(numsbad == 0, "sv negative")
     else
       var numsbad = 0
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -560,11 +562,11 @@ do
 
         var p1_pxp = p1.pxp
         var p2_pxp = p2.pxp
-        var sa = 0.5 * cross(p2_pxp - p1_pxp, z.zxp - p1_pxp)
+        var sa = 0.5 * vec2_cross(vec2_sub(p2_pxp, p1_pxp), vec2_sub(z.zxp, p1_pxp))
         var sv = sa * (p1_pxp.x + p2_pxp.x + z.zxp.x)
         s.sareap = sa
         -- s.svolp = sv
-        s.elen = length(p2_pxp - p1_pxp)
+        s.elen = vec2_length(vec2_sub(p2_pxp, p1_pxp))
 
         z.zareap += sa
         z.zvolp += sv
@@ -597,12 +599,7 @@ do
 
         var area = s.sareap
         var base = e.elen
-        var fac = 0.0
-        if z.znump == 3 then
-          fac = 3.0
-        else
-          fac = 4.0
-        end
+        var fac = 3.0 + [int](z.znump ~= 3) * 1.0
         var sdl = fac * area / base
         z.zdl min= sdl
       end
@@ -738,7 +735,8 @@ do
         var z = s.mapsz
         var p1 = unsafe_cast(ptr(point, rpp), s.mapsp1)
 
-        z.zuc += p1.pu
+        z.zuc.x += p1.pu.x
+        z.zuc.y += p1.pu.y
       end
     else
       __demand(__vectorize)
@@ -748,20 +746,21 @@ do
         var z = s.mapsz
         var p1 = s.mapsp1
 
-        z.zuc += p1.pu
+        z.zuc.x += p1.pu.x
+        z.zuc.y += p1.pu.y
       end
     end
     __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
-      z.zuc.x = z.zuc.x/z.znump -- FIXME: This fails with /=
+      z.zuc.x *= 1 / [double](z.znump)
     end
     __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
-      z.zuc.y = z.zuc.y/z.znump -- FIXME: This fails with /=
+      z.zuc.y *= 1 / [double](z.znump)
     end
 
     -- QCS corner divergence.
@@ -1212,9 +1211,10 @@ do
         var e = s
 
         var p1_px = p1.px
-        e.ex = 0.5*(p1_px + p2.px)
+        e.ex = vec2_mul_lhs(0.5, vec2_add(p1_px, p2.px))
 
-        z.zx += p1_px
+        z.zx.x += p1_px.x
+        z.zx.y += p1_px.y
       end
     else
       __demand(__vectorize)
@@ -1227,22 +1227,23 @@ do
         var e = s
 
         var p1_px = p1.px
-        e.ex = 0.5*(p1_px + p2.px)
+        e.ex = vec2_mul_lhs(0.5, vec2_add(p1_px, p2.px))
 
-        z.zx += p1_px
+        z.zx.x += p1_px.x
+        z.zx.y += p1_px.y
       end
     end
     __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
-      z.zx.x = z.zx.x/double(z.znump) -- FIXME: This fails with /=
+      z.zx.x *= 1 / [double](z.znump)
     end
     __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
-      z.zx.y = z.zx.y/double(z.znump) -- FIXME: This fails with /=
+      z.zx.y *= 1 / [double](z.znump)
     end
 
     -- Calc volumes.
@@ -1260,7 +1261,7 @@ do
     end
     if s_span.internal then
       var numsbad = 0
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1283,7 +1284,7 @@ do
       regentlib.assert(numsbad == 0, "sv negative")
     else
       var numsbad = 0
-      __demand(__vectorize)
+      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1331,9 +1332,9 @@ do
         var p1 = unsafe_cast(ptr(point, rpp), s.mapsp1)
         var p2 = unsafe_cast(ptr(point, rpp), s.mapsp2)
 
-        var sftot = s.sfp + s.sfq
-        var sd1 = dot(sftot, p1.pu0 + p1.pu)
-        var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
+        var sftot = vec2_add(s.sfp, s.sfq)
+        var sd1 = vec2_dot(sftot, vec2_add(p1.pu0, p1.pu))
+        var sd2 = vec2_dot(vec2_mul_lhs(-1.0, sftot), vec2_add(p2.pu0, p2.pu))
         var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
         z.zetot += dwork
@@ -1348,9 +1349,9 @@ do
         var p1 = s.mapsp1
         var p2 = s.mapsp2
 
-        var sftot = s.sfp + s.sfq
-        var sd1 = dot(sftot, p1.pu0 + p1.pu)
-        var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
+        var sftot = vec2_add(s.sfp, s.sfq)
+        var sd1 = vec2_dot(sftot, vec2_add(p1.pu0, p1.pu))
+        var sd2 = vec2_dot(vec2_mul_lhs(-1.0, sftot), vec2_add(p2.pu0, p2.pu))
         var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
         z.zetot += dwork
@@ -1419,7 +1420,7 @@ do
   do
     var fuzz = 1e-99
     var dtnew = dtmax
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for z in rz do
       var cdu = max(z.zdu, max(z.zss, fuzz))
       var zdthyd = z.zdl * cfl / cdu
@@ -1433,7 +1434,7 @@ do
   -- Calc dt volume.
   do
     var dvovmax = 1e-99
-    __demand(__vectorize)
+    --__demand(__vectorize)
     for z in rz do
       var zdvov = abs((z.zvol - z.zvol0) / z.zvol0)
       dvovmax max= zdvov
