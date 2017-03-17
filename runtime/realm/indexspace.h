@@ -1884,9 +1884,9 @@ namespace Realm {
 
     // for higher-level interfaces to use, the INST type must implement the following methods
     // - RegionInstance get_instance(unsigned field_id, ptrdiff_t &field_offset)
-    // - ZIndexSpace<N,T> get_bounds(void)
-    // - AccessorPrivilege get_accessor_privileges(void)
-    template<typename INST>
+    // - ZIndexSpace<N,T> get_bounds(void) -- for bounds checks
+    // - AccessorPrivilege get_accessor_privileges(void) -- for privilege checks
+    template <typename INST>
     AffineAccessor(const INST &instance, unsigned field_id);
 
     ~AffineAccessor(void);
