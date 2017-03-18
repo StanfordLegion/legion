@@ -395,7 +395,7 @@ where
   reads(rz.{zxp, znump}, rpp.pxp, rpg.pxp, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.{zareap, zvolp}, rs.{sareap, elen}),
 
-  reads(rz.{zdl, znump}, rs.{mapsz, sareap, elen}),
+  reads(rz.znump, rs.{mapsz, sareap, elen}),
   writes(rz.zdl),
 
   reads(rz.{zvolp, zm}),
@@ -454,20 +454,9 @@ do
     --
 
     -- Compute centers of zones and edges.
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zxp.x = 0.0
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zxp.y = 0.0
-    end
     if s_span.internal then
-      __demand(__vectorize)
+      var zxp = vec2 { x = 0.0, y = 0.0 }
+      var nside = 1
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -479,11 +468,18 @@ do
         var p1_pxp = p1.pxp
         e.exp = vec2_mul_lhs(0.5, vec2_add(p1_pxp, p2.pxp))
 
-        z.zxp.x += p1_pxp.x
-        z.zxp.y += p1_pxp.y
+        zxp += p1_pxp
+
+        if nside == z.znump then
+          z.zxp = (1/double(z.znump)) * zxp
+          zxp = vec2 { x = 0.0, y = 0.0 }
+          nside = 0
+        end
+        nside += 1
       end
     else
-      __demand(__vectorize)
+      var zxp = vec2 { x = 0.0, y = 0.0 }
+      var nside = 1
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -495,40 +491,24 @@ do
         var p1_pxp = p1.pxp
         e.exp = vec2_mul_lhs(0.5, vec2_add(p1_pxp, p2.pxp))
 
-        z.zxp.x += p1_pxp.x
-        z.zxp.y += p1_pxp.y
+        zxp += p1_pxp
+
+        if nside == z.znump then
+          z.zxp = (1/double(z.znump)) * zxp
+          zxp = vec2 { x = 0.0, y = 0.0 }
+          nside = 0
+        end
+        nside += 1
       end
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zxp.x *= 1 / [double](z.znump)
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zxp.y *= 1 / [double](z.znump)
     end
 
     -- Compute volumes of zones and sides.
     -- Compute edge lengths.
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zareap = 0.0
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zvolp = 0.0
-    end
     if s_span.internal then
+      var zareap = 0.0
+      var zvolp = 0.0
+      var nside = 1
       var numsbad = 0
-      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -544,15 +524,26 @@ do
         -- s.svolp = sv
         s.elen = vec2_length(vec2_sub(p2_pxp, p1_pxp))
 
-        z.zareap += sa
-        z.zvolp += sv
+        zareap += sa
+        zvolp += sv
+
+        if nside == z.znump then
+          z.zareap = zareap
+          z.zvolp = (1.0 / 3.0) * zvolp
+          zareap = 0.0
+          zvolp = 0.0
+          nside = 0
+        end
+        nside += 1
 
         numsbad += int(sv <= 0.0)
       end
       regentlib.assert(numsbad == 0, "sv negative")
     else
+      var zareap = 0.0
+      var zvolp = 0.0
+      var nside = 1
       var numsbad = 0
-      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -568,29 +559,27 @@ do
         -- s.svolp = sv
         s.elen = vec2_length(vec2_sub(p2_pxp, p1_pxp))
 
-        z.zareap += sa
-        z.zvolp += sv
+        zareap += sa
+        zvolp += sv
+
+        if nside == z.znump then
+          z.zareap = zareap
+          z.zvolp = (1.0 / 3.0) * zvolp
+          zareap = 0.0
+          zvolp = 0.0
+          nside = 0
+        end
+        nside += 1
 
         numsbad += int(sv <= 0.0)
       end
       regentlib.assert(numsbad == 0, "sv negative")
     end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zvolp *= (1.0 / 3.0)
-    end
 
     -- Compute zone characteristic lengths.
     do
-      __demand(__vectorize)
-      for z_raw = z_span.start, z_span.stop do
-        var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-        z.zdl = 1e99
-      end
-      __demand(__vectorize)
+      var zdl = 1e99
+      var nside = 1
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -601,7 +590,14 @@ do
         var base = e.elen
         var fac = 3.0 + [int](z.znump ~= 3) * 1.0
         var sdl = fac * area / base
-        z.zdl min= sdl
+        zdl = min(zdl, sdl)
+
+        if nside == z.znump then
+          z.zdl = zdl
+          zdl = 1e99
+          nside = 0
+        end
+        nside += 1
       end
     end
 
@@ -715,52 +711,42 @@ do
     -- Compute QCS forces.
 
     -- QCS zone center velocity.
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zuc.x = 0.0
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zuc.y = 0.0
-    end
     if s_span.internal then
-      __demand(__vectorize)
+      var zuc = vec2 { x = 0.0, y = 0.0 }
+      var nside = 1
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
         var z = s.mapsz
         var p1 = unsafe_cast(ptr(point, rpp), s.mapsp1)
 
-        z.zuc.x += p1.pu.x
-        z.zuc.y += p1.pu.y
+        zuc += (1.0 / double(z.znump))*p1.pu
+
+        if nside == z.znump then
+          z.zuc = zuc
+          zuc = vec2 { x = 0.0, y = 0.0 }
+          nside = 0
+        end
+        nside += 1
       end
     else
-      __demand(__vectorize)
+      var zuc = vec2 { x = 0.0, y = 0.0 }
+      var nside = 1
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
         var z = s.mapsz
         var p1 = s.mapsp1
 
-        z.zuc.x += p1.pu.x
-        z.zuc.y += p1.pu.y
+        zuc += (1.0 / double(z.znump))*p1.pu
+
+        if nside == z.znump then
+          z.zuc = zuc
+          zuc = vec2 { x = 0.0, y = 0.0 }
+          nside = 0
+        end
+        nside += 1
       end
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zuc.x *= 1 / [double](z.znump)
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zuc.y *= 1 / [double](z.znump)
     end
 
     -- QCS corner divergence.
@@ -1166,7 +1152,7 @@ where
   reads(rz.znump, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.zx, rs.ex),
 
-  reads(rz.{zx, zarea, znump}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
+  reads(rz.{zx, znump}, rpp.px, rpg.px, rs.{mapsz, mapsp1, mapsp2}),
   writes(rz.{zarea, zvol}, rs.{sarea}),
 
   reads(rz.{zetot, znump}, rpp.{pxp, pu0, pu}, rpg.{pxp, pu0, pu},
@@ -1188,20 +1174,9 @@ do
     --
 
     -- Calc centers.
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zx.x = 0.0
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zx.y = 0.0
-    end
     if s_span.internal then
-      __demand(__vectorize)
+      var zx = vec2 { x = 0.0, y = 0.0 }
+      var nside = 1
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1213,11 +1188,18 @@ do
         var p1_px = p1.px
         e.ex = vec2_mul_lhs(0.5, vec2_add(p1_px, p2.px))
 
-        z.zx.x += p1_px.x
-        z.zx.y += p1_px.y
+        zx += p1_px
+
+        if nside == z.znump then
+          z.zx = (1/double(z.znump)) * zx
+          zx = vec2 { x = 0.0, y = 0.0 }
+          nside = 0
+        end
+        nside += 1
       end
     else
-      __demand(__vectorize)
+      var zx = vec2 { x = 0.0, y = 0.0 }
+      var nside = 1
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1229,39 +1211,23 @@ do
         var p1_px = p1.px
         e.ex = vec2_mul_lhs(0.5, vec2_add(p1_px, p2.px))
 
-        z.zx.x += p1_px.x
-        z.zx.y += p1_px.y
+        zx += p1_px
+
+        if nside == z.znump then
+          z.zx = (1/double(z.znump)) * zx
+          zx = vec2 { x = 0.0, y = 0.0 }
+          nside = 0
+        end
+        nside += 1
       end
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zx.x *= 1 / [double](z.znump)
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zx.y *= 1 / [double](z.znump)
     end
 
     -- Calc volumes.
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zarea = 0.0
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zvol = 0.0
-    end
     if s_span.internal then
+      var zarea = 0.0
+      var zvol = 0.0
+      var nside = 1
       var numsbad = 0
-      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1276,15 +1242,26 @@ do
         s.sarea = sa
         -- s.svol = sv
 
-        z.zarea += sa
-        z.zvol += sv
+        zarea += sa
+        zvol += sv
+
+        if nside == z.znump then
+          z.zarea = zarea
+          z.zvol = (1.0 / 3.0) * zvol
+          zarea = 0.0
+          zvol = 0.0
+          nside = 0
+        end
+        nside += 1
 
         numsbad += int(sv <= 0.0)
       end
       regentlib.assert(numsbad == 0, "sv negative")
     else
+      var zarea = 0.0
+      var zvol = 0.0
+      var nside = 1
       var numsbad = 0
-      --__demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1299,32 +1276,30 @@ do
         s.sarea = sa
         -- s.svol = sv
 
-        z.zarea += sa
-        z.zvol += sv
+        zarea += sa
+        zvol += sv
+
+        if nside == z.znump then
+          z.zarea = zarea
+          z.zvol = (1.0 / 3.0) * zvol
+          zarea = 0.0
+          zvol = 0.0
+          nside = 0
+        end
+        nside += 1
 
         numsbad += int(sv <= 0.0)
       end
       regentlib.assert(numsbad == 0, "sv negative")
-    end
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zvol *= (1.0 / 3.0)
     end
 
     --
     -- 7. Compute work
     --
 
-    __demand(__vectorize)
-    for z_raw = z_span.start, z_span.stop do
-      var z = unsafe_cast(ptr(zone, rz), z_raw)
-
-      z.zw = 0.0
-    end
     if s_span.internal then
-      __demand(__vectorize)
+      var zdwork = 0.0
+      var nside = 1
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1337,11 +1312,19 @@ do
         var sd2 = vec2_dot(vec2_mul_lhs(-1.0, sftot), vec2_add(p2.pu0, p2.pu))
         var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
-        z.zetot += dwork
-        z.zw += dwork
+        zdwork += dwork
+
+        if nside == z.znump then
+          z.zetot += zdwork
+          z.zw = zdwork
+          zdwork = 0.0
+          nside = 0
+        end
+        nside += 1
       end
     else
-      __demand(__vectorize)
+      var zdwork = 0.0
+      var nside = 1
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1354,8 +1337,15 @@ do
         var sd2 = vec2_dot(vec2_mul_lhs(-1.0, sftot), vec2_add(p2.pu0, p2.pu))
         var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
-        z.zetot += dwork
-        z.zw += dwork
+        zdwork += dwork
+
+        if nside == z.znump then
+          z.zetot += zdwork
+          z.zw = zdwork
+          zdwork = 0.0
+          nside = 0
+        end
+        nside += 1
       end
     end
 
