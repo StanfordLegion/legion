@@ -196,7 +196,7 @@ namespace Legion {
       // allocation.  It is an error if the field already existed and the
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
-                    FieldID fid, CustomSerdezID serdez_id, bool local = false);
+                          FieldID fid, CustomSerdezID serdez_id);
       void free_field(FieldSpace handle, FieldID fid);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
@@ -1524,7 +1524,7 @@ namespace Legion {
       void issue_restricted_reductions(const TraversalInfo &info,
          const RestrictInfo &restrict_info,
          const InstanceSet &restricted_instances,
-         const std::vector<MaterializedView*> &restricted_views,
+         const std::vector<InstanceView*> &restricted_views,
          const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views);
       // Look for a view to remove from the set of valid views
       void filter_valid_views(PhysicalState *state, LogicalView *to_filter);

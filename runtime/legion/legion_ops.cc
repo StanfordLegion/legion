@@ -1842,7 +1842,7 @@ namespace Legion {
         const Predicate &p)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, track, regions);
+      initialize_operation(ctx, track, regions, dependences);
       if (p == Predicate::TRUE_PRED)
       {
         speculation_state = RESOLVE_TRUE_STATE;
@@ -10464,19 +10464,19 @@ namespace Legion {
       if (src_index >= 0)
       {
         int dst_index = find_operation_index(dst_op, dst_gen);
+        if (dst_index >= 0)
+        {
+          TaskOp *src_task = find_task_by_index(src_index);
+          TaskOp *dst_task = find_task_by_index(dst_index);
+          log_run.error("MUST EPOCH ERROR: dependence between task "
+              "%s (ID %lld) and task %s (ID %lld)\n",
+              src_task->get_task_name(), src_task->get_unique_id(),
+              dst_task->get_task_name(), dst_task->get_unique_id());
 #ifdef DEBUG_LEGION
-        assert(dst_index >= 0);
+          assert(false);
 #endif
-        TaskOp *src_task = find_task_by_index(src_index);
-        TaskOp *dst_task = find_task_by_index(dst_index);
-        log_run.error("MUST EPOCH ERROR: dependence between task "
-            "%s (ID %lld) and task %s (ID %lld)\n",
-            src_task->get_task_name(), src_task->get_unique_id(),
-            dst_task->get_task_name(), dst_task->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_MUST_EPOCH_FAILURE);
+          exit(ERROR_MUST_EPOCH_FAILURE);
+        }
       }
     }
     

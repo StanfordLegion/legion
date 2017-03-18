@@ -79,7 +79,7 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "inline", "parallel", "spmd", "trace",
+ast.annotation:leaf("Set", {"cuda", "external", "inline", "parallel", "spmd", "trace",
                             "vectorize"},
                     false, true)
 
@@ -87,6 +87,7 @@ function ast.default_annotations()
   local allow = ast.annotation.Allow { value = false }
   return ast.annotation.Set {
     cuda = allow,
+    external = allow,
     inline = allow,
     parallel = allow,
     spmd = allow,
@@ -205,6 +206,7 @@ ast.unspecialized.expr:leaf("PhaseBarrier", {"value"})
 ast.unspecialized.expr:leaf("DynamicCollective", {"value_type_expr", "op", "arrivals"})
 ast.unspecialized.expr:leaf("DynamicCollectiveGetResult", {"value"})
 ast.unspecialized.expr:leaf("Advance", {"value"})
+ast.unspecialized.expr:leaf("Adjust", {"barrier", "value"})
 ast.unspecialized.expr:leaf("Arrive", {"barrier", "value"})
 ast.unspecialized.expr:leaf("Await", {"barrier"})
 ast.unspecialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
@@ -320,6 +322,7 @@ ast.specialized.expr:leaf("PhaseBarrier", {"value"})
 ast.specialized.expr:leaf("DynamicCollective", {"value_type", "op", "arrivals"})
 ast.specialized.expr:leaf("DynamicCollectiveGetResult", {"value"})
 ast.specialized.expr:leaf("Advance", {"value"})
+ast.specialized.expr:leaf("Adjust", {"barrier", "value"})
 ast.specialized.expr:leaf("Arrive", {"barrier", "value"})
 ast.specialized.expr:leaf("Await", {"barrier"})
 ast.specialized.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
@@ -422,6 +425,7 @@ ast.typed.expr:leaf("PhaseBarrier", {"value"})
 ast.typed.expr:leaf("DynamicCollective", {"value_type", "op", "arrivals"})
 ast.typed.expr:leaf("DynamicCollectiveGetResult", {"value"})
 ast.typed.expr:leaf("Advance", {"value"})
+ast.typed.expr:leaf("Adjust", {"barrier", "value"})
 ast.typed.expr:leaf("Arrive", {"barrier", "value"})
 ast.typed.expr:leaf("Await", {"barrier"})
 ast.typed.expr:leaf("Copy", {"src", "dst", "op", "conditions"})
@@ -451,6 +455,8 @@ ast.typed.stat:leaf("If", {"cond", "then_block", "elseif_blocks", "else_block"})
 ast.typed.stat:leaf("Elseif", {"cond", "block"})
 ast.typed.stat:leaf("While", {"cond", "block"})
 ast.typed.stat:leaf("ForNum", {"symbol", "values", "block"})
+ast.typed.stat:leaf("ForNumVectorized", {"symbol", "values", "block",
+                                         "orig_block", "vector_width"})
 ast.typed.stat:leaf("ForList", {"symbol", "value", "block"})
 ast.typed.stat:leaf("ForListVectorized", {"symbol", "value", "block",
                                           "orig_block", "vector_width"})

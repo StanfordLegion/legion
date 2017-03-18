@@ -2932,6 +2932,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   st.bounds_symbols = bounds
   st.N = width
   st.type = ptr(points_to_type, ...)
+  st.impl_type = legion_vptr_t
 
   function st:bounds()
     local bounds = terralib.newlist()
@@ -3731,7 +3732,7 @@ function std.setup(main_task, extra_setup_thunk)
               local field_type = field_types[1]
               layout = layout_reduction[op][field_type]
             end
-            if options.inner then
+            if options.inner or task:getexternal() then
               -- No layout constraints for inner tasks
               layout = layout_unconstrained
             end

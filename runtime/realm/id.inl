@@ -116,6 +116,21 @@ namespace Realm {
     return this->memory.type_tag == FMT_Memory::TAG_VALUE;
   }
 
+  /*static*/ inline ID ID::make_ib_memory(unsigned owner_node, unsigned mem_idx)
+  {
+    ID id;
+    id.memory.type_tag = FMT_IB_Memory::TAG_VALUE;
+    id.memory.owner_node = owner_node;
+    id.memory.unused = 0;
+    id.memory.mem_idx = mem_idx;
+    return id;
+  }
+
+  inline bool ID::is_ib_memory(void) const
+  {
+    return this->memory.type_tag == FMT_IB_Memory::TAG_VALUE;
+  }
+
   /*static*/ inline ID ID::make_instance(unsigned owner_node, unsigned creator_node, unsigned mem_idx, unsigned inst_idx)
   {
     ID id;

@@ -36,6 +36,7 @@ function context:new_local_scope(must_epoch)
     expected_return_type = self.expected_return_type,
     fixup_nodes = self.fixup_nodes,
     must_epoch = must_epoch,
+    external = self.external,
   }
   setmetatable(cx, context)
   return cx
@@ -50,6 +51,7 @@ function context:new_task_scope(expected_return_type)
     expected_return_type = {expected_return_type},
     fixup_nodes = terralib.newlist(),
     must_epoch = false,
+    external = false,
   }
   setmetatable(cx, context)
   return cx
@@ -77,6 +79,14 @@ end
 function context:set_return_type(t)
   assert(self.expected_return_type)
   self.expected_return_type[1] = t
+end
+
+function context:get_external()
+  return self.external
+end
+
+function context:set_external(external)
+  self.external = external
 end
 
 function type_check.region_field(cx, node, region, prefix_path, value_type)
@@ -2215,13 +2225,38 @@ function type_check.expr_advance(cx, node)
   }
 end
 
+function type_check.expr_adjust(cx, node)
+  local barrier = type_check.expr(cx, node.barrier)
+  local barrier_type = std.check_read(cx, barrier)
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.check_read(cx, value)
+  if not (std.validate_implicit_cast(barrier_type, std.phase_barrier) or
+            std.is_list_of_phase_barriers(barrier_type) or
+          std.is_dynamic_collective(barrier_type)) then
+    report.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
+  end
+  if not std.validate_implicit_cast(value_type, int) then
+    report.error(node, "type mismatch in argument 2: expected " ..
+                tostring(int) .. " but got " .. tostring(value_type))
+  end
+  local expr_type = barrier_type
+
+  return ast.typed.expr.Adjust {
+    barrier = barrier,
+    value = value,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_arrive(cx, node)
   local barrier = type_check.expr(cx, node.barrier)
   local barrier_type = std.check_read(cx, barrier)
   local value = node.value and type_check.expr(cx, node.value)
   local value_type = node.value and std.check_read(cx, value)
   if not (std.is_phase_barrier(barrier_type) or std.is_dynamic_collective(barrier_type)) then
-    report.error(node, "type mismatch in argument 1: expected a dynamic collective but got " .. tostring(barrier_type))
+    report.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
   end
   if std.is_phase_barrier(barrier_type) and value_type then
     report.error(node, "type mismatch in arrive: expected 1 argument but got 2")
@@ -2807,6 +2842,10 @@ function type_check.expr_deref(cx, node)
     report.error(node, "dereference of non-pointer type " .. tostring(value_type))
   end
 
+  if cx:get_external() then
+    report.error(node, "dereference in an external task")
+  end
+
   local expr_type = std.ref(value_type)
 
   return ast.typed.expr.Deref {
@@ -2970,6 +3009,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.Advance) then
     return type_check.expr_advance(cx, node)
+
+  elseif node:is(ast.specialized.expr.Adjust) then
+    return type_check.expr_adjust(cx, node)
 
   elseif node:is(ast.specialized.expr.Arrive) then
     return type_check.expr_arrive(cx, node)
@@ -3558,6 +3600,7 @@ end
 function type_check.top_task(cx, node)
   local return_type = node.return_type
   local cx = cx:new_task_scope(return_type)
+  cx:set_external(node.prototype:getexternal())
 
   local mapping = {}
   local params = node.params:map(

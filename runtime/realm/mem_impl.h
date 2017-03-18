@@ -409,7 +409,7 @@ namespace Realm {
 	//off_t adjust;
 	off_t list_size;
 	ReductionOpID redopid;
-	int linearization_bits[16]; //RegionInstanceImpl::MAX_LINEARIZATION_LEN];
+	int linearization_bits[32]; //RegionInstanceImpl::MAX_LINEARIZATION_LEN];
 	size_t num_fields; // as long as it needs to be
 	const size_t &field_size(int idx) const { return *((&num_fields)+idx+1); }
 	size_t &field_size(int idx) { return *((&num_fields)+idx+1); }

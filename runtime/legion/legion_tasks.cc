@@ -92,7 +92,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ResourceTracker::pack_privilege_state(Serializer &rez, 
-                                               AddressSpaceID target) const
+                                    AddressSpaceID target, bool returning) const
     //--------------------------------------------------------------------------
     {
       // Shouldn't need the lock here since we only do this
@@ -116,14 +116,41 @@ namespace Legion {
           rez.serialize(*it);
         }
       }
-      rez.serialize<size_t>(created_fields.size());
-      if (!created_fields.empty())
+      if (returning)
       {
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
+        // Only non-local fields get returned
+        size_t non_local = 0;
+        for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
               created_fields.begin(); it != created_fields.end(); it++)
         {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
+          if (it->second)
+            continue;
+          non_local++;
+        }
+        rez.serialize(non_local);
+        if (non_local > 0)
+        {
+          for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
+                created_fields.begin(); it != created_fields.end(); it++)
+          {
+            rez.serialize(it->first.first);
+            rez.serialize(it->first.second);
+            rez.serialize<bool>(it->second);
+          }
+        }
+      }
+      else
+      {
+        rez.serialize<size_t>(created_fields.size());
+        if (!created_fields.empty())
+        {
+          for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
+                created_fields.begin(); it != created_fields.end(); it++)
+          {
+            rez.serialize(it->first.first);
+            rez.serialize(it->first.second);
+            rez.serialize<bool>(it->second);
+          }
         }
       }
       rez.serialize<size_t>(deleted_fields.size());
@@ -236,14 +263,15 @@ namespace Legion {
       derez.deserialize(num_created_fields);
       if (num_created_fields > 0)
       {
-        std::set<std::pair<FieldSpace,FieldID> > created_fields;
+        std::map<std::pair<FieldSpace,FieldID>,bool> created_fields;
         for (unsigned idx = 0; idx < num_created_fields; idx++)
         {
           FieldSpace sp;
           derez.deserialize(sp);
           FieldID fid;
           derez.deserialize(fid);
-          created_fields.insert(std::pair<FieldSpace,FieldID>(sp,fid));
+          derez.deserialize<bool>(
+              created_fields[std::pair<FieldSpace,FieldID>(sp,fid)]);
         }
         target->register_field_creations(created_fields);
       }
@@ -2747,6 +2775,44 @@ namespace Legion {
         // Only one valid choice in this case, ignore everything else
         target_processors.push_back(this->target_proc);
       }
+      // See whether the mapper picked a variant or a generator
+      VariantImpl *variant_impl = NULL;
+      if (output.chosen_variant > 0)
+      {
+        variant_impl = runtime->find_variant_impl(task_id, 
+                                output.chosen_variant, true/*can fail*/);
+      }
+      else
+      {
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper specified an invalid task variant "
+                      "of ID 0 for task %s (ID %lld), but Legion does not yet "
+                      "support task generators.", "map_task", 
+                      mapper->get_mapper_name(), 
+                      get_task_name(), get_unique_id());
+        // TODO: invoke a generator if one exists
+#ifdef DEBUG_LEGION
+        assert(false); 
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (variant_impl == NULL)
+      {
+        // If we couldn't find or make a variant that is bad
+        log_run.error("Invalid mapper output from invocation of '%s' on "
+                      "mapper %s. Mapper failed to specify a valid "
+                      "task variant or generator capable of create a variant "
+                      "implementation of task %s (ID %lld).",
+                      "map_task", mapper->get_mapper_name(), get_task_name(),
+                      get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      // Now that we know which variant to use, we can validate it
+      if (!Runtime::unsafe_mapper)
+        validate_variant_selection(mapper, variant_impl, "map_task");
       // fill in virtual_mapped
       virtual_mapped.resize(regions.size(),false);
       // Convert all the outputs into our set of physical instances and
@@ -3029,7 +3095,8 @@ namespace Legion {
               exit(ERROR_INVALID_MAPPER_OUTPUT);
             }
           }
-          if (!regions[idx].is_no_access())
+          if (!regions[idx].is_no_access() &&
+              !variant_impl->is_no_access_region(idx))
           {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
@@ -3143,7 +3210,6 @@ namespace Legion {
       }
       early_mapped_regions.clear();
       // See whether the mapper picked a variant or a generator
-      VariantImpl *variant_impl = NULL;
       if (output.chosen_variant > 0)
       {
         variant_impl = runtime->find_variant_impl(task_id, 
@@ -3913,7 +3979,8 @@ namespace Legion {
             localize_region_requirement(clone_requirements[idx]);
             // Also make the region requirement read-write to force
             // people to wait on the value
-            clone_requirements[idx].privilege = READ_WRITE;
+            if (!IS_REDUCE(regions[idx]))
+              clone_requirements[idx].privilege = READ_WRITE;
             unmap_events[idx] = Runtime::create_ap_user_event();
             execution_context->add_physical_region(clone_requirements[idx],
                     false/*mapped*/, map_id, tag, unmap_events[idx],
@@ -5612,7 +5679,7 @@ namespace Legion {
       rez.serialize(orig_task);
       RezCheck z(rez);
       // Pack the privilege state
-      execution_context->pack_privilege_state(rez, target);
+      execution_context->pack_privilege_state(rez, target, true/*returning*/);
       // Then pack the future result
       {
         RezCheck z2(rez);
@@ -8838,7 +8905,7 @@ namespace Legion {
       RezCheck z(rez);
       rez.serialize<size_t>(points.size());
       // Serialize the privilege state
-      pack_privilege_state(rez, target); 
+      pack_privilege_state(rez, target, true/*returning*/); 
       // Now pack up the future results
       if (redop != 0)
       {
@@ -8922,15 +8989,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::register_field_creations(
-                        const std::set<std::pair<FieldSpace,FieldID> > &fields)
+                     const std::map<std::pair<FieldSpace,FieldID>,bool> &fields)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+      for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it = 
             fields.begin(); it != fields.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(created_fields.find(*it) == created_fields.end());
+        assert(created_fields.find(it->first) == created_fields.end());
 #endif
         created_fields.insert(*it);
       }

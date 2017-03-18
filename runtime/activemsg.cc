@@ -2244,6 +2244,7 @@ static void handle_flip_ack(gasnet_token_t token,
 void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 		    int gasnet_mem_size_in_mb,
 		    int registered_mem_size_in_mb,
+		    int registered_ib_mem_size_in_mb,
 		    Realm::CoreReservationSet& crs,
 		    int argc, const char *argv[])
 {
@@ -2298,16 +2299,17 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   // add in our internal handlers and space we need for LMBs
   size_t attach_size = ((((size_t)gasnet_mem_size_in_mb) << 20) +
 			(((size_t)registered_mem_size_in_mb) << 20) +
+			(((size_t)registered_ib_mem_size_in_mb) << 20) +
 			srcdatapool_size +
 			total_lmb_size);
 
   if(gasnet_mynode() == 0) {
-    log_amsg.info("Pinned Memory Usage: GASNET=%d, RMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
-		  gasnet_mem_size_in_mb, registered_mem_size_in_mb,
+    log_amsg.info("Pinned Memory Usage: GASNET=%d, RMEM=%d, IBRMEM=%d, LMB=%zd, SDP=%zd, total=%zd\n",
+		  gasnet_mem_size_in_mb, registered_mem_size_in_mb, registered_ib_mem_size_in_mb,
 		  total_lmb_size >> 20, srcdatapool_size >> 20,
 		  attach_size >> 20);
 #ifdef DEBUG_REALM_STARTUP
-    LegionRuntime::TimeStamp ts("entering gasnet_attach", false);
+    Realm::TimeStamp ts("entering gasnet_attach", false);
     fflush(stdout);
 #endif
   }
@@ -2345,7 +2347,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 
 #ifdef DEBUG_REALM_STARTUP
   if(gasnet_mynode() == 0) {
-    LegionRuntime::TimeStamp ts("exited gasnet_attach", false);
+    Realm::TimeStamp ts("exited gasnet_attach", false);
     fflush(stdout);
   }
 #endif
@@ -2365,6 +2367,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   char *my_segment = (char *)(segment_info[gasnet_mynode()].addr);
   /*char *gasnet_mem_base = my_segment;*/  my_segment += (gasnet_mem_size_in_mb << 20);
   /*char *reg_mem_base = my_segment;*/  my_segment += (registered_mem_size_in_mb << 20);
+  /*char *reg_ib_mem_base = my_segment;*/ my_segment += (registered_ib_mem_size_in_mb << 20);
   char *srcdatapool_base = my_segment;  my_segment += srcdatapool_size;
   /*char *lmb_base = my_segment;*/  my_segment += total_lmb_size;
   assert(my_segment <= ((char *)(segment_info[gasnet_mynode()].addr) + segment_info[gasnet_mynode()].size)); 

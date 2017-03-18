@@ -156,54 +156,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::add_local_field(FieldSpace handle, FieldID fid, 
-                                    size_t field_size, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      allocate_local_field(local_fields.back());
-      // Hold the lock when modifying the local_fields data structure
-      // since it can be read by tasks that are being packed
-      ApEvent completion_event = owner_task->get_task_completion(); 
-      AutoLock ctx_lock(context_lock);
-      local_fields.push_back(
-          LocalFieldInfo(handle, fid, field_size, 
-            Runtime::protect_event(completion_event), serdez_id));
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::add_local_fields(FieldSpace handle,
-                                      const std::vector<FieldID> &fields,
-                                      const std::vector<size_t> &field_sizes,
-                                      CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(fields.size() == field_sizes.size());
-#endif
-      for (unsigned idx = 0; idx < fields.size(); idx++)
-        add_local_field(handle, fields[idx], field_sizes[idx], serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::allocate_local_field(const LocalFieldInfo &info)
-    //--------------------------------------------------------------------------
-    {
-      // Try allocating a local field and if we succeeded then launch
-      // a deferred task to reclaim the field whenever it's completion
-      // event has triggered.  Otherwise it already exists on this node
-      // so we are free to use it no matter what
-      if (runtime->forest->allocate_field(info.handle, info.field_size,
-                                       info.fid, info.serdez_id, true/*local*/))
-      {
-        ReclaimLocalFieldArgs args;
-        args.handle = info.handle;
-        args.fid = info.fid;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                         owner_task, info.reclaim_event);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     ptr_t TaskContext::perform_safe_cast(IndexSpace handle, ptr_t pointer)
     //--------------------------------------------------------------------------
     {
@@ -341,7 +293,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_field_creation(FieldSpace handle, FieldID fid)
+    void TaskContext::register_field_creation(FieldSpace handle, 
+                                              FieldID fid, bool local)
     //--------------------------------------------------------------------------
     {
       AutoLock ctx_lock(context_lock);
@@ -349,11 +302,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(created_fields.find(key) == created_fields.end());
 #endif
-      created_fields.insert(key);
+      created_fields[key] = local;
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_field_creations(FieldSpace handle,
+    void TaskContext::register_field_creations(FieldSpace handle, bool local,
                                           const std::vector<FieldID> &fields)
     //--------------------------------------------------------------------------
     {
@@ -364,7 +317,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(created_fields.find(key) == created_fields.end());
 #endif
-        created_fields.insert(key);
+        created_fields[key] = local;
       }
     }
 
@@ -380,7 +333,7 @@ namespace Legion {
               it != to_free.end(); it++)
         {
           std::pair<FieldSpace,FieldID> key(handle,*it);
-          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
+          std::map<std::pair<FieldSpace,FieldID>,bool>::iterator finder = 
             created_fields.find(key);
           if (finder != created_fields.end())
           {
@@ -414,11 +367,11 @@ namespace Legion {
       {
         AutoLock ctx_lock(context_lock);
         std::deque<FieldID> to_delete;
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+        for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
               created_fields.begin(); it != created_fields.end(); it++)
         {
-          if (it->first == space)
-            to_delete.push_back(it->second);
+          if (it->first.first == space)
+            to_delete.push_back(it->first.second);
         }
         for (unsigned idx = 0; idx < to_delete.size(); idx++)
         {
@@ -572,15 +525,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::register_field_creations(
-                         const std::set<std::pair<FieldSpace,FieldID> > &fields)
+                     const std::map<std::pair<FieldSpace,FieldID>,bool> &fields)
     //--------------------------------------------------------------------------
     {
       AutoLock ctx_lock(context_lock);
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+      for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it = 
             fields.begin(); it != fields.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(created_fields.find(*it) == created_fields.end());
+        assert(created_fields.find(it->first) == created_fields.end());
 #endif
         created_fields.insert(*it);
       }
@@ -597,7 +550,7 @@ namespace Legion {
         for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
               fields.begin(); it != fields.end(); it++)
         {
-          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
+          std::map<std::pair<FieldSpace,FieldID>,bool>::iterator finder = 
             created_fields.find(*it);
           if (finder != created_fields.end())
           {
@@ -646,11 +599,11 @@ namespace Legion {
               it != spaces.end(); it++)
         {
           std::deque<FieldID> to_delete;
-          for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator cit = 
-                created_fields.begin(); cit != created_fields.end(); cit++)
+          for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator cit 
+                = created_fields.begin(); cit != created_fields.end(); cit++)
           {
-            if (cit->first == *it)
-              to_delete.push_back(cit->second);
+            if (cit->first.first == *it)
+              to_delete.push_back(cit->first.second);
           }
           for (unsigned idx = 0; idx < to_delete.size(); idx++)
           {
@@ -2125,20 +2078,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    void TaskContext::find_enclosing_local_fields(
-           LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
-    //--------------------------------------------------------------------------
-    {
-      // Ask the same for our parent context
-      TaskContext *parent_ctx = find_parent_context();
-      if (parent_ctx != NULL)
-        parent_ctx->find_enclosing_local_fields(infos);
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < local_fields.size(); idx++)
-        infos.push_back(local_fields[idx]);
-    } 
-
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
     RtEvent TaskContext::update_previous_mapped_event(RtEvent next)
@@ -2226,7 +2165,6 @@ namespace Legion {
         bar.destroy_barrier();
         context_barriers.pop_back();
       }
-      local_fields.clear();
       if (valid_wait_event)
       {
         valid_wait_event = false;
@@ -2342,7 +2280,8 @@ namespace Legion {
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == parent_req_indexes.size());
 #endif     
-      if (index < virtual_mapped.size())
+      const unsigned owner_size = virtual_mapped.size();
+      if (index < owner_size)
       {
         // See if it is virtual mapped
         if (virtual_mapped[index])
@@ -2351,8 +2290,22 @@ namespace Legion {
         else // We mapped a physical instance so we're it
           return this;
       }
-      else // We created it, put it in the top context
-        return find_top_context();
+      else // We created it
+      {
+        // Check to see if this has returnable privileges or not
+        // If they are not returnable, then we can just be the 
+        // context for the handling the meta-data management, 
+        // otherwise if they are returnable then the top-level
+        // context has to provide global guidance about which
+        // node manages the meta-data.
+        index -= owner_size;
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        if ((index >= returnable_privileges.size()) || 
+            returnable_privileges[index])
+          return find_top_context();
+        else
+          return this;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2439,14 +2392,6 @@ namespace Legion {
         else
           info.pack_version_numbers(rez);
       }
-      // Now pack up any local fields 
-      LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked locals = 
-                                                                  local_fields;
-      find_enclosing_local_fields(locals);
-      size_t num_local = locals.size();
-      rez.serialize(num_local);
-      for (unsigned idx = 0; idx < locals.size(); idx++)
-        rez.serialize(locals[idx]);
       rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
     }
@@ -3728,12 +3673,18 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_field_creation(space.id, fid, field_size);
 
+      forest->allocate_field(space, field_size, fid, serdez_id);
+      register_field_creation(space, fid, local);
+      // If we're local issue a task to reclaim to field when we're done
       if (local)
-        add_local_field(space, fid, field_size, serdez_id);
-      else
       {
-        forest->allocate_field(space, field_size, fid, serdez_id);
-        register_field_creation(space, fid);
+        ReclaimLocalFieldArgs args;
+        args.handle = space;
+        args.fid = fid;
+        RtEvent reclaim_pre = 
+          Runtime::protect_event(owner_task->get_completion_event());
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                         owner_task, reclaim_pre);
       }
       return fid;
     }
@@ -3778,12 +3729,20 @@ namespace Legion {
           LegionSpy::log_field_creation(space.id, 
                                         resulting_fields[idx], sizes[idx]);
       }
+      forest->allocate_fields(space, sizes, resulting_fields, serdez_id);
+      register_field_creations(space, local, resulting_fields);
       if (local)
-        add_local_fields(space, resulting_fields, sizes, serdez_id);
-      else
       {
-        forest->allocate_fields(space, sizes, resulting_fields, serdez_id); 
-        register_field_creations(space, resulting_fields);
+        ReclaimLocalFieldArgs args;
+        args.handle = space;
+        RtEvent reclaim_pre = 
+          Runtime::protect_event(owner_task->get_completion_event());
+        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+        {
+          args.fid = resulting_fields[idx];
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                           owner_task, reclaim_pre);
+        }
       }
     }
 
@@ -5243,12 +5202,13 @@ namespace Legion {
 #endif
         exit(ERROR_UNMATCHED_END_TRACE);
       }
-      // We're done with this trace
-      if (current_trace->remove_reference())
-        legion_delete(current_trace->as_static_trace());
+      // We're done with this trace, need a trace complete op to clean up
+      // This operation takes ownership of the static trace reference
+      TraceCompleteOp *complete_op = runtime->get_available_trace_op(true);
+      complete_op->initialize_complete(this);
+      runtime->add_to_dependence_queue(this, executing_processor, complete_op);
+      // We no longer have a trace that we're executing 
       current_trace = NULL;
-      // Now dump a mapping fence into the analysis
-      runtime->issue_mapping_fence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -7067,18 +7027,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteContext::find_enclosing_local_fields(
-             LegionDeque<LocalFieldInfo,TASK_LOCAL_FIELD_ALLOC>::tracked &infos)
-    //--------------------------------------------------------------------------
-    {
-      // No need to recurse here for our parent since we got
-      // all our parent fields when we were sent remotely
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < local_fields.size(); idx++)
-        infos.push_back(local_fields[idx]);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteContext::unpack_remote_context(Deserializer &derez,
                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
@@ -7110,14 +7058,6 @@ namespace Legion {
           version_infos[idx].unpack_version_info(derez, runtime, preconditions);
         else
           version_infos[idx].unpack_version_numbers(derez, runtime->forest);
-      }
-      size_t num_local;
-      derez.deserialize(num_local);
-      local_fields.resize(num_local);
-      for (unsigned idx = 0; idx < num_local; idx++)
-      {
-        derez.deserialize(local_fields[idx]);
-        allocate_local_field(local_fields[idx]);
       }
       derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);

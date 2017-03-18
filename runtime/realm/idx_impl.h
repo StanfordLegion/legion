@@ -145,6 +145,21 @@ namespace Realm {
 			       const void *data, size_t datalen, int payload_mode);
     };
 
+    struct ValidMaskFetchMessage {
+      struct RequestArgs {
+        IndexSpace is;
+        Event complete;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<VALID_MASK_FTH_MSGID,
+                                        RequestArgs,
+                                        handle_request> Message;
+
+      static void send_request(gasnet_node_t target, IndexSpace is, Event complete);
+    };
+
 }; // namespace Realm
 
 #endif // ifndef REALM_IDX_IMPL_H

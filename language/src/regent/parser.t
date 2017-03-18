@@ -57,6 +57,8 @@ function parser.annotation_name(p, required)
   if p:nextif("__cuda") then
     local values = p:annotation_values()
     return "cuda", values
+  elseif p:nextif("__external") then
+    return "external"
   elseif p:nextif("__inline") then
     return "inline"
   elseif p:nextif("__parallel") then
@@ -907,6 +909,19 @@ function parser.expr_prefix(p)
     local value = p:expr()
     p:expect(")")
     return ast.unspecialized.expr.Advance {
+      value = value,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("adjust") then
+    p:expect("(")
+    local barrier = p:expr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Adjust {
+      barrier = barrier,
       value = value,
       annotations = ast.default_annotations(),
       span = ast.span(start, p),

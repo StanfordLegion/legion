@@ -149,6 +149,14 @@ function base.task:getcuda()
   return self.cuda
 end
 
+function base.task:setexternal(external)
+  self.external = external
+end
+
+function base.task:getexternal()
+  return self.external
+end
+
 function base.task:setinline(inline)
   self.inline = inline
 end
@@ -408,6 +416,7 @@ do
       ast = false,
       definition = false,
       cuda = false,
+      external = false,
       inline = false,
       cudakernels = false,
       param_symbols = false,

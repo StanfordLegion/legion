@@ -357,7 +357,14 @@ namespace Realm {
 	switch(get_dim()) {
 	case 1:
 	  {
-	    LegionRuntime::Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
+            /*
+	    std::vector<LegionRuntime::Layouts::DimKind> kind_vec;
+	    std::vector<size_t> size_vec;
+	    kind_vec.push_back(LegionRuntime::Layouts::DIM_X);
+	    size_vec.push_back(get_rect<1>().dim_size(0));
+	    LegionRuntime::Layouts::SplitDimLinearization<1> cl(get_rect<1>().lo, make_point(0), kind_vec, size_vec);
+	    */
+            LegionRuntime::Arrays::FortranArrayLinearization<1> cl(get_rect<1>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<1>(LegionRuntime::Arrays::Mapping<1, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<1>());
 	    dl.serialize(linearization_bits);
@@ -366,7 +373,16 @@ namespace Realm {
 
 	case 2:
 	  {
-	    LegionRuntime::Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
+            /*
+	    std::vector<LegionRuntime::Layouts::DimKind> kind_vec;
+	    std::vector<size_t> size_vec;
+	    kind_vec.push_back(LegionRuntime::Layouts::DIM_X);
+	    kind_vec.push_back(LegionRuntime::Layouts::DIM_Y);
+	    size_vec.push_back(get_rect<2>().dim_size(0));
+	    size_vec.push_back(get_rect<2>().dim_size(1));
+	    LegionRuntime::Layouts::SplitDimLinearization<2> cl(get_rect<2>().lo, make_point(0), kind_vec, size_vec);
+	    */
+            LegionRuntime::Arrays::FortranArrayLinearization<2> cl(get_rect<2>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<2>(LegionRuntime::Arrays::Mapping<2, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<2>());
 	    dl.serialize(linearization_bits);
@@ -375,7 +391,18 @@ namespace Realm {
 
 	case 3:
 	  {
-	    LegionRuntime::Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
+            /*
+	    std::vector<LegionRuntime::Layouts::DimKind> kind_vec;
+	    std::vector<size_t> size_vec;
+	    kind_vec.push_back(LegionRuntime::Layouts::DIM_X);
+	    kind_vec.push_back(LegionRuntime::Layouts::DIM_Y);
+	    kind_vec.push_back(LegionRuntime::Layouts::DIM_Z);
+	    size_vec.push_back(get_rect<3>().dim_size(0));
+	    size_vec.push_back(get_rect<3>().dim_size(1));
+	    size_vec.push_back(get_rect<3>().dim_size(2));
+	    LegionRuntime:: Layouts::SplitDimLinearization<3> cl(get_rect<3>().lo, make_point(0), kind_vec, size_vec);
+	    */
+            LegionRuntime::Arrays::FortranArrayLinearization<3> cl(get_rect<3>(), 0);
 	    DomainLinearization dl = DomainLinearization::from_mapping<3>(LegionRuntime::Arrays::Mapping<3, 1>::new_dynamic_mapping(cl));
 	    inst_extent = cl.image_convex(get_rect<3>());
 	    dl.serialize(linearization_bits);
@@ -384,7 +411,6 @@ namespace Realm {
 
 	default: assert(0); return RegionInstance::NO_INST;
 	}
-
 	num_elements = inst_extent.volume();
 	// always at least one element
 	if(num_elements <= 0) num_elements = 1;
@@ -1738,7 +1764,7 @@ namespace Realm {
 
       return e;
     }
-  
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class IndexSpaceAllocatorImpl
@@ -1851,7 +1877,7 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class IndexSpaceAllocatorImpl
+  // class ValidMaskDataMessage
   //
 
   /*static*/ void ValidMaskDataMessage::handle_request(RequestArgs args,
@@ -1926,6 +1952,97 @@ namespace Realm {
     args.first_enabled_elmt = first_enabled_elmt;
     args.last_enabled_elmt = last_enabled_elmt;
     Message::request(target, args, data, datalen, payload_mode);
+  }
+
+  class FetchISMaskWaiter : public EventWaiter {
+  public:
+    FetchISMaskWaiter(Event complete, IndexSpace is);
+    virtual ~FetchISMaskWaiter(void);
+    void sleep_on_event(Event e, Reservation l = Reservation::NO_RESERVATION);
+    bool fetch_is_mask();
+    virtual bool event_triggered(Event e, bool poisoned);
+    virtual void print(std::ostream& os) const;
+    virtual Event get_finish_event(void) const;
+    Event complete_event;
+    IndexSpace is;
+    Reservation current_lock;
+  };
+
+  FetchISMaskWaiter::FetchISMaskWaiter(Event _complete, IndexSpace _is)
+  : complete_event(_complete), is(_is), current_lock(Reservation::NO_RESERVATION) {}
+
+  FetchISMaskWaiter::~FetchISMaskWaiter() {}
+
+  void FetchISMaskWaiter::sleep_on_event(Event e, Reservation l)
+  {
+    current_lock = l;
+    EventImpl::add_waiter(e, this);
+  }
+
+  bool FetchISMaskWaiter::fetch_is_mask()
+  {
+    IndexSpaceImpl *is_impl = get_runtime()->get_index_space_impl(is);
+    if (!is_impl->locked_data.valid) {
+      Event e = is_impl->lock.acquire(1, false, ReservationImpl::ACQUIRE_BLOCKING);
+      if (e.has_triggered()) {
+        is_impl->lock.release();
+      } else {
+        sleep_on_event(e, is_impl->lock.me);
+        return false;
+      }
+    }
+
+    Event e = is_impl->request_valid_mask();
+    if (!e.has_triggered()) {
+      sleep_on_event(e);
+      return false;
+    }
+
+    GenEventImpl::trigger(complete_event, false/*poisoned*/);
+    return true;
+  }
+
+  bool FetchISMaskWaiter::event_triggered(Event e, bool poisoned)
+  {
+    if (poisoned) {
+      Realm::log_poison.info() << "poisoned fetch index space mask waiter";
+      GenEventImpl::trigger(complete_event, true/*poisoned*/);
+      return false;
+    }
+
+    if (current_lock.exists()) {
+      current_lock.release();
+      current_lock = Reservation::NO_RESERVATION;
+    }
+
+    bool ret = fetch_is_mask();
+    return ret;
+  }
+
+  void FetchISMaskWaiter::print(std::ostream& os) const
+  {
+  }
+
+  Event FetchISMaskWaiter::get_finish_event(void) const
+  {
+    return complete_event;
+  }
+
+  /*static*/ void ValidMaskFetchMessage::handle_request(RequestArgs args)
+  {
+    FetchISMaskWaiter* waiter = new FetchISMaskWaiter(args.complete, args.is);
+    // don't need to worry about delete, which will be performed by EventWaiter gc
+    waiter->fetch_is_mask();
+  }
+
+  /*static*/ void ValidMaskFetchMessage::send_request(gasnet_node_t target,
+                                                      IndexSpace is,
+                                                      Event complete)
+  {
+    RequestArgs args;
+    args.is = is;
+    args.complete = complete;
+    Message::request(target, args);
   }
   
 }; // namespace Realm

@@ -1,4 +1,5 @@
 # Copyright 2017 Stanford University, NVIDIA Corporation
+# Copyright 2017 Los Alamos National Laboratory 
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +14,13 @@
 # limitations under the License.
 #
 
+ifeq ($(shell uname -s),Darwin)
+DARWIN = 1
+CC_FLAGS += -DDARWIN
+else
+#use disk unless on DARWIN 
+CC_FLAGS += -DUSE_DISK 
+endif
 
 # If using the general low-level runtime
 # select a target GPU architecture
@@ -74,6 +82,12 @@ ifeq ($(shell uname -n),n0003)
 CONDUIT=ibv
 GPU_ARCH=fermi
 endif
+ifeq ($(findstring xs,$(shell uname -n)), xs)
+GPU_ARCH=k80
+GASNET=/home/stanford/aaiken/users/zhihao/tools/gasnet/release/
+CONDUIT=ibv#not sure if this is true
+CUDA=${CUDA_HOME}
+endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
 GASNET=/nics/d/home/sequoia/gasnet-1.20.2-openmpi
 MPI=/sw/kfs/openmpi/1.6.1/centos6.2_intel2011_sp1.11.339
@@ -108,6 +122,16 @@ LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
+CXX=CC
+F90=ftn
+# Cray's magic wrappers automatically provide LAPACK goodness?
+LAPACK_LIBS=
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+CONDUIT=aries
+LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
+endif
+ifeq ($(findstring cori,$(shell uname -n)),cori)
 CXX=CC
 F90=ftn
 # Cray's magic wrappers automatically provide LAPACK goodness?
@@ -179,6 +203,19 @@ ifeq ($(strip $(USE_LLVM)),1)
   LEGION_LD_FLAGS += $(LLVM_SYSTEM_LIBS)
 endif
 
+USE_OPENMP ?= 0
+ifeq ($(strip $(USE_OPENMP)),1)
+  CC_FLAGS += -DREALM_USE_OPENMP
+  REALM_OPENMP_GOMP_SUPPORT ?= 1
+  ifeq ($(strip $(REALM_OPENMP_GOMP_SUPPORT)),1)
+    CC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
+  endif
+  REALM_OPENMP_KMP_SUPPORT ?= 1	
+  ifeq ($(strip $(REALM_OPENMP_KMP_SUPPORT)),1)
+    CC_FLAGS += -DREALM_OPENMP_KMP_SUPPORT
+  endif
+endif
+
 # Flags for running in the general low-level runtime
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 
@@ -203,10 +240,10 @@ NVCC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -g -O0
 else
 NVCC_FLAGS	+= -O2
 endif
-ifneq ($(shell uname -s),Darwin)
-LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
-else
+ifeq ($(strip $(DARWIN)),1)
 LEGION_LD_FLAGS	+= -L$(CUDA)/lib -lcuda
+else
+LEGION_LD_FLAGS	+= -L$(CUDA)/lib64 -lcuda -Xlinker -rpath=$(CUDA)/lib64
 endif
 # CUDA arch variables
 ifeq ($(strip $(GPU_ARCH)),fermi)
@@ -241,11 +278,11 @@ endif
 ifeq ($(strip $(USE_GASNET)),1)
   # General GASNET variables
   INC_FLAGS	+= -I$(GASNET)/include
-  ifneq ($(shell uname -s),Darwin)
-    LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
-  else
+  ifeq ($(strip $(DARWIN)),1)
     LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lm
-  endif 
+  else
+    LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
+  endif
   CC_FLAGS	+= -DUSE_GASNET
   # newer versions of gasnet seem to need this
   CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
@@ -272,6 +309,13 @@ ifeq ($(strip $(USE_GASNET)),1)
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
+  ifeq ($(strip $(CONDUIT)),psm)
+    INC_FLAGS 	+= -I$(GASNET)/include/psm-conduit
+    CC_FLAGS	+= -DGASNET_CONDUIT_PSM
+    LEGION_LD_FLAGS	+= -lgasnet-psm-par -lpsm2 -lpmi2 # PMI2 is required for OpenMPI
+    # GASNet needs MPI for interop support
+    USE_MPI	= 1
+  endif
   ifeq ($(strip $(CONDUIT)),mpi)
     INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_MPI
@@ -294,7 +338,7 @@ ifeq ($(strip $(USE_HDF)), 1)
   LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
 endif
 
-SKIP_MACHINES= titan% daint% excalibur%
+SKIP_MACHINES= titan% daint% excalibur% cori%
 #Extra options for MPI support in GASNet
 ifeq ($(strip $(USE_MPI)),1)
   # Skip any machines on this list list
@@ -337,6 +381,8 @@ ASM_SRC		?=
 # Set the source files
 ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
+	           $(LG_RT_DIR)/channel.cc \
+	           $(LG_RT_DIR)/channel_disk.cc \
 	           $(LG_RT_DIR)/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
@@ -356,6 +402,11 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
                    $(LG_RT_DIR)/lowlevel_disk.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/numa/numa_module.cc \
 		   $(LG_RT_DIR)/realm/numa/numasysif.cc
+ifeq ($(strip $(USE_OPENMP)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/openmp/openmp_module.cc \
+		   $(LG_RT_DIR)/realm/openmp/openmp_threadpool.cc \
+		   $(LG_RT_DIR)/realm/openmp/openmp_api.cc
+endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/procset/procset_module.cc
 ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc \

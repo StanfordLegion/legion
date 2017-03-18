@@ -24,6 +24,7 @@
 
 #include "lowlevel_config.h"
 #include "arrays.h"
+//#include "layouts.h"
 #include "custom_serdez.h"
 
 #ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS
@@ -361,6 +362,8 @@ namespace Realm {
         return point_data[index];
       }
 
+      
+        
       struct STLComparator {
 	bool operator()(const DomainPoint& a, const DomainPoint& b) const
 	{
@@ -582,7 +585,7 @@ namespace Realm {
       protected:
 	int dim;
 	void *lptr;
-      };
+    };
 
     class Domain {
     public:

@@ -30,6 +30,7 @@
 local ast = require("regent/ast")
 local data = require("common/data")
 local report = require("common/report")
+local std = require("regent/std")
 
 local context = {}
 context.__index = context
@@ -112,6 +113,7 @@ local function check_annotations_node(cx)
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
       node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
@@ -141,7 +143,11 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({"spmd", "trace"}))
 
     elseif node:is(ast.typed.stat.ForNum) then
-      check(cx, node, data.set({"parallel", "spmd", "trace"}))
+      local annotations = {"parallel", "spmd", "trace"}
+      if std.config["vectorize-unsafe"] then
+        annotations[#annotations + 1] = "vectorize"
+      end
+      check(cx, node, data.set(annotations))
 
     elseif node:is(ast.typed.stat.ForList) then
       check(cx, node, data.set({"parallel", "spmd", "trace", "vectorize"}))
@@ -172,7 +178,7 @@ local function check_annotations_node(cx)
       check(cx, node, data.set({}))
 
     elseif node:is(ast.typed.top.Task) then
-      check(cx, node, data.set({"cuda", "inline", "parallel"}))
+      check(cx, node, data.set({"cuda", "external", "inline", "parallel"}))
 
     -- Miscellaneous:
     elseif node:is(ast.typed.Block) or

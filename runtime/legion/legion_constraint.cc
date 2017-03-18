@@ -492,8 +492,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SpecializedConstraint::SpecializedConstraint(SpecializedKind k,
-                                                 ReductionOpID r)
-      : kind(k), redop(r)
+                                                 ReductionOpID r, bool no)
+      : kind(k), redop(r), no_access(no)
     //--------------------------------------------------------------------------
     {
       if (redop == 0)
@@ -534,6 +534,8 @@ namespace Legion {
         return false;
       if (redop != other.redop)
         return false;
+      if (no_access && !other.no_access)
+        return false;
       return true;
     }
 
@@ -550,6 +552,7 @@ namespace Legion {
         return true;
       if (redop != other.redop)
         return true;
+      // No access never causes a conflict
       return false;
     }
 
@@ -561,6 +564,7 @@ namespace Legion {
       if ((kind == REDUCTION_FOLD_SPECIALIZE) || 
           (kind == REDUCTION_LIST_SPECIALIZE))
         rez.serialize(redop);
+      rez.serialize<bool>(no_access);
     }
 
     //--------------------------------------------------------------------------
@@ -571,6 +575,7 @@ namespace Legion {
       if ((kind == REDUCTION_FOLD_SPECIALIZE) || 
           (kind == REDUCTION_LIST_SPECIALIZE))
         derez.deserialize(redop);
+      derez.deserialize<bool>(no_access);
     }
 
     //--------------------------------------------------------------------------
@@ -600,6 +605,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (GENERIC_FILE_SPECIALIZE <= kind);
+    }
+
+    //--------------------------------------------------------------------------
+    bool SpecializedConstraint::is_no_access(void) const
+    //--------------------------------------------------------------------------
+    {
+      return no_access;
     }
 
     /////////////////////////////////////////////////////////////

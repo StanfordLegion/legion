@@ -31,7 +31,9 @@ def download(dest_path, url, sha1):
     check_sha1(dest_path, sha1)
 
 def extract(dest_dir, archive_path, format):
-    if format == 'xz':
+    if format == 'gz':
+        subprocess.check_call(['tar', 'xfz', archive_path], cwd=dest_dir)
+    elif format == 'xz':
         subprocess.check_call(['tar', 'xfJ', archive_path], cwd=dest_dir)
     else:
         raise Exception('Unknown format %s' % format)
@@ -50,36 +52,55 @@ def git_update(repo_dir):
 def discover_conduit():
     if 'CONDUIT' in os.environ:
         return os.environ['CONDUIT']
+    elif platform.node().startswith('cori'):
+        return 'aries'
     elif platform.node().startswith('daint'):
         return 'aries'
     elif platform.node().startswith('excalibur'):
         return 'aries'
+    elif platform.node().startswith('quartz'):
+        return 'psm'
     else:
         raise Exception('Please set CONDUIT in your environment')
 
 def build_gasnet(gasnet_dir, conduit):
     subprocess.check_call(['make', 'CONDUIT=%s' % conduit], cwd=gasnet_dir)
 
-def build_llvm(source_dir, build_dir, install_dir, thread_count):
+def build_llvm(source_dir, build_dir, install_dir, cmake_exe, thread_count):
+    env = None
+    if is_cray:
+        env = dict(list(os.environ.items()) + [
+            ('CC', os.environ['HOST_CC']),
+            ('CXX', os.environ['HOST_CXX']),
+        ])
     subprocess.check_call(
-        [os.path.join(source_dir, 'configure'),
-         '--prefix=%s' % install_dir,
-         '--enable-optimized',
-         '--disable-zlib', '--disable-terminfo', '--disable-libedit'],
-        cwd=build_dir)
+        [cmake_exe,
+         '-DCMAKE_INSTALL_PREFIX=%s' % install_dir,
+         '-DCMAKE_BUILD_TYPE=Release',
+         '-DLLVM_ENABLE_ZLIB=OFF',
+         '-DLLVM_ENABLE_TERMINFO=OFF',
+         source_dir],
+        cwd=build_dir,
+        env=env)
     subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
     subprocess.check_call(['make', 'install'], cwd=build_dir)
 
-def build_terra(terra_dir, llvm_dir, thread_count):
+def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
+    env = None
+    if is_cray:
+        env = dict(list(os.environ.items()) + [
+            ('CC', os.environ['HOST_CC']),
+            ('CXX', os.environ['HOST_CXX']),
+        ])
+
     subprocess.check_call(
         ['make',
-         'CC=%s -dynamic' % os.environ['CC'],
-         'CXX=%s -dynamic' % os.environ['CXX'],
          'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
          'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
-         'LLVM_VERSION=35',
-         '-j', str(thread_count)],
-        cwd = terra_dir)
+         '-j', str(thread_count),
+        ],
+        cwd=terra_dir,
+        env=env)
 
 if __name__ == '__main__':
     if 'CC' not in os.environ:
@@ -88,6 +109,21 @@ if __name__ == '__main__':
         raise Exception('Please set CXX in your environment')
     if 'LG_RT_DIR' in os.environ:
         raise Exception('Please unset LG_RT_DIR in your environment')
+
+    is_cray = 'CRAYPE_VERSION' in os.environ
+
+    if is_cray:
+        print('This system has been detected as a Cray system.')
+        print()
+        print('Note: The Cray wrappers are broken for various purposes')
+        print('(particularly, dynamically linked libraries). For this')
+        print('reason this script requires that HOST_CC and HOST_CXX')
+        print('be set to the underlying compilers (GCC and G++, etc.).')
+        print()
+        if 'HOST_CC' not in os.environ:
+            raise Exception('Please set HOST_CC in your environment')
+        if 'HOST_CXX' not in os.environ:
+            raise Exception('Please set HOST_CXX in your environment')
 
     root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     legion_dir = os.path.dirname(root_dir)
@@ -102,17 +138,28 @@ if __name__ == '__main__':
         build_gasnet(gasnet_dir, conduit)
     assert os.path.exists(gasnet_release_dir)
 
+    cmake_dir = os.path.realpath(os.path.join(root_dir, 'cmake'))
+    cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')
+    if not os.path.exists(cmake_dir):
+        os.mkdir(cmake_dir)
+
+        cmake_tarball = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64.tar.gz')
+        download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '915bc981aab354821fb9fd28374a720fdb3aa180')
+        extract(cmake_dir, cmake_tarball, 'gz')
+    assert os.path.exists(cmake_install_dir)
+    cmake_exe = os.path.join(cmake_install_dir, 'bin', 'cmake')
+
     llvm_dir = os.path.realpath(os.path.join(root_dir, 'llvm'))
     llvm_install_dir = os.path.join(llvm_dir, 'install')
     if not os.path.exists(llvm_dir):
         os.mkdir(llvm_dir)
 
-        llvm_tarball = os.path.join(llvm_dir, 'llvm-3.5.2.src.tar.xz')
-        llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.5.2.src')
-        clang_tarball = os.path.join(llvm_dir, 'cfe-3.5.2.src.tar.xz')
-        clang_source_dir = os.path.join(llvm_dir, 'cfe-3.5.2.src')
-        download(llvm_tarball, 'http://llvm.org/releases/3.5.2/llvm-3.5.2.src.tar.xz', '85faf7cbd518dabeafc4d3f7e909338fc1dab3c4')
-        download(clang_tarball, 'http://llvm.org/releases/3.5.2/cfe-3.5.2.src.tar.xz', '50291e4c4ced8fcee3cca40bff0afb19fcc356e2')
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-3.9.1.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.9.1.src')
+        clang_tarball = os.path.join(llvm_dir, 'cfe-3.9.1.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'cfe-3.9.1.src')
+        download(llvm_tarball, 'http://llvm.org/releases/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff')
+        download(clang_tarball, 'http://llvm.org/releases/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8')
         extract(llvm_dir, llvm_tarball, 'xz')
         extract(llvm_dir, clang_tarball, 'xz')
         os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
@@ -120,16 +167,16 @@ if __name__ == '__main__':
         llvm_build_dir = os.path.join(llvm_dir, 'build')
         os.mkdir(llvm_build_dir)
         os.mkdir(llvm_install_dir)
-        build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, thread_count)
+        build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, cmake_exe, thread_count)
     assert os.path.exists(llvm_install_dir)
 
     terra_dir = os.path.join(root_dir, 'terra.build')
     if not os.path.exists(terra_dir):
-        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-ppopp17-snapshot')
-        build_terra(terra_dir, llvm_install_dir, thread_count)
+        git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-sc17-snapshot')
+        build_terra(terra_dir, llvm_install_dir, is_cray, thread_count)
 
     use_hdf = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
     install.install(
         shared_llr=False, general_llr=True, gasnet=True, cuda=False, hdf=use_hdf,
-        external_terra_dir=terra_dir, gasnet_dir=gasnet_release_dir,
+        external_terra_dir=terra_dir, gasnet_dir=gasnet_release_dir, conduit=conduit,
         debug=False, thread_count=thread_count)

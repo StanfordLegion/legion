@@ -43,7 +43,7 @@ namespace Legion {
     public:
       ISAConstraint(uint64_t prop = 0);
     public:
-      bool entaisl(const ISAConstraint &other) const;
+      bool entails(const ISAConstraint &other) const;
       bool conflicts(const ISAConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
@@ -210,7 +210,7 @@ namespace Legion {
                                             SPECIALIZED_CONSTRAINT;
     public:
       SpecializedConstraint(SpecializedKind kind = NORMAL_SPECIALIZE,
-                            ReductionOpID redop = 0);
+                            ReductionOpID redop = 0, bool no_access = false);
     public:
       bool entails(const SpecializedConstraint &other) const;
       bool conflicts(const SpecializedConstraint &other) const;
@@ -225,9 +225,11 @@ namespace Legion {
       bool is_virtual(void) const;
       bool is_reduction(void) const;
       bool is_file(void) const;
+      bool is_no_access(void) const;
     public:
       SpecializedKind kind;
       ReductionOpID  redop;
+      bool       no_access;
     };
 
     /**

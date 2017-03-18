@@ -820,7 +820,7 @@ namespace Legion {
     public:
       void filter_composite_mask(FieldMask &composite_mask);
       void capture_composite_root(CompositeView *composite_view,
-                                  const FieldMask &closed_mask,
+        const FieldMask &closed_mask, ReferenceMutator *mutator,
         const LegionMap<LogicalView*,FieldMask>::aligned &valid_above);
     public:
       PhysicalState* clone(void) const;
@@ -1238,8 +1238,10 @@ namespace Legion {
     public:
       void find_close_fields(FieldMask &test_mask, FieldMask &result_mask);
       void capture_root(CompositeView *target, 
-                        const FieldMask &capture_mask) const;
-      void capture(CompositeNode *target, const FieldMask &capture_mask) const;
+                        const FieldMask &capture_mask,
+                        ReferenceMutator *mutator) const;
+      void capture(CompositeNode *target, const FieldMask &capture_mask,
+                   ReferenceMutator *mutator) const;
       void capture_dirty_instances(const FieldMask &capture_mask, 
                                    VersionState *target) const;
     public:

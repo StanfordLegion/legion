@@ -169,9 +169,25 @@ local function check_valid_inline_task(task)
   end
 end
 
+local function check_rf_type(ty)
+  if std.is_ispace(ty) or std.is_region(ty) or
+     std.is_partition(ty) or std.is_cross_product(ty) then
+     return true
+  elseif std.is_fspace_instance(ty) then
+    for _, field in ipairs(ty:getentries()) do
+      if not check_rf_type(field.type) then
+        return false
+      end
+      return true
+    end
+  else
+    return false
+  end
+end
+
 local function check_rf(node)
-  if node:is(ast.typed.expr.ID) then return true
-  elseif node:is(ast.typed.expr.Constant) then return true
+  if node:is(ast.typed.expr.ID) then
+    return check_rf_type(std.as_read(node.expr_type))
   elseif node:is(ast.typed.expr.FieldAccess) then
     return check_rf(node.value)
   elseif node:is(ast.typed.expr.IndexAccess) then

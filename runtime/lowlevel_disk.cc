@@ -1,4 +1,5 @@
 /* Copyright 2017 Stanford University, NVIDIA Corporation
+ * Copyright 2017 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +23,7 @@
 #include <errno.h>
 
 namespace Realm {
-
+  
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
       : MemoryImpl(_me, _size, MKIND_DISK, ALIGNMENT, Memory::DISK_MEM), file(_file)
     {
@@ -329,5 +330,5 @@ namespace Realm {
       pthread_mutex_unlock(&vector_lock);
       return fd;
     }
-
 }
+

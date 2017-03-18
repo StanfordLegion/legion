@@ -473,6 +473,13 @@ function pretty.expr_advance(cx, node)
       "advance(", commas({pretty.expr(cx, node.value)}), ")"})
 end
 
+function pretty.expr_adjust(cx, node)
+  return join({
+      "adjust(",
+      commas({pretty.expr(cx, node.barrier), pretty.expr(cx, node.value)}),
+      ")"})
+end
+
 function pretty.expr_arrive(cx, node)
   return join({
       "arrive(",
@@ -710,6 +717,9 @@ function pretty.expr(cx, node)
   elseif node:is(ast.typed.expr.Advance) then
     return pretty.expr_advance(cx, node)
 
+  elseif node:is(ast.typed.expr.Adjust) then
+    return pretty.expr_adjust(cx, node)
+
   elseif node:is(ast.typed.expr.Arrive) then
     return pretty.expr_arrive(cx, node)
 
@@ -802,6 +812,16 @@ function pretty.stat_for_num(cx, node)
   result:insert(join({"for", tostring(node.symbol),
                       ":", tostring(node.symbol:gettype()),
                       "=", pretty.expr_list(cx, node.values), "do"}, true))
+  result:insert(pretty.block(cx, node.block))
+  result:insert(text.Line { value = "end" })
+  return text.Lines { lines = result }
+end
+
+function pretty.stat_for_num_vectorized(cx, node)
+  local result = terralib.newlist()
+  result:insert(join({"for", tostring(node.symbol),
+                      ":", tostring(node.symbol:gettype()),
+                      "=", pretty.expr_list(cx, node.values), "do -- vectorized"}, true))
   result:insert(pretty.block(cx, node.block))
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -958,6 +978,9 @@ function pretty.stat(cx, node)
 
   elseif node:is(ast.typed.stat.ForNum) then
     return pretty.stat_for_num(cx, node)
+
+  elseif node:is(ast.typed.stat.ForNumVectorized) then
+    return pretty.stat_for_num_vectorized(cx, node)
 
   elseif node:is(ast.typed.stat.ForList) then
     return pretty.stat_for_list(cx, node)

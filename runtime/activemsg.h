@@ -44,6 +44,7 @@
       CREATE_INST_RPLID,
       VALID_MASK_REQ_MSGID,
       VALID_MASK_DATA_MSGID,
+      VALID_MASK_FTH_MSGID,
       ROLL_UP_TIMER_MSGID,
       ROLL_UP_DATA_MSGID,
       CLEAR_TIMER_MSGID,
@@ -64,8 +65,18 @@
       METADATA_RESPONSE_MSGID, // should really be a reply
       METADATA_INVALIDATE_MSGID,
       METADATA_INVALIDATE_ACK_MSGID,
+      XFERDES_REMOTEWRITE_MSGID,
+      XFERDES_REMOTEWRITE_ACK_MSGID,
+      XFERDES_CREATE_MSGID,
+      XFERDES_DESTROY_MSGID,
+      XFERDES_NOTIFY_COMPLETION_MSGID,
+      XFERDES_UPDATE_BYTES_WRITE_MSGID,
+      XFERDES_UPDATE_BYTES_READ_MSGID,
       REGISTER_TASK_MSGID,
       REGISTER_TASK_COMPLETE_MSGID,
+      REMOTE_IB_ALLOC_REQUEST_MSGID,
+      REMOTE_IB_ALLOC_RESPONSE_MSGID,
+      REMOTE_IB_FREE_REQUEST_MSGID,
     };
 
 
@@ -192,6 +203,7 @@ protected:
 extern void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int gasnet_mem_size_in_mb,
 			   int registered_mem_size_in_mb,
+			   int registered_ib_mem_size_in_mb,
 			   Realm::CoreReservationSet& crs,
 			   int argc, const char *argv[]);
 extern void start_polling_threads(int count);
@@ -878,6 +890,7 @@ template <class T> struct HandlerReplyFuture {
 inline void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
 			   int gasnet_mem_size_in_mb,
 			   int registered_mem_size_in_mb,
+			   int registered_ib_mem_size_in_mb,
 			   Realm::CoreReservationSet& crs,
                            int argc, const char *argv[])
 {

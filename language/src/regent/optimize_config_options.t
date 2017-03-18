@@ -63,6 +63,7 @@ local function analyze_leaf_node(cx)
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
       node:is(ast.typed.expr.Advance) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
@@ -165,6 +166,7 @@ local function analyze_inner_node(cx)
       return not std.is_ref(node.expr_type)
 
     elseif node:is(ast.typed.expr.RawPhysical) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await)
     then
@@ -278,8 +280,10 @@ end
 local optimize_config_options = {}
 
 function optimize_config_options.top_task(cx, node)
-  local leaf = analyze_leaf(cx, node.body)
-  local inner = not leaf and analyze_inner(cx, node.body)
+  -- Do the analysis first and then mask it out if the configuration
+  -- is disabled. This is to ensure that the analysis always works.
+  local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]
+  local inner = analyze_inner(cx, node.body) and std.config["inner"] and not leaf
 
   return node {
     config_options = ast.TaskConfigOptions {

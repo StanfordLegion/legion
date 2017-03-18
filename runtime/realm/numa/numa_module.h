@@ -59,12 +59,14 @@ namespace Realm {
 
     public:
       size_t cfg_numa_mem_size_in_mb;
+      ssize_t cfg_numa_nocpu_mem_size_in_mb;
       int cfg_num_numa_cpus;
       bool cfg_pin_memory;
       size_t cfg_stack_size_in_mb;
 
       // "global" variables live here too
       std::map<int, void *> numa_mem_bases;
+      std::map<int, size_t> numa_mem_sizes;
       std::map<int, int> numa_cpu_counts;
       std::map<int, MemoryImpl *> memories;
     };

@@ -28,8 +28,10 @@ local default_options = {
   ["inline"] = true,
   ["future"] = true,
   ["leaf"] = true,
+  ["inner"] = true,
   ["mapping"] = true,
   ["vectorize"] = true,
+  ["vectorize-unsafe"] = false,
 
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,

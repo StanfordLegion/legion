@@ -1,3 +1,4 @@
+// Some of the constants are read in from load_scale_json
 var constants = {
   margin_left: 310,
   margin_right: 50,
@@ -11,6 +12,10 @@ var constants = {
   line_colors: ["limegreen", "crimson", "goldenrod", "sienna", "orangered",
                 "palevioletred", "olivedrab", "cornflowerblue"]
 }
+
+var op_dependencies = {};
+var base_map = {};
+var prof_uid_map = {};
 
 // Contains the children for each stats file
 var stats_files = {};
@@ -187,8 +192,6 @@ function getLineColor(elem) {
   return colorMap[kind];
 }
 
-
-
 function drawStats() {
   // TODO: Add to state
   var windowStart = $("#timeline").scrollLeft();
@@ -209,7 +212,6 @@ function drawStats() {
   var paths = state.timelineSvg.selectAll("path")
     .data(filteredStatsData);
 
-  var focus = state.timelineSvg.select("g.focus");
   paths.enter().append("path")
     .attr("class", "line")
     .attr("d", function (d) { return statsline(d.data); })
@@ -222,8 +224,7 @@ function drawStats() {
     .attr("stroke", getLineColor)
     .on("mouseover", function() { 
         var focus = state.timelineSvg.append("g")
-          .attr("class", "focus")
-          .style("display", null);
+          .attr("class", "focus");
 
         var text = focus.append("text")
           .attr("x", 7)
@@ -232,13 +233,13 @@ function drawStats() {
           .attr("dy", ".35em");
 
         focus.append("circle")
-        .attr("fill", "none")
-        .attr("stroke", "black")
-        .attr("r", 4.5);
+          .attr("fill", "none")
+          .attr("stroke", "black")
+          .attr("r", 4.5);
 
         var rect = focus.insert("rect", "text")
-            .style("fill", "#222")
-            .style("opacity", "0.7");
+          .style("fill", "#222")
+          .style("opacity", "0.7");
     })
     .on("mouseout", function() {
       state.timelineSvg.select("g.focus").remove();
@@ -325,6 +326,7 @@ function hideLoaderIcon() {
   }
 }
 
+
 function getMouseOver() {
   var paneWidth = $("#timeline").width();
   var left = paneWidth / 3;
@@ -332,22 +334,27 @@ function getMouseOver() {
   return function(d, i) {
     var p = d3.mouse(this);
     var x = parseFloat(p[0]);
+    var y = timelineLevelCalculator(d) - 5;
     var relativeX = (x - $("#timeline").scrollLeft())
     var anchor = relativeX < left ? "start" :
                  relativeX < right ? "middle" : "end";
     var descView = state.timelineSvg.append("g").attr("id", "desc");
 
+    if ((d.in.length != 0) || (d.out.length != 0)) {
+      d3.select(this).style("cursor", "pointer")
+    }
+
     var total = d.end - d.start;
     var initiation = "";
     if ((d.initiation != undefined) && d.initiation != "") {
-      initiation = " initiated by " + state.operations[d.initiation];
+      initiation = " initiated by " + state.operations[d.initiation].desc;
     } 
     var title = d.title + initiation + ", total=" + total + "us, start=" + 
                 d.start + "us, end=" + d.end+ "us";
 
     var text = descView.append("text")
       .attr("x", x)
-      .attr("y", d.level * state.thickness - 5)
+      .attr("y", y)
       .attr("text-anchor", anchor)
       .attr("class", "desc")
       .text(unescape(escape(title)));
@@ -408,18 +415,34 @@ function getProcessors(stats_name) {
 // This function gets a particular timelineElement. It will also handle
 // creating the children for expand commands
 function getElement(depth, text, type, num_levels, loader, 
-                    tsv, children, enabled, visible) {
+                    tsv, _parent, children, enabled, visible) {
+
+  // build the dummy element
+  var element = {
+    depth: depth,
+    enabled: enabled,
+    expanded: false,
+    loaded: false,
+    loader: loader,
+    num_levels: num_levels,
+    children: [],
+    parent: _parent,
+    text: text,
+    type: type,
+    tsv: tsv,
+    visible: visible
+  };
+
   // Create child elements. Child elements will be enabled, but they will be
   // invisible and unloaded. They will be loaded in when expanded
-  var child_elements = [];
   if (children != undefined) {
     children.forEach(function(child) {
       var stats_name = "node " + child;
       var child_element = getElement(depth + 1, stats_name, "stats", 
                                      num_levels, loader,
                                      "tsv/" + child + "_stats.tsv",
-                                     stats_files[child], true, false);
-      child_elements.push(child_element);
+                                     element, stats_files[child], true, false);
+      element.children.push(child_element);
     });
   }
 
@@ -430,25 +453,12 @@ function getElement(depth, text, type, num_levels, loader,
     proc_children.forEach(function(proc_child) {
       var child_element = getElement(depth + 1, proc_child.processor, "proc", 
                                      proc_child.height, load_proc_timeline,
-                                     proc_child.tsv, undefined, true, false);
-      child_elements.push(child_element);
+                                     proc_child.tsv, element, undefined, 
+                                     true, false);
+      element.children.push(child_element);
     });
   }
 
-  // Now that we've gotten the parts, let's build the element and return it
-  var element = {
-    depth: depth,
-    enabled: enabled,
-    expanded: false,
-    loaded: false,
-    loader: loader,
-    num_levels: num_levels,
-    children: child_elements,
-    text: text,
-    type: type,
-    tsv: tsv,
-    visible: visible
-  };
   return element;
 }
 
@@ -466,7 +476,7 @@ function calculateLayout() {
       var kind_element = getElement(0, stats_name, "stats", 
                                      constants.stats_levels, load_stats,
                                      "tsv/" + kind + "_stats.tsv",
-                                     stats_files[kind], false, true);
+                                     undefined, stats_files[kind], false, true);
       state.layoutData.push(kind_element);
     });
   }
@@ -476,7 +486,6 @@ function calculateLayout() {
     // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
     var proc_regex = /Processor 0x1d([a-fA-f0-9]{4})/;
     var proc_match = proc_regex.exec(proc.processor);
-    // if there's only one node, then per-node graphs are redundant
     if (proc_match) {
       var node_id = parseInt(proc_match[1], 16);
       if (!(node_id in seen_nodes)) {
@@ -488,16 +497,106 @@ function calculateLayout() {
           var kind_element = getElement(0, stats_name, "stats", 
                                          constants.stats_levels, load_stats,
                                          "tsv/" + kind + "_stats.tsv",
-                                         stats_files[kind], false, true);
+                                         undefined, stats_files[kind],
+                                         false, true);
           state.layoutData.push(kind_element);
         });
       }
     } else {
       state.layoutData.push(getElement(0, proc.processor, "proc", 
                                        proc.height, load_proc_timeline,
-                                       proc.tsv, undefined, false, true));
+                                       proc.tsv, undefined, undefined,
+                                       false, true));
     }
   });
+}
+
+function drawDependencies() {
+  state.timelineSvg.select("g.dependencies").remove();
+  var timelineEvent = state.dependencyEvent;
+  if (timelineEvent == undefined || 
+      !timelineEvent.proc.visible || !timelineEvent.proc.enabled) {
+    return; // don't draw in this case, the src isn't present
+  }
+  var startTime = (timelineEvent.end - timelineEvent.start) / 2 
+                  + timelineEvent.start;
+  var startX = convertToPos(state, startTime);
+  var startLevel = timelineEvent.proc.base + timelineEvent.level;
+  var startY = dependencyLineLevelCalculator(startLevel);
+  var depGroup = state.timelineSvg.append("g")
+      .attr("class", "dependencies");
+
+  var drewOne = false;
+
+  var addDependency = function(dep) {
+    var depProc = base_map[dep[0] + "," + dep[1]]; // set in calculateBases
+    if (depProc.visible && depProc.enabled) {
+      var depElement = prof_uid_map[dep[2]];
+      if (depElement != undefined) {
+        drewOne = true;
+        var level = depElement.level;
+        var time = (depElement.end - depElement.start) / 2 + depElement.start;
+        var endX = convertToPos(state, time);
+        var endBase = +depProc.base
+        // create a dummy element so we can reuse timelineLevelCalculator
+        var endLevel = endBase + level;
+        var endY = dependencyLineLevelCalculator(endLevel);
+        depGroup.append("line")
+          .style("stroke", "black")
+          .attr("x1", startX)
+          .attr("y1", startY)
+          .attr("x2", endX)
+          .attr("y2", endY)
+          .style("stroke-width", "1px");
+
+        depGroup.append("circle")
+          .attr("cx", endX)
+          .attr("cy", endY)
+          .attr("fill", "white")
+          .attr("stroke", "black")
+          .attr("r", 2.5)
+          .style("stroke-width", "1px");
+      }
+    }
+  }
+
+  timelineEvent.in.forEach(addDependency);
+  timelineEvent.out.forEach(addDependency);
+
+  if (drewOne) {
+    depGroup.append("circle")
+      .attr("cx", startX)
+      .attr("cy", startY)
+      .attr("fill", "white")
+      .attr("stroke", "black")
+      .attr("r", 2.5)
+      .style("stroke-width", "1px");
+  }
+}
+
+function timelineEventsExistsAndEqual(a, b) {
+  if (a == undefined || b == undefined) {
+    return false;
+  }
+  return (a.proc.base == b.proc.base) && (a.id == b.id);
+}
+
+function timelineEventMouseDown(timelineEvent) {
+  var hasDependencies = ((timelineEvent.in.length != 0) || 
+                         (timelineEvent.out.length != 0));
+
+  if (hasDependencies) {
+    if (timelineEventsExistsAndEqual(timelineEvent, state.dependencyEvent)) {
+      state.dependencyEvent = undefined;
+    } else {
+      timelineEvent.in.concat(timelineEvent.out).forEach(function(dep) {
+        expandElement(dep[0], dep[1])
+      });
+      
+      state.dependencyEvent = timelineEvent;
+    }
+    redraw();
+  }
 }
 
 function drawTimeline() {
@@ -507,13 +606,13 @@ function drawTimeline() {
   var timelineGroup = state.timelineSvg.select("g#timeline");
   timelineGroup.selectAll("rect").remove();
   var timeline = timelineGroup.selectAll("rect")
-    .data(state.dataToDraw, function(d) { return d.proc + "-" + d.id; });
+    .data(state.dataToDraw, function(d) { return d.proc.base + "-" + d.id; });
   var mouseOver = getMouseOver();
 
   timeline.enter().append("rect");
 
   timeline
-    .attr("id", function(d) { return "block-" + d.proc + "-" + d.id; })
+    .attr("id", function(d) { return "block-" + d.proc.base + "-" + d.id; })
     .attr("x", function(d) { return convertToPos(state, d.start); })
     .attr("y", timelineLevelCalculator)
     .style("fill", function(d) {
@@ -525,8 +624,20 @@ function drawTimeline() {
     .attr("width", function(d) {
       return Math.max(constants.min_feature_width, convertToPos(state, d.end - d.start));
     })
-    .attr("stroke", "black")
-    .attr("stroke-width", "0.5")
+    .attr("stroke", function(d) {
+      if (timelineEventsExistsAndEqual(d, state.dependencyEvent)) {
+        return "red";
+      } else {
+        return "black";
+      }
+    })
+    .attr("stroke-width", function(d) {
+      if (timelineEventsExistsAndEqual(d, state.dependencyEvent)) {
+        return "1.5";
+      } else {
+        return "0.5";
+      }
+    })
     .attr("height", state.thickness)
     .style("opacity", function(d) {
       if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) != null) {
@@ -535,8 +646,12 @@ function drawTimeline() {
       else return 0.05;
     })
     .on("mouseout", function(d, i) { 
+      if ((d.in.length != 0) || (d.out.length != 0)) {
+        d3.select(this).style("cursor", "default");
+      }
       state.timelineSvg.selectAll("#desc").remove();
-    });
+    })
+    .on("mousedown", timelineEventMouseDown);
 
   drawStats();
   timeline.on("mouseover", mouseOver);
@@ -551,6 +666,7 @@ function redraw() {
     constants.max_level = calculateVisibileLevels();
     recalculateHeight();
     drawTimeline();
+    drawDependencies();
     drawLayout();
   }
 }
@@ -568,10 +684,38 @@ function calculateVisibileLevels() {
   return levels;
 }
 
+function get_node_id(text) {
+  // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
+  var proc_regex = /Processor 0x1d([a-fA-f0-9]{4})/;
+  var proc_match = proc_regex.exec(text);
+  // if there's only one node, then per-node graphs are redundant
+  if (proc_match) {
+    var node_id = parseInt(proc_match[1], 16);
+    return node_id
+  }
+}
+
+function get_proc_in_node(text) {
+  // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
+  var proc_regex = /Processor 0x1d[a-fA-f0-9]{11}([a-fA-f0-9]{3})/;
+    0x1d00000000000001
+  var proc_match = proc_regex.exec(text);
+  // if there's only one node, then per-node graphs are redundant
+  if (proc_match) {
+    var proc_in_node = parseInt(proc_match[1], 16);
+    return proc_in_node;
+  }
+}
+
 function calculateBases() {
   var base = 0;
   state.flattenedLayoutData.forEach(function(elem) {
     elem.base = base;
+    var node_id = get_node_id(elem.text);
+    var proc_in_node = get_proc_in_node(elem.text);
+    if (node_id != undefined && proc_in_node != undefined) {
+      base_map[(+node_id) + "," + (+proc_in_node)] = elem;
+    }
     if (elem.visible) {
       if (elem.enabled) {
         base += elem.num_levels;
@@ -599,16 +743,12 @@ function expandHandler(elem, index) {
   } else {
     function collapseChildren(child) {
       child.visible = false;
-      // child.expanded = false;
-      // child.enabled = false;
       child.children.forEach(collapseChildren);
     }
     elem.children.forEach(collapseChildren);
   }
   redraw();
 }
-
-
 
 // This handler is called when you collapse/uncollapse a row in the
 // timeline
@@ -618,18 +758,49 @@ function collapseHandler(d, index) {
   if (!d.loaded) {
     // should always be expanding here
     showLoaderIcon();
-    var elem = state.flattenedLayoutData[index];
-    elem.loader(elem); // will redraw the timeline once loaded
+    //var elem = state.flattenedLayoutData[index];
+    d.loader(d); // will redraw the timeline once loaded
   } else {
-    // if collapsing, unexpand
-    // if (!d.enabled && d.expanded) {
-    //   expandHandler(d, index);
-    // } else {
-      // redraw the timeline
-      redraw();
-    //}
+    redraw();
   }
 }
+
+// This expands a particular element and its parents if necessary
+function expandElement(node, proc) {
+  // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
+  // ugh why isn't there string formatting
+  var nodeHex = ("0000" + node.toString(16)).slice(-4);
+  var procHex = ("000" + proc.toString(16)).slice(-3);
+  var expectedTitle = "0x1d" + nodeHex + "0000000" + procHex;
+  var matchedElement = undefined;
+  for (var i = 0; i < state.flattenedLayoutData.length; i++) {
+    var timelineElement = state.flattenedLayoutData[i];
+    if (timelineElement.text.indexOf(expectedTitle) !=-1) {  
+      matchedElement = timelineElement;
+      break;
+    }
+  }
+  if (matchedElement != undefined) {
+    var elemPath = []; // path up to parent
+    var curElem = matchedElement;
+    while (curElem != undefined) {
+      elemPath.push(curElem);
+      curElem = curElem.parent;
+    }
+
+    for (var i = elemPath.length - 1; i >= 0; --i) {
+      var elem = elemPath[i];
+      if (!elem.expanded) {
+        expandHandler(elem);
+      }
+      // uncollapse if necessary
+      if ((i == 0) && !elem.enabled) {
+        collapseHandler(elem);
+      }
+    }
+  }
+}
+
 
 function lineLevelCalculator(timelineElement) {
   var level = timelineElement.base + 1;
@@ -649,8 +820,13 @@ function statsLevelCalculator(timelineElement) {
 
 
 function timelineLevelCalculator(timelineEvent) {  
-  return constants.margin_top + timelineEvent.level * state.thickness;
+  return constants.margin_top + 
+         (timelineEvent.proc.base + timelineEvent.level) * state.thickness;
 };
+
+function dependencyLineLevelCalculator(level) {
+  return constants.margin_top + ((level+0.5) * state.thickness);
+}
 
 function drawLayout() {
   
@@ -669,9 +845,11 @@ function drawLayout() {
   var names = namesGroup.append("text");
 
   var thickness = state.thickness;
+  var xCalculator = function(d) { return (d.depth + 1) * 15; };
+
   names.attr("text-anchor", "start")
     .attr("class", "processor")
-    .attr("x", function(d) { return (d.depth + 1) * 15; })
+    .attr("x", xCalculator)
     .attr("y", lineLevelCalculator)
     .attr("visibility", function(elem) {
       return (elem.visible) ? "visible" : "hidden"  
@@ -682,17 +860,20 @@ function drawLayout() {
     });
 
   names.each(function(d) {
-    var text = d3.select(this);
+    var elem = d3.select(this);
+    var text = d.text;
     var tokens = d.text.split(" to ");
     if (tokens.length == 1)
-      text.text(d.text);
+      elem.append("tspan").text(d.text);
     else {
       var source = tokens[0];
       var target = tokens[1].replace(" Channel", "");
-      text.text(source)
-        .attr({x : 0, dy : -10});
-      text.text("==> " + target)
-        .attr({x : 0, dy : 10});
+      elem.append("tspan").text(source)
+        .attr("x", xCalculator)
+        .attr("dy", -10);
+      elem.append("tspan").text("==> " + target)
+        .attr("x", xCalculator)
+        .attr("dy", 10);
     }
   });
   names.on({
@@ -708,9 +889,16 @@ function drawLayout() {
   var expandableNodes = namesGroup.filter(function(elem) {
     return elem.children.length > 0;
   });
-  var expand_icons = expandableNodes.append("path");
+
+  var expand_group = expandableNodes.append("g");
+
+  var expand_clickable = expand_group.append("circle")
+                          .attr("fill", "transparent")
+                          .attr("stroke", "transparent")
+                          .attr("r", 8);
+  var expand_icons = expand_group.append("path");
   var arc = d3.svg.symbol().type('triangle-down')
-            .size(6);
+            .size(12);
 
 
     //.attr("transform", function(elem) {
@@ -729,10 +917,10 @@ function drawLayout() {
       return (proc.enabled) ? 1 : 0.5;
     });
 
-  expand_icons.each(function(elem) {
+  expand_group.each(function(elem) {
     var path = d3.select(this);
     var x = elem.depth * 15 + 5;
-    var y = lineLevelCalculator(elem) - 2;
+    var y = lineLevelCalculator(elem) - 3;
 
     if (elem.expanded) {
       path.attr("transform", "translate(" + x + ", " + y + ") rotate(0)");
@@ -743,7 +931,7 @@ function drawLayout() {
   });
 
 
-  expand_icons.on({
+  expand_group.on({
     "mouseover": function(d) {
       d3.select(this).style("cursor", "pointer")
     },
@@ -966,6 +1154,7 @@ function adjustZoom(newZoom, scroll) {
     filterAndMergeBlocks(state);
     drawTimeline();
   }
+  drawDependencies();
 }
 
 function recalculateHeight() {
@@ -1175,6 +1364,8 @@ function load_proc_timeline(proc) {
         var start = +d.start;
         var end = +d.end;
         var total = end - start;
+        var _in = d.in === "" ? [] : JSON.parse(d.in)
+        var out = d.out === "" ? [] : JSON.parse(d.out)
         if (total > state.resolution) {
             return {
                 id: i,
@@ -1184,7 +1375,10 @@ function load_proc_timeline(proc) {
                 color: d.color,
                 opacity: d.opacity,
                 initiation: d.initiation,
-                title: d.title
+                title: d.title,
+                in: _in,
+                out: out,
+                prof_uid: d.prof_uid
             };
         }
     },
@@ -1196,6 +1390,9 @@ function load_proc_timeline(proc) {
           state.processorData[proc_name][d.level].push(d);
         } else {
           state.processorData[proc_name][d.level] = [d];
+        }
+        if (d.prof_uid != undefined && d.prof_uid !== "") {
+          prof_uid_map[d.prof_uid] = d;
         }
       }
       proc.loaded = true;
@@ -1251,7 +1448,7 @@ function load_ops_and_timeline() {
     },
     function(data) { 
       data.forEach(function(d) {
-        state.operations[parseInt(d.op_id)] = d.operation;      
+        state.operations[parseInt(d.op_id)] = d;
       });
       // initTimelineElements depends on the ops to be loaded
       initTimelineElements();
@@ -1278,7 +1475,6 @@ function load_procs(callback) {
 
         base += 2;
       });
-      //console.log(data);
       state.processors = data;
       calculateLayout();
 
@@ -1287,11 +1483,6 @@ function load_procs(callback) {
       calculateBases();
       drawLayout();
       callback();
-
-      //stats_counter = stats_files.length; // TODO: use ES6 Promises
-      //stats_files.forEach(function(stats_filename) {
-      //  load_stats(stats_filename, callback);
-      //});
     }
   );
 }
@@ -1422,8 +1613,6 @@ function mousemove(timelineElem) {
 
 }
 
-var maxVal;
-
 // Get the data
 function load_stats(elem) {
   var stats_file = elem.tsv;
@@ -1445,27 +1634,6 @@ function load_stats(elem) {
     },
     function(error, data) {
       state.statsData[stats_file] = data;
-
-      // state.statsData = filterStatsData(data);
-      // Scale the range of the data
-      //state.x.domain(d3.extent(data, function(d) { return d.time; }));
-      //state.y.domain([0, 1]);
-      //state.y.domain([0, d3.max(data, function(d) { return d.count; })]);
-
-      // Loop through each symbol / key
-      //state.timelineSvg.append("path")
-      //  .attr("class", "line")
-      //  .attr("id", function(d) { return stats_file; })
-      //  .attr("d", statsline(state.statsData)); 
-
-      //var focus = state.timelineSvg.select("g.focus");
-
-      //state.timelineSvg.select("path.line")
-      //  .on("mouseover", function() { focus.style("display", null); })
-      //  .on("mouseout", function() { focus.style("display", "none"); })
-      //  .on("mousemove", mousemove);
-      //console.log("loaded", stats_file);
-
       elem.loaded = true;
       hideLoaderIcon();
       redraw();
@@ -1485,6 +1653,7 @@ function initializeState() {
   state.zoom = 1.0;
   state.zoomHistory = Array();
   state.numLoading = 0;
+  state.dependencyEvent = undefined;
 
   state.layoutData = [];
   state.flattenedLayoutData = [];
@@ -1533,10 +1702,18 @@ function load_stats_json(callback) {
 // of a stats view
 function load_scale_json(callback) {
   $.getJSON("json/scale.json", function(json) {
+    // add the read-in constants
     $.each(json, function(key, val) {
       constants[key] = val;
     });
     load_stats_json(callback);
+  });
+}
+
+function load_op_deps_json(callback) {
+  $.getJSON("json/op_dependencies.json", function(json) {
+    op_dependencies = json;
+    load_scale_json(callback);
   });
 }
 

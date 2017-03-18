@@ -7203,6 +7203,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool VariantImpl::is_no_access_region(unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+      bool result = false;
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layout_constraints.layouts.lower_bound(idx); it !=
+            layout_constraints.layouts.upper_bound(idx); it++)
+      {
+        result = true;
+        LayoutConstraints *constraints = 
+          runtime->find_layout_constraints(it->second);
+        if (!constraints->specialized_constraint.is_no_access())
+        {
+          result = false;
+          break;
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent VariantImpl::dispatch_task(Processor target, SingleTask *task,
                                        TaskContext *ctx, ApEvent precondition,
                                        PredEvent predicate_guard, int priority, 

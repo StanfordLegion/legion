@@ -1871,7 +1871,7 @@ task toplevel()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lpennant"}
+  local link_flags = {"-L" .. root_dir, "-lpennant", "-lm"}
   regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
 else
   regentlib.start(toplevel, cpennant.register_mappers)

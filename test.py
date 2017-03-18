@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, datetime, json, multiprocessing, os, platform, shutil, subprocess, sys, traceback, tempfile
+import argparse, datetime, glob, json, multiprocessing, os, platform, shutil, subprocess, sys, traceback, tempfile
 
 # Find physical core count of the machine.
 if platform.system() == 'Linux':
@@ -55,13 +55,13 @@ legion_cxx_tests = [
     ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
 
     # Tests
-    ['test/attach_file_mini/attach_file_mini', []],
-    #['test/garbage_collection_mini/garbage_collection_mini', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/220
-    #['test/matrix_multiply/matrix_multiply', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/222
-    #['test/predspec/predspec', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/223
-    #['test/read_write/read_write', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/224
-    #['test/rendering/rendering', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/225
 ]
+
+if platform.system() != 'Darwin':
+    legion_cxx_tests = legion_cxx_tests + [
+        # FIXME: Fails non-deterministically on Mac OS: https://github.com/StanfordLegion/legion/issues/213
+        ['test/attach_file_mini/attach_file_mini', []],
+    ]
 
 legion_hdf_cxx_tests = [
     # Examples
@@ -203,6 +203,30 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         test_dir = os.path.join(miniaero_dir, 'tests', test)
         cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir)
 
+    # PENNANT
+    # Contact: Galen Shipman <gshipman@lanl.gov>
+    pennant_dir = os.path.join(tmp_dir, 'pennant')
+    cmd(['git', 'clone', '-b', 'spmdv2',
+         'git@github.com:gshipman/pennant-legion.git', pennant_dir])
+    # This uses a custom Makefile that requires additional
+    # configuration. Rather than go to that trouble it's easier to
+    # just use a copy of the standard Makefile template.
+    pennant_env = dict(list(env.items()) + [
+        ('OUTFILE', 'pennant'),
+        ('GEN_SRC', ' '.join(glob.glob(os.path.join(pennant_dir, 'src/*.cc')))),
+        ('CC_FLAGS', (env['CC_FLAGS'] if 'CC_FLAGS' in env else '') +
+         ' -std=c++11 -Wno-sign-compare -Wno-unknown-pragmas -Wno-unused-variable' +
+         ' -D__STDC_FORMAT_MACROS -DDISABLE_BARRIER_MIGRATION'),
+        ('WARN_AS_ERROR', '0'),
+    ])
+    makefile = os.path.join(root_dir, 'apps/Makefile.template')
+    # Previous build uses -DASSUME_UNALLOCABLE. Clean first to get a fresh environment.
+    cmd(['make', '-f', makefile, '-C', pennant_dir, 'clean'], env=pennant_env)
+    cmd(['make', '-f', makefile, '-C', pennant_dir, '-j', str(thread_count)], env=pennant_env)
+    pennant = os.path.join(pennant_dir, 'pennant')
+    cmd([pennant, str(app_cores), 'test/sedovsmall/sedovsmall.pnt', '-ll:cpu', str(app_cores)],
+        cwd=pennant_dir)
+
 def hostname():
     return subprocess.check_output(['hostname']).strip()
 
@@ -325,6 +349,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf
     return os.path.join(build_dir, 'bin')
 
 def clean_cxx(tests, root_dir, env, thread_count):
+    env = dict(list(env.items()) + [
+        ('MAKEFLAGS', 's'), # Always silence initial clean.
+    ])
     for test_file, test_flags in tests:
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         cmd(['make', '-C', test_dir, 'clean'], env=env)

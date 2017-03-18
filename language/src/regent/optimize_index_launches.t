@@ -167,6 +167,7 @@ local function analyze_is_side_effect_free_node(cx)
       node:is(ast.typed.expr.ListPhaseBarriers) or
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or
@@ -256,6 +257,7 @@ local function analyze_is_loop_invariant_node(cx)
       node:is(ast.typed.expr.PhaseBarrier) or
       node:is(ast.typed.expr.DynamicCollective) or
       node:is(ast.typed.expr.DynamicCollectiveGetResult) or
+      node:is(ast.typed.expr.Adjust) or
       node:is(ast.typed.expr.Arrive) or
       node:is(ast.typed.expr.Await) or
       node:is(ast.typed.expr.Copy) or

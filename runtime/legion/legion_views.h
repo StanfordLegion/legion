@@ -1313,7 +1313,7 @@ namespace Legion {
       void record_reduction_fields(const FieldMask &reduction_fields);
       void record_reduction_view(ReductionView *view, const FieldMask &mask);
       void record_child_version_state(const ColorPoint &child_color, 
-                                 VersionState *state, const FieldMask &mask);
+         VersionState *state, const FieldMask &mask, ReferenceMutator *mutator);
       void finalize_capture(bool need_prune);
     public:
       void pack_composite_view(Serializer &rez) const;
@@ -1380,7 +1380,7 @@ namespace Legion {
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool needs_lock = true);
-      void capture(RtUserEvent capture_event);
+      void capture(RtUserEvent capture_event, ReferenceMutator *mutator);
       static void handle_deferred_capture(const void *args);
     public:
       void clone(CompositeView *target, const FieldMask &clone_mask) const;
@@ -1398,9 +1398,9 @@ namespace Legion {
       void record_reduction_fields(const FieldMask &reduction_fields);
       void record_reduction_view(ReductionView *view, const FieldMask &mask);
       void record_child_version_state(const ColorPoint &child_color, 
-                                 VersionState *state, const FieldMask &mask);
-      void record_version_state(VersionState *state, 
-                                const FieldMask &mask, bool root);
+         VersionState *state, const FieldMask &mask, ReferenceMutator *mutator);
+      void record_version_state(VersionState *state, const FieldMask &mask, 
+                                ReferenceMutator *mutator, bool root);
     public:
       void capture_field_versions(FieldVersions &versions,
                                   const FieldMask &capture_mask) const;
