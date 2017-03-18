@@ -503,6 +503,9 @@ namespace Legion {
     {
       if (region_node != NULL)
         region_node->register_physical_manager(this);
+      // Add a reference to the layout
+      if (layout != NULL)
+        layout->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -520,6 +523,8 @@ namespace Legion {
       if (own_domain && is_owner())
         region_node->context->destroy_index_space(instance_domain->handle,
                                                   runtime->address_space);
+      if ((layout != NULL) && layout->remove_reference())
+        delete layout;
     }
 
     //--------------------------------------------------------------------------
@@ -940,9 +945,7 @@ namespace Legion {
         // Register it with the memory manager, the memory manager
         // on the owner node will handle this
         memory_manager->register_remote_instance(this);
-      }
-      // Add a reference to the layout
-      layout->add_reference();
+      } 
 #ifdef LEGION_GC
       log_garbage.info("GC Instance Manager %lld %d " IDFMT " " IDFMT " ",
        LEGION_DISTRIBUTED_ID_FILTER(did), local_space, inst.id, mem->memory.id);
@@ -973,9 +976,7 @@ namespace Legion {
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
-      if (layout->remove_reference())
-        delete layout;
+#endif 
       // If we are the owner, we get to destroy the read only reservation
       if (is_owner())
         read_only_mapping_reservation.destroy_reservation();

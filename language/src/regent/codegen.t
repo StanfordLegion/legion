@@ -5806,7 +5806,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
          local field_name = field_path:mkstring("", ".", "") .. ".(scratch)"
          local field_type = cx:region_or_list(region_type):field_type(field_path)
          return quote
-           [field_ids][i] = c.legion_field_allocator_allocate_field(
+           [field_ids][i] = c.legion_field_allocator_allocate_local_field(
              fsa, terralib.sizeof(field_type), -1ULL)
            c.legion_field_id_attach_name(
              [cx.runtime], [field_space], [field_ids][i], field_name, false)
