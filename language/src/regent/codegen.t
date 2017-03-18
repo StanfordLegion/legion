@@ -4356,6 +4356,46 @@ function codegen.expr_list_cross_product_complete(cx, node)
     expr_type)
 end
 
+local gen_expr_list_phase_barriers = terralib.memoize(
+  function(product_type, expr_type)
+    local result = terralib.newsymbol(expr_type, "result")
+    local product = terralib.newsymbol(product_type, "product")
+    local runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
+    local context = terralib.newsymbol(c.legion_context_t, "context")
+    local terra list_phase_barriers([runtime], [context], [product])
+      var data = c.malloc(
+        terralib.sizeof([expr_type.element_type]) * [product].__size)
+      regentlib.assert(data ~= nil, "malloc failed in list_phase_barriers")
+      var [result] = expr_type {
+        __size = [product].__size,
+        __data = data,
+      }
+      for i = 0, [product].__size do
+        var subsize = [product_type:data(product)][i].__size
+
+        -- Allocate sublist.
+        var subdata = c.malloc(
+          terralib.sizeof([expr_type.element_type.element_type]) * subsize)
+        regentlib.assert(subdata ~= nil, "malloc failed in list_phase_barriers")
+        [expr_type:data(result)][i] = [expr_type.element_type] {
+          __size = subsize,
+          __data = subdata,
+        }
+
+        -- Fill sublist.
+        for j = 0, subsize do
+          [expr_type.element_type:data(`([expr_type:data(result)][i]))][j] =
+            [expr_type.element_type.element_type] {
+              impl = c.legion_phase_barrier_create([runtime], [context], 1)
+            }
+        end
+      end
+      return [result]
+    end
+    list_phase_barriers:setinlined(false)
+    return list_phase_barriers
+  end)
+
 function codegen.expr_list_phase_barriers(cx, node)
   local product_type = std.as_read(node.product.expr_type)
   local product = codegen.expr(cx, node.product):read(cx, product_type)
@@ -4366,37 +4406,11 @@ function codegen.expr_list_phase_barriers(cx, node)
   end
 
   local result = terralib.newsymbol(expr_type, "result")
+  local helper = gen_expr_list_phase_barriers(product_type, expr_type)
 
   actions = quote
     [actions]
-
-    var data = c.malloc(
-      terralib.sizeof([expr_type.element_type]) * [product.value].__size)
-    regentlib.assert(data ~= nil, "malloc failed in list_phase_barriers")
-    var [result] = expr_type {
-      __size = [product.value].__size,
-      __data = data,
-    }
-    for i = 0, [product.value].__size do
-      var subsize = [product_type:data(product.value)][i].__size
-
-      -- Allocate sublist.
-      var subdata = c.malloc(
-        terralib.sizeof([expr_type.element_type.element_type]) * subsize)
-      regentlib.assert(subdata ~= nil, "malloc failed in list_phase_barriers")
-      [expr_type:data(result)][i] = [expr_type.element_type] {
-        __size = subsize,
-        __data = subdata,
-      }
-
-      -- Fill sublist.
-      for j = 0, subsize do
-        [expr_type.element_type:data(`([expr_type:data(result)][i]))][j] =
-          [expr_type.element_type.element_type] {
-            impl = c.legion_phase_barrier_create([cx.runtime], [cx.context], 1)
-          }
-      end
-    end
+    var [result] = [helper]([cx.runtime], [cx.context], [product.value])
   end
 
   return values.value(
@@ -4406,10 +4420,10 @@ function codegen.expr_list_phase_barriers(cx, node)
 end
 
 -- Returns Terra expression for color as an index_type (e.g. int2d).
-local function get_logical_region_color(cx, region, color_type)
+local function get_logical_region_color(runtime, region, color_type)
   assert(std.is_index_type(color_type))
   local domain_pt_expr =
-    `(c.legion_logical_region_get_color_domain_point([cx.runtime], region))
+    `(c.legion_logical_region_get_color_domain_point([runtime], region))
   return `([color_type.from_domain_point](domain_pt_expr))
 end
 
@@ -4434,6 +4448,169 @@ local function get_offset_in_rect(point, rect_size)
   end
 end
 
+local gen_expr_list_invert = terralib.memoize(
+  function(rhs_type, product_type, expr_type, barriers_type)
+    local color_type = rhs_type:partition():colors().index_type
+    if color_type:is_opaque() then  -- Treat `ptr` as `int1d`.
+      color_type = int1d
+    end
+    local result = terralib.newsymbol(expr_type, "result")
+    local rhs = terralib.newsymbol(rhs_type, "rhs")
+    local product = terralib.newsymbol(product_type, "product")
+    local barriers = terralib.newsymbol(barriers_type, "barriers")
+    local runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
+    local terra list_invert([runtime], [rhs], [product], [barriers])
+      -- 1. Compute an index from colors to rhs index.
+      -- 2. Compute sublist sizes.
+      -- 3. Allocate sublists.
+      -- 3. Fill sublists.
+
+      var data = c.malloc(
+        terralib.sizeof([expr_type.element_type]) * [rhs].__size)
+      regentlib.assert(data ~= nil, "malloc failed in list_invert")
+      var [result] = expr_type {
+        __size = [rhs].__size,
+        __data = data,
+      }
+
+      if [rhs].__size > 0 then
+        -- 1. Compute an index from colors to rhs index.
+
+        -- Determine the range of colors in rhs.
+        var min_color : color_type
+        var max_color : color_type
+        for i = 0, [rhs].__size do
+          var rhs_elt = [rhs_type:data(rhs)][i].impl
+          var rhs_color = [get_logical_region_color(runtime, rhs_elt, color_type)]
+          if i == 0 then
+            min_color, max_color = rhs_color, rhs_color
+          else
+            min_color, max_color =
+              [color_type.elem_min](min_color, rhs_color),
+              [color_type.elem_max](max_color, rhs_color)
+          end
+        end
+        var colors_rect = [std.rect_type(color_type)] { lo = min_color, hi = max_color }
+        var colors_size = colors_rect:size()
+        var num_colors = colors_rect:volume()
+        regentlib.assert(num_colors >= 0, "invalid color range in list_invert")
+
+        -- Build the index.
+        var color_to_index = [&int64](c.malloc(
+          terralib.sizeof(int64) * num_colors))
+        regentlib.assert(color_to_index ~= nil, "malloc failed in list_invert")
+
+        for i = 0, num_colors do
+          color_to_index[i] = -1
+        end
+
+        for i = 0, [rhs].__size do
+          var rhs_elt = [rhs_type:data(rhs)][i].impl
+          var rhs_color = [get_logical_region_color(runtime, rhs_elt, color_type)]
+
+          var delta = rhs_color - min_color
+          var color_index = [get_offset_in_rect(delta, colors_size)]
+          regentlib.assert(
+            (0 <= color_index) and (color_index < num_colors),
+            "color index out of bounds in list_invert")
+          regentlib.assert(
+            color_to_index[color_index] == -1,
+            "duplicate colors in list_invert")
+          color_to_index[color_index] = i
+        end
+
+        -- 2. Compute sublists sizes.
+        for i = 0, [rhs].__size do
+          [expr_type:data(result)][i].__size = 0
+        end
+
+        for j = 0, [product].__size do
+          for k = 0, [product_type:data(product)][j].__size do
+            var leaf = [product_type.element_type:data(
+                          `([product_type:data(product)][j]))][k].impl
+            var inner = leaf
+
+            if not [product_type.shallow] then
+              regentlib.assert(
+                c.legion_logical_region_has_parent_logical_partition(
+                  [runtime], leaf),
+                "missing color in list_invert")
+              var part = c.legion_logical_region_get_parent_logical_partition(
+                [runtime], leaf)
+              var parent = c.legion_logical_partition_get_parent_logical_region(
+                [runtime], part)
+              inner = parent
+            end
+
+            var inner_color = [get_logical_region_color(runtime, inner, color_type)]
+            var delta = inner_color - min_color
+            var i = color_to_index[ [get_offset_in_rect(delta, colors_size)] ]
+            [expr_type:data(result)][i].__size =
+              [expr_type:data(result)][i].__size + 1
+          end
+        end
+
+        -- 3. Allocate sublists.
+        for i = 0, [rhs].__size do
+          var subsize = [expr_type:data(result)][i].__size
+          var subdata = [&expr_type.element_type.element_type](c.malloc(
+            terralib.sizeof([expr_type.element_type.element_type]) * subsize))
+          regentlib.assert(subdata ~= nil, "malloc failed in list_invert")
+          [expr_type:data(result)][i].__data = subdata
+        end
+
+        -- 4. Fill sublists.
+
+        -- Create a list to hold the next index.
+        var subslots = [&int64](c.malloc(
+          terralib.sizeof([int64]) * [rhs].__size))
+        for i = 0, [rhs].__size do
+          subslots[i] = 0
+        end
+
+        for j = 0, [product].__size do
+          for k = 0, [product_type:data(product)][j].__size do
+            var leaf = [product_type.element_type:data(
+                          `([product_type:data(product)][j]))][k].impl
+            var inner = leaf
+
+            if not [product_type.shallow] then
+              regentlib.assert(
+                c.legion_logical_region_has_parent_logical_partition(
+                  [runtime], leaf),
+                "missing parent in list_invert")
+              var part = c.legion_logical_region_get_parent_logical_partition(
+                [runtime], leaf)
+              var parent = c.legion_logical_partition_get_parent_logical_region(
+                [runtime], part)
+              inner = parent
+            end
+
+            var inner_color = [get_logical_region_color(runtime, inner, color_type)]
+            var delta = inner_color - min_color
+            var i = color_to_index[ [get_offset_in_rect(delta, colors_size)] ]
+            regentlib.assert(subslots[i] < [expr_type:data(result)][i].__size,
+                             "overflowed sublist in list_invert")
+            [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslots[i]] =
+                [barriers_type.element_type:data(
+                   `([barriers_type:data(barriers)][j]))][k]
+            subslots[i] = subslots[i] + 1
+          end
+        end
+
+        for i = 0, [rhs].__size do
+          regentlib.assert(subslots[i] == [expr_type:data(result)][i].__size, "underflowed sublist in list_invert")
+        end
+
+        c.free(subslots)
+        c.free(color_to_index)
+      end
+      return [result]
+    end
+    list_invert:setinlined(false)
+    return list_invert
+  end)
+
 function codegen.expr_list_invert(cx, node)
   local rhs_type = std.as_read(node.rhs.expr_type)
   local rhs = codegen.expr(cx, node.rhs):read(cx, rhs_type)
@@ -4455,155 +4632,10 @@ function codegen.expr_list_invert(cx, node)
   end
 
   local result = terralib.newsymbol(expr_type, "result")
-
+  local helper = gen_expr_list_invert(rhs_type, product_type, expr_type, barriers_type)
   actions = quote
     [actions]
-
-    -- 1. Compute an index from colors to rhs index.
-    -- 2. Compute sublist sizes.
-    -- 3. Allocate sublists.
-    -- 3. Fill sublists.
-
-    var data = c.malloc(
-      terralib.sizeof([expr_type.element_type]) * [rhs.value].__size)
-    regentlib.assert(data ~= nil, "malloc failed in list_invert")
-    var [result] = expr_type {
-      __size = [rhs.value].__size,
-      __data = data,
-    }
-
-    if [rhs.value].__size > 0 then
-      -- 1. Compute an index from colors to rhs index.
-
-      -- Determine the range of colors in rhs.
-      var min_color : color_type
-      var max_color : color_type
-      for i = 0, [rhs.value].__size do
-        var rhs_elt = [rhs_type:data(rhs.value)][i].impl
-        var rhs_color = [get_logical_region_color(cx, rhs_elt, color_type)]
-        if i == 0 then
-          min_color, max_color = rhs_color, rhs_color
-        else
-          min_color, max_color =
-            [color_type.elem_min](min_color, rhs_color),
-            [color_type.elem_max](max_color, rhs_color)
-        end
-      end
-      var colors_rect = [std.rect_type(color_type)] { lo = min_color, hi = max_color }
-      var colors_size = colors_rect:size()
-      var num_colors = colors_rect:volume()
-      regentlib.assert(num_colors >= 0, "invalid color range in list_invert")
-
-      -- Build the index.
-      var color_to_index = [&int64](c.malloc(
-        terralib.sizeof(int64) * num_colors))
-      regentlib.assert(color_to_index ~= nil, "malloc failed in list_invert")
-
-      for i = 0, num_colors do
-        color_to_index[i] = -1
-      end
-
-      for i = 0, [rhs.value].__size do
-        var rhs_elt = [rhs_type:data(rhs.value)][i].impl
-        var rhs_color = [get_logical_region_color(cx, rhs_elt, color_type)]
-
-        var delta = rhs_color - min_color
-        var color_index = [get_offset_in_rect(delta, colors_size)]
-        regentlib.assert(
-          (0 <= color_index) and (color_index < num_colors),
-          "color index out of bounds in list_invert")
-        regentlib.assert(
-          color_to_index[color_index] == -1,
-          "duplicate colors in list_invert")
-        color_to_index[color_index] = i
-      end
-
-      -- 2. Compute sublists sizes.
-      for i = 0, [rhs.value].__size do
-        [expr_type:data(result)][i].__size = 0
-      end
-
-      for j = 0, [product.value].__size do
-        for k = 0, [product_type:data(product.value)][j].__size do
-          var leaf = [product_type.element_type:data(
-                        `([product_type:data(product.value)][j]))][k].impl
-          var inner = leaf
-
-          if not [product_type.shallow] then
-            regentlib.assert(
-              c.legion_logical_region_has_parent_logical_partition(
-                [cx.runtime], leaf),
-              "missing color in list_invert")
-            var part = c.legion_logical_region_get_parent_logical_partition(
-              [cx.runtime], leaf)
-            var parent = c.legion_logical_partition_get_parent_logical_region(
-              [cx.runtime], part)
-            inner = parent
-          end
-
-          var inner_color = [get_logical_region_color(cx, inner, color_type)]
-          var delta = inner_color - min_color
-          var i = color_to_index[ [get_offset_in_rect(delta, colors_size)] ]
-          [expr_type:data(result)][i].__size =
-            [expr_type:data(result)][i].__size + 1
-        end
-      end
-
-      -- 3. Allocate sublists.
-      for i = 0, [rhs.value].__size do
-        var subsize = [expr_type:data(result)][i].__size
-        var subdata = [&expr_type.element_type.element_type](c.malloc(
-          terralib.sizeof([expr_type.element_type.element_type]) * subsize))
-        regentlib.assert(subdata ~= nil, "malloc failed in list_invert")
-        [expr_type:data(result)][i].__data = subdata
-      end
-
-      -- 4. Fill sublists.
-
-      -- Create a list to hold the next index.
-      var subslots = [&int64](c.malloc(
-        terralib.sizeof([int64]) * [rhs.value].__size))
-      for i = 0, [rhs.value].__size do
-        subslots[i] = 0
-      end
-
-      for j = 0, [product.value].__size do
-        for k = 0, [product_type:data(product.value)][j].__size do
-          var leaf = [product_type.element_type:data(
-                        `([product_type:data(product.value)][j]))][k].impl
-          var inner = leaf
-
-          if not [product_type.shallow] then
-            regentlib.assert(
-              c.legion_logical_region_has_parent_logical_partition(
-                [cx.runtime], leaf),
-              "missing parent in list_invert")
-            var part = c.legion_logical_region_get_parent_logical_partition(
-              [cx.runtime], leaf)
-            var parent = c.legion_logical_partition_get_parent_logical_region(
-              [cx.runtime], part)
-            inner = parent
-          end
-
-          var inner_color = [get_logical_region_color(cx, inner, color_type)]
-          var delta = inner_color - min_color
-          var i = color_to_index[ [get_offset_in_rect(delta, colors_size)] ]
-          regentlib.assert(subslots[i] < [expr_type:data(result)][i].__size,
-                           "overflowed sublist in list_invert")
-          [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslots[i]] =
-              [barriers_type.element_type:data(
-                 `([barriers_type:data(barriers.value)][j]))][k]
-          subslots[i] = subslots[i] + 1
-        end
-      end
-
-      for i = 0, [rhs.value].__size do
-        regentlib.assert(subslots[i] == [expr_type:data(result)][i].__size, "underflowed sublist in list_invert")
-      end
-
-      c.free(subslots)
-      c.free(color_to_index)
-    end
+    var [result] = [helper]([cx.runtime], [rhs.value], [product.value], [barriers.value])
   end
 
   return values.value(
