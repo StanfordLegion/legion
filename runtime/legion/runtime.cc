@@ -6186,10 +6186,12 @@ namespace LegionRuntime {
       Domain parent_dom = forest->get_index_space_domain(parent);
       const size_t num_elmts = 
         parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+      const int first_element =
+        parent_dom.get_index_space().get_valid_mask().get_first_element();
       for (std::map<DomainPoint,ColoredPoints<ptr_t> >::const_iterator it = 
             coloring.begin(); it != coloring.end(); it++)
       {
-        Realm::ElementMask child_mask(num_elmts);
+        Realm::ElementMask child_mask(num_elmts, first_element);
         const ColoredPoints<ptr_t> &pcoloring = it->second;
         for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
               pit != pcoloring.points.end(); pit++)
@@ -6626,6 +6628,8 @@ namespace LegionRuntime {
         Domain parent_dom = forest->get_index_space_domain(parent);
         size_t parent_elmts = 
           parent_dom.get_index_space().get_valid_mask().get_num_elmts();
+	const int parent_first_element =
+	  parent_dom.get_index_space().get_valid_mask().get_first_element();
         for (Domain::DomainPointIterator itr(parent_dom); itr; itr++)
         {
           ptr_t cur_ptr = itr.p.get_index();
@@ -6639,7 +6643,8 @@ namespace LegionRuntime {
             // Haven't made an index space for this color yet
             if (finder == child_masks.end())
             {
-              child_masks[color] = Realm::ElementMask(parent_elmts);
+              child_masks[color] = Realm::ElementMask(parent_elmts,
+						      parent_first_element);
               finder = child_masks.find(color);
             }
 #ifdef DEBUG_HIGH_LEVEL
