@@ -3829,6 +3829,11 @@ namespace Legion {
         dst_versions[idx].apply_mapping(map_applied_conditions); 
       }
       ApEvent copy_complete_event = Runtime::merge_events(copy_complete_events);
+      if (!restrict_postconditions.empty())
+      {
+        restrict_postconditions.insert(copy_complete_event);
+        copy_complete_event = Runtime::merge_events(restrict_postconditions);
+      }
 #ifdef LEGION_SPY
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, copy_complete_event,
@@ -3838,12 +3843,6 @@ namespace Legion {
       // copy complete event
       if (!arrive_barriers.empty())
       {
-        ApEvent done_event = copy_complete_event;
-        if (!restrict_postconditions.empty())
-        {
-          restrict_postconditions.insert(done_event);
-          done_event = Runtime::merge_events(restrict_postconditions);
-        }
         for (std::vector<PhaseBarrier>::iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
         {
