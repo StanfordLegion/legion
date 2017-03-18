@@ -2280,7 +2280,8 @@ namespace Legion {
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == parent_req_indexes.size());
 #endif     
-      if (index < virtual_mapped.size())
+      const unsigned owner_size = virtual_mapped.size();
+      if (index < owner_size)
       {
         // See if it is virtual mapped
         if (virtual_mapped[index])
@@ -2289,8 +2290,21 @@ namespace Legion {
         else // We mapped a physical instance so we're it
           return this;
       }
-      else // We created it, put it in the top context
-        return find_top_context();
+      else // We created it
+      {
+        // Check to see if this has returnable privileges or not
+        // If they are not returnable, then we can just be the 
+        // context for the handling the meta-data management, 
+        // otherwise if they are returnable then the top-level
+        // context has to provide global guidance about which
+        // node manages the meta-data.
+        index -= owner_size;
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        if (returnable_privileges[index])
+          return find_top_context();
+        else
+          return this;
+      }
     }
 
     //--------------------------------------------------------------------------
