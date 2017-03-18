@@ -2300,7 +2300,8 @@ namespace Legion {
         // node manages the meta-data.
         index -= owner_size;
         AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-        if (returnable_privileges[index])
+        if ((index >= returnable_privileges.size()) || 
+            returnable_privileges[index])
           return find_top_context();
         else
           return this;
