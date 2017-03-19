@@ -130,6 +130,12 @@ namespace Legion {
         PhysicalInstance inst;
         unsigned long long create, destroy;
       };
+      struct PartitionInfo {
+      public:
+        UniqueID op_id;
+        DepPartOpKind part_op;
+        unsigned long long create, ready, start, stop;
+      };
       struct MessageInfo {
       public:
         MessageKind kind;
@@ -196,6 +202,8 @@ namespace Legion {
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
       void process_inst_timeline(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline);
+      void process_partition(UniqueID op_id, DepPartOpKind part_op,
+                  Realm::ProfilingMeasurements::OperationTimeline *timeline);
     public:
       void record_message(Processor proc, MessageKind kind, 
                           unsigned long long start,
@@ -228,6 +236,7 @@ namespace Legion {
       std::deque<InstCreateInfo> inst_create_infos;
       std::deque<InstUsageInfo> inst_usage_infos;
       std::deque<InstTimelineInfo> inst_timeline_infos;
+      std::deque<PartitionInfo> partition_infos;
     private:
       std::deque<MessageInfo> message_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
@@ -247,6 +256,7 @@ namespace Legion {
         LEGION_PROF_COPY,
         LEGION_PROF_FILL,
         LEGION_PROF_INST,
+        LEGION_PROF_PARTITION,
       };
       struct ProfilingInfo {
       public:
@@ -292,6 +302,8 @@ namespace Legion {
                             Operation *op);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             Operation *op);
+      void add_partition_request(Realm::ProfilingRequestSet &requests,
+                                 Operation *op, DepPartOpKind part_op);
       // Adding a message profiling request is a static method
       // because we might not have a profiler on the local node
       static void add_message_request(Realm::ProfilingRequestSet &requests,
@@ -308,6 +320,8 @@ namespace Legion {
                             UniqueID uid);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             UniqueID uid);
+      void add_partition_request(Realm::ProfilingRequestSet &requests,
+                                 UniqueID uid, DepPartOpKind part_op);
     public:
       // Process low-level runtime profiling results
       void process_results(Processor p, const void *buffer, size_t size);

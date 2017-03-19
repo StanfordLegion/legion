@@ -18,7 +18,9 @@
 // nop, but helps IDEs
 #include "instance.h"
 
+#include "indexspace.h"
 #include "serialize.h"
+
 TYPE_IS_SERIALIZABLE(Realm::RegionInstance);
 
 namespace Realm {
@@ -52,6 +54,20 @@ namespace Realm {
     return os << std::hex << r.id << std::dec;
   }
 
+#if 0		
+  template <int N, typename T>
+  const ZIndexSpace<N,T>& RegionInstance::get_indexspace(void) const
+  {
+    return get_lis().as_dim<N,T>().indexspace;
+  }
+		
+  template <int N>
+  const ZIndexSpace<N,int>& RegionInstance::get_indexspace(void) const
+  {
+    return get_lis().as_dim<N,int>().indexspace;
+  }
+#endif
+		
 
   ////////////////////////////////////////////////////////////////////////
   //

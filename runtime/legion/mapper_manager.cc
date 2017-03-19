@@ -879,6 +879,144 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_partition_projection(
+                          DependentPartitionOp *op,
+                          Mapper::SelectPartitionProjectionInput *input,
+                          Mapper::SelectPartitionProjectionOutput *output,
+                          bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(SELECT_PARTITION_PROJECTION_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+                            Mapper::SelectPartitionProjectionInput,
+                            Mapper::SelectPartitionProjectionOutput, 
+                            &MapperManager::invoke_select_partition_projection>
+                              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_partition_projection(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_map_partition(DependentPartitionOp *op,
+                                  Mapper::MapPartitionInput *input,
+                                  Mapper::MapPartitionOutput *output,
+                                  bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MAP_PARTITION_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+                            Mapper::MapPartitionInput,
+                            Mapper::MapPartitionOutput, 
+                            &MapperManager::invoke_map_partition>
+                              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->map_partition(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_partition_sources(
+                                  DependentPartitionOp *op,
+                                  Mapper::SelectPartitionSrcInput *input,
+                                  Mapper::SelectPartitionSrcOutput *output,
+                                  bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(PARTITION_SELECT_SOURCES_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+                            Mapper::SelectPartitionSrcInput,
+                            Mapper::SelectPartitionSrcOutput, 
+                            &MapperManager::invoke_select_partition_sources>
+                              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_partition_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_partition_create_temporary(
+                                DependentPartitionOp *op,
+                                Mapper::CreatePartitionTemporaryInput *input,
+                                Mapper::CreatePartitionTemporaryOutput *output,
+                                bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(PARTITION_CREATE_TEMPORARY_CALL,
+                              op, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+                            Mapper::CreatePartitionTemporaryInput,
+                            Mapper::CreatePartitionTemporaryOutput, 
+                            &MapperManager::invoke_partition_create_temporary>
+                              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->create_partition_temporary_instance(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_partition_report_profiling(
+                                         DependentPartitionOp *op,
+                                         Mapper::PartitionProfilingInfo *input,
+                                         bool first_invocation,
+                                         MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(PARTITION_REPORT_PROFILING_CALL,
+                             NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation2<DependentPartitionOp, 
+                              Mapper::PartitionProfilingInfo,
+                              &MapperManager::invoke_partition_report_profiling>
+                                continuation(this, op, input, info);
+          continuation.defer(runtime, continuation_precondition, op);  
+          return;
+        }
+      }
+      mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_configure_context(TaskOp *task,
                                          Mapper::ContextConfigOutput *output,
                                          bool first_invocation,
@@ -2303,7 +2441,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      IndexSpace result = runtime->get_index_subspace(p, c);
+      Realm::ZPoint<1,coord_t> color(c);
+      IndexSpace result = runtime->get_index_subspace(p, &color,
+                    NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
       return result;
     }
@@ -2315,7 +2455,33 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      IndexSpace result = runtime->get_index_subspace(p, color);
+      IndexSpace result = IndexSpace::NO_SPACE;
+      switch (color.get_dim())
+      {
+        case 1:
+          {
+            Realm::ZPoint<1,coord_t> point(color);
+            result = runtime->get_index_subspace(p, &point,
+                NT_TemplateHelper::encode_tag<1,coord_t>());
+            break;
+          }
+        case 2:
+          {
+            Realm::ZPoint<2,coord_t> point(color);
+            result = runtime->get_index_subspace(p, &point,
+                NT_TemplateHelper::encode_tag<2,coord_t>());
+            break;
+          }
+        case 3:
+          {
+            Realm::ZPoint<3,coord_t> point(color);
+            result = runtime->get_index_subspace(p, &point,
+                NT_TemplateHelper::encode_tag<3,coord_t>());
+            break;
+          }
+        default:
+          assert(false);
+      }
       resume_mapper_call(ctx);
       return result;
     }
@@ -2325,10 +2491,8 @@ namespace Legion {
                                              IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      pause_mapper_call(ctx);
-      bool result = runtime->has_multiple_domains(handle);
-      resume_mapper_call(ctx);
-      return result;
+      // Never have multiple domains
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2337,7 +2501,34 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Domain result = runtime->get_index_space_domain(handle);
+      Domain result = Domain::NO_DOMAIN;
+      const TypeTag type_tag = handle.get_type_tag();
+      switch (NT_TemplateHelper::get_dim(type_tag))
+      {
+        case 1:
+          {
+            Realm::ZIndexSpace<1,coord_t> realm_is;
+            runtime->get_index_space_domain(handle, &realm_is, type_tag);
+            result = realm_is;
+            break;
+          }
+        case 2:
+          {
+            Realm::ZIndexSpace<2,coord_t> realm_is;
+            runtime->get_index_space_domain(handle, &realm_is, type_tag);
+            result = realm_is;
+            break;
+          }
+        case 3:
+          {
+            Realm::ZIndexSpace<3,coord_t> realm_is;
+            runtime->get_index_space_domain(handle, &realm_is, type_tag);
+            result = realm_is;
+            break;
+          }
+        default:
+          assert(false);
+      }
       resume_mapper_call(ctx);
       return result;
     }
@@ -2348,9 +2539,7 @@ namespace Legion {
                                                 std::vector<Domain> &domains)
     //--------------------------------------------------------------------------
     {
-      pause_mapper_call(ctx);
-      runtime->get_index_space_domains(handle, domains);
-      resume_mapper_call(ctx);
+      domains.push_back(get_index_space_domain(ctx, handle));
     }
 
     //--------------------------------------------------------------------------
@@ -2391,9 +2580,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Color result = runtime->get_index_space_color(handle);
+      Realm::ZPoint<1,coord_t> point;
+      runtime->get_index_space_color_point(handle, &point,
+                NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
-      return result;
+      return point[0];
     }
 
     //--------------------------------------------------------------------------
@@ -2513,8 +2704,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
+#ifdef DEBUG_LEGION
+      assert((color.get_dim() == 0) || (color.get_dim() == 1));
+#endif
       LogicalPartition result = 
-        runtime->get_logical_partition_by_color(par, color);
+        runtime->get_logical_partition_by_color(par, color[0]);
       resume_mapper_call(ctx);
       return result;
     }
@@ -2552,7 +2746,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      LogicalRegion result = runtime->get_logical_subregion_by_color(par,color);
+      Realm::ZPoint<1,coord_t> point(color);
+      LogicalRegion result = runtime->get_logical_subregion_by_color(par,
+                      &point, NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
       return result;
     }
@@ -2563,7 +2759,33 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      LogicalRegion result = runtime->get_logical_subregion_by_color(par,color);
+      LogicalRegion result = LogicalRegion::NO_REGION;
+      switch (color.get_dim())
+      {
+        case 1:
+          {
+            Realm::ZPoint<1,coord_t> point(color);
+            result = runtime->get_logical_subregion_by_color(par, &point,
+                              NT_TemplateHelper::encode_tag<1,coord_t>());
+            break;
+          }
+        case 2:
+          {
+            Realm::ZPoint<2,coord_t> point(color);
+            result = runtime->get_logical_subregion_by_color(par, &point,
+                              NT_TemplateHelper::encode_tag<2,coord_t>());
+            break;
+          }
+        case 3:
+          {
+            Realm::ZPoint<3,coord_t> point(color);
+            result = runtime->get_logical_subregion_by_color(par, &point,
+                              NT_TemplateHelper::encode_tag<3,coord_t>());
+            break;
+          }
+        default:
+          assert(false);
+      }
       resume_mapper_call(ctx);
       return result;
     }
@@ -2587,9 +2809,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Color result = runtime->get_logical_region_color(handle);
+      Realm::ZPoint<1,coord_t> point;
+      runtime->get_logical_region_color(handle, &point, 
+            NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
-      return result;
+      return point[0];
     }
 
     //--------------------------------------------------------------------------

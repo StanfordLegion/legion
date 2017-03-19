@@ -268,4 +268,23 @@ namespace Realm {
     lock.unlock();
   }
 
+  // allocates a range of IDs that can be given to a remote node for remote allocation
+  // these entries do not go on the local free list unless they are deleted after being used
+  template <typename ALLOCATOR>
+  void DynamicTableFreeList<ALLOCATOR>::alloc_range(int requested, IT& first_id, IT& last_id)
+  {
+    // to avoid interactions with the local allocator, we must always assign a multiple of 2^LEAF_BITS
+    //  ids
+    if((requested & ((1 << ALLOCATOR::LEAF_BITS) - 1)) != 0)
+      requested = ((requested >> ALLOCATOR::LEAF_BITS) + 1) << ALLOCATOR::LEAF_BITS;
+
+    // take lock and bump next_alloc
+    lock.lock();
+    first_id = next_alloc;
+    next_alloc += requested;
+    lock.unlock();
+
+    last_id = first_id + (requested - 1);
+  }
+
 }; // namespace Realm

@@ -156,54 +156,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    ptr_t TaskContext::perform_safe_cast(IndexSpace handle, ptr_t pointer)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      DomainPoint point(pointer.value);
-      std::map<IndexSpace,Domain>::const_iterator finder = 
-                                              safe_cast_domains.find(handle);
-      if (finder != safe_cast_domains.end())
-      {
-        if (finder->second.contains(point))
-          return pointer;
-        else
-          return ptr_t::nil();
-      }
-      Domain domain = runtime->get_index_space_domain(this, handle);
-      // Save the result
-      safe_cast_domains[handle] = domain;
-      if (domain.contains(point))
-        return pointer;
-      else
-        return ptr_t::nil();
-    }
-    
-    //--------------------------------------------------------------------------
-    DomainPoint TaskContext::perform_safe_cast(IndexSpace handle, 
-                                              const DomainPoint &point)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      std::map<IndexSpace,Domain>::const_iterator finder = 
-                                              safe_cast_domains.find(handle);
-      if (finder != safe_cast_domains.end())
-      {
-        if (finder->second.contains(point))
-          return point;
-        else
-          return DomainPoint::nil();
-      }
-      Domain domain = runtime->get_index_space_domain(this, handle);
-      // Save the result
-      safe_cast_domains[handle] = domain;
-      if (domain.contains(point))
-        return point;
-      else
-        return DomainPoint::nil();
-    }
-
-    //--------------------------------------------------------------------------
     void TaskContext::add_created_region(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -744,7 +696,7 @@ namespace Legion {
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<ColorPoint> dummy_path;
+        std::vector<LegionColor> dummy_path;
         // See if we dominate the deleted instance
         if (runtime->forest->compute_index_path(it->region.index_space, 
                                                 handle, dummy_path))
@@ -774,7 +726,7 @@ namespace Legion {
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<ColorPoint> dummy_path;
+        std::vector<LegionColor> dummy_path;
         // See if we dominate the deleted instance
         if (runtime->forest->compute_index_path(it->region.index_space,
                                                 handle, dummy_path))
@@ -814,7 +766,7 @@ namespace Legion {
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<ColorPoint> dummy_path;
+        std::vector<LegionColor> dummy_path;
         // See if we dominate the deleted instance
         if (runtime->forest->compute_partition_path(it->region.index_space,
                                                     handle, dummy_path))
@@ -847,7 +799,7 @@ namespace Legion {
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<ColorPoint> dummy_path;
+        std::vector<LegionColor> dummy_path;
         // See if we dominate the deleted instance
         if (runtime->forest->compute_partition_path(it->region.index_space,
                                                     handle, dummy_path))
@@ -999,7 +951,7 @@ namespace Legion {
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<ColorPoint> dummy_path;
+        std::vector<LegionColor> dummy_path;
         // See if we dominate the deleted instance
         if (runtime->forest->compute_index_path(it->region.index_space,
                                   handle.get_index_space(), dummy_path))
@@ -1028,7 +980,7 @@ namespace Legion {
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<ColorPoint> dummy_path;
+        std::vector<LegionColor> dummy_path;
         // See if we dominate the deleted instance
         if (runtime->forest->compute_index_path(it->region.index_space,
                                   handle.get_index_space(), dummy_path))
@@ -1066,7 +1018,7 @@ namespace Legion {
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<ColorPoint> dummy_path;
+        std::vector<LegionColor> dummy_path;
         // See if we dominate the deleted instance
         if (runtime->forest->compute_partition_path(it->region.index_space,
                                   handle.get_index_partition(), dummy_path))
@@ -1099,7 +1051,7 @@ namespace Legion {
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<ColorPoint> dummy_path;
+        std::vector<LegionColor> dummy_path;
         // See if we dominate the deleted instance
         if (runtime->forest->compute_partition_path(it->region.index_space,
                                   handle.get_index_partition(), dummy_path))
@@ -1435,7 +1387,7 @@ namespace Legion {
           return false;
         // Check to see if there is a path between
         // the index spaces
-        std::vector<ColorPoint> path;
+        std::vector<LegionColor> path;
         if (!runtime->forest->compute_index_path(our_space,
                          req.region.get_index_space(),path))
           return false;
@@ -1445,7 +1397,7 @@ namespace Legion {
         // Check if the trees are different
         if (our_tid != req.partition.get_tree_id())
           return false;
-        std::vector<ColorPoint> path;
+        std::vector<LegionColor> path;
         if (!runtime->forest->compute_partition_path(our_space,
                      req.partition.get_index_partition(), path))
           return false;
@@ -1746,7 +1698,7 @@ namespace Legion {
         if (it->handle == req.parent)
         {
           // Check that there is a path between the parent and the child
-          std::vector<ColorPoint> path;
+          std::vector<LegionColor> path;
           if (!runtime->forest->compute_index_path(req.parent, 
                                                    req.handle, path))
             return ERROR_BAD_INDEX_PATH;
@@ -1763,7 +1715,7 @@ namespace Legion {
       if (has_created_index_space(req.parent))
       {
         // Still need to check that there is a path between the two
-        std::vector<ColorPoint> path;
+        std::vector<LegionColor> path;
         if (!runtime->forest->compute_index_path(req.parent, req.handle, path))
           return ERROR_BAD_INDEX_PATH;
         // No need to check privileges here since it is a created space
@@ -1850,14 +1802,14 @@ namespace Legion {
         if ((req.handle_type == SINGULAR) || 
             (req.handle_type == REG_PROJECTION))
         {
-          std::vector<ColorPoint> path;
+          std::vector<LegionColor> path;
           if (!runtime->forest->compute_index_path(req.parent.index_space,
                                             req.region.index_space, path))
             return ERROR_BAD_REGION_PATH;
         }
         else
         {
-          std::vector<ColorPoint> path;
+          std::vector<LegionColor> path;
           if (!runtime->forest->compute_partition_path(req.parent.index_space,
                                         req.partition.index_partition, path))
             return ERROR_BAD_PARTITION_PATH;
@@ -2430,132 +2382,83 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space(RegionTreeForest *forest,
-                                                size_t max_num_elmts)
+                                         const void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      AutoRuntimeCall call(this); 
       IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id());
+                        runtime->get_unique_index_tree_id(), type_tag);
 #ifdef DEBUG_LEGION
-      log_index.debug("Creating index space %x in task %s "
-                      "(ID %lld) with %zd maximum elements", handle.id, 
-                      get_task_name(), get_unique_id(), max_num_elmts); 
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-
-      Realm::IndexSpace space = 
-                      Realm::IndexSpace::create_index_space(max_num_elmts);
-      forest->create_index_space(handle, Domain(space), 
-                                 UNSTRUCTURED_KIND, MUTABLE);
+      forest->create_index_space(handle, realm_is); 
       register_index_space_creation(handle);
       return handle;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace InnerContext::create_index_space(RegionTreeForest *forest,
-                                                const Domain &domain)
+    IndexSpace InnerContext::union_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      if (spaces.empty())
+        return IndexSpace::NO_SPACE;
+      AutoRuntimeCall call(this); 
       IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id());
+                        runtime->get_unique_index_tree_id(), 
+                        spaces[0].get_type_tag());
 #ifdef DEBUG_LEGION
-      log_index.debug("Creating dummy index space %x in task %s (ID %lld) "
-                      "for domain", handle.id, get_task_name(),get_unique_id());
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-
-      forest->create_index_space(handle, domain, DENSE_ARRAY_KIND, NO_MEMORY);
+      forest->create_union_space(handle, owner_task, spaces); 
       register_index_space_creation(handle);
       return handle;
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace InnerContext::create_index_space(RegionTreeForest *forest,
-                                                const std::set<Domain> &domains)
+    IndexSpace InnerContext::intersect_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      if (spaces.empty())
+        return IndexSpace::NO_SPACE;
+      AutoRuntimeCall call(this); 
       IndexSpace handle(runtime->get_unique_index_space_id(),
-                        runtime->get_unique_index_tree_id());
-      // First compute the convex hull of all the domains
-      Domain hull = *(domains.begin());
+                        runtime->get_unique_index_tree_id(), 
+                        spaces[0].get_type_tag());
 #ifdef DEBUG_LEGION
-      if (hull.get_dim() == 0)
-      {
-        log_index.error("Create index space with multiple domains "
-                        "must be created with domains for non-zero "
-                        "dimension in task %s (ID %lld)",
-                        get_task_name(), get_unique_id());
-        assert(false);
-        exit(ERROR_DOMAIN_DIM_MISMATCH);
-      }
-      for (std::set<Domain>::const_iterator it = domains.begin();
-            it != domains.end(); it++)
-      {
-        assert(it->exists());
-        if (hull.get_dim() != it->get_dim())
-        {
-          log_index.error("A set of domains passed to create_index_space "
-                          "must all have the same dimensions in task "
-                          "%s (ID %lld)", get_task_name(), get_unique_id());
-          assert(false);
-          exit(ERROR_DOMAIN_DIM_MISMATCH);
-        }
-      }
-#endif
-      switch (hull.get_dim())
-      {
-        case 1:
-          {
-            LegionRuntime::Arrays::Rect<1> base = hull.get_rect<1>();
-            for (std::set<Domain>::const_iterator it = domains.begin();
-                  it != domains.end(); it++)
-            {
-              LegionRuntime::Arrays::Rect<1> next = it->get_rect<1>();
-              base = base.convex_hull(next);
-            }
-            hull = Domain::from_rect<1>(base);
-            break;
-          }
-        case 2:
-          {
-            LegionRuntime::Arrays::Rect<2> base = hull.get_rect<2>();
-            for (std::set<Domain>::const_iterator it = domains.begin();
-                  it != domains.end(); it++)
-            {
-              LegionRuntime::Arrays::Rect<2> next = it->get_rect<2>();
-              base = base.convex_hull(next);
-            }
-            hull = Domain::from_rect<2>(base);
-            break;
-          }
-        case 3:
-          {
-            LegionRuntime::Arrays::Rect<3> base = hull.get_rect<3>();
-            for (std::set<Domain>::const_iterator it = domains.begin();
-                  it != domains.end(); it++)
-            {
-              LegionRuntime::Arrays::Rect<3> next = it->get_rect<3>();
-              base = base.convex_hull(next);
-            }
-            hull = Domain::from_rect<3>(base);
-            break;
-          }
-        default:
-          assert(false);
-      }
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating dummy index space %x in task %s (ID %lld) for "
-                      "domain", handle.id, get_task_name(), get_unique_id());
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
+      forest->create_intersection_space(handle, owner_task, spaces); 
+      register_index_space_creation(handle);
+      return handle;
+    }
 
-      forest->create_index_space(handle, hull, domains,
-                                 DENSE_ARRAY_KIND, NO_MEMORY);
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::subtract_index_spaces(RegionTreeForest *forest,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexSpace handle(runtime->get_unique_index_space_id(),
+                        runtime->get_unique_index_tree_id(), 
+                        left.get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id()); 
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_index_space(handle.id);
+      forest->create_difference_space(handle, owner_task, left, right); 
       register_index_space_creation(handle);
       return handle;
     }
@@ -2572,441 +2475,6 @@ namespace Legion {
       DeletionOp *op = runtime->get_available_deletion_op(true);
       op->initialize_index_space_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_index_partition(
-                                  RegionTreeForest *forest, IndexSpace parent,
-                                  const Domain &color_space,
-                                  const PointColoring &coloring,
-                                  PartitionKind part_kind, 
-                                  int color, bool allocable)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index partition %d with parent index space %x "
-                      "in task %s (ID %lld)", pid.id, parent.id,
-                      get_task_name(), get_unique_id());
-#endif
-      std::map<DomainPoint,Domain> new_index_spaces; 
-      Domain parent_dom = forest->get_index_space_domain(parent);
-      const size_t num_elmts = 
-        parent_dom.get_index_space().get_valid_mask().get_num_elmts();
-      const int first_element =
-        parent_dom.get_index_space().get_valid_mask().get_first_element();
-      for (std::map<DomainPoint,ColoredPoints<ptr_t> >::const_iterator it = 
-            coloring.begin(); it != coloring.end(); it++)
-      {
-        Realm::ElementMask child_mask(num_elmts, first_element);
-        const ColoredPoints<ptr_t> &pcoloring = it->second;
-        for (std::set<ptr_t>::const_iterator pit = pcoloring.points.begin();
-              pit != pcoloring.points.end(); pit++)
-        {
-          child_mask.enable(pit->value,1);
-        }
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator pit = 
-              pcoloring.ranges.begin(); pit != pcoloring.ranges.end(); pit++)
-        {
-          if (pit->second.value >= pit->first.value)
-            child_mask.enable(pit->first.value,
-                (size_t)(pit->second.value - pit->first.value) + 1);
-        }
-        Realm::IndexSpace child_space = 
-          Realm::IndexSpace::create_index_space(
-                          parent_dom.get_index_space(), child_mask, allocable);
-        new_index_spaces[it->first] = Domain(child_space);
-      }
-#ifdef DEBUG_LEGION
-      if ((part_kind == DISJOINT_KIND) && Runtime::verify_disjointness)
-        runtime->validate_unstructured_disjointness(pid, new_index_spaces);
-#endif
-      ColorPoint partition_color;
-      // If we have a valid color, set it now
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        partition_color = ColorPoint(color);
-      forest->create_index_partition(pid, parent, partition_color, 
-                                     new_index_spaces, color_space, part_kind, 
-                                     allocable ? MUTABLE : NO_MEMORY);
-      register_index_partition_creation(pid);
-      return pid;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_index_partition(
-                                              RegionTreeForest *forest,
-                                              IndexSpace parent,
-                                              const Coloring &coloring,
-                                              bool disjoint, int part_color)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index partition %d with parent index space %x "
-                      "in task %s (ID %lld)", pid.id, parent.id,
-                      get_task_name(), get_unique_id());
-#endif
-      if (coloring.empty())
-      {
-        log_run.error("Attempt to create index partition with no colors in "
-                      "task %s (ID %lld). Index partitions must have at least "
-                      "one color.", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_EMPTY_INDEX_PARTITION);
-      }
-      LegionRuntime::Arrays::Point<1> lower_bound(coloring.begin()->first);
-      LegionRuntime::Arrays::Point<1> upper_bound(coloring.rbegin()->first);
-      LegionRuntime::Arrays::Rect<1> color_range(lower_bound,upper_bound);
-      Domain color_space = Domain::from_rect<1>(color_range);
-      // Perform the coloring by iterating over all the colors in the
-      // range.  For unspecified colors there is nothing wrong with
-      // making empty index spaces.  We do this so we can save the
-      // color space as a dense 1D domain.
-      std::map<DomainPoint,Domain> new_index_spaces; 
-      Domain parent_dom = forest->get_index_space_domain(parent);
-      const size_t num_elmts = 
-        parent_dom.get_index_space().get_valid_mask().get_num_elmts();
-      const int first_element =
-        parent_dom.get_index_space().get_valid_mask().get_first_element();
-      for (LegionRuntime::Arrays::GenericPointInRectIterator<1>
-	     pir(color_range); pir; pir++)
-      {
-        Realm::ElementMask child_mask(num_elmts, first_element);
-        Color c = pir.p;
-        std::map<Color,ColoredPoints<ptr_t> >::const_iterator finder = 
-          coloring.find(c);
-        // If we had a coloring provided, then fill in all the elements
-        if (finder != coloring.end())
-        {
-          const ColoredPoints<ptr_t> &pcoloring = finder->second;
-          for (std::set<ptr_t>::const_iterator it = pcoloring.points.begin();
-                it != pcoloring.points.end(); it++)
-          {
-            child_mask.enable(it->value,1);
-          }
-          for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-                pcoloring.ranges.begin(); it != pcoloring.ranges.end(); it++)
-          {
-            if (it->second.value >= it->first.value)
-              child_mask.enable(it->first.value,
-                  (size_t)(it->second.value - it->first.value) + 1);
-          }
-        }
-        else
-          continue;
-        // Now make the index space and save the information
-#ifdef ASSUME_UNALLOCABLE
-        Realm::IndexSpace child_space = 
-          Realm::IndexSpace::create_index_space(
-              parent_dom.get_index_space(), child_mask, false/*allocable*/);
-#else
-        Realm::IndexSpace child_space = 
-          Realm::IndexSpace::create_index_space(
-                          parent_dom.get_index_space(), child_mask);
-#endif
-        new_index_spaces[DomainPoint::from_point<1>(
-         LegionRuntime::Arrays::Point<1>(finder->first))] = Domain(child_space);
-      }
-#ifdef DEBUG_LEGION
-      if (disjoint && Runtime::verify_disjointness)
-        runtime->validate_unstructured_disjointness(pid, new_index_spaces);
-#endif 
-      ColorPoint partition_color;
-      // If we have a valid color, set it now
-      if (part_color >= 0)
-        partition_color = ColorPoint(part_color);
-      forest->create_index_partition(pid, parent, partition_color, 
-                                     new_index_spaces, color_space,
-                                     disjoint ? DISJOINT_KIND : ALIASED_KIND,
-                                     MUTABLE);
-      register_index_partition_creation(pid);
-      return pid;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_index_partition(
-                                            RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index partition %d with parent index space %x "
-                      "in task %s (ID %lld)", pid.id, parent.id,
-                      get_task_name(), get_unique_id());
-      if ((part_kind == DISJOINT_KIND) && Runtime::verify_disjointness)
-        runtime->validate_structured_disjointness(pid, coloring);
-#endif
-      ColorPoint partition_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        partition_color = ColorPoint(color);
-      forest->create_index_partition(pid, parent, partition_color, 
-                                     coloring, color_space, 
-                                     part_kind, NO_MEMORY);
-      register_index_partition_creation(pid);
-      return pid;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_index_partition(
-                                            RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainColoring &coloring,
-                                            bool disjoint, int part_color)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index partition %d with parent index space %x "
-                      "in task %s (ID %lld)", pid.id, parent.id,
-                      get_task_name(), get_unique_id());
-#endif
-      if (coloring.empty())
-      {
-        log_run.error("Attempt to create index partition with no colors in "
-                      "task %s (ID %lld). Index partitions must have at least "
-                      "one color.", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_EMPTY_INDEX_PARTITION);
-      }
-      ColorPoint partition_color;
-      if (part_color >= 0)
-        partition_color = ColorPoint(part_color);
-      std::map<DomainPoint,Domain> new_subspaces;
-      for (std::map<Color,Domain>::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-        new_subspaces[DomainPoint::from_point<1>(
-            LegionRuntime::Arrays::Point<1>(it->first))] = it->second;
-      }
-#ifdef DEBUG_LEGION
-      if (disjoint && Runtime::verify_disjointness)
-        runtime->validate_structured_disjointness(pid, new_subspaces);
-#endif
-      forest->create_index_partition(pid, parent, partition_color, 
-                                     new_subspaces, color_space,
-                                     disjoint ? DISJOINT_KIND : ALIASED_KIND,
-                                     NO_MEMORY);
-      register_index_partition_creation(pid);
-      return pid;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_index_partition(
-                                      RegionTreeForest *forest,
-                                      IndexSpace parent,
-                                      const Domain &color_space,
-                                      const MultiDomainPointColoring &coloring,
-                                      PartitionKind part_kind, int color)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index partition %d with parent index space %x "
-                      "in task %s (ID %lld)", pid.id, parent.id,
-                      get_task_name(), get_unique_id());
-#endif
-      // Build all the convex hulls
-      std::map<DomainPoint,Domain> convex_hulls;
-      for (std::map<DomainPoint,std::set<Domain> >::const_iterator it = 
-            coloring.begin(); it != coloring.end(); it++)
-      {
-        Domain hull = runtime->construct_convex_hull(it->second);
-        convex_hulls[it->first] = hull;
-      }
-#ifdef DEBUG_LEGION
-      if ((part_kind == DISJOINT_KIND) && Runtime::verify_disjointness)
-        runtime->validate_multi_structured_disjointness(pid, coloring);
-#endif
-      ColorPoint partition_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        partition_color = ColorPoint(color);
-      forest->create_index_partition(pid, parent, partition_color, 
-                                     convex_hulls, coloring,
-                                     color_space, part_kind, NO_MEMORY);
-      register_index_partition_creation(pid);
-      return pid;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_index_partition(
-                                            RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint, int part_color)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index partition %d with parent index space %x "
-                      "in task %s (ID %lld)", pid.id, parent.id,
-                      get_task_name(), get_unique_id());
-#endif
-      if (coloring.empty())
-      {
-        log_run.error("Attempt to create index partition with no colors in "
-                      "task %s (ID %lld). Index partitions must have at least "
-                      "one color.", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_EMPTY_INDEX_PARTITION);
-      }
-      // TODO: Construct the validity of all the domains in the set
-      // Build all the convex hulls
-      std::map<DomainPoint,Domain> convex_hulls;
-      std::map<DomainPoint,std::set<Domain> > color_sets;
-      for (std::map<Color,std::set<Domain> >::const_iterator it = 
-            coloring.begin(); it != coloring.end(); it++)
-      {
-        Domain hull = runtime->construct_convex_hull(it->second);
-	LegionRuntime::Arrays::Point<1> pcolor(it->first);
-        DomainPoint color = DomainPoint::from_point<1>(pcolor);
-        convex_hulls[color] = hull;
-        color_sets[color] = it->second; 
-      }
-#ifdef DEBUG_LEGION
-      if (disjoint && Runtime::verify_disjointness)
-        runtime->validate_multi_structured_disjointness(pid, color_sets);
-#endif
-      ColorPoint partition_color;
-      if (part_color >= 0)
-        partition_color = ColorPoint(part_color);
-      forest->create_index_partition(pid, parent, partition_color, 
-                                     convex_hulls, color_sets,
-                                     color_space,
-                                     disjoint ? DISJOINT_KIND : ALIASED_KIND,
-                                     NO_MEMORY);
-      register_index_partition_creation(pid);
-      return pid;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_index_partition(
-                                        RegionTreeForest *forest,
-                                        IndexSpace parent,
-                LegionRuntime::Accessor::RegionAccessor<
-                 LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                        int part_color)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating index partition %d with parent index space %x "
-                      "in task %s (ID %lld)", pid.id, parent.id,
-                      get_task_name(), get_unique_id());
-#endif
-      // Perform the coloring
-      std::map<DomainPoint,Domain> new_index_spaces;
-      Domain color_space;
-      // Iterate over the parent index space and make the sub-index spaces
-      // for each of the different points in the space
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic,int> 
-          fa_coloring = field_accessor.typeify<int>();
-      {
-        std::map<Color,Realm::ElementMask> child_masks;
-        Domain parent_dom = forest->get_index_space_domain(parent);
-        size_t parent_elmts = 
-          parent_dom.get_index_space().get_valid_mask().get_num_elmts();
-        for (Domain::DomainPointIterator itr(parent_dom); itr; itr++)
-        {
-          ptr_t cur_ptr = itr.p.get_index();
-          int c;
-          fa_coloring.read_untyped(cur_ptr, &c, sizeof(c));
-          // Ignore all colors less than zero
-          if (c >= 0)
-          {
-            Color color = (Color)c; 
-            std::map<Color,Realm::ElementMask>::iterator finder = 
-              child_masks.find(color);
-            // Haven't made an index space for this color yet
-            if (finder == child_masks.end())
-            {
-              child_masks[color] = Realm::ElementMask(parent_elmts);
-              finder = child_masks.find(color);
-            }
-#ifdef DEBUG_LEGION
-            assert(finder != child_masks.end());
-#endif
-            finder->second.enable(cur_ptr.value);
-          }
-        }
-        // Now make the index spaces and their domains
-        LegionRuntime::Arrays::Point<1> lower_bound(child_masks.begin()->first);
-        LegionRuntime::Arrays::Point<1> upper_bound(child_masks.rbegin()->first);
-        LegionRuntime::Arrays::Rect<1> color_range(lower_bound,upper_bound);
-        color_space = Domain::from_rect<1>(color_range);
-        // Iterate over all the colors in the range from the lower
-        // bound to upper bound so we can store the color space as
-        // a dense array of colors.
-        for (LegionRuntime::Arrays::GenericPointInRectIterator<1>
-	       pir(color_range); pir; pir++)
-        {
-          Color c = pir.p;
-          std::map<Color,Realm::ElementMask>::const_iterator finder = 
-            child_masks.find(c);
-          Realm::IndexSpace child_space;
-          if (finder != child_masks.end())
-          {
-#ifdef ASSUME_UNALLOCABLE
-            child_space = 
-              Realm::IndexSpace::create_index_space(
-                parent_dom.get_index_space(), finder->second, false);
-#else
-            child_space = 
-              Realm::IndexSpace::create_index_space(
-                    parent_dom.get_index_space(), finder->second);
-#endif
-          }
-          else
-          {
-            Realm::ElementMask empty_mask;
-#ifdef ASSUME_UNALLOCABLE
-            child_space = 
-              Realm::IndexSpace::create_index_space(
-                    parent_dom.get_index_space(), empty_mask, false);
-#else
-            child_space = 
-              Realm::IndexSpace::create_index_space(
-                    parent_dom.get_index_space(), empty_mask);
-#endif
-          }
-          new_index_spaces[DomainPoint::from_point<1>(
-              LegionRuntime::Arrays::Point<1>(c))] = Domain(child_space);
-        }
-      }
-      ColorPoint partition_color;
-      if (part_color >= 0)
-        partition_color = ColorPoint(part_color);
-      forest->create_index_partition(pid, parent, partition_color,
-                                     new_index_spaces, color_space,
-                                     DISJOINT_KIND, MUTABLE);
-      register_index_partition_creation(pid);
-      return pid;
     }
 
     //--------------------------------------------------------------------------
@@ -3027,66 +2495,30 @@ namespace Legion {
     IndexPartition InnerContext::create_equal_partition(
                                                       RegionTreeForest *forest,
                                                       IndexSpace parent,
-                                                      const Domain &color_space,
+                                                      IndexSpace color_space,
                                                       size_t granularity,
-                                                      int color, bool allocable)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      AutoRuntimeCall call(this);  
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+                         parent.get_tree_id(), parent.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating equal partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
                       get_task_name(), get_unique_id());
 #endif
-      ColorPoint partition_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        partition_color = ColorPoint(color);
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_equal_partition(this, pid, granularity);
-      ApEvent handle_ready = part_op->get_handle_ready();
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, parent, color_space,
                                        partition_color, DISJOINT_KIND,
-                                       allocable, handle_ready, term_event);
-      // Now we can add the operation to the queue
-      runtime->add_to_dependence_queue(this, executing_processor, part_op);
-      return pid;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InnerContext::create_weighted_partition(
-                                      RegionTreeForest *forest,
-                                      IndexSpace parent,
-                                      const Domain &color_space,
-                                      const std::map<DomainPoint,int> &weights,
-                                      size_t granularity, 
-                                      int color, bool allocable)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
-#ifdef DEBUG_LEGION
-      log_index.debug("Creating weighted partition %d with parent index "
-                      "space %x in task %s (ID %lld)", pid.id, parent.id,
-                      get_task_name(), get_unique_id());
-#endif
-      ColorPoint partition_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        partition_color = ColorPoint(color);
-      PendingPartitionOp *part_op = 
-        runtime->get_available_pending_partition_op(true);
-      part_op->initialize_weighted_partition(this, pid, granularity, weights);
-      ApEvent handle_ready = part_op->get_handle_ready();
-      ApEvent term_event = part_op->get_completion_event();
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, DISJOINT_KIND,
-                                       allocable, handle_ready, term_event);
+                                       term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return pid;
@@ -3098,13 +2530,13 @@ namespace Legion {
                                           IndexSpace parent,
                                           IndexPartition handle1,
                                           IndexPartition handle2,
-                                          PartitionKind kind,
-                                          int color, bool allocable)
+                                          IndexSpace color_space,
+                                          PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+                         parent.get_tree_id(), parent.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating union partition %d with parent index "
                       "space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -3126,21 +2558,30 @@ namespace Legion {
         exit(ERROR_INDEX_TREE_MISMATCH);
       }
 #endif
-      ColorPoint partition_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        partition_color = ColorPoint(color);
-      Domain color_space;
-      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          Realm::IndexSpace::ISO_UNION);
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_union_partition(this, pid, handle1, handle2);
-      ApEvent handle_ready = part_op->get_handle_ready();
       ApEvent term_event = part_op->get_completion_event();
+      // If either partition is aliased the result is aliased
+      if (kind == COMPUTE_KIND)
+      {
+        // If one of these partitions is aliased then the result is aliased
+        IndexPartNode *p1 = forest->get_node(handle1);
+        if (p1->is_disjoint(true/*from app*/))
+        {
+          IndexPartNode *p2 = forest->get_node(handle2);
+          if (!p2->is_disjoint(true/*from app*/))
+            kind = ALIASED_KIND;
+        }
+        else
+          kind = ALIASED_KIND;
+      }
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, kind, allocable, 
-                                       handle_ready, term_event);
+                                       partition_color, kind, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return pid;
@@ -3152,13 +2593,13 @@ namespace Legion {
                                               IndexSpace parent,
                                               IndexPartition handle1,
                                               IndexPartition handle2,
-                                              PartitionKind kind,
-                                              int color, bool allocable)
+                                              IndexSpace color_space,
+                                              PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+                         parent.get_tree_id(), parent.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating intersection partition %d with parent "
                       "index space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -3180,21 +2621,29 @@ namespace Legion {
         exit(ERROR_INDEX_TREE_MISMATCH);
       }
 #endif
-      ColorPoint partition_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        partition_color = ColorPoint(color);
-      Domain color_space;
-      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          Realm::IndexSpace::ISO_INTERSECT);
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
-      ApEvent handle_ready = part_op->get_handle_ready();
       ApEvent term_event = part_op->get_completion_event();
+      // If either partition is disjoint then the result is disjoint
+      if (kind == COMPUTE_KIND)
+      {
+        IndexPartNode *p1 = forest->get_node(handle1);
+        if (!p1->is_disjoint(true/*from app*/))
+        {
+          IndexPartNode *p2 = forest->get_node(handle2);
+          if (p2->is_disjoint(true/*from app*/))
+            kind = DISJOINT_KIND;
+        }
+        else
+          kind = DISJOINT_KIND;
+      }
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, kind, allocable, 
-                                       handle_ready, term_event);
+                                       partition_color, kind, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return pid;
@@ -3206,13 +2655,14 @@ namespace Legion {
                                                   IndexSpace parent,
                                                   IndexPartition handle1,
                                                   IndexPartition handle2,
-                                                  PartitionKind kind,
-                                                  int color, bool allocable)
+                                                  IndexSpace color_space,
+                                                  PartitionKind kind, 
+                                                  Color color)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+                         parent.get_tree_id(), parent.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating difference partition %d with parent "
                       "index space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -3236,33 +2686,35 @@ namespace Legion {
         exit(ERROR_INDEX_TREE_MISMATCH);
       }
 #endif
-      ColorPoint partition_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        partition_color = ColorPoint(color);
-      Domain color_space;
-      forest->compute_pending_color_space(parent, handle1, handle2, color_space,
-                                          Realm::IndexSpace::ISO_SUBTRACT);
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
-      ApEvent handle_ready = part_op->get_handle_ready();
       ApEvent term_event = part_op->get_completion_event();
+      // If the left-hand-side is disjoint the result is disjoint
+      if (kind == COMPUTE_KIND)
+      {
+        IndexPartNode *p1 = forest->get_node(handle1);
+        if (p1->is_disjoint(true/*from app*/))
+          kind = DISJOINT_KIND;
+      }
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, kind, allocable, 
-                                       handle_ready, term_event);
+                                       partition_color, kind, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return pid;
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::create_cross_product_partition(RegionTreeForest *forest,
+    Color InnerContext::create_cross_product_partition(RegionTreeForest *forest,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
-                                  std::map<DomainPoint,IndexPartition> &handles,
+                                   std::map<IndexSpace,IndexPartition> &handles,
                                                       PartitionKind kind,
-                                                      int color, bool allocable)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -3279,21 +2731,92 @@ namespace Legion {
         exit(ERROR_INDEX_TREE_MISMATCH);
       }
 #endif
-      ColorPoint partition_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        partition_color = ColorPoint(color);
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
-      ApEvent handle_ready = part_op->get_handle_ready();
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
-      std::map<DomainPoint,IndexPartition> local;
-      forest->create_pending_cross_product(handle1, handle2, local, handles,
-                                           kind, partition_color, allocable,
-                                           handle_ready, term_event);
-      part_op->initialize_cross_product(this, handle1, handle2, local);
+      forest->create_pending_cross_product(handle1, handle2, handles, kind, 
+                                           partition_color, term_event);
+      part_op->initialize_cross_product(this, handle1, handle2,partition_color);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return partition_color;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::create_association(LogicalRegion domain,
+                                          LogicalRegion domain_parent,
+                                          FieldID domain_fid,
+                                          IndexSpace range,
+                                          MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating association in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      DependentPartitionOp *part_op = 
+        runtime->get_available_dependent_partition_op(true);
+      part_op->initialize_by_association(this, domain, domain_parent, 
+                                         domain_fid, range, id, tag);
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_association call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_restricted_partition(
+                                              RegionTreeForest *forest,
+                                              IndexSpace parent,
+                                              IndexSpace color_space,
+                                              const void *transform,
+                                              size_t transform_size,
+                                              const void *extent,
+                                              size_t extent_size,
+                                              PartitionKind part_kind,
+                                              Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating restricted partition in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color; 
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op(true);
+      part_op->initialize_restricted_partition(this, pid, transform, 
+                                transform_size, extent, extent_size);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space,
+                                       part_color, part_kind, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
     }
 
     //--------------------------------------------------------------------------
@@ -3302,32 +2825,30 @@ namespace Legion {
                                               LogicalRegion handle,
                                               LogicalRegion parent_priv,
                                               FieldID fid,
-                                              const Domain &color_space,
-                                              int color, bool allocable)
+                                              IndexSpace color_space,
+                                              Color color,
+                                              MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexSpace parent = handle.get_index_space();
+      IndexSpace parent = handle.get_index_space(); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+                         parent.get_tree_id(), parent.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by field in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ColorPoint part_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        part_color = ColorPoint(color);
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_field(this, pid, handle, 
-                                   parent_priv, color_space, fid);
+      part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
       ApEvent term_event = part_op->get_completion_event();
-      ApEvent handle_ready = part_op->get_handle_ready();
       // Tell the region tree forest about this partition 
       forest->create_pending_partition(pid, parent, color_space, part_color,
-                                       DISJOINT_KIND, allocable, 
-                                       handle_ready, term_event); 
+                                       DISJOINT_KIND, term_event); 
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -3356,32 +2877,31 @@ namespace Legion {
                                                     LogicalPartition projection,
                                                     LogicalRegion parent,
                                                     FieldID fid,
-                                                    const Domain &color_space,
+                                                    IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color, bool allocable)
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         handle.get_tree_id());
+                         handle.get_tree_id(), parent.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by image in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ColorPoint part_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        part_color = ColorPoint(color);
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_image(this, pid, projection,
-                                   parent, fid, color_space);
-      ApEvent term_event = part_op->get_completion_event();
-      ApEvent handle_ready = part_op->get_handle_ready();
+      part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
+      ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle, color_space, part_color,
-                                       part_kind, allocable, 
-                                       handle_ready, term_event); 
+                                       part_kind, term_event); 
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -3404,38 +2924,101 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_image_range(
+                                                    RegionTreeForest *forest,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition by image range in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = 
+        runtime->get_available_dependent_partition_op(true);
+      part_op->initialize_by_image_range(this, pid, projection, parent, 
+                                         fid, id, tag);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle, color_space, part_color,
+                                       part_kind, term_event); 
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_image_range call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_preimage(
                                                   RegionTreeForest *forest,
                                                   IndexPartition projection,
                                                   LogicalRegion handle,
                                                   LogicalRegion parent,
                                                   FieldID fid,
-                                                  const Domain &color_space,
+                                                  IndexSpace color_space,
                                                   PartitionKind part_kind,
-                                                  int color, bool allocable)
+                                                  Color color,
+                                                  MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
+      AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         handle.get_index_space().get_tree_id());
+                         handle.get_index_space().get_tree_id(),
+                         parent.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ColorPoint part_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        part_color = ColorPoint(color);
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_preimage(this, pid, projection, handle,
-                                      parent, fid, color_space);
+      part_op->initialize_by_preimage(this, pid, projection, handle, 
+                                      parent, fid, id, tag);
       ApEvent term_event = part_op->get_completion_event();
-      ApEvent handle_ready = part_op->get_handle_ready();
+      // If the source of the preimage is disjoint then the result is disjoint
+      // Note this only applies here and not to range
+      if (part_kind == COMPUTE_KIND)
+      {
+        IndexPartNode *p = forest->get_node(projection);
+        if (p->is_disjoint(true/*from app*/))
+          part_kind = DISJOINT_KIND;
+      }
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle.get_index_space(), 
                                        color_space, part_color, part_kind,
-                                       allocable, handle_ready, term_event);
+                                       term_event);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -3458,35 +3041,91 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_preimage_range(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition projection,
+                                                  LogicalRegion handle,
+                                                  LogicalRegion parent,
+                                                  FieldID fid,
+                                                  IndexSpace color_space,
+                                                  PartitionKind part_kind,
+                                                  Color color,
+                                                  MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         handle.get_index_space().get_tree_id(),
+                         parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating partition by preimage range in task %s "
+                      "(ID %lld)", get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
+      // Allocate the partition operation
+      DependentPartitionOp *part_op = 
+        runtime->get_available_dependent_partition_op(true);
+      part_op->initialize_by_preimage_range(this, pid, projection, handle,
+                                            parent, fid, id, tag);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle.get_index_space(), 
+                                       color_space, part_color, part_kind,
+                                       term_event);
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_preimage_range call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_pending_partition(
                                                 RegionTreeForest *forest,
                                                 IndexSpace parent,
-                                                const Domain &color_space, 
+                                                IndexSpace color_space, 
                                                 PartitionKind part_kind,
-                                                int color, bool allocable)
+                                                Color color)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         parent.get_tree_id());
+                         parent.get_tree_id(), parent.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating pending partition in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ColorPoint part_color;
-      if (color != static_cast<int>(AUTO_GENERATE_ID))
-        part_color = ColorPoint(color);
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
+      ApUserEvent partition_ready = Runtime::create_ap_user_event();
       forest->create_pending_partition(pid, parent, color_space, part_color,
-                                       part_kind, allocable, 
-                                       ApEvent::NO_AP_EVENT,
-                                       ApEvent::NO_AP_EVENT, true/*separate*/);
+                                       part_kind, partition_ready, 
+                                       partition_ready);
       return pid;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space_union(RegionTreeForest *forest,
                                                       IndexPartition parent,
-                                                      const DomainPoint &color,
+                                                      const void *realm_color,
+                                                      TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
@@ -3495,14 +3134,12 @@ namespace Legion {
       log_index.debug("Creating index space union in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent handle_ready, domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, color, 
-                                                     handle_ready, 
-                                                     domain_ready);
+      ApUserEvent domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, realm_color, 
+                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_index_space_union(this, result, handles);
-      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -3512,7 +3149,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace InnerContext::create_index_space_union(RegionTreeForest *forest,
                                                       IndexPartition parent,
-                                                      const DomainPoint &color,
+                                                      const void *realm_color,
+                                                      TypeTag type_tag,
                                                       IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -3521,14 +3159,12 @@ namespace Legion {
       log_index.debug("Creating index space union in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent handle_ready, domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, color, 
-                                                     handle_ready, 
-                                                     domain_ready);
+      ApUserEvent domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, realm_color, 
+                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_index_space_union(this, result, handle);
-      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -3539,7 +3175,8 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_intersection(
                                                       RegionTreeForest *forest,
                                                       IndexPartition parent,
-                                                      const DomainPoint &color,
+                                                      const void *realm_color,
+                                                      TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
@@ -3548,14 +3185,12 @@ namespace Legion {
       log_index.debug("Creating index space intersection in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent handle_ready, domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, color, 
-                                                     handle_ready, 
-                                                     domain_ready);
+      ApUserEvent domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, realm_color, 
+                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_index_space_intersection(this, result, handles);
-      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -3566,7 +3201,8 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_intersection(
                                                       RegionTreeForest *forest,
                                                       IndexPartition parent,
-                                                      const DomainPoint &color,
+                                                      const void *realm_color,
+                                                      TypeTag type_tag,
                                                       IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -3575,14 +3211,12 @@ namespace Legion {
       log_index.debug("Creating index space intersection in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent handle_ready, domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, color, 
-                                                     handle_ready, 
-                                                     domain_ready);
+      ApUserEvent domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, realm_color, 
+                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_index_space_intersection(this, result, handle);
-      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -3593,7 +3227,8 @@ namespace Legion {
     IndexSpace InnerContext::create_index_space_difference(
                                                     RegionTreeForest *forest,
                                                     IndexPartition parent,
-                                                    const DomainPoint &color,
+                                                    const void *realm_color,
+                                                    TypeTag type_tag,
                                                     IndexSpace initial,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -3603,14 +3238,12 @@ namespace Legion {
       log_index.debug("Creating index space difference in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent handle_ready, domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, color, 
-                                                     handle_ready, 
-                                                     domain_ready);
+      ApUserEvent domain_ready;
+      IndexSpace result = forest->find_pending_space(parent, realm_color, 
+                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
       part_op->initialize_index_space_difference(this, result, initial,handles);
-      Runtime::trigger_event(handle_ready, part_op->get_handle_ready());
       Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -7177,7 +6810,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space(RegionTreeForest *forest,
-                                               size_t max_num_elmts)
+                                         const void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal index space creation performed in leaf task %s "
@@ -7190,11 +6823,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace LeafContext::create_index_space(RegionTreeForest *forest,
-                                               const Domain &domain)
+    IndexSpace LeafContext::union_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      log_task.error("Illegal index space creation performed in leaf task %s "
+      log_task.error("Illegal union index spaces performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
@@ -7204,11 +6837,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace LeafContext::create_index_space(RegionTreeForest *forest,
-                                               const std::set<Domain> &domains)
+    IndexSpace LeafContext::intersect_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      log_task.error("Illegal index space creation performed in leaf task %s "
+      log_task.error("Illegal intersect index spaces performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace LeafContext::subtract_index_spaces(RegionTreeForest *forest,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal subtract index spaces performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
@@ -7230,125 +6877,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent, 
-                                            const Domain &color_space,
-                                            const PointColoring &coloring,
-                                            PartitionKind part_kind,
-                                            int color, bool allocable)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal index partition creation performed in leaf task "
-                     "%s (ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
-                                              IndexSpace parent,
-                                              const Coloring &coloring,
-                                              bool disjoint, int part_color)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal index partition creation performed in leaf task "
-                     "%s (ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal index partition creation performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
-                                                 IndexSpace parent,
-                                                 const Domain &color_space,
-                                                 const DomainColoring &coloring,
-                                                 bool disjoint, int part_color)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal index partition creation performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
-                                      IndexSpace parent,
-                                      const Domain &color_space,
-                                      const MultiDomainPointColoring &coloring,
-                                      PartitionKind part_kind, int color)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal index partition creation performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const MultiDomainColoring &coloring,
-                                            bool disjoint, int part_color)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal index partition creation performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_index_partition(RegionTreeForest *forest,
-                                        IndexSpace parent,
-                LegionRuntime::Accessor::RegionAccessor<
-                 LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                        int part_color)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal index partition creation performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
     void LeafContext::destroy_index_partition(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7363,31 +6891,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_equal_partition(RegionTreeForest *forest,
                                              IndexSpace parent,
-                                             const Domain &color_space,
-                                             size_t granularity,
-                                             int color, bool allocable)
+                                             IndexSpace color_space,
+                                             size_t granularity, Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal equal partition creation performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexPartition::NO_PART;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition LeafContext::create_weighted_partition(
-                                      RegionTreeForest *forest,
-                                      IndexSpace parent,
-                                      const Domain &color_space,
-                                      const std::map<DomainPoint,int> &weights,
-                                      size_t granularity,
-                                      int color, bool allocable)
-    //--------------------------------------------------------------------------
-    {
-      log_task.error("Illegal weighted partition creation performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
@@ -7402,8 +6910,8 @@ namespace Legion {
                                           IndexSpace parent,
                                           IndexPartition handle1,
                                           IndexPartition handle2,
-                                          PartitionKind kind,
-                                          int color, bool allocable)
+                                          IndexSpace color_space,
+                                          PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal union partition creation performed in leaf "
@@ -7421,8 +6929,8 @@ namespace Legion {
                                                 IndexSpace parent,
                                                 IndexPartition handle1,
                                                 IndexPartition handle2,
-                                                PartitionKind kind,
-                                                int color, bool allocable)
+                                                IndexSpace color_space,
+                                                PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal intersection partition creation performed in "
@@ -7440,8 +6948,9 @@ namespace Legion {
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
+                                                      IndexSpace color_space,
                                                       PartitionKind kind,
-                                                      int color, bool allocable)
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal difference partition creation performed in leaf "
@@ -7454,12 +6963,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::create_cross_product_partition(RegionTreeForest *forest,
-                                                     IndexPartition handle1,
-                                                     IndexPartition handle2,
-                                  std::map<DomainPoint,IndexPartition> &handles,
-                                                     PartitionKind kind,
-                                                     int color, bool allocable)
+    Color LeafContext::create_cross_product_partition(RegionTreeForest *forest,
+                                                      IndexPartition handle1,
+                                                      IndexPartition handle2,
+                                   std::map<IndexSpace,IndexPartition> &handles,
+                                                      PartitionKind kind,
+                                                      Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal create cross product partitions performed in "
@@ -7468,6 +6977,44 @@ namespace Legion {
       assert(false);
 #endif
       exit(ERROR_LEAF_TASK_VIOLATION);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::create_association(LogicalRegion domain,
+                                         LogicalRegion domain_parent,
+                                         FieldID domain_fid, IndexSpace range,
+                                         MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create association performed in leaf task "
+                     "%s (ID %lld)", get_task_name(),get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_restricted_partition(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                IndexSpace color_space,
+                                                const void *transform,
+                                                size_t transform_size,
+                                                const void *extent,
+                                                size_t extent_size,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal create restricted partition performed in "
+                     "leaf task %s (ID %lld)", get_task_name(),get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
     }
 
     //--------------------------------------------------------------------------
@@ -7476,8 +7023,9 @@ namespace Legion {
                                                 LogicalRegion handle,
                                                 LogicalRegion parent_priv,
                                                 FieldID fid,
-                                                const Domain &color_space,
-                                                int color, bool allocable)
+                                                IndexSpace color_space,
+                                                Color color,
+                                                MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by field performed in leaf "
@@ -7496,12 +7044,35 @@ namespace Legion {
                                               LogicalPartition projection,
                                               LogicalRegion parent,
                                               FieldID fid,
-                                              const Domain &color_space,
+                                              IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              int color, bool allocable)
+                                              Color color,
+                                              MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by image performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_image_range(
+                                              RegionTreeForest *forest,
+                                              IndexSpace handle,
+                                              LogicalPartition projection,
+                                              LogicalRegion parent,
+                                              FieldID fid,
+                                              IndexSpace color_space,
+                                              PartitionKind part_kind,
+                                              Color color,
+                                              MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal partition by image range performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
       assert(false);
@@ -7517,9 +7088,10 @@ namespace Legion {
                                                 LogicalRegion handle,
                                                 LogicalRegion parent,
                                                 FieldID fid,
-                                                const Domain &color_space,
+                                                IndexSpace color_space,
                                                 PartitionKind part_kind,
-                                                int color, bool allocable)
+                                                Color color,
+                                                MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal partition by preimage performed in leaf "
@@ -7532,12 +7104,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_preimage_range(
+                                                RegionTreeForest *forest,
+                                                IndexPartition projection,
+                                                LogicalRegion handle,
+                                                LogicalRegion parent,
+                                                FieldID fid,
+                                                IndexSpace color_space,
+                                                PartitionKind part_kind,
+                                                Color color,
+                                                MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      log_task.error("Illegal partition by preimage range performed in leaf "
+                     "task %s (ID %lld)", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_LEAF_TASK_VIOLATION);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_pending_partition(
                                               RegionTreeForest *forest,
                                               IndexSpace parent,
-                                              const Domain &color_space,
+                                              IndexSpace color_space,
                                               PartitionKind part_kind,
-                                              int color, bool allocable)
+                                              Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal create pending partition performed in leaf "
@@ -7552,7 +7146,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space_union(RegionTreeForest *forest,
                                                      IndexPartition parent,
-                                                     const DomainPoint &color,
+                                                     const void *realm_color,
+                                                     TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles) 
     //--------------------------------------------------------------------------
     {
@@ -7568,7 +7163,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpace LeafContext::create_index_space_union(RegionTreeForest *forest,
                                                      IndexPartition parent,
-                                                     const DomainPoint &color,
+                                                     const void *realm_color,
+                                                     TypeTag type_tag,
                                                      IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7585,7 +7181,8 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_intersection(
                                                      RegionTreeForest *forest,
                                                      IndexPartition parent,
-                                                     const DomainPoint &color,
+                                                     const void *realm_color,
+                                                     TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles) 
     //--------------------------------------------------------------------------
     {
@@ -7602,7 +7199,8 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_intersection(
                                                      RegionTreeForest *forest,
                                                      IndexPartition parent,
-                                                     const DomainPoint &color,
+                                                     const void *realm_color,
+                                                     TypeTag type_tag,
                                                      IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7619,7 +7217,8 @@ namespace Legion {
     IndexSpace LeafContext::create_index_space_difference(
                                                   RegionTreeForest *forest,
                                                   IndexPartition parent,
-                                                  const DomainPoint &color,
+                                                  const void *realm_color,
+                                                  TypeTag type_tag,
                                                   IndexSpace initial,
                                           const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -8647,26 +8246,34 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
-                                                 size_t max_num_elmts)
+                                         const void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_index_space(forest, max_num_elmts);
+      return enclosing->create_index_space(forest, realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
-                                                 const Domain &domain)
+    IndexSpace InlineContext::union_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_index_space(forest, domain);
+      return enclosing->union_index_spaces(forest, spaces);
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace InlineContext::create_index_space(RegionTreeForest *forest,
-                                                const std::set<Domain> &domains)
+    IndexSpace InlineContext::intersect_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_index_space(forest, domains);
+      return enclosing->intersect_index_spaces(forest, spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InlineContext::subtract_index_spaces(RegionTreeForest *forest,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->subtract_index_spaces(forest, left, right);
     }
 
     //--------------------------------------------------------------------------
@@ -8674,97 +8281,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->destroy_index_space(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_index_partition(
-                                            RegionTreeForest *forest,
-                                            IndexSpace parent, 
-                                            const Domain &color_space,
-                                            const PointColoring &coloring,
-                                            PartitionKind part_kind,
-                                            int color, bool allocable)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_partition(forest, parent, color_space,
-                                     coloring, part_kind, color, allocable);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_index_partition(
-                                            RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Coloring &coloring,
-                                            bool disjoint, int part_color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_partition(forest, parent, coloring,
-                                               disjoint, part_color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_index_partition(
-                                            RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainPointColoring &coloring,
-                                            PartitionKind part_kind, int color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_partition(forest, parent, color_space,
-                                               coloring, part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_index_partition(
-                                            RegionTreeForest *forest,
-                                            IndexSpace parent,
-                                            const Domain &color_space,
-                                            const DomainColoring &coloring,
-                                            bool disjoint, int part_color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_partition(forest, parent, color_space,
-                                               coloring, disjoint, part_color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_index_partition(
-                                      RegionTreeForest *forest,
-                                      IndexSpace parent,
-                                      const Domain &color_space,
-                                      const MultiDomainPointColoring &coloring,
-                                      PartitionKind part_kind, int color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_partition(forest, parent, color_space,
-                                               coloring, part_kind, color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_index_partition(
-                                      RegionTreeForest *forest,
-                                      IndexSpace parent,
-                                      const Domain &color_space,
-                                      const MultiDomainColoring &coloring,
-                                      bool disjoint, int part_color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_partition(forest, parent, color_space,
-                                               coloring, disjoint, part_color);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_index_partition(
-                                      RegionTreeForest *forest,
-                                      IndexSpace parent,
-                LegionRuntime::Accessor::RegionAccessor<
-                 LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
-                                      int part_color)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_partition(forest, parent, 
-                                               field_accessor, part_color);
     }
 
     //--------------------------------------------------------------------------
@@ -8778,27 +8294,12 @@ namespace Legion {
     IndexPartition InlineContext::create_equal_partition(
                                                 RegionTreeForest *forest,
                                                 IndexSpace parent,
-                                                const Domain &color_space,
-                                                size_t granularity,
-                                                int color, bool allocable)
+                                                IndexSpace color_space,
+                                                size_t granularity, Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_equal_partition(forest, parent, color_space,
-                                               granularity, color, allocable);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartition InlineContext::create_weighted_partition(
-                                      RegionTreeForest *forest,
-                                      IndexSpace parent,
-                                      const Domain &color_space,
-                                      const std::map<DomainPoint,int> &weights,
-                                      size_t granularity,
-                                      int color, bool allocable)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_weighted_partition(forest, parent, color_space,
-                                        weights, granularity, color, allocable);
+                                               granularity, color);
     }
 
     //--------------------------------------------------------------------------
@@ -8807,12 +8308,13 @@ namespace Legion {
                                       IndexSpace parent,
                                       IndexPartition handle1,
                                       IndexPartition handle2,
-                                      PartitionKind kind,
-                                      int color, bool allocable)
+                                      IndexSpace color_space,
+                                      PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_union(forest, parent, handle1,
-                                          handle2, kind, color, allocable);
+                                                  handle2, color_space,
+                                                  kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -8821,12 +8323,13 @@ namespace Legion {
                                       IndexSpace parent,
                                       IndexPartition handle1,
                                       IndexPartition handle2,
-                                      PartitionKind kind,
-                                      int color, bool allocable)
+                                      IndexSpace color_space,
+                                      PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_intersection(forest, parent,
-                                handle1, handle2, kind, color, allocable);
+                                          handle1, handle2, color_space, 
+                                          kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -8835,25 +8338,56 @@ namespace Legion {
                                       IndexSpace parent,
                                       IndexPartition handle1,
                                       IndexPartition handle2,
-                                      PartitionKind kind,
-                                      int color, bool allocable)   
+                                      IndexSpace color_space,
+                                      PartitionKind kind, Color color)   
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_difference(forest, parent,
-                                handle1, handle2, kind, color, allocable);
+                          handle1, handle2, color_space, kind, color);
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::create_cross_product_partition(RegionTreeForest *forest,
+    Color InlineContext::create_cross_product_partition(
+                                                       RegionTreeForest *forest,
                                                        IndexPartition handle1,
                                                        IndexPartition handle2,
-                                  std::map<DomainPoint,IndexPartition> &handles,
+                                  std::map<IndexSpace,IndexPartition> &handles,
                                                        PartitionKind kind,
-                                                       int color,bool allocable)
+                                                       Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_cross_product_partition(forest, handle1, handle2,
-                                               handles, kind, color, allocable);
+                                                       handles, kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::create_association(LogicalRegion domain,
+                                           LogicalRegion domain_parent,
+                                           FieldID domain_fid,
+                                           IndexSpace range,
+                                           MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->create_association(domain, domain_parent, domain_fid, 
+                                    range, id, tag);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_restricted_partition(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                IndexSpace color_space,
+                                                const void *transform,
+                                                size_t transform_size,
+                                                const void *extent,
+                                                size_t extent_size,
+                                                PartitionKind part_kind,
+                                                Color color)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_restricted_partition(forest, parent, color_space,
+                                 transform, transform_size, extent, extent_size,
+                                 part_kind, color);
     }
 
     //--------------------------------------------------------------------------
@@ -8862,12 +8396,14 @@ namespace Legion {
                                                       LogicalRegion handle,
                                                       LogicalRegion parent_priv,
                                                       FieldID fid,
-                                                      const Domain &color_space,
-                                                      int color, bool allocable)
+                                                      IndexSpace color_space,
+                                                      Color color,
+                                                      MapperID id, 
+                                                      MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_field(forest, handle, parent_priv,
-                                          fid, color_space, color, allocable);
+                                            fid, color_space, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -8877,13 +8413,33 @@ namespace Legion {
                                                     LogicalPartition projection,
                                                     LogicalRegion parent,
                                                     FieldID fid,
-                                                    const Domain &color_space,
+                                                    IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color, bool allocable)
+                                                    Color color,
+                                                    MapperID id,
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_image(forest, handle, projection,
-                      parent, fid, color_space, part_kind, color, allocable);
+                          parent, fid, color_space, part_kind, color, id, tag);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_image_range(
+                                                    RegionTreeForest *forest,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_image_range(forest, handle, 
+              projection, parent, fid, color_space, part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
@@ -8893,84 +8449,114 @@ namespace Legion {
                                                     LogicalRegion handle,
                                                     LogicalRegion parent,
                                                     FieldID fid,
-                                                    const Domain &color_space,
+                                                    IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color, bool allocable)
+                                                    Color color,
+                                                    MapperID id,
+                                                    MappingTagID tag)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_partition_by_preimage(forest, projection, handle,
-                         parent, fid, color_space, part_kind, color, allocable);
+                           parent, fid, color_space, part_kind, color, id, tag);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_preimage_range(
+                                                    RegionTreeForest *forest,
+                                                    IndexPartition projection,
+                                                    LogicalRegion handle,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color,
+                                                    MapperID id,
+                                                    MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_preimage_range(forest, projection, 
+                  handle, parent, fid, color_space, part_kind, color, id, tag);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition InlineContext::create_pending_partition(
                                                     RegionTreeForest *forest,
                                                     IndexSpace parent,
-                                                    const Domain &color_space,
+                                                    IndexSpace color_space,
                                                     PartitionKind part_kind,
-                                                    int color, bool allocable)
+                                                    Color color)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_pending_partition(forest, parent, color_space,
-                                                 part_kind, color, allocable);
+                                                 part_kind, color);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space_union(
                                                   RegionTreeForest *forest,
                                                   IndexPartition parent,
-                                                  const DomainPoint &color,
+                                                  const void *realm_color,
+                                                  TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_index_space_union(forest, parent, color,handles);
+      return enclosing->create_index_space_union(forest, parent, realm_color, 
+                                                 type_tag, handles);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space_union(
                                                   RegionTreeForest *forest,
                                                   IndexPartition parent,
-                                                  const DomainPoint &color,
+                                                  const void *realm_color,
+                                                  TypeTag type_tag,
                                                   IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_index_space_union(forest, parent, color, handle);
+      return enclosing->create_index_space_union(forest, parent, realm_color, 
+                                                 type_tag, handle);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space_intersection(
                                                   RegionTreeForest *forest,
                                                   IndexPartition parent,
-                                                  const DomainPoint &color,
+                                                  const void *realm_color,
+                                                  TypeTag type_tag,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_index_space_intersection(forest, parent, 
-                                                        color, handles);
+                                                        realm_color, type_tag, 
+                                                        handles);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space_intersection(
                                                   RegionTreeForest *forest,
                                                   IndexPartition parent,
-                                                  const DomainPoint &color,
+                                                  const void *realm_color,
+                                                  TypeTag type_tag,
                                                   IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       return enclosing->create_index_space_intersection(forest, parent, 
-                                                        color, handle);
+                                                        realm_color, 
+                                                        type_tag, handle);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace InlineContext::create_index_space_difference(
                                                   RegionTreeForest *forest,
                                                   IndexPartition parent,
-                                                  const DomainPoint &color,
+                                                  const void *realm_color,
+                                                  TypeTag type_tag,
                                                   IndexSpace initial,
                                         const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_index_space_difference(forest, parent, color,
+      return enclosing->create_index_space_difference(forest, parent, 
+                                                      realm_color, type_tag,
                                                       initial, handles);
     }
 

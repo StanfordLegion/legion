@@ -306,96 +306,6 @@ namespace Legion {
     };
 
     /////////////////////////////////////////////////////////////
-    // ColorPoint 
-    /////////////////////////////////////////////////////////////
-    class ColorPoint {
-    public:
-      ColorPoint(void)
-        : valid(false) { }
-      // Make these constructors explicit so we know when
-      // we are converting between things
-      explicit ColorPoint(Color c)
-        : point(DomainPoint::from_point<1>(LegionRuntime::Arrays::Point<1>((c)))), valid(true) { }
-      explicit ColorPoint(const DomainPoint &p)
-        : point(p), valid(true) { }
-    public:
-      inline bool is_valid(void) const { return valid; }
-      inline int get_index(void) const
-      {
-#ifdef DEBUG_LEGION
-        assert(valid);
-#endif
-        // This will help with the conversion for now
-        if (point.get_dim() == 1)
-          return point.point_data[0];
-        else
-          return point.get_index();
-      }
-      inline int get_dim(void) const
-      {
-#ifdef DEBUG_LEGION
-        assert(valid);
-#endif
-        return point.get_dim();
-      }
-      inline bool is_null(void) const
-      {
-#ifdef DEBUG_LEGION
-        assert(valid);
-#endif
-        return point.is_null();
-      }
-    public:
-      inline bool operator==(const ColorPoint &rhs) const
-      {
-        if (valid != rhs.valid)
-          return false;
-        if (valid)
-          return point == rhs.point;
-        return true; // both not vaid so they are equal
-      }
-      inline bool operator!=(const ColorPoint &rhs) const
-      {
-        return !((*this) == rhs);
-      }
-      inline bool operator<(const ColorPoint &rhs) const
-      {
-        if (valid < rhs.valid)
-          return true;
-        if (valid > rhs.valid)
-          return false;
-        if (valid)
-          return (point < rhs.point);
-        else // both not valid so equal
-          return false;
-      }
-    public:
-      inline int operator[](unsigned index) const
-      {
-#ifdef DEBUG_LEGION
-        assert(valid);
-        assert(index < unsigned(point.get_dim()));
-#endif
-        return point.point_data[index];
-      }
-    public:
-      inline const DomainPoint& get_point(void) const
-      {
-#ifdef DEBUG_LEGION
-        assert(valid);
-#endif
-        return point;
-      }
-      inline void clear(void) { valid = false; }
-    public:
-      inline void serialize(Serializer &rez) const;
-      inline void deserialize(Deserializer &derez);
-    private:
-      DomainPoint point;
-      bool valid;
-    }; 
-
-    /////////////////////////////////////////////////////////////
     // Serializer 
     /////////////////////////////////////////////////////////////
     class Serializer {
@@ -441,7 +351,6 @@ namespace Legion {
 #endif
       template<typename IT, typename DT, bool BIDIR>
       inline void serialize(const IntegerSet<IT,DT,BIDIR> &index_set);
-      inline void serialize(const ColorPoint &point);
       inline void serialize(const Domain &domain);
       inline void serialize(const DomainPoint &dp);
       inline void serialize(const void *src, size_t bytes);
@@ -514,7 +423,6 @@ namespace Legion {
 #endif
       template<typename IT, typename DT, bool BIDIR>
       inline void deserialize(IntegerSet<IT,DT,BIDIR> &index_set);
-      inline void deserialize(ColorPoint &color);
       inline void deserialize(Domain &domain);
       inline void deserialize(DomainPoint &dp);
       inline void deserialize(void *dst, size_t bytes);
@@ -1504,13 +1412,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void Serializer::serialize(const ColorPoint &point)
-    //--------------------------------------------------------------------------
-    {
-      point.serialize(*this);
-    }
-
-    //--------------------------------------------------------------------------
     inline void Serializer::serialize(const Domain &dom)
     //--------------------------------------------------------------------------
     {
@@ -1710,13 +1611,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void Deserializer::deserialize(ColorPoint &point)
-    //--------------------------------------------------------------------------
-    {
-      point.deserialize(*this);
-    }
-
-    //--------------------------------------------------------------------------
     inline void Deserializer::deserialize(Domain &dom)
     //--------------------------------------------------------------------------
     {
@@ -1819,32 +1713,6 @@ namespace Legion {
       context_bytes += bytes;
 #endif
       index += bytes;
-    }
-
-    //--------------------------------------------------------------------------
-    inline void ColorPoint::serialize(Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(valid);
-      if (valid)
-      {
-        rez.serialize(point.dim);
-        for (int idx = 0; idx < point.dim; idx++)
-          rez.serialize(point.point_data[idx]);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    inline void ColorPoint::deserialize(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      derez.deserialize(valid);
-      if (valid)
-      {
-        derez.deserialize(point.dim);
-        for (int idx = 0; idx < point.dim; idx++)
-          derez.deserialize(point.point_data[idx]);
-      }
     }
 
     // There is an interesting design decision about how to break up the 32 bit

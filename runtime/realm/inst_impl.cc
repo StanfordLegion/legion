@@ -118,6 +118,64 @@ namespace Realm {
       return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped((void *)i_impl));
     }
 
+#if 0
+    /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
+							      const LinearizedIndexSpaceIntfc& lis,
+							      const std::vector<size_t>& field_sizes,
+							      const ProfilingRequestSet& prs)
+    {
+      size_t num_elements = lis.size();
+      size_t element_size = 0;
+      for(std::vector<size_t>::const_iterator it = field_sizes.begin();
+	  it != field_sizes.end();
+	  it++)
+	element_size += *it;
+
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+
+      int dummy_bits[RegionInstanceImpl::MAX_LINEARIZATION_LEN];
+      for(size_t i = 0; i < RegionInstanceImpl::MAX_LINEARIZATION_LEN; i++)
+	dummy_bits[i] = 0;
+
+      RegionInstance r = m_impl->create_instance(IndexSpace::NO_SPACE,
+						 dummy_bits,
+						 num_elements * element_size,
+						 num_elements, // SOA
+						 element_size,
+						 field_sizes,
+						 0, -1, prs,
+						 RegionInstance::NO_INST);
+			
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(r);
+      r_impl->lis = lis.clone();
+			 
+      return r;
+    }
+#endif
+
+    const LinearizedIndexSpaceIntfc& RegionInstance::get_lis(void) const
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      assert(r_impl->lis);
+      return *(r_impl->lis);
+    }
+
+    void RegionInstance::get_strided_access_parameters(size_t start, size_t count,
+						       ptrdiff_t field_offset, size_t field_size,
+						       intptr_t& base, ptrdiff_t& stride)
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+
+      // TODO: make sure we're in range
+
+      void *orig_base = 0;
+      size_t orig_stride = 0;
+      bool ok = r_impl->get_strided_parameters(orig_base, orig_stride, field_offset);
+      assert(ok);
+      base = reinterpret_cast<intptr_t>(orig_base);
+      stride = orig_stride;
+    }
+
     void RegionInstance::report_instance_fault(int reason,
 					       const void *reason_data,
 					       size_t reason_size) const
@@ -138,7 +196,7 @@ namespace Realm {
 					   const ProfilingRequestSet &reqs,
 					   off_t _count_offset /*= 0*/, off_t _red_list_size /*= 0*/,
 					   RegionInstance _parent_inst /*= NO_INST*/)
-      : me(_me), memory(_memory)
+      : me(_me), memory(_memory), lis(0)
     {
       metadata.linearization = _linear;
 
@@ -178,7 +236,7 @@ namespace Realm {
 
     // when we auto-create a remote instance, we don't know region/offset
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
-      : me(_me), memory(_memory)
+      : me(_me), memory(_memory), lis(0)
     {
       lock.init(ID(me).convert<Reservation>(), ID(me).instance.owner_node);
       lock.in_use = true;
@@ -271,7 +329,9 @@ namespace Realm {
 	preimage.hi.x[0] += 1; // not perfect, but at least detects non-unit-stride case
 	assert(mapping->image_is_dense(preimage));
 	coord_t inst_first_elmt = preimage.lo[0];
-	//printf("adjusting base by %d * %zd\n", inst_first_elmt, stride);
+	//printf("adjusting base by %d * %zd: %p -> %p\n", inst_first_elmt, stride,
+	//       base,
+	//       ((char *)base) - inst_first_elmt * stride);
 	base = ((char *)base) - inst_first_elmt * stride;
       }
 

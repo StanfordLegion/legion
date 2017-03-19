@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-
 #include "legion.h"
 #include "runtime.h"
 #include "legion_ops.h"
@@ -27,6 +26,8 @@
 #include "legion_analysis.h"
 #include "interval_tree.h"
 #include "rectangle_set.h"
+
+#include "region_tree.inl"
 
 namespace Legion {
   namespace Internal {
@@ -60,17 +61,6 @@ namespace Legion {
     {
       lookup_lock.destroy_reservation();
       lookup_lock = Reservation::NO_RESERVATION;
-      // Log any index spaces with allocators
-      if (Runtime::legion_spy_enabled)
-      {
-        for (std::map<IndexSpace,IndexSpaceNode*>::const_iterator it = 
-              index_nodes.begin(); it != index_nodes.end(); it++)
-        {
-          const Domain &dom = it->second->get_domain_no_wait();
-          if (dom.get_dim() == 0)
-            IndexSpaceNode::log_index_space_domain(it->first, dom);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -83,60 +73,95 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_index_space(IndexSpace handle,
-                                              const Domain &domain,
-                                              IndexSpaceKind kind,
-                                              AllocateMode mode) 
+    IndexSpace RegionTreeForest::create_child_space_name(IndexPartition p) const
     //--------------------------------------------------------------------------
     {
-      create_node(handle, domain, NULL/*parent*/, 
-                  ColorPoint(0)/*color*/, kind, mode);
-      if (Runtime::legion_spy_enabled && (domain.get_dim() > 0))
-        IndexSpaceNode::log_index_space_domain(handle, domain);
+      return IndexSpace(runtime->get_unique_index_space_id(),
+                        p.get_tree_id(), p.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::create_index_space(IndexSpace handle,
-                                              const Domain &hull,
-                                              const std::set<Domain> &domains,
-                                              IndexSpaceKind kind,
-                                              AllocateMode mode)
+                                              const void *realm_is)
     //--------------------------------------------------------------------------
     {
-      // Note that it is safe that we do this in two passes
-      // because we haven't given back the handle yet for
-      // the index space so no one actually knows it exists yet.
-      IndexSpaceNode *node = create_node(handle, hull, NULL/*parent*/, 
-                                         ColorPoint(0)/*color*/, kind, mode);
-      node->update_component_domains(domains);
-      if (Runtime::legion_spy_enabled && (hull.get_dim() > 0))
+      IndexSpaceNode *node = 
+        create_node(handle, realm_is, NULL/*parent*/, 0/*color*/);
+      if (Runtime::legion_spy_enabled)
+        node->log_index_space_points();
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::create_union_space(IndexSpace handle, TaskOp *op,
+                                         const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      ApUserEvent to_trigger = Runtime::create_ap_user_event();
+      IndexSpaceNode *node = 
+        create_node(handle, NULL, NULL/*parent*/, 0/*color*/, to_trigger);
+      node->initialize_union_space(to_trigger, op, handles);
+      if (Runtime::legion_spy_enabled)
       {
-        for (std::set<Domain>::const_iterator it = domains.begin();
-              it != domains.end(); it++)
-          IndexSpaceNode::log_index_space_domain(handle, *it);
+        if (!node->index_space_ready.has_triggered())
+          node->index_space_ready.wait();
+        node->log_index_space_points();
       }
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_index_partition(IndexPartition pid,
-        IndexSpace parent, ColorPoint part_color, 
-        const std::map<DomainPoint,Domain> &coloring, 
-        const Domain &color_space, PartitionKind part_kind, AllocateMode mode)
+    void RegionTreeForest::create_intersection_space(IndexSpace handle,
+                             TaskOp *op, const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      ApUserEvent to_trigger = Runtime::create_ap_user_event();
+      IndexSpaceNode *node = 
+        create_node(handle, NULL, NULL/*parent*/, 0/*color*/, to_trigger);
+      node->initialize_intersection_space(to_trigger, op, handles);
+      if (Runtime::legion_spy_enabled)
+      {
+        if (!node->index_space_ready.has_triggered())
+          node->index_space_ready.wait();
+        node->log_index_space_points();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::create_difference_space(IndexSpace handle,
+                                  TaskOp *op, IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      ApUserEvent to_trigger = Runtime::create_ap_user_event();
+      IndexSpaceNode *node = 
+        create_node(handle, NULL, NULL/*parent*/, 0/*color*/, to_trigger);
+      node->initialize_difference_space(to_trigger, op, left, right);
+      if (Runtime::legion_spy_enabled)
+      {
+        if (!node->index_space_ready.has_triggered())
+          node->index_space_ready.wait();
+        node->log_index_space_points();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent RegionTreeForest::create_pending_partition(IndexPartition pid,
+                                                       IndexSpace parent,
+                                                       IndexSpace color_space,
+                                                    LegionColor partition_color,
+                                                       PartitionKind part_kind,
+                                                       ApEvent partition_ready,
+                                                       ApUserEvent instantiate)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *parent_node = get_node(parent);
-      if (!part_color.is_valid())
-        part_color = ColorPoint(DomainPoint::from_point<1>(
-              LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
+      IndexSpaceNode *color_node = get_node(color_space);
+      if (partition_color == INVALID_COLOR)
+        partition_color = parent_node->generate_color();
       // If we are making this partition on a different node than the
       // owner node of the parent index space then we have to tell that
       // owner node about the existence of this partition
       RtEvent parent_notified;
       const AddressSpaceID parent_owner = parent_node->get_owner_space();
-      // If we have to send the notification and we know the disjointness
-      // then we can send it now, otherwise, wait for disjointness test
-      if ((parent_owner != runtime->address_space) && 
-          (part_kind != COMPUTE_KIND))
+      if (parent_owner != runtime->address_space)
       {
         RtUserEvent notified_event = Runtime::create_rt_user_event();
         Serializer rez;
@@ -144,60 +169,36 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(pid);
           rez.serialize(parent);
-          rez.serialize(part_color);
-          rez.serialize(color_space);
-          rez.serialize(part_kind);
-          rez.serialize(mode);
+          rez.serialize(partition_color);
           rez.serialize(notified_event);
         }
         runtime->send_index_partition_notification(parent_owner, rez);
         parent_notified = notified_event;
       }
-      IndexPartNode *new_part;
       RtUserEvent disjointness_event;
+      IndexPartNode *partition_node;
       if (part_kind == COMPUTE_KIND)
       {
         disjointness_event = Runtime::create_rt_user_event();
-        new_part = create_node(pid, parent_node, part_color, color_space,
-                               disjointness_event, mode);
+        partition_node = create_node(pid, parent_node, color_node,
+             partition_color, disjointness_event, partition_ready);
       }
       else
-        new_part = create_node(pid, parent_node, part_color, color_space, 
-                               (part_kind == DISJOINT_KIND), mode);
-
-      if (Runtime::legion_spy_enabled)
       {
-        bool disjoint = (part_kind == DISJOINT_KIND);
-        LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-            part_color.get_point());
-      }
-      // Now do all the child nodes
-      for (std::map<DomainPoint,Domain>::const_iterator it = 
-            coloring.begin(); it != coloring.end(); it++)
-      {
-        if (!color_space.contains(it->first))
-        {
-          log_index.error("Invalid child color specified "
-                                "for create index partition.  All colors "
-                                "must be contained within the "
-                                "given color space");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_PARTITION_COLOR);
-        }
-        IndexSpace handle(runtime->get_unique_index_space_id(),
-                          pid.get_tree_id());
-        create_node(handle, it->second, new_part, ColorPoint(it->first),
-                    parent_node->kind, mode);
-
+        const bool disjoint = (part_kind == DISJOINT_KIND);
+        partition_node = create_node(pid, parent_node, color_node,
+                       partition_color, disjoint, partition_ready);
         if (Runtime::legion_spy_enabled)
-        {
-          LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-          if (it->second.get_dim() > 0)
-            IndexSpaceNode::log_index_space_domain(handle, it->second);
-        }
-      } 
+          LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
+                                         partition_color);
+      }
+      // We also need to explicitly instantiate all the children so
+      // that they know the domains will be ready at a later time.
+      // We instantiate them with an empty domain that will be filled in later
+      if (instantiate.exists())
+        color_node->instantiate_color_space(partition_node, instantiate);
+      // If we need to compute the disjointness, only do that
+      // after the partition is actually ready
       if (part_kind == COMPUTE_KIND)
       {
 #ifdef DEBUG_LEGION
@@ -207,167 +208,10 @@ namespace Legion {
         DisjointnessArgs args;
         args.handle = pid;
         args.ready = disjointness_event;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
+                                 Runtime::protect_event(partition_ready));
       }
-      // If we didn't send the notification yet because we need the 
-      // disjointness test, now we can send it
-      if ((parent_owner != runtime->address_space) && 
-          (part_kind == COMPUTE_KIND))
-      {
-        // Get the disjointness result, this will likely wait on
-        // the disjointness test issued above
-        const bool disjoint = new_part->is_disjoint(true/*app*/);
-        RtUserEvent notified_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(pid);
-          rez.serialize(parent);
-          rez.serialize(part_color);
-          rez.serialize(color_space);
-          if (disjoint)
-            rez.serialize(DISJOINT_KIND);
-          else
-            rez.serialize(ALIASED_KIND);
-          rez.serialize(mode);
-          rez.serialize(notified_event);
-        }
-        runtime->send_index_partition_notification(parent_owner, rez);
-        parent_notified = notified_event;
-      }
-      // Wait for the parent index space to be notified if necessary
-      if (parent_notified.exists())
-        parent_notified.wait();
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::create_index_partition(IndexPartition pid,
-       IndexSpace parent, ColorPoint part_color, 
-       const std::map<DomainPoint,Domain> &convex_hulls,
-       const std::map<DomainPoint,std::set<Domain> > &component_domains,
-       const Domain &color_space, PartitionKind part_kind, AllocateMode mode)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *parent_node = get_node(parent);
-      if (!part_color.is_valid())
-        part_color = ColorPoint(DomainPoint::from_point<1>(
-              LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
-      // If we are making this partition on a different node than the
-      // owner node of the parent index space then we have to tell that
-      // owner node about the existence of this partition
-      RtEvent parent_notified;
-      const AddressSpaceID parent_owner = parent_node->get_owner_space();
-      // If we know the disjointness result, we can send the notification
-      // now otherwise we will wait until we know the disjointness
-      if ((parent_owner != runtime->address_space) &&
-          (part_kind != COMPUTE_KIND))
-      {
-        RtUserEvent notified_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(pid);
-          rez.serialize(parent);
-          rez.serialize(part_color);
-          rez.serialize(color_space);
-          rez.serialize(part_kind);
-          rez.serialize(mode);
-          rez.serialize(notified_event);
-        }
-        runtime->send_index_partition_notification(parent_owner, rez);
-        parent_notified = notified_event;
-      }
-      IndexPartNode *new_part;
-      RtUserEvent disjointness_event;
-      if (part_kind == COMPUTE_KIND)
-      {
-        disjointness_event = Runtime::create_rt_user_event();
-        new_part = create_node(pid, parent_node, part_color, color_space, 
-                               disjointness_event, mode);
-      }
-      else
-        new_part = create_node(pid, parent_node, part_color, color_space, 
-                               (part_kind == DISJOINT_KIND), mode);
-
-      if (Runtime::legion_spy_enabled)
-      {
-        bool disjoint = (part_kind == DISJOINT_KIND);
-        LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-            part_color.get_point());
-      }
-      // Now do all the child nodes
-      std::map<DomainPoint,std::set<Domain> >::const_iterator comp_it = 
-        component_domains.begin();
-      for (std::map<DomainPoint,Domain>::const_iterator it = 
-            convex_hulls.begin(); it != convex_hulls.end(); it++, comp_it++)
-      {
-        if (!color_space.contains(it->first))
-        {
-          log_index.error("Invalid child color specified "
-                                "for create index partition.  All colors "
-                                "must be contained within the given"
-                                "color space");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_PARTITION_COLOR);
-        }
-        IndexSpace handle(runtime->get_unique_index_space_id(),
-                          pid.get_tree_id());
-        IndexSpaceNode *child = create_node(handle, it->second, 
-                                            new_part, ColorPoint(it->first),
-                                            parent_node->kind, mode);
-        child->update_component_domains(comp_it->second);
-
-        if (Runtime::legion_spy_enabled)
-        {
-          LegionSpy::log_index_subspace(pid.id, handle.id, it->first);
-          if (it->second.get_dim() > 0)
-            for (std::set<Domain>::const_iterator cit = 
-                  comp_it->second.begin(); cit != comp_it->second.end(); cit++)
-              IndexSpaceNode::log_index_space_domain(handle, *cit); 
-        }
-      }
-      if (part_kind == COMPUTE_KIND)
-      {
-#ifdef DEBUG_LEGION
-        assert(disjointness_event.exists());
-#endif
-        // Launch a task to compute the disjointness
-        DisjointnessArgs args;
-        args.handle = pid;
-        args.ready = disjointness_event;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY);
-      }
-      // If we didn't send the notification yet because we need the 
-      // disjointness test, now we can send it
-      if ((parent_owner != runtime->address_space) && 
-          (part_kind == COMPUTE_KIND))
-      {
-        // Get the disjointness result, this will likely wait on
-        // the disjointness test issued above
-        const bool disjoint = new_part->is_disjoint(true/*app*/);
-        RtUserEvent notified_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(pid);
-          rez.serialize(parent);
-          rez.serialize(part_color);
-          rez.serialize(color_space);
-          if (disjoint)
-            rez.serialize(DISJOINT_KIND);
-          else
-            rez.serialize(ALIASED_KIND);
-          rez.serialize(mode);
-          rez.serialize(notified_event);
-        }
-        runtime->send_index_partition_notification(parent_owner, rez);
-        parent_notified = notified_event;
-      }
-      // Wait for the parent index space to be notified if necessary
-      if (parent_notified.exists())
-        parent_notified.wait();
+      return parent_notified;
     }
 
     //--------------------------------------------------------------------------
@@ -398,26 +242,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_equal_partition(IndexPartition pid,
+    ApEvent RegionTreeForest::create_equal_partition(Operation *op,
+                                                     IndexPartition pid,
                                                      size_t granularity)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_equal_children(granularity);
+      return new_part->create_equal_children(op, granularity);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_weighted_partition(IndexPartition pid,
-                                                        size_t granularity,
-                                       const std::map<DomainPoint,int> &weights)
-    //--------------------------------------------------------------------------
-    {
-      IndexPartNode *new_part = get_node(pid);
-      return new_part->create_weighted_children(weights, granularity);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_union(IndexPartition pid,
+    ApEvent RegionTreeForest::create_partition_by_union(Operation *op,
+                                                        IndexPartition pid,
                                                         IndexPartition handle1,
                                                         IndexPartition handle2)
     //--------------------------------------------------------------------------
@@ -425,12 +261,11 @@ namespace Legion {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_operation(node1, node2,
-                                           Realm::IndexSpace::ISO_UNION);
+      return new_part->create_by_union(op, node1, node2);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_intersection(
+    ApEvent RegionTreeForest::create_partition_by_intersection(Operation *op,
                                                          IndexPartition pid,
                                                          IndexPartition handle1,
                                                          IndexPartition handle2)
@@ -439,12 +274,11 @@ namespace Legion {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_operation(node1, node2,
-                                           Realm::IndexSpace::ISO_INTERSECT);
+      return new_part->create_by_intersection(op, node1, node2);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_difference(
+    ApEvent RegionTreeForest::create_partition_by_difference(Operation *op,
                                                        IndexPartition pid,
                                                        IndexPartition handle1,
                                                        IndexPartition handle2)
@@ -453,434 +287,273 @@ namespace Legion {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_operation(node1, node2,
-                                           Realm::IndexSpace::ISO_SUBTRACT);
+      return new_part->create_by_difference(op, node1, node2);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_cross_product_partitions(
-                                                          IndexPartition base,
-                                                          IndexPartition source,
-                                  std::map<DomainPoint,IndexPartition> &handles)
+    ApEvent RegionTreeForest::create_partition_by_restriction(
+                                                        IndexPartition pid,
+                                                        const void *transform,
+                                                        const void *extent)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *new_part = get_node(pid);
+      return new_part->create_by_restriction(transform, extent); 
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_cross_product_partitions(Operation *op,
+                                                         IndexPartition base,
+                                                         IndexPartition source,
+                                                         LegionColor part_color)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base_node = get_node(base);
       IndexPartNode *source_node = get_node(source);
       std::set<ApEvent> ready_events;
-      // Iterate over all our sub-regions and fill in the intersections
-      for (std::map<DomainPoint,IndexPartition>::const_iterator it = 
-            handles.begin(); it != handles.end(); it++)
+      if (base_node->total_children == base_node->max_linearized_color)
       {
-        ColorPoint child_color(it->first);
-        IndexSpaceNode *child_node = base_node->get_child(child_color);
-        IndexPartNode *part_node = get_node(it->second);
-        ApEvent ready = part_node->create_by_operation(child_node, source_node,
-                                        Realm::IndexSpace::ISO_INTERSECT);
-        ready_events.insert(ready);
+        for (LegionColor color = 0; color < base_node->total_children; color++)
+        {
+          IndexSpaceNode *child_node = base_node->get_child(color);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = child_node->create_by_intersection(op, part_node, 
+                                                             source_node); 
+          ready_events.insert(ready);
+        }
+      }
+      else
+      {
+        for (LegionColor color = 0; 
+              color < base_node->max_linearized_color; color++)
+        {
+          if (!base_node->color_space->contains_color(color))
+            continue;
+          IndexSpaceNode *child_node = base_node->get_child(color);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = child_node->create_by_intersection(op, part_node, 
+                                                             source_node); 
+          ready_events.insert(ready);
+        }
       }
       return Runtime::merge_events(ready_events);
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::compute_pending_color_space(IndexSpace parent,
-                                                       IndexPartition handle1,
-                                                       IndexPartition handle2,
-                                                       Domain &color_space,
-                                   Realm::IndexSpace::IndexSpaceOperation op)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      std::vector<ColorPoint> path;
-      switch (op)
-      {
-        case Realm::IndexSpace::ISO_UNION:
-          {
-            // Check that parent is an ancestor of both partitions
-            if (!compute_partition_path(parent, handle1, path))
-            {
-              log_index.error("Index space %d is not an ancestor of "
-                                    "index partition %d in create partition "
-                                    "by union call!", parent.id, handle1.id);
-              assert(false);
-              exit(ERROR_INDEX_PARTITION_ANCESTOR);
-            }
-            path.clear();
-            if (!compute_partition_path(parent, handle2, path))
-            {
-              log_index.error("Index space %d is not an ancestor of "
-                                    "index partition %d in create partition "
-                                    "by union call!", parent.id, handle1.id);
-              assert(false);
-              exit(ERROR_INDEX_PARTITION_ANCESTOR);
-            }
-            break;
-          }
-        case Realm::IndexSpace::ISO_INTERSECT:
-          {
-            // Check that parent is an ancestor of one of the partitions
-            if (!compute_partition_path(parent, handle1, path))
-            {
-              path.clear();
-              if (!compute_partition_path(parent, handle2, path))
-              {
-                log_index.error("Index space %d is not an ancestor of "
-                                      "either index partition %d or index "
-                                      "partition %d in create partition by "
-                                      "intersection call!", 
-                                      parent.id, handle1.id, handle2.id);
-                assert(false);
-                exit(ERROR_INDEX_PARTITION_ANCESTOR);
-              }
-            }
-            break;
-          }
-        case Realm::IndexSpace::ISO_SUBTRACT:
-          {
-            // Check that the parent is an ancestor of the first index partition
-            if (!compute_partition_path(parent, handle1, path))
-            {
-              log_index.error("Index space %d is not an ancestor of "
-                                    "index partition %d in create partition "
-                                    "by difference call!", 
-                                    parent.id, handle1.id);
-              assert(false);
-              exit(ERROR_INDEX_PARTITION_ANCESTOR);
-            }
-            break;
-          }
-        default:
-          assert(false); // should never get here
-      }
-#endif
-      IndexPartNode *node1 = get_node(handle1);
-      IndexPartNode *node2 = get_node(handle2);
-      // Compute the color space
-      IndexTreeNode::compute_intersection(node1->color_space, 
-                                          node2->color_space,
-                                          color_space, true/*compute*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::create_pending_partition(IndexPartition pid,
-                                                    IndexSpace parent,
-                                                    const Domain &color_space,
-                                                    ColorPoint partition_color,
-                                                    PartitionKind part_kind,
-                                                    bool allocable,
-                                                    ApEvent handle_ready,
-                                                    ApEvent domain_ready,
-                                                    bool create_separate)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *parent_node = get_node(parent);
-      if (!partition_color.is_valid())
-        partition_color = ColorPoint(DomainPoint::from_point<1>(
-              LegionRuntime::Arrays::Point<1>(parent_node->generate_color())));
-      RtUserEvent disjointness_event;
-      IndexPartNode *partition_node;
-      if (part_kind == COMPUTE_KIND)
-      {
-        disjointness_event = Runtime::create_rt_user_event();
-        partition_node = create_node(pid, parent_node, partition_color,
-                                     color_space, disjointness_event,
-                                     allocable ? MUTABLE : NO_MEMORY);
-      }
-      else
-        partition_node = create_node(pid, parent_node, partition_color,
-                                     color_space, (part_kind == DISJOINT_KIND),
-                                     allocable ? MUTABLE : NO_MEMORY);
-
-      if (Runtime::legion_spy_enabled)
-      {
-        bool disjoint = (part_kind == DISJOINT_KIND);
-        LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
-            partition_color.get_point());
-      }
-      // We also need to explicitly instantiate all the children so
-      // that they know the domains will be ready at a later time.
-      // We instantiate them with an empty domain that will be filled in later
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        IndexSpace is(runtime->get_unique_index_space_id(), pid.get_tree_id());
-        ColorPoint child_color(itr.p);
-        if (create_separate)
-        {
-#ifdef DEBUG_LEGION
-          assert(!handle_ready.exists());
-          assert(!domain_ready.exists());
-#endif
-          // Create a separate handle ready event for each node
-          ApUserEvent local_handle_ready = Runtime::create_ap_user_event();
-          ApUserEvent local_domain_ready = Runtime::create_ap_user_event();
-          create_node(is, local_handle_ready, local_domain_ready,
-                      partition_node, child_color, parent_node->kind, 
-                      allocable ? MUTABLE : NO_MEMORY);
-          partition_node->add_pending_child(child_color, local_handle_ready,
-                                            local_domain_ready);
-        }
-        else
-          create_node(is, handle_ready, domain_ready,
-                      partition_node, child_color, parent_node->kind, 
-                      allocable ? MUTABLE : NO_MEMORY);
-        if (Runtime::legion_spy_enabled)
-          LegionSpy::log_index_subspace(pid.id, is.id, itr.p);
-      }
-      // If we need to compute the disjointness, only do that
-      // after the partition is actually ready
-      if (part_kind == COMPUTE_KIND)
-      {
-#ifdef DEBUG_LEGION
-        assert(disjointness_event.exists());
-#endif
-        // Launch a task to compute the disjointness
-        DisjointnessArgs args;
-        args.handle = pid;
-        args.ready = disjointness_event;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
-                                         Runtime::protect_event(domain_ready));
-#ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(domain_ready, disjointness_event);
-#endif
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::create_pending_cross_product(IndexPartition handle1,
                                                         IndexPartition handle2,
-                            std::map<DomainPoint,IndexPartition> &our_handles,
-                            std::map<DomainPoint,IndexPartition> &user_handles,
+                             std::map<IndexSpace,IndexPartition> &user_handles,
                                                         PartitionKind kind,
-                                                        ColorPoint &part_color,
-                                                        bool allocable,
-                                                        ApEvent handle_ready,
+                                                        LegionColor &part_color,
                                                         ApEvent domain_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base = get_node(handle1);
       IndexPartNode *source = get_node(handle2);
+      // If we're supposed to compute this, but we already know that
+      // the source is disjoint then we can also conlclude the the 
+      // resulting partitions will also be disjoint under intersection
+      if ((kind == COMPUTE_KIND) && source->is_disjoint(true/*from app*/))
+        kind = DISJOINT_KIND;
+      // If we haven't been given a color yet, we need to find
+      // one that will be valid for all the child partitions
+      if (part_color == INVALID_COLOR)
+      {
+        std::set<LegionColor> existing_colors;
+        if (base->total_children == base->max_linearized_color)
+        {
+          for (LegionColor color = 0; color < base->total_children; color++)
+          {
+            IndexSpaceNode *child_node = base->get_child(color);
+            std::vector<LegionColor> colors;
+            child_node->get_colors(colors);
+            if (!colors.empty())
+              existing_colors.insert(colors.begin(), colors.end());
+          }
+        }
+        else
+        {
+          for (LegionColor color = 0; 
+                color < base->max_linearized_color; color++)
+          {
+            if (!base->color_space->contains_color(color))
+              continue;
+            IndexSpaceNode *child_node = base->get_child(color);
+            std::vector<LegionColor> colors;
+            child_node->get_colors(colors);
+            if (!colors.empty())
+              existing_colors.insert(colors.begin(), colors.end());
+          }
+        }
+        // Now we have the existing colors, so just do something dumb
+        // like add our current runtime ID to the last color
+        const unsigned offset = (runtime->address_space == 0) ?
+                      runtime->runtime_stride : runtime->address_space;
+        if (!existing_colors.empty())
+        {
+          LegionColor last = *(existing_colors.rbegin());
+          part_color = last + offset;
+        }
+        else
+          part_color = offset;
+      }
       // Iterate over all our sub-regions and generate partitions
-      for (Domain::DomainPointIterator itr(base->color_space); itr; itr++)
+      if (base->total_children == base->max_linearized_color)
       {
-        ColorPoint child_color(itr.p);
-        IndexSpaceNode *child_node = base->get_child(child_color); 
-        ColorPoint partition_color = part_color;
-        if (!partition_color.is_valid())
-          partition_color = ColorPoint(DomainPoint::from_point<1>(
-              LegionRuntime::Arrays::Point<1>(child_node->generate_color())));
-        IndexPartition pid(runtime->get_unique_index_partition_id(),
-                           handle1.get_tree_id());
-        create_pending_partition(pid, child_node->handle,
-                                 source->color_space, partition_color,
-                                 kind, allocable, handle_ready, domain_ready);
-        // Save the handles for ourselves 
-        our_handles[itr.p] = pid;
-        // If the user requested the handle for this point return it
-        std::map<DomainPoint,IndexPartition>::iterator finder = 
-          user_handles.find(itr.p);
-        if (finder != user_handles.end())
-          finder->second = pid;
+        for (LegionColor color = 0; color < base->total_children; color++)
+        {
+          IndexSpaceNode *child_node = base->get_child(color);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag()); 
+          create_pending_partition(pid, child_node->handle, 
+                                   source->color_space->handle, 
+                                   part_color, kind, domain_ready);
+          // If the user requested the handle for this point return it
+          std::map<IndexSpace,IndexPartition>::iterator finder = 
+            user_handles.find(child_node->handle);
+          if (finder != user_handles.end())
+            finder->second = pid;
+        }
+      }
+      else
+      {
+        for (LegionColor color = 0; color < base->max_linearized_color; color++)
+        {
+          if (!base->color_space->contains_color(color))
+            continue;
+          IndexSpaceNode *child_node = base->get_child(color);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag()); 
+          create_pending_partition(pid, child_node->handle, 
+                                   source->color_space->handle,
+                                   part_color, kind, domain_ready);
+          // If the user requested the handle for this point return it
+          std::map<IndexSpace,IndexPartition>::iterator finder = 
+            user_handles.find(child_node->handle);
+          if (finder != user_handles.end())
+            finder->second = pid;
+        }
       }
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_field(RegionTreeContext ctx,
-                                                  Operation *op, unsigned index,
-                                                  const RegionRequirement &req,
-                                                  IndexPartition pending,
-                                                  const Domain &color_space,
-                                                  ApEvent term_event,
-                                                  VersionInfo &version_info,
-                                              std::set<RtEvent> &applied_events)
+    ApEvent RegionTreeForest::create_partition_by_field(Operation *op,
+                                                        IndexPartition pending,
+                             const std::vector<FieldDataDescriptor> &instances,
+                                                        ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == REG_PROJECTION);
-      assert(req.privilege_fields.size() == 1);
-#endif
-      IndexPartNode *pending_node = get_node(pending);
-      IndexSpaceNode *parent_node = pending_node->parent;
-      RegionNode *top_node = get_node(req.region);
-      FieldSpaceNode *field_space = top_node->get_column_source();
-      // Get the index for the field
-      FieldID field_id = *(req.privilege_fields.begin());
-      // Traverse the target node and get all the field data descriptors
-      std::set<ApEvent> preconditions;
-      std::vector<FieldDataDescriptor> field_data;
-      {
-        FieldMask user_mask;
-        user_mask.set_bit(field_space->get_field_index(field_id));
-        RegionUsage usage(req);
-        top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                       user_mask, field_id, op, index,
-                                       field_data, preconditions, 
-                                       version_info, applied_events);
-      }
-      // Enumerate the color space so we can get back a different index
-      // for each color in the color space
-      std::map<DomainPoint,Realm::IndexSpace> subspaces;
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        subspaces[itr.p] = Realm::IndexSpace::NO_SPACE;
-      }
-      // Merge preconditions for all the field data descriptors
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      // Ask the parent node to make all the subspaces
-      ApEvent result = parent_node->create_subspaces_by_field(field_data,
-                subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, result);
-#endif
-      // Now update the domains for all the sub-regions
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        IndexSpaceNode *child_node = pending_node->get_child(ColorPoint(itr.p));
-        child_node->set_domain(subspaces[itr.p]);
-      }
-      return result;
+      IndexPartNode *partition = get_node(pending);
+      return partition->parent->create_by_field(op, partition, 
+                                                instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_image(RegionTreeContext ctx,
-                                                  Operation *op, unsigned index,
-                                                  const RegionRequirement &req,
-                                                  IndexPartition pending,
-                                                  const Domain &color_space,
-                                                  ApEvent term_event,
-                                                  VersionInfo &version_info,
-                                              std::set<RtEvent> &applied_events)
+    ApEvent RegionTreeForest::create_partition_by_image(Operation *op,
+                                                        IndexPartition pending,
+                                                        IndexPartition proj,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == PART_PROJECTION);
-      assert(req.privilege_fields.size() == 1);
-#endif
-      IndexPartNode *pending_node = get_node(pending);
-      IndexSpaceNode *parent_node = pending_node->parent;
-      PartitionNode *projection_node = get_node(req.partition);
-      FieldSpaceNode *field_space = projection_node->get_column_source();
-      // Get the index for the field
-      FieldID field_id = *(req.privilege_fields.begin());
-      // Traverse the target node and get all the field data descriptors
-      // Get all the index spaces from the color space in the projection
-      std::set<ApEvent> preconditions;
-      std::vector<FieldDataDescriptor> field_data;
-      std::map<Realm::IndexSpace,Realm::IndexSpace> subspaces;
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        FieldMask user_mask;
-        user_mask.set_bit(field_space->get_field_index(field_id));
-        ColorPoint child_color(itr.p);
-        RegionNode *child_node = projection_node->get_child(child_color);
-        // Get the field data on this child node
-        RegionUsage usage(req);
-        child_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                           user_mask, field_id, op, index,
-                                           field_data, preconditions, 
-                                           version_info, applied_events);
-        ApEvent child_pre;
-        const Domain &child_dom = 
-                        child_node->row_source->get_domain(child_pre);
-        if (child_pre.exists())
-          preconditions.insert(child_pre);
-        subspaces[child_dom.get_index_space()] = Realm::IndexSpace::NO_SPACE;
-      }
-      // Merge the preconditions for all the field descriptors
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      // Ask the parent node to make all the subspaces
-      ApEvent result = parent_node->create_subspaces_by_image(field_data,
-                subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, result);
-#endif
-      // Now update the domains for all the sub-regions
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        ColorPoint child_color(itr.p);
-        RegionNode     *orig_child = projection_node->get_child(child_color);
-        IndexSpaceNode *next_child = pending_node->get_child(child_color);
-        const Domain &orig_dom = orig_child->get_domain_no_wait();
-        next_child->set_domain(subspaces[orig_dom.get_index_space()]);
-      }
-      return result;
+      IndexPartNode *partition = get_node(pending);
+      IndexPartNode *projection = get_node(proj);
+      return partition->parent->create_by_image(op, partition, projection,
+                                        instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_preimage(
-                                                  RegionTreeContext ctx,
-                                                  Operation *op, unsigned index,
-                                                  const RegionRequirement &req,
-                                                  IndexPartition projection,
-                                                  IndexPartition pending,
-                                                  const Domain &color_space,
-                                                  ApEvent term_event,
-                                                  VersionInfo &version_info,
-                                              std::set<RtEvent> &applied_events)
+    ApEvent RegionTreeForest::create_partition_by_image_range(Operation *op,
+                                                      IndexPartition pending,
+                                                      IndexPartition proj,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
+      IndexPartNode *partition = get_node(pending);
+      IndexPartNode *projection = get_node(proj);
+      return partition->parent->create_by_image_range(op, partition, projection,
+                                              instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_preimage(Operation *op,
+                                                      IndexPartition pending,
+                                                      IndexPartition proj,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *partition = get_node(pending);
+      IndexPartNode *projection = get_node(proj);
+      return partition->parent->create_by_preimage(op, partition, projection,
+                                           instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_preimage_range(Operation *op,
+                                                      IndexPartition pending,
+                                                      IndexPartition proj,
+                              const std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *partition = get_node(pending);
+      IndexPartNode *projection = get_node(proj);
+      return partition->parent->create_by_preimage_range(op, partition, 
+                                projection, instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_association(Operation *op,
+                                                 IndexSpace dom, IndexSpace ran,
+                              const std::vector<FieldDataDescriptor> &instances, 
+                                                 ApEvent instances_ready)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *domain = get_node(dom);
+      IndexSpaceNode *range = get_node(ran);
+      return domain->create_association(op, range, instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::check_partition_by_field_size(IndexPartition pid,
+                FieldSpace fs, FieldID fid, bool is_range, bool use_color_space)
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size = get_node(fs)->get_field_size(fid);
+      IndexPartNode *partition = get_node(pid);
+      if (use_color_space)
+      {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == REG_PROJECTION);
-      assert(req.privilege_fields.size() == 1);
+        assert(!is_range);
 #endif
-      IndexPartNode *pending_node = get_node(pending);
-      IndexSpaceNode *parent_node = pending_node->parent;
-      IndexPartNode *projection_node = get_node(projection);
-      RegionNode *top_node = get_node(req.region);
-      FieldSpaceNode *field_space = top_node->get_column_source();
-      // Get the index for the field
-      FieldID field_id = *(req.privilege_fields.begin());
-      // Traverse the target node and get all the field data structures
-      std::set<ApEvent> preconditions;
-      std::vector<FieldDataDescriptor> field_data;
-      {
-        FieldMask user_mask;
-        user_mask.set_bit(field_space->get_field_index(field_id));
-        RegionUsage usage(req);
-        top_node->find_field_descriptors(ctx.get_id(), term_event, usage,
-                                         user_mask, field_id, op, index,
-                                         field_data, preconditions, 
-                                         version_info, applied_events);
+        return partition->color_space->check_field_size(field_size, 
+                                                        false/*range*/);
       }
-      // Get all the index spaces from the color space in the projection
-      std::map<Realm::IndexSpace,Realm::IndexSpace> subspaces;
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        IndexSpaceNode *child_node = 
-          projection_node->get_child(ColorPoint(itr.p));
-        ApEvent child_pre;
-        const Domain &child_dom = child_node->get_domain(child_pre);
-        if (child_pre.exists())
-          preconditions.insert(child_pre);
-        subspaces[child_dom.get_index_space()] = Realm::IndexSpace::NO_SPACE;
-      }
-      // Merge the preconditions for all the field descriptors
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      // Ask the parent node to make all the subspaces
-      ApEvent result = parent_node->create_subspaces_by_preimage(field_data,
-                subspaces, ((pending_node->mode & MUTABLE) != 0), precondition);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, result);
-#endif
-      // Now update the domains for all the sub-regions
-      for (Domain::DomainPointIterator itr(color_space); itr; itr++)
-      {
-        ColorPoint child_color(itr.p);
-        IndexSpaceNode *orig_child = projection_node->get_child(child_color);
-        IndexSpaceNode *next_child = pending_node->get_child(child_color);
-        const Domain &orig_dom = orig_child->get_domain_no_wait();
-        next_child->set_domain(subspaces[orig_dom.get_index_space()]);
-      }
-      return result;
+      else
+        return partition->parent->check_field_size(field_size, is_range);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::check_association_field_size(IndexSpace is,
+                                                     FieldSpace fs, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      const size_t field_size = get_node(fs)->get_field_size(fid);
+      return get_node(is)->check_field_size(field_size, false/*is range*/);
     }
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_pending_space(IndexPartition parent,
-                                                    const DomainPoint &color,
-                                                    ApUserEvent &handle_ready,
+                                                    const void *realm_color,
+                                                    TypeTag type_tag,
                                                     ApUserEvent &domain_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *parent_node = get_node(parent);
-      ColorPoint child_color(color);
+      LegionColor child_color = 
+        parent_node->color_space->linearize_color(realm_color, type_tag);
       // First get the child node   
       if (!parent_node->has_child(child_color))
       {
@@ -891,8 +564,7 @@ namespace Legion {
         exit(ERROR_INVALID_PARTITION_COLOR);
       }
       IndexSpaceNode *child_node = parent_node->get_child(child_color);
-      if (!parent_node->get_pending_child(child_color, 
-                                          handle_ready, domain_ready))
+      if (!parent_node->get_pending_child(child_color, domain_ready))
       {
         log_run.error("Invalid pending child!");
 #ifdef DEBUG_LEGION
@@ -904,143 +576,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::compute_pending_space(IndexSpace target,
-                                         const std::vector<IndexSpace> &handles,
-                                                                  bool is_union)
+    ApEvent RegionTreeForest::compute_pending_space(Operation *op, 
+       IndexSpace target, const std::vector<IndexSpace> &handles, bool is_union)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      IndexPartNode *parent_node = child_node->parent;
-      // Compute the new index space 
-      std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace> spaces(handles.size());
-      unsigned idx = 0;
-      for (std::vector<IndexSpace>::const_iterator it = handles.begin();
-            it != handles.end(); it++, idx++)
-      {
-        IndexSpaceNode *node = get_node(*it); 
-        ApEvent precondition;
-        const Domain &dom = node->get_domain(precondition);
-        spaces[idx] = dom.get_index_space();
-        if (precondition.exists())
-          preconditions.insert(precondition);
-      }
-      ApEvent parent_precondition;
-      const Domain &parent_dom = 
-              parent_node->parent->get_domain(parent_precondition);
-      if (parent_precondition.exists())
-        preconditions.insert(parent_precondition);
-      // Now we can compute the low-level index space
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::IndexSpace result;
-      ApEvent ready(Realm::IndexSpace::reduce_index_spaces(
-          is_union ? Realm::IndexSpace::ISO_UNION : 
-                     Realm::IndexSpace::ISO_INTERSECT, spaces, result, 
-          ((parent_node->mode & MUTABLE) != 0)/* allocable */,
-          parent_dom.get_index_space(), precondition));
-      // Now set the result and trigger the handle ready event
-      child_node->set_domain(Domain(result));
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, ready);
-#endif
-      return ready;
+      return child_node->compute_pending_space(op, handles, is_union);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::compute_pending_space(IndexSpace target,
-                                                    IndexPartition handle,
-                                                    bool is_union)
+    ApEvent RegionTreeForest::compute_pending_space(Operation *op, 
+                        IndexSpace target, IndexPartition handle, bool is_union)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      IndexPartNode *parent_node = child_node->parent;
-      IndexPartNode *reduce_node = get_node(handle);
-      std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace> 
-        spaces(reduce_node->color_space.get_volume());
-      unsigned idx = 0;
-      for (Domain::DomainPointIterator itr(reduce_node->color_space); 
-            itr; itr++, idx++)
-      {
-        ColorPoint node_color(itr.p);
-        IndexSpaceNode *node = reduce_node->get_child(node_color);
-        ApEvent precondition;
-        const Domain &dom = node->get_domain(precondition);
-        spaces[idx] = dom.get_index_space();
-        if (precondition.exists())
-          preconditions.insert(precondition);
-      }
-      ApEvent parent_precondition;
-      const Domain &parent_dom = 
-            parent_node->parent->get_domain(parent_precondition);
-      if (parent_precondition.exists())
-        preconditions.insert(parent_precondition);
-      // Now we can compute the low-level index space
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::IndexSpace result;
-      ApEvent ready(Realm::IndexSpace::reduce_index_spaces(
-          is_union ? Realm::IndexSpace::ISO_UNION : 
-                     Realm::IndexSpace::ISO_INTERSECT, spaces, result,
-          ((parent_node->mode & MUTABLE) != 0)/* allocable */,
-          parent_dom.get_index_space(), precondition));
-      // Now set the result and trigger the handle ready event
-      child_node->set_domain(Domain(result));
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, ready);
-#endif
-      return ready;
+      return child_node->compute_pending_space(op, handle, is_union);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::compute_pending_space(IndexSpace target,
-                                                  IndexSpace initial,
+    ApEvent RegionTreeForest::compute_pending_space(Operation *op,
+                                         IndexSpace target, IndexSpace initial,
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      IndexPartNode *parent_node = child_node->parent;
-      std::set<ApEvent> preconditions;
-      std::vector<Realm::IndexSpace> spaces(handles.size()+1);
-      IndexSpaceNode *init_node = get_node(initial);
-      ApEvent init_precondition;
-      const Domain &init_dom = init_node->get_domain(init_precondition);
-      spaces[0] = init_dom.get_index_space();
-      if (init_precondition.exists())
-        preconditions.insert(init_precondition);
-      unsigned idx = 1;
-      for (std::vector<IndexSpace>::const_iterator it = handles.begin();
-            it != handles.end(); it++, idx++)
-      {
-        IndexSpaceNode *node = get_node(*it);  
-        ApEvent precondition;
-        const Domain &dom = node->get_domain(precondition);
-        spaces[idx] = dom.get_index_space();
-        if (precondition.exists())
-          preconditions.insert(precondition);
-      }
-      ApEvent parent_precondition;
-      const Domain &parent_dom = 
-              parent_node->parent->get_domain(parent_precondition);
-      if (parent_precondition.exists())
-        preconditions.insert(parent_precondition);
-      // Now we can compute the low-level index space
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::IndexSpace result;
-      ApEvent ready(Realm::IndexSpace::reduce_index_spaces(
-                             Realm::IndexSpace::ISO_SUBTRACT, spaces, result,
-          ((parent_node->mode & MUTABLE) != 0)/* allocable */,
-          parent_dom.get_index_space(), precondition));
-      // Now set the result and trigger the handle ready event
-      child_node->set_domain(Domain(result));
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, ready);
-#endif
-      return ready;
+      return child_node->compute_pending_difference(op, initial, handles);
     }
 
     //--------------------------------------------------------------------------
     IndexPartition RegionTreeForest::get_index_partition(IndexSpace parent,
-                                                       const ColorPoint &color)
+                                                         Color color)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *parent_node = get_node(parent);
@@ -1049,68 +614,88 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace RegionTreeForest::get_index_subspace(IndexPartition parent,
-                                                    const ColorPoint &color)
+    bool RegionTreeForest::has_index_subspace(IndexPartition parent,
+                                              const void *realm_color,
+                                              TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *parent_node = get_node(parent);
-      IndexSpaceNode *child_node = parent_node->get_child(color);
+      return parent_node->color_space->contains_point(realm_color, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace RegionTreeForest::get_index_subspace(IndexPartition parent,
+                                                    const void *realm_color,
+                                                    TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *parent_node = get_node(parent);
+      LegionColor child_color = 
+        parent_node->color_space->linearize_color(realm_color, type_tag);
+      IndexSpaceNode *child_node = parent_node->get_child(child_color);
       return child_node->handle;
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::has_multiple_domains(IndexSpace handle)
+    void RegionTreeForest::get_index_space_domain(IndexSpace handle,
+                                               void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      return node->has_component_domains();
+      node->get_index_space_domain(realm_is, type_tag);
     }
 
     //--------------------------------------------------------------------------
-    Domain RegionTreeForest::get_index_space_domain(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *node = get_node(handle);
-      return node->get_domain_blocking();
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::get_index_space_domains(IndexSpace handle,
-                                                   std::vector<Domain> &domains)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *node = get_node(handle);
-      node->get_domains_blocking(domains); 
-    }
-
-    //--------------------------------------------------------------------------
-    Domain RegionTreeForest::get_index_partition_color_space(IndexPartition p)
+    IndexSpace RegionTreeForest::get_index_partition_color_space(
+                                                               IndexPartition p)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *node = get_node(p);
-      return node->color_space;
+      return node->color_space->handle;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::get_index_space_partition_colors(IndexSpace sp,
-                                                   std::set<ColorPoint> &colors)
+                                                        std::set<Color> &colors)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(sp);
-      node->get_colors(colors); 
+      std::vector<LegionColor> temp_colors;
+      node->get_colors(temp_colors); 
+      for (std::vector<LegionColor>::const_iterator it = temp_colors.begin();
+            it != temp_colors.end(); it++)
+        colors.insert(*it);
     }
 
     //--------------------------------------------------------------------------
-    ColorPoint RegionTreeForest::get_index_space_color(IndexSpace handle)
+    void RegionTreeForest::get_index_space_color(IndexSpace handle,
+                                            void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      return node->color;
+      if (node->parent == NULL)
+      {
+        // We know the answer here
+        if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
+        {
+          log_run.error("Dynamic type mismatch in 'get_index_space_color'");
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+        }
+        Realm::ZPoint<1,coord_t> *color = 
+          (Realm::ZPoint<1,coord_t>*)realm_color;
+        *color = Realm::ZPoint<1,coord_t>(0);
+        return;
+      }
+      // Otherwise we can get the color for the partition color space
+      IndexSpaceNode *color_space = node->parent->color_space;
+      color_space->delinearize_color(node->color, realm_color, type_tag);
     }
 
     //--------------------------------------------------------------------------
-    ColorPoint RegionTreeForest::get_index_partition_color(
-                                                          IndexPartition handle)
+    Color RegionTreeForest::get_index_partition_color(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *node = get_node(handle);
@@ -1181,7 +766,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      return node->get_domain_volume(true/*app query*/); 
+      return node->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -1197,7 +782,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexPartNode *node = get_node(p);
-      return node->is_complete();
+      return node->is_complete(true/*app query*/);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::safe_cast(IndexSpace handle, 
+                                     const void *realm_point, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(handle);
+      return node->contains_point(realm_point, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -1333,7 +927,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalPartition RegionTreeForest::get_logical_partition_by_color(
-                                     LogicalRegion parent, const ColorPoint &c)
+                                                  LogicalRegion parent, Color c)
     //--------------------------------------------------------------------------
     {
       RegionNode *parent_node = get_node(parent);
@@ -1345,7 +939,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::has_logical_partition_by_color(LogicalRegion parent,
-                                                        const ColorPoint &color)
+                                                          Color color)
     //--------------------------------------------------------------------------
     {
       RegionNode *parent_node = get_node(parent);
@@ -1372,11 +966,13 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     LogicalRegion RegionTreeForest::get_logical_subregion_by_color(
-                                  LogicalPartition parent, const ColorPoint &c)
+             LogicalPartition parent, const void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       PartitionNode *parent_node = get_node(parent);
-      IndexSpaceNode *index_node = parent_node->row_source->get_child(c);
+      IndexSpaceNode *color_space = parent_node->row_source->color_space;
+      LegionColor color = color_space->linearize_color(realm_color, type_tag);
+      IndexSpaceNode *index_node = parent_node->row_source->get_child(color);
       LogicalRegion result(parent.tree_id, index_node->handle,
                            parent.field_space);
       return result;
@@ -1384,10 +980,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::has_logical_subregion_by_color(
-                               LogicalPartition parent, const ColorPoint &color)
+             LogicalPartition parent, const void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       PartitionNode *parent_node = get_node(parent);
+      IndexSpaceNode *color_space = parent_node->row_source->color_space;
+      LegionColor color = color_space->linearize_color(realm_color, type_tag);
       return parent_node->has_color(color);
     }
 
@@ -1401,16 +999,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ColorPoint RegionTreeForest::get_logical_region_color(LogicalRegion handle)
+    void RegionTreeForest::get_logical_region_color(LogicalRegion handle,
+                                            void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      RegionNode *node = get_node(handle);
-      return node->row_source->color;
+      IndexSpaceNode *node = get_node(handle.get_index_space());
+      if (node->parent == NULL)
+      {
+        // We know the answer here
+        if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
+        {
+          log_run.error("Dynamic type mismatch in 'get_logical_region_color'");
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+        }
+        Realm::ZPoint<1,coord_t> *color = 
+          (Realm::ZPoint<1,coord_t>*)realm_color;
+        *color = Realm::ZPoint<1,coord_t>(0);
+        return;
+      }
+      // Otherwise we can get the color for the partition color space
+      IndexSpaceNode *color_space = node->parent->color_space;
+      color_space->delinearize_color(node->color, realm_color, type_tag);
     }
 
     //--------------------------------------------------------------------------
-    ColorPoint RegionTreeForest::get_logical_partition_color(
-                                                        LogicalPartition handle)
+    Color RegionTreeForest::get_logical_partition_color(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
       PartitionNode *node = get_node(handle);
@@ -1462,15 +1078,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RegionNode *node = get_node(handle);
-      Domain d = node->get_domain_blocking();
-      if (d.get_dim() == 0)
-      {
-        const Realm::ElementMask &mask = 
-          d.get_index_space().get_valid_mask();
-        return mask.get_num_elmts();
-      }
-      else
-        return d.get_volume();
+      return node->row_source->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -1605,6 +1213,26 @@ namespace Legion {
                                      false/*closing*/, true/*logical*/,
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::find_open_complete_partitions(Operation *op,
+                                                         unsigned idx,
+                                                  const RegionRequirement &req,
+                                      std::vector<LogicalPartition> &partitions)
+    //--------------------------------------------------------------------------
+    {
+      TaskContext *context = op->find_logical_context(idx);
+      RegionTreeContext ctx = context->get_context(); 
+#ifdef DEBUG_LEGION
+      assert(ctx.exists());
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *region_node = get_node(req.region);
+      FieldMask user_mask = 
+        region_node->column_source->get_field_mask(req.privilege_fields);
+      region_node->find_open_complete_partitions(ctx.get_id(), user_mask, 
+                                                 partitions);
     }
 
     //--------------------------------------------------------------------------
@@ -2675,7 +2303,7 @@ namespace Legion {
             dst_ref.get_manager()->as_instance_manager();
           const FieldMask &dst_mask = dst_ref.get_valid_fields();
           std::map<unsigned,
-                   std::vector<Domain::CopySrcDstField> > src_fields,dst_fields;
+                   std::vector<CopySrcDstField> > src_fields,dst_fields;
           for (unsigned idx2 = 0; idx2 < dst_indexes.size(); idx2++)
           {
             const unsigned dst_field_index = dst_indexes[idx2];
@@ -2704,11 +2332,11 @@ namespace Legion {
           if (src_fields.empty())
             continue;
           ApEvent dst_precondition = dst_ref.get_ready_event(); 
-          for (std::map<unsigned,std::vector<Domain::CopySrcDstField> >::
+          for (std::map<unsigned,std::vector<CopySrcDstField> >::
                 const_iterator src_it = src_fields.begin(); 
                 src_it != src_fields.end(); src_it++)
           {
-            std::map<unsigned,std::vector<Domain::CopySrcDstField> >::
+            std::map<unsigned,std::vector<CopySrcDstField> >::
               const_iterator dst_it = dst_fields.find(src_it->first);
 #ifdef DEBUG_LEGION
             assert(dst_it != dst_fields.end());
@@ -2771,10 +2399,10 @@ namespace Legion {
         }
       }
       // Let's handle all the actual instances first
-      std::vector<Domain::CopySrcDstField> src_fields_fold;
-      std::vector<Domain::CopySrcDstField> dst_fields_fold;
-      std::vector<Domain::CopySrcDstField> src_fields_list;
-      std::vector<Domain::CopySrcDstField> dst_fields_list;
+      std::vector<CopySrcDstField> src_fields_fold;
+      std::vector<CopySrcDstField> dst_fields_fold;
+      std::vector<CopySrcDstField> src_fields_list;
+      std::vector<CopySrcDstField> dst_fields_list;
       for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
       {
         const InstanceRef &dst_ref = dst_targets[idx1];
@@ -3328,85 +2956,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp,const Domain &d,
+    IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp,
+                                                  const void *realm_is,
                                                   IndexPartNode *parent,
-                                                  ColorPoint color, 
-                                                  IndexSpaceKind kind,
-                                                  AllocateMode mode)
+                                                  LegionColor color,
+                                                  ApEvent is_ready)
     //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *result = new IndexSpaceNode(sp, d, parent, color, 
-                                                  kind, mode, this);
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      // Check to see if someone else has already made it
-      {
-        // Hold the lookup lock while modifying the lookup table
-        AutoLock l_lock(lookup_lock);
-        std::map<IndexSpace,IndexSpaceNode*>::const_iterator it =
-          index_nodes.find(sp);
-        if (it != index_nodes.end())
-        {
-          delete result;
-          return it->second;
-        }
-        index_nodes[sp] = result;
-        index_space_requests.erase(sp);
-      }
-      if (parent != NULL)
-        parent->add_child(result);
-      
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp,const Domain &d,
-                                                  ApEvent ready_event, 
-                                                  IndexPartNode *parent,
-                                                  ColorPoint color, 
-                                                  IndexSpaceKind kind,
-                                                  AllocateMode mode)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *result = new IndexSpaceNode(sp, d, ready_event, parent, 
-                                                  color, kind, mode, this);
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      // Check to see if someone else has already made it
-      {
-        // Hold the lookup lock while modifying the lookup table
-        AutoLock l_lock(lookup_lock);
-        std::map<IndexSpace,IndexSpaceNode*>::const_iterator it =
-          index_nodes.find(sp);
-        if (it != index_nodes.end())
-        {
-          delete result;
-          return it->second;
-        }
-        index_nodes[sp] = result;
-        index_space_requests.erase(sp);
-      }
-      if (parent != NULL)
-        parent->add_child(result);
-      
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp, 
-                                                  ApEvent handle_ready,
-                                                  ApEvent domain_ready,
-                                                  IndexPartNode *parent,
-                                                  ColorPoint color,
-                                                  IndexSpaceKind kind,
-                                                  AllocateMode mode)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *result = new IndexSpaceNode(sp, handle_ready, 
-                                                  domain_ready, parent, 
-                                                  color, kind, mode, this);
+    { 
+      IndexSpaceCreator creator(this, sp, realm_is, parent, color, is_ready);
+      NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
+      IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -3433,14 +2992,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartNode* RegionTreeForest::create_node(IndexPartition p, 
                                                  IndexSpaceNode *parent,
-                                                 ColorPoint color, 
-                                                 Domain color_space,
-                                                 bool disjoint,
-                                                 AllocateMode mode)
+                                                 IndexSpaceNode *color_space,
+                                                 LegionColor color,
+                                                 bool disjoint, 
+                                                 ApEvent part_ready)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode *result = new IndexPartNode(p, parent, color, color_space,
-                                                disjoint, mode, this);
+      IndexPartCreator creator(this, p, parent, color_space, 
+                               color, disjoint, part_ready);
+      NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
+      IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
       assert(result != NULL);
@@ -3468,14 +3029,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartNode* RegionTreeForest::create_node(IndexPartition p, 
                                                  IndexSpaceNode *parent,
-                                                 ColorPoint color, 
-                                                 Domain color_space,
-                                                 RtEvent ready_event,
-                                                 AllocateMode mode)
+                                                 IndexSpaceNode *color_space,
+                                                 LegionColor color,
+                                                 RtEvent disjointness_ready,
+                                                 ApEvent part_ready)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode *result = new IndexPartNode(p, parent, color, color_space,
-                                                ready_event, mode, this);
+      IndexPartCreator creator(this, p, parent, color_space, 
+                               color, disjointness_ready, part_ready);
+      NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
+      IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
       assert(result != NULL);
@@ -4172,7 +3735,7 @@ namespace Legion {
         return true;
       if (child.get_tree_id() != parent.get_tree_id())
         return false;
-      std::vector<ColorPoint> path;
+      std::vector<LegionColor> path;
       return compute_index_path(parent.get_index_space(),
                                 child.get_index_space(), path);
     }
@@ -4307,13 +3870,7 @@ namespace Legion {
     bool RegionTreeForest::are_compatible(IndexSpace left, IndexSpace right)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode *left_node = get_node(left);
-      IndexSpaceNode *right_node = get_node(right);
-      const Domain &left_dom = left_node->get_domain_blocking();
-      const Domain &right_dom = right_node->get_domain_blocking();
-      if (left_dom.get_dim() != right_dom.get_dim())
-        return false;
-      return true;
+      return (left.get_type_tag() == right.get_type_tag());
     }
 
     //--------------------------------------------------------------------------
@@ -4331,7 +3888,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::compute_index_path(IndexSpace parent, 
-                               IndexSpace child, std::vector<ColorPoint> &path)
+                               IndexSpace child, std::vector<LegionColor> &path)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(child); 
@@ -4360,7 +3917,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::compute_partition_path(IndexSpace parent, 
-                           IndexPartition child, std::vector<ColorPoint> &path)
+                           IndexPartition child, std::vector<LegionColor> &path)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *child_node = get_node(child);
@@ -4464,56 +4021,7 @@ namespace Legion {
       }
       return depth;
     }
-#endif
 
-    //--------------------------------------------------------------------------
-    PhysicalInstance RegionTreeForest::create_instance(const Domain &dom,
-                    Memory target, const std::vector<size_t> &field_sizes, 
-                    size_t blocking_factor, ReductionOpID redop, UniqueID op_id)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REALM_CREATE_INSTANCE_CALL);
-      if (runtime->profiler != NULL)
-      {
-        Realm::ProfilingRequestSet reqs;
-        runtime->profiler->add_inst_request(reqs, op_id);
-        PhysicalInstance result = dom.create_instance(target, field_sizes, 
-                                            blocking_factor, reqs, redop);
-        // If the result exists tell the profiler about it in case
-        // it never gets deleted and we never see the profiling feedback
-        if (result.exists())
-        {
-          unsigned long long creation_time = 
-            Realm::Clock::current_time_in_nanoseconds();
-          runtime->profiler->record_instance_creation(result, target, op_id,
-                                                      creation_time);
-        }
-        return result;
-      }
-      else
-        return dom.create_instance(target, field_sizes, 
-                                   blocking_factor, redop);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
-    Color RegionTreeForest::generate_unique_color(
-                                          const std::map<Color,T> &current_map)
-    //--------------------------------------------------------------------------
-    {
-      if (current_map.empty())
-        return runtime->get_start_color();
-      unsigned stride = runtime->get_color_modulus();
-      typename std::map<Color,T>::const_reverse_iterator rlast = 
-        current_map.rbegin();
-      Color result = rlast->first + stride;
-#ifdef DEBUG_LEGION
-      assert(current_map.find(result) == current_map.end());
-#endif
-      return result;
-    }
-
-#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void RegionTreeForest::dump_logical_state(LogicalRegion region,
                                               ContextID ctx)
@@ -4715,134 +4223,20 @@ namespace Legion {
                                                          can_fail, wait_until);
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ bool RegionTreeForest::are_disjoint(const Domain &left,
-                                                   const Domain &right)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(left.get_dim() == right.get_dim());
-#endif
-      bool disjoint = true;
-      switch (left.get_dim())
-      {
-        case 0:
-          {
-            const Realm::ElementMask &left_mask = 
-                                       left.get_index_space().get_valid_mask();
-            const Realm::ElementMask &right_mask = 
-                                       right.get_index_space().get_valid_mask();
-            Realm::ElementMask::OverlapResult result = 
-                                            left_mask.overlaps_with(right_mask);
-            if (result != Realm::ElementMask::OVERLAP_NO)
-              disjoint = false;
-            break;
-          }
-        case 1:
-          {
-            LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
-            LegionRuntime::Arrays::Rect<1> rightr = right.get_rect<1>();
-            if (leftr.overlaps(rightr))
-              disjoint = false;
-            break;
-          }
-        case 2:
-          {
-            LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
-            LegionRuntime::Arrays::Rect<2> rightr = right.get_rect<2>();
-            if (leftr.overlaps(rightr))
-              disjoint = false;
-            break;
-          }
-        case 3:
-          {
-            LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
-            LegionRuntime::Arrays::Rect<3> rightr = right.get_rect<3>();
-            if (leftr.overlaps(rightr))
-              disjoint = false;
-            break;
-          }
-        default:
-          assert(false);
-      }
-      return disjoint;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ bool RegionTreeForest::are_disjoint(IndexSpaceNode *left,
-                                                   IndexSpaceNode *right)
-    //--------------------------------------------------------------------------
-    {
-      bool disjoint = true;
-      if (left->has_component_domains())
-      {
-        const std::set<Domain> &left_domains = 
-          left->get_component_domains_blocking();
-        if (right->has_component_domains())
-        {
-          const std::set<Domain> &right_domains = 
-            right->get_component_domains_blocking();
-          // Double Loop
-          for (std::set<Domain>::const_iterator lit = left_domains.begin();
-                disjoint && (lit != left_domains.end()); lit++)
-          {
-            for (std::set<Domain>::const_iterator rit = right_domains.begin();
-                  disjoint && (rit != right_domains.end()); rit++)
-            {
-              disjoint = RegionTreeForest::are_disjoint(*lit, *rit);
-            }
-          }
-        }
-        else
-        {
-          // Loop over left components
-          for (std::set<Domain>::const_iterator it = left_domains.begin();
-                disjoint && (it != left_domains.end()); it++)
-          {
-            disjoint = RegionTreeForest::are_disjoint(*it, 
-                        right->get_domain_blocking());
-          }
-        }
-      }
-      else
-      {
-        if (right->has_component_domains())
-        {
-          const std::set<Domain> &right_domains = 
-              right->get_component_domains_blocking();
-          // Loop over right components
-          for (std::set<Domain>::const_iterator it = right_domains.begin();
-                disjoint && (it != right_domains.end()); it++)
-          {
-            disjoint = RegionTreeForest::are_disjoint(
-                          left->get_domain_blocking(), *it);
-          }
-        }
-        else
-        {
-          // No Loops
-          disjoint = RegionTreeForest::are_disjoint(left->get_domain_blocking(),
-                                                  right->get_domain_blocking());
-        }
-      }
-      return disjoint;
-    }
-
     /////////////////////////////////////////////////////////////
     // Index Tree Node 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(void)
-      : depth(0), color(ColorPoint()), context(NULL), destroyed(false)
+      : context(NULL), depth(0), color(0), destroyed(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    IndexTreeNode::IndexTreeNode(ColorPoint c, unsigned d, 
-                                 RegionTreeForest *ctx)
-      : depth(d), color(c), context(ctx), destroyed(false),
+    IndexTreeNode::IndexTreeNode(RegionTreeForest *ctx,unsigned d,LegionColor c)
+      : context(ctx), depth(d), color(c), destroyed(false),
         node_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -4862,19 +4256,6 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
-      for (std::map<IndexTreeNode*,IntersectInfo>::iterator it = 
-            intersections.begin(); it != intersections.end(); it++)
-      {
-        IntersectInfo &info = it->second; 
-        for (std::set<Domain>::iterator dit = info.intersections.begin();
-              dit != info.intersections.end(); dit++)
-        {
-          Realm::IndexSpace space = dit->get_index_space();
-          if (space.exists())
-            space.destroy();
-        }
-      }
-      intersections.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -5055,379 +4436,16 @@ namespace Legion {
       return true;
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ bool IndexTreeNode::compute_intersections(
-        const std::set<Domain> &left, const std::set<Domain> &right, 
-        std::set<Domain> &result_domains, bool compute)
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<Domain>::const_iterator lit = left.begin();
-            lit != left.end(); lit++)
-      {
-        for (std::set<Domain>::const_iterator rit = right.begin();
-              rit != right.end(); rit++)
-        {
-          Domain result;
-          if (compute_intersection(*lit, *rit, result, compute))
-          {
-            if (compute)
-              result_domains.insert(result);
-            else
-              return true;
-          }
-        }
-      }
-      return !result_domains.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ bool IndexTreeNode::compute_intersections(
-        const std::set<Domain> &left, const Domain &right, 
-        std::set<Domain> &result_domains, bool compute)
-    //--------------------------------------------------------------------------
-    {
-      for (std::set<Domain>::const_iterator it = left.begin();
-            it != left.end(); it++)
-      {
-        Domain result;
-        if (compute_intersection(*it, right, result, compute))
-        {
-          if (compute)
-            result_domains.insert(result);
-          else
-            return true;
-        }
-      }
-      return !result_domains.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ bool IndexTreeNode::compute_intersection(const Domain &left,
-                                                        const Domain &right,
-                                                        Domain &result,
-                                                        bool compute)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(left.get_dim() == right.get_dim());
-#endif
-      bool non_empty = false;
-      switch (left.get_dim())
-      {
-        case 0:
-          {
-            const Realm::ElementMask &left_mask = 
-                                    left.get_index_space().get_valid_mask();
-            const Realm::ElementMask &right_mask = 
-                                    right.get_index_space().get_valid_mask();
-            Realm::ElementMask intersection = left_mask & right_mask;
-            if (!!intersection)
-            {
-              non_empty = true;
-              if (compute)
-                result = 
-                 Domain(Realm::IndexSpace::create_index_space(intersection));
-            }
-            break;
-          }
-        case 1:
-          {
-            LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
-            LegionRuntime::Arrays::Rect<1> rightr = right.get_rect<1>();
-            LegionRuntime::Arrays::Rect<1> temp = leftr.intersection(rightr);
-            if (temp.volume() > 0)
-            {
-              non_empty = true;
-              if (compute)
-                result = Domain::from_rect<1>(temp);
-            }
-            break;
-          }
-        case 2:
-          {
-            LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
-            LegionRuntime::Arrays::Rect<2> rightr = right.get_rect<2>();
-            LegionRuntime::Arrays::Rect<2> temp = leftr.intersection(rightr);
-            if (temp.volume() > 0)
-            {
-              non_empty = true;
-              if (compute)
-                result = Domain::from_rect<2>(temp);
-            }
-            break;
-          }
-        case 3:
-          {
-            LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
-            LegionRuntime::Arrays::Rect<3> rightr = right.get_rect<3>();
-            LegionRuntime::Arrays::Rect<3> temp = leftr.intersection(rightr);
-            if (temp.volume() > 0)
-            {
-              non_empty = true;
-              if (compute)
-                result = Domain::from_rect<3>(temp);
-            }
-            break;
-          }
-        default:
-          assert(false);
-      }
-      return non_empty;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ bool IndexTreeNode::compute_dominates(
-            const std::set<Domain> &left_set, const std::set<Domain> &right_set)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!left_set.empty());
-      assert(!right_set.empty());
-#endif
-      // Check to see if the left set of domains dominates the right set
-      bool dominates = false;
-      // Handle the easy case for dimension zero
-      Domain left = *(left_set.begin());
-      if (left.get_dim() == 0)
-      {
-	// We're going to compute the union of the right set members and then
-	//  subtract out the left set members and see if anything is left
-	// If there is, left does NOT dominate right
-	
-	Realm::ElementMask *mask = 0;
-	// We need first to make sure we have an ElementMask that can hold all
-	//  the right_set members, which may have been trimmed
-	if (right_set.size() == 1)
-	{
-	  // just make a copy of the only set member's mask
-	  mask = new Realm::ElementMask(right_set.begin()->get_index_space()
-					   .get_valid_mask());
-	} else {
-	  std::set<Domain>::const_iterator it = right_set.begin();
-	  assert(it != right_set.end());
-	  const Realm::ElementMask *maskp = 
-            &(it->get_index_space().get_valid_mask());
-	  int first_elmt = maskp->first_enabled();
-	  int last_elmt = maskp->last_enabled();
-	  while(++it != right_set.end())
-	  {
-	    maskp = &(it->get_index_space().get_valid_mask());
-	    int new_first = maskp->first_enabled();
-	    int new_last = maskp->last_enabled();
-	    if ((new_first != -1) && 
-                ((first_elmt == -1) || (first_elmt > new_first)))
-	      first_elmt = new_first;
-	    if ((new_last != -1) && (last_elmt < new_last))
-	      last_elmt = new_last;
-	  }
-	  // If there are no elements, right is trivially dominated
-	  if ((first_elmt > last_elmt) || (last_elmt == -1))
-	    return true;
-	  // Now construct the mask
-	  mask = new Realm::ElementMask(last_elmt - first_elmt + 1, first_elmt);
-	  // And copy in the bits from each member set
-	  for (it = right_set.begin(); it != right_set.end(); it++)
-	    *mask |= it->get_index_space().get_valid_mask();
-	}
-
-	// Now go through the left set members and subtract them all ot
-	for (std::set<Domain>::const_iterator it = left_set.begin();
-	     it != left_set.end(); it++)
-	  *mask -= it->get_index_space().get_valid_mask();
-	  
-        // Union left and right together and then test (empty == domainated)
-	dominates = !(*mask);
-
-	// Clean up our working copy
-	delete mask;
-      }
-      else if (left_set.size() == 1)
-      {
-        // This is the easy case where we only have a single domain on the left
-        switch (left.get_dim())
-        {
-          case 1:
-            {
-              LegionRuntime::Arrays::Rect<1> leftr = left.get_rect<1>();
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<1> right = it->get_rect<1>(); 
-                if ((right.intersection(leftr)) != right)
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          case 2:
-            {
-              LegionRuntime::Arrays::Rect<2> leftr = left.get_rect<2>();
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<2> right = it->get_rect<2>(); 
-                if ((right.intersection(leftr)) != right)
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          case 3:
-            {
-              LegionRuntime::Arrays::Rect<3> leftr = left.get_rect<3>();
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<3> right = it->get_rect<3>(); 
-                if ((right.intersection(leftr)) != right)
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          default:
-            assert(false);
-        }
-      }
-      else
-      {
-        // This is the hard case where we have multiple domains on the left
-        switch (left.get_dim())
-        {
-          case 1:
-            {
-              // Construct an interval tree for the left set
-              // and then check to see if all the intervals within
-              // the right set are dominated by an interval in the tree
-              IntervalTree<int,true/*discrete*/> intervals;
-              for (std::set<Domain>::const_iterator it = left_set.begin();
-                    it != left_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<1> left_rect = it->get_rect<1>();
-                intervals.insert(left_rect.lo[0], left_rect.hi[0]);
-              }
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<1> right_rect = it->get_rect<1>();
-                if (!intervals.dominates(right_rect.lo[0], right_rect.hi[0]))
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          case 2:
-            {
-              RectangleSet<int,true/*discrete*/> rectangles;
-              for (std::set<Domain>::const_iterator it = left_set.begin();
-                    it != left_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<2> left_rect = it->get_rect<2>();
-                if (left_rect.volume() > 0)
-                  rectangles.add_rectangle(left_rect.lo[0], left_rect.lo[1],
-                                           left_rect.hi[0], left_rect.hi[1]);
-              }
-              dominates = true;
-              for (std::set<Domain>::const_iterator it = right_set.begin();
-                    it != right_set.end(); it++)
-              {
-                LegionRuntime::Arrays::Rect<2> right_rect = it->get_rect<2>();
-                if (right_rect.volume() > 0 &&
-                    !rectangles.covers(right_rect.lo[0], right_rect.lo[1],
-                                       right_rect.hi[0], right_rect.hi[1]))
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          case 3:
-            {
-              // TODO: Improve this terrible approximation
-              dominates = true;
-              for (std::set<Domain>::const_iterator rit = right_set.begin();
-                    (rit != right_set.end()) && dominates; rit++)
-              {
-                LegionRuntime::Arrays::Rect<3> right_rect = rit->get_rect<3>();
-                bool has_dominator = false;
-                // See if any of the rectangles on the left dominate it
-                for (std::set<Domain>::const_iterator lit = left_set.begin();
-                      lit != left_set.end(); lit++)
-                {
-                  LegionRuntime::Arrays::Rect<3> left_rect = lit->get_rect<3>();
-                  if (right_rect.intersection(left_rect) == right_rect)
-                  {
-                    has_dominator = true;
-                    break;
-                  }
-                }
-                if (!has_dominator)
-                {
-                  dominates = false;
-                  break;
-                }
-              }
-              break;
-            }
-          default:
-            assert(false); // should never get here
-        }
-      }
-      return dominates;
-    }
-
-
     /////////////////////////////////////////////////////////////
     // Index Space Node 
     /////////////////////////////////////////////////////////////
     
     //--------------------------------------------------------------------------
-    IndexSpaceNode::IndexSpaceNode(IndexSpace h, const Domain &d, 
-                                   IndexPartNode *par, ColorPoint c,
-                                   IndexSpaceKind k, AllocateMode m,
-                                   RegionTreeForest *ctx)
-      : IndexTreeNode(c, (par == NULL) ? 0 : par->depth+1, ctx),
-        handle(h), parent(par), kind(k), mode(m), 
-        handle_ready(ApEvent::NO_AP_EVENT), domain_ready(ApEvent::NO_AP_EVENT), 
-        domain(d),  allocator(NULL)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode::IndexSpaceNode(IndexSpace h, const Domain &d, ApEvent r, 
-                                   IndexPartNode *par, ColorPoint c, 
-                                   IndexSpaceKind k, AllocateMode m, 
-                                   RegionTreeForest *ctx)
-      : IndexTreeNode(c, (par == NULL) ? 0 : par->depth+1, ctx),
-        handle(h), parent(par), kind(k), mode(m), 
-        handle_ready(ApEvent::NO_AP_EVENT), domain_ready(r), 
-        domain(d), allocator(NULL)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode::IndexSpaceNode(IndexSpace h,ApEvent h_ready,ApEvent d_ready,
-                                   IndexPartNode *par, ColorPoint c,
-                                   IndexSpaceKind k, AllocateMode m,
-                                   RegionTreeForest *ctx)
-      : IndexTreeNode(c, (par == NULL) ? 0 : par->depth+1, ctx),
-        handle(h), parent(par), kind(k), mode(m), handle_ready(h_ready),
-        domain_ready(d_ready), allocator(NULL)
+    IndexSpaceNode::IndexSpaceNode(RegionTreeForest *ctx, IndexSpace h, 
+                                   IndexPartNode *par, LegionColor c,
+                                   ApEvent ready)
+      : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c),
+        handle(h), parent(par), index_space_ready(ready), allocator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5435,9 +4453,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceNode::IndexSpaceNode(const IndexSpaceNode &rhs)
       : IndexTreeNode(), handle(IndexSpace::NO_SPACE), parent(NULL), 
-        kind(rhs.kind), mode(rhs.mode), handle_ready(ApEvent::NO_AP_EVENT), 
-        domain_ready(ApEvent::NO_AP_EVENT), domain(Domain::NO_DOMAIN),
-        allocator(NULL)
+        index_space_ready(ApEvent::NO_AP_EVENT), allocator(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5462,20 +4478,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* IndexSpaceNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexSpaceNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -5521,19 +4523,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t IndexSpaceNode::get_num_elmts(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(kind == UNSTRUCTURED_KIND);
-#endif
-      if (parent != NULL)
-        return parent->get_num_elmts();
-      const Domain &dom = get_domain_blocking();
-      return dom.get_index_space().get_valid_mask().get_num_elmts();
     }
 
     //--------------------------------------------------------------------------
@@ -5669,23 +4658,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::has_child(const ColorPoint &c)
+    bool IndexSpaceNode::has_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      std::map<ColorPoint,IndexPartNode*>::const_iterator finder = 
+      std::map<LegionColor,IndexPartNode*>::const_iterator finder = 
         color_map.find(c);
       return ((finder != color_map.end()) && (finder->second != NULL));
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode* IndexSpaceNode::get_child(const ColorPoint &c)
+    IndexPartNode* IndexSpaceNode::get_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       // See if we have it locally if not go find it
+      IndexPartition remote_handle = IndexPartition::NO_PART;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<ColorPoint,IndexPartNode*>::const_iterator finder = 
+        std::map<LegionColor,IndexPartNode*>::const_iterator finder = 
           color_map.find(c);
         if (finder != color_map.end())
         {
@@ -5694,40 +4684,19 @@ namespace Legion {
 #endif
           return finder->second;
         }
+        std::map<LegionColor,IndexPartition>::const_iterator remote_finder = 
+          remote_colors.find(c);
+        if (remote_finder != remote_colors.end())
+          remote_handle = remote_finder->second;
       }
       // if we make it here, send a request
       AddressSpaceID owner_space = get_owner_space();
       if (owner_space == context->runtime->address_space)
       {
-        switch (c.get_dim())
-        {
-          case 0:
-            {
-              log_index.error("Unable to find entry for color %d in "
-                              "index space %x.", c.get_index(), handle.id);
-              break;
-            }
-          case 1:
-            {
-              log_index.error("Unable to find entry for color %d in "
-                              "index space %x.", c[0], handle.id);
-              break;
-            }
-          case 2:
-            {
-              log_index.error("Unable to find entry for color (%d,%d) in "
-                              "index space %x.", c[0], c[1], handle.id);
-              break;
-            }
-          case 3:
-            {
-              log_index.error("Unable to find entry for color (%d,%d,%d) in "
-                              "index space %x.", c[0], c[1], c[2], handle.id);
-              break;
-            }
-          default:
-            assert(false);
-        }
+        if (remote_handle.exists())
+          return context->get_node(remote_handle);
+        log_index.error("Unable to find entry for color %lld in "
+                        "index space %x.", c, handle.id);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -5766,15 +4735,15 @@ namespace Legion {
              (color_map[child->color] == NULL));
 #endif
       color_map[child->color] = child;
-      valid_map[child->color] = child;
+      if (!remote_colors.empty())
+        remote_colors.erase(child->color);
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::remove_child(const ColorPoint &c)
+    void IndexSpaceNode::remove_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
-      valid_map.erase(c);
+      // Do nothing for now
     }
 
     //--------------------------------------------------------------------------
@@ -5782,140 +4751,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      return valid_map.size();
+      return color_map.size();
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::get_children(
-                                  std::map<ColorPoint,IndexPartNode*> &children)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock,1,false/*exclsuve*/);
-      children = color_map;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::get_child_colors(std::set<ColorPoint> &child_colors,
-                                          bool only_valid)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      if (only_valid)
-      {
-        for (std::map<ColorPoint,IndexPartNode*>::const_iterator it = 
-              valid_map.begin(); it != valid_map.end(); it++)
-          child_colors.insert(it->first);
-      }
-      else
-      {
-        for (std::map<ColorPoint,IndexPartNode*>::const_iterator it = 
-              color_map.begin(); it != color_map.end(); it++)
-          child_colors.insert(it->first);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent IndexSpaceNode::get_domain_precondition(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!handle_ready.has_triggered())
-        handle_ready.wait();
-      return domain_ready;
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& IndexSpaceNode::get_domain_blocking(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!handle_ready.has_triggered())
-        handle_ready.wait();
-      if (!domain_ready.has_triggered())
-        domain_ready.wait();
-      return domain;
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& IndexSpaceNode::get_domain(ApEvent &precondition)
-    //--------------------------------------------------------------------------
-    {
-      if (!handle_ready.has_triggered())
-        handle_ready.wait();
-      precondition = domain_ready;
-      return domain;
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& IndexSpaceNode::get_domain_no_wait(void)
-    //--------------------------------------------------------------------------
-    {
-      // We still need to wait for the handle to be valid
-      if (!handle_ready.has_triggered())
-        handle_ready.wait();
-      return domain;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::set_domain(const Domain &dom)
-    //--------------------------------------------------------------------------
-    {
-      domain = dom;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::get_domains_blocking(std::vector<Domain> &domains) 
-    //--------------------------------------------------------------------------
-    {
-      if (!handle_ready.has_triggered())
-        handle_ready.wait();
-      if (!domain_ready.has_triggered())
-        domain_ready.wait();
-      if (has_component_domains())
-      {
-        domains.insert(domains.end(), 
-                       component_domains.begin(), component_domains.end());
-      }
-      else
-        domains.push_back(domain);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::get_domains(std::vector<Domain> &domains, 
-                                     ApEvent &precondition)
-    //--------------------------------------------------------------------------
-    {
-      if (!handle_ready.has_triggered())
-        handle_ready.wait();
-      precondition = domain_ready;
-      if (has_component_domains())
-      {
-        domains.insert(domains.end(), 
-                       component_domains.begin(), component_domains.end());
-      }
-      else
-        domains.push_back(domain);
-    }
-
-    //--------------------------------------------------------------------------
-    size_t IndexSpaceNode::get_domain_volume(bool app_query)
-    //--------------------------------------------------------------------------
-    {
-      if (!handle_ready.has_triggered())
-        handle_ready.wait();
-      if (!domain_ready.has_triggered())
-        domain_ready.wait();
-      if (domain.get_dim() == 0)
-      {
-        const Realm::ElementMask &mask = 
-                                  domain.get_index_space().get_valid_mask();
-        return mask.get_num_elmts();
-      }
-      else
-        return domain.get_volume();
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::are_disjoint(const ColorPoint &c1, 
-                                      const ColorPoint &c2)
+    bool IndexSpaceNode::are_disjoint(const LegionColor c1, 
+                                      const LegionColor c2)
     //--------------------------------------------------------------------------
     {
       // Quick out
@@ -5924,7 +4765,7 @@ namespace Legion {
       // Do the test with read-only mode first
       RtEvent ready;
       bool issue_dynamic_test = false;
-      std::pair<ColorPoint,ColorPoint> key(c1,c2);
+      std::pair<LegionColor,LegionColor> key(c1,c2);
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         if (disjoint_subsets.find(key) != disjoint_subsets.end())
@@ -5933,7 +4774,7 @@ namespace Legion {
           return false;
         else
         {
-          std::map<std::pair<ColorPoint,ColorPoint>,RtEvent>::const_iterator
+          std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
             finder = pending_tests.find(key);
           if (finder != pending_tests.end())
             ready = finder->second;
@@ -5944,7 +4785,7 @@ namespace Legion {
             else
             {
               aliased_subsets.insert(key);
-              aliased_subsets.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+              aliased_subsets.insert(std::pair<LegionColor,LegionColor>(c2,c1));
               return false;
             }
           }
@@ -5954,12 +4795,9 @@ namespace Legion {
       {
         IndexPartNode *left = get_child(c1);
         IndexPartNode *right = get_child(c2);
-        std::set<ApEvent> preconditions; 
-        left->get_subspace_domain_preconditions(preconditions);
-        right->get_subspace_domain_preconditions(preconditions);
         AutoLock n_lock(node_lock);
         // Test again to make sure we didn't lose the race
-        std::map<std::pair<ColorPoint,ColorPoint>,RtEvent>::const_iterator
+        std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
           finder = pending_tests.find(key);
         if (finder == pending_tests.end())
         {
@@ -5968,11 +4806,13 @@ namespace Legion {
           args.left = left;
           args.right = right;
           // Get the preconditions for domains 
-          RtEvent pre = Runtime::protect_merge_events(preconditions);
+          RtEvent pre = Runtime::protect_event(
+              Runtime::merge_events(left->partition_ready,
+                                    right->partition_ready));
           ready = context->runtime->issue_runtime_meta_task(args,
                                       LG_LATENCY_PRIORITY, NULL, pre);
           pending_tests[key] = ready;
-          pending_tests[std::pair<ColorPoint,ColorPoint>(c2,c1)] = ready;
+          pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] = ready;
         }
         else
           ready = finder->second;
@@ -5988,7 +4828,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::record_disjointness(bool disjoint, 
-                                     const ColorPoint &c1, const ColorPoint &c2)
+                                     const LegionColor c1, const LegionColor c2)
     //--------------------------------------------------------------------------
     {
       if (c1 == c2)
@@ -6000,53 +4840,65 @@ namespace Legion {
 #endif
       if (disjoint)
       {
-        disjoint_subsets.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
-        disjoint_subsets.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+        disjoint_subsets.insert(std::pair<LegionColor,LegionColor>(c1,c2));
+        disjoint_subsets.insert(std::pair<LegionColor,LegionColor>(c2,c1));
       }
       else
       {
-        aliased_subsets.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
-        aliased_subsets.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+        aliased_subsets.insert(std::pair<LegionColor,LegionColor>(c1,c2));
+        aliased_subsets.insert(std::pair<LegionColor,LegionColor>(c2,c1));
       }
-      pending_tests.erase(std::pair<ColorPoint,ColorPoint>(c1,c2));
-      pending_tests.erase(std::pair<ColorPoint,ColorPoint>(c2,c1));
+      pending_tests.erase(std::pair<LegionColor,LegionColor>(c1,c2));
+      pending_tests.erase(std::pair<LegionColor,LegionColor>(c2,c1));
     }
 
     //--------------------------------------------------------------------------
-    Color IndexSpaceNode::generate_color(void)
+    LegionColor IndexSpaceNode::generate_color(void)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      Color result;
+      LegionColor result;
       if (!color_map.empty())
       {
         unsigned stride = context->runtime->get_color_modulus();
-        std::map<ColorPoint,IndexPartNode*>::const_reverse_iterator rlast = 
+        std::map<LegionColor,IndexPartNode*>::const_reverse_iterator rlast = 
                                                         color_map.rbegin();
-#ifdef DEBUG_LEGION
-        assert(rlast->first.get_dim() == 1);
-#endif
         // We know all colors for index spaces are 0-D
-        Color new_color =
-          (rlast->first[0] + (stride - 1)) / stride * stride +
+        LegionColor new_color =
+          (rlast->first + (stride - 1)) / stride * stride +
           context->runtime->get_start_color();
-        if (new_color == (Color)rlast->first[0]) new_color += stride;
+        if (new_color == rlast->first) 
+          new_color += stride;
         result = new_color;
       }
       else
         result = context->runtime->get_start_color();
-      ColorPoint color(result);
 #ifdef DEBUG_LEGION
       assert(color_map.find(color) == color_map.end());
 #endif
       // We have to put ourselves in the map to be sound for other parallel
       // allocations of colors which may come later
-      color_map[color] = NULL; /* just put in a NULL pointer for now */
+      color_map[result] = NULL; /* just put in a NULL pointer for now */
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::get_colors(std::set<ColorPoint> &colors)
+    void IndexSpaceNode::record_remote_child(IndexPartition pid, 
+                                             LegionColor part_color)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      assert(color_map.find(part_color) == color_map.end());
+      assert(remote_colors.find(part_color) == remote_colors.end());
+      // should only happen on the owner node
+      assert(get_owner_space() == context->runtime->address_space);
+#endif
+      remote_colors[part_color] = pid;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::get_colors(std::vector<LegionColor> &colors)
     //--------------------------------------------------------------------------
     {
       // If we're not the owner, we need to request an up to date set of colors
@@ -6068,12 +4920,12 @@ namespace Legion {
       else
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        for (std::map<ColorPoint,IndexPartNode*>::const_iterator it = 
-              valid_map.begin(); it != valid_map.end(); it++)
+        for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
+              color_map.begin(); it != color_map.end(); it++)
         {
           // Can be NULL in some cases of parallel partitioning
           if (it->second != NULL)
-            colors.insert(it->first);
+            colors.push_back(it->first);
         }
       }
     }
@@ -6119,436 +4971,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::destroy_node(AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // If we've already been destroyed then we are done
-      if (destroyed)
-        return;
-      std::set<RegionNode*> to_destroy;
-      {
-        AutoLock n_lock(node_lock);
-        if (!destroyed)
-        {
-          destroyed = true;
-          if (!creation_set.empty())
-          {
-            DestructionFunctor functor(handle, context->runtime);
-            creation_set.map(functor);
-          }
-          to_destroy = logical_nodes;
-        }
-      }
-      for (std::set<RegionNode*>::const_iterator it = to_destroy.begin();
-            it != to_destroy.end(); it++)
-      {
-        (*it)->destroy_node(source);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::has_component_domains(void) const
-    //--------------------------------------------------------------------------
-    {
-      return !component_domains.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::update_component_domains(const std::set<Domain> &doms)
-    //--------------------------------------------------------------------------
-    {
-      component_domains.insert(doms.begin(), doms.end());
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& IndexSpaceNode::get_component_domains_blocking(
-                                                                     void) const
-    //--------------------------------------------------------------------------
-    {
-      if (!handle_ready.has_triggered())
-        handle_ready.wait();
-      if (!domain_ready.has_triggered())
-        domain_ready.wait();
-      return component_domains;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& IndexSpaceNode::get_component_domains(
-                                                           ApEvent &ready) const
-    //--------------------------------------------------------------------------
-    {
-      if (!handle_ready.has_triggered())
-        handle_ready.wait();
-      ready = domain_ready;
-      return component_domains;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::intersects_with(IndexSpaceNode *other, bool compute)
-    //--------------------------------------------------------------------------
-    {
-      if (other == this)
-        return true;
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        // Only return the value if we either didn't want to compute
-        // or we already have valid intersections
-        if ((finder != intersections.end()) && 
-            (!compute || finder->second.intersections_valid))
-          return finder->second.has_intersects;
-      }
-      std::set<Domain> intersect;
-      bool result;
-      if (component_domains.empty())
-      { 
-        if (other->has_component_domains())
-          result = compute_intersections(
-                                   other->get_component_domains_blocking(),
-                                   get_domain_blocking(), intersect, compute);
-        else
-        {
-          Domain inter;
-          result = compute_intersection(get_domain_blocking(), 
-                                        other->get_domain_blocking(),
-                                        inter, compute);
-          if (result)
-            intersect.insert(inter);
-        }
-      }
-      else
-      {
-        if (other->has_component_domains())
-          result = compute_intersections(component_domains,
-                  other->get_component_domains_blocking(), intersect, compute);
-        else
-          result = compute_intersections(component_domains,
-                                         other->get_domain_blocking(), 
-                                         intersect, compute); 
-      }
-      AutoLock n_lock(node_lock);
-      if (result)
-      {
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        // Check to make sure we didn't lose the race
-        if ((finder == intersections.end()) || 
-            (compute && !finder->second.intersections_valid))
-        {
-          if (compute)
-            intersections[other] = IntersectInfo(intersect);
-          else
-            intersections[other] = IntersectInfo(true/*result*/);
-        }
-      }
-      else
-        intersections[other] = IntersectInfo(false/*result*/);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::intersects_with(IndexPartNode *other, bool compute)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        // Only return the value if we know we are valid and we didn't
-        // want to compute anything or we already did compute it
-        if ((finder != intersections.end()) &&
-            (!compute || finder->second.intersections_valid))
-          return finder->second.has_intersects;
-      }
-      // Build up the set of domains for the partition
-      std::set<Domain> other_domains, intersect;
-      other->get_subspace_domains(other_domains);
-      bool result;
-      if (component_domains.empty())
-      {
-        result = compute_intersections(other_domains, get_domain_blocking(), 
-                                       intersect, compute);
-      }
-      else
-      {
-        result = compute_intersections(component_domains, other_domains,
-                                       intersect, compute);
-      }
-      AutoLock n_lock(node_lock);
-      if (result)
-      {
-        // Check to make sure we didn't lose the race
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder == intersections.end()) ||
-            (compute && !finder->second.intersections_valid))
-        {
-          if (compute)
-            intersections[other] = IntersectInfo(intersect);
-          else
-            intersections[other] = IntersectInfo(true/*result*/);
-        }
-      }
-      else
-        intersections[other] = IntersectInfo(false/*result*/);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& IndexSpaceNode::get_intersection_domains(
-                                                          IndexSpaceNode *other)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder != intersections.end()) &&
-            finder->second.intersections_valid)
-          return finder->second.intersections;
-      }
-      std::set<Domain> intersect;
-      bool result;
-      if (component_domains.empty())
-      { 
-        if (other->has_component_domains())
-          result = compute_intersections(
-                    other->get_component_domains_blocking(),
-                    get_domain_blocking(), intersect, true/*compute*/);
-        else
-        {
-          Domain inter;
-          result = compute_intersection(get_domain_blocking(), 
-                                        other->get_domain_blocking(), 
-                                        inter, true/*compute*/);
-          if (result)
-            intersect.insert(inter);
-        }
-      }
-      else
-      {
-        if (other->has_component_domains())
-          result = compute_intersections(component_domains,
-                  other->get_component_domains_blocking(), 
-                  intersect, true/*compute*/);
-        else
-          result = compute_intersections(component_domains,
-                                         other->get_domain_blocking(), 
-                                         intersect, true/*compute*/); 
-      }
-      AutoLock n_lock(node_lock);
-      if (result)
-      {
-        // Check again to make sure we didn't lose the race
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder == intersections.end()) ||
-            !finder->second.intersections_valid)
-          intersections[other] = IntersectInfo(intersect);
-      }
-      else
-        intersections[other] = IntersectInfo(false/*result*/);
-      return intersections[other].intersections;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& IndexSpaceNode::get_intersection_domains(
-                                                           IndexPartNode *other)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder != intersections.end()) &&
-            finder->second.intersections_valid)
-          return finder->second.intersections;
-      }
-      // Build up the set of domains for the partition
-      std::set<Domain> other_domains, intersect;
-      other->get_subspace_domains(other_domains);
-      bool result;
-      if (component_domains.empty())
-      {
-        result = compute_intersections(other_domains, get_domain_blocking(), 
-                                       intersect, true/*compute*/);
-      }
-      else
-      {
-        result = compute_intersections(component_domains, other_domains,
-                                       intersect, true/*compute*/);
-      }
-      AutoLock n_lock(node_lock);
-      if (result)
-      {
-        // Check again to make sure we didn't lose the race
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder == intersections.end()) ||
-            !finder->second.intersections_valid)
-          intersections[other] = IntersectInfo(intersect);
-      }
-      else
-        intersections[other] = IntersectInfo(false/*result*/);
-      return intersections[other].intersections;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::dominates(IndexSpaceNode *other)
-    //--------------------------------------------------------------------------
-    {
-      if (other == this)
-        return true;
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,bool>::const_iterator finder = 
-          dominators.find(other);
-        if (finder != dominators.end())
-          return finder->second;
-      }
-      bool result;
-      if (component_domains.empty())
-      {
-        if (other->has_component_domains())
-        {
-          std::set<Domain> local;
-          local.insert(get_domain_blocking());
-          result = compute_dominates(local, 
-                                     other->get_component_domains_blocking());
-        }
-        else
-        {
-          std::set<Domain> left, right;
-          left.insert(get_domain_blocking());
-          right.insert(other->get_domain_blocking());
-          result = compute_dominates(left, right);
-        }
-      }
-      else
-      {
-        if (other->has_component_domains())
-          result = compute_dominates(component_domains,   
-                                     other->get_component_domains_blocking()); 
-        else
-        {
-          std::set<Domain> other_doms;
-          other_doms.insert(other->get_domain_blocking());
-          result = compute_dominates(component_domains, other_doms);
-        }
-      }
-      AutoLock n_lock(node_lock);
-      dominators[other] = result;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::dominates(IndexPartNode *other)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,bool>::const_iterator finder = 
-          dominators.find(other);
-        if (finder != dominators.end())
-          return finder->second;
-      }
-      bool result;
-      std::set<Domain> other_doms;
-      other->get_subspace_domains(other_doms);
-      if (component_domains.empty())
-      {
-        std::set<Domain> local;
-        local.insert(get_domain_blocking());
-        result = compute_dominates(local, other_doms);
-      }
-      else
-        result = compute_dominates(component_domains, other_doms);
-      AutoLock n_lock(node_lock);
-      dominators[other] = result;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent IndexSpaceNode::create_subspaces_by_field(
-                        const std::vector<FieldDataDescriptor> &field_data,
-                        std::map<DomainPoint, Realm::IndexSpace> &subspaces,
-                        bool mutable_results, ApEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent dom_precondition;
-      const Domain &dom = get_domain(dom_precondition);
-      return ApEvent(dom.get_index_space().create_subspaces_by_field(field_data,
-                                     subspaces, mutable_results, 
-                                     Runtime::merge_events(precondition,
-                                                           dom_precondition)));
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent IndexSpaceNode::create_subspaces_by_image(
-                const std::vector<FieldDataDescriptor> &field_data,
-                std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
-                bool mutable_results, ApEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent dom_precondition;
-      const Domain &dom = get_domain(dom_precondition);
-      return ApEvent(dom.get_index_space().create_subspaces_by_image(field_data,
-                                     subspaces, mutable_results, 
-                                     Runtime::merge_events(precondition,
-                                                          dom_precondition)));
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent IndexSpaceNode::create_subspaces_by_preimage(
-                const std::vector<FieldDataDescriptor> &field_data,
-                std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
-                bool mutable_results, ApEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent dom_precondition;
-      const Domain &dom = get_domain(dom_precondition);
-      return ApEvent(dom.get_index_space().create_subspaces_by_preimage(
-                                     field_data, subspaces, mutable_results, 
-                                     Runtime::merge_events(precondition,
-                                                           dom_precondition)));
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_disjointness_test(
               IndexSpaceNode *parent, IndexPartNode *left, IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      std::map<ColorPoint,IndexSpaceNode*> left_spaces, right_spaces;    
-      left->get_children(left_spaces);
-      right->get_children(right_spaces);
-      bool disjoint = true;
-      for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator lit = 
-            left_spaces.begin(); disjoint && (lit != left_spaces.end()); lit++)
-      {
-        for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator rit = 
-              right_spaces.begin(); disjoint && 
-              (rit != right_spaces.end()); rit++)
-        {
-          if (!RegionTreeForest::are_disjoint(lit->second, rit->second))
-            disjoint = false;
-        }
-      }
+      const bool disjoint = !left->intersects_with(right);
       parent->record_disjointness(disjoint, left->color, right->color);
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::send_node(AddressSpaceID target, bool up, bool down)
+    void IndexSpaceNode::send_node(AddressSpaceID target, bool up)
     //--------------------------------------------------------------------------
     {
       // Go up first so we know those nodes will be there
       if (up && (parent != NULL))
-        parent->send_node(target, true/*up*/, false/*down*/);
-      // Check to see if we need to wait for the handle event to be ready
-      if (!handle_ready.has_triggered())
-          handle_ready.wait();
-      // Check to see if our creation set includes the target
-      std::map<ColorPoint,IndexPartNode*> valid_copy;
+        parent->send_node(target, true/*up*/);
       {
         AutoLock n_lock(node_lock);
         if (!creation_set.contains(target))
@@ -6557,22 +4994,13 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(handle);
-            rez.serialize(domain);
-            rez.serialize(domain_ready);
-            rez.serialize(kind);
-            rez.serialize(mode);
             if (parent != NULL)
               rez.serialize(parent->handle);
             else
               rez.serialize(IndexPartition::NO_PART);
             rez.serialize(color);
-            rez.serialize(component_domains.size());
-            for (std::set<Domain>::const_iterator it = 
-                  component_domains.begin(); it != 
-                  component_domains.end(); it++)
-            {
-              rez.serialize(*it);
-            }
+            rez.serialize(index_space_ready);
+            pack_index_space(rez);
             rez.serialize<size_t>(semantic_info.size());
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
@@ -6586,26 +5014,9 @@ namespace Legion {
           context->runtime->send_index_space_node(target, rez); 
           creation_set.add(target);
         }
-        // Also check to see if we need to go down
-        if (down && child_creation.contains(target))
-          down = false;
         if (destroyed)
           // Now we need to send a destruction
           context->runtime->send_index_space_destruction(handle, target);
-        // If we need to go down, make a copy of the valid children
-        if (down)
-          valid_copy = valid_map;
-      }
-      if (down)
-      {
-        for (std::map<ColorPoint,IndexPartNode*>::const_iterator it = 
-              valid_copy.begin(); it != valid_copy.end(); it++)
-        {
-          it->second->send_node(target, false/*up*/, true/*down*/);
-        }
-        // If we sent all our children, then we can record it
-        AutoLock n_lock(node_lock);
-        child_creation.add(target);
       }
     }
 
@@ -6617,27 +5028,16 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      Domain domain;
-      derez.deserialize(domain);
-      ApEvent ready_event;
-      derez.deserialize(ready_event);
-      IndexSpaceKind kind;
-      derez.deserialize(kind);
-      AllocateMode mode;
-      derez.deserialize(mode);
       IndexPartition parent;
       derez.deserialize(parent);
-      ColorPoint color;
+      LegionColor color;
       derez.deserialize(color);
-      size_t components;
-      derez.deserialize(components);
-      std::set<Domain> component_domains;
-      for (unsigned idx = 0; idx < components; idx++)
-      {
-        Domain component;
-        derez.deserialize(component);
-        component_domains.insert(component);
-      }
+      ApEvent ready_event;
+      derez.deserialize(ready_event);
+      size_t index_space_size;
+      derez.deserialize(index_space_size);
+      const void *index_space_ptr = derez.get_current_pointer();
+
       IndexPartNode *parent_node = NULL;
       if (parent != IndexPartition::NO_PART)
       {
@@ -6647,15 +5047,14 @@ namespace Legion {
 #endif
       }
       IndexSpaceNode *node = 
-                  context->create_node(handle, domain, ready_event, 
-                                       parent_node, color,
-                                       kind, mode);
+                  context->create_node(handle, index_space_ptr,
+                                       parent_node, color, ready_event);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
+      // Advance the pointer
+      derez.advance_pointer(index_space_size);
       node->add_creation_source(source);
-      if (components > 0)
-        node->update_component_domains(component_domains);
       size_t num_semantic;
       derez.deserialize(num_semantic);
       for (unsigned idx = 0; idx < num_semantic; idx++)
@@ -6683,7 +5082,7 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexSpaceNode *target = forest->get_node(handle);
-      target->send_node(source, true/*up*/, false/*down*/);
+      target->send_node(source, true/*up*/);
       // Then send back the flush
       Serializer rez;
       rez.serialize(to_trigger);
@@ -6707,7 +5106,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      ColorPoint child_color;
+      LegionColor child_color;
       derez.deserialize(child_color);
       IndexPartNode *target;
       derez.deserialize(target);
@@ -6745,93 +5144,33 @@ namespace Legion {
     IndexSpaceAllocator* IndexSpaceNode::get_allocator(void)
     //--------------------------------------------------------------------------
     {
-      if (kind != UNSTRUCTURED_KIND)
+      bool valid_request = true;
+      if (allocator == NULL)
       {
-        log_run.error("Illegal request for an allocator on a structured "
-                      "index space! Only unstructured index spaces are "
-                      "permitted to have allocators.");
+        AutoLock n_lock(node_lock);
+        if (allocator == NULL)
+          allocator = create_allocator();
+        else
+          valid_request = false;
+      }
+      else
+        valid_request = false;
+      if (!valid_request)
+      {
+        // If we ever get here we've then we've violated our backwards
+        // compatibility support of only providing one allocator ever
+        // for a given index space
+        log_run.error("Illegal duplicate request for an allocator of index "
+                      "tree %d. Allocators are only provided for backwards "
+                      "compatbility and there is only permitted to be for "
+                      "each index space tree throughout the lifetime of the "
+                      "program.", handle.get_tree_id());
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
         exit(ERROR_ILLEGAL_ALLOCATOR_REQUEST);
       }
-      if (allocator == NULL)
-      {
-        AutoLock n_lock(node_lock);
-        if (allocator == NULL)
-        {
-          allocator = (IndexSpaceAllocator*)malloc(sizeof(IndexSpaceAllocator));
-          const Domain &dom = get_domain_blocking();
-          *allocator = dom.get_index_space().create_allocator();
-        }
-      }
       return allocator;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexSpaceNode::log_index_space_domain(IndexSpace handle,
-                                                           const Domain &dom)
-    //--------------------------------------------------------------------------
-    {
-      switch (dom.get_dim())
-      {
-        case 0:
-          {
-            const Realm::ElementMask &mask = 
-              dom.get_index_space().get_valid_mask();
-            Realm::ElementMask::Enumerator *enumerator = 
-              mask.enumerate_enabled();
-            coord_t next;
-            size_t length;
-            bool empty = true;
-            while (enumerator->get_next(next, length))
-            {
-              long long int begin = next;
-              if (length > 1)
-              {
-                // inclusive so need -1
-                coord_t end = next + length - 1;
-                LegionSpy::log_index_space_rect<1>(handle.id, &begin, &end);
-              }
-              else
-                LegionSpy::log_index_space_point<1>(handle.id, &begin);
-              empty = false;
-            }
-            delete enumerator;
-            if (empty)
-              LegionSpy::log_empty_index_space(handle.id);
-            break;
-          }
-        case 1:
-          {
-            LegionRuntime::Arrays::Rect<1> rect = dom.get_rect<1>();
-            if (rect.volume() > 0)
-              LegionSpy::log_index_space_rect<1>(handle.id,rect.lo.x,rect.hi.x);
-            else
-              LegionSpy::log_empty_index_space(handle.id);
-            break;
-          }
-        case 2:
-          {
-            LegionRuntime::Arrays::Rect<2> rect = dom.get_rect<2>();
-            if (rect.volume() > 0)
-              LegionSpy::log_index_space_rect<2>(handle.id,rect.lo.x,rect.hi.x);
-            else
-              LegionSpy::log_empty_index_space(handle.id);
-            break;
-          }
-        case 3:
-          {
-            LegionRuntime::Arrays::Rect<3> rect = dom.get_rect<3>();
-            if (rect.volume() > 0)
-              LegionSpy::log_index_space_rect<3>(handle.id,rect.lo.x,rect.hi.x);
-            else
-              LegionSpy::log_empty_index_space(handle.id);
-            break;
-          }
-        default:
-          assert(false);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -6842,21 +5181,21 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      std::set<ColorPoint> *target;
+      std::vector<LegionColor> *target;
       derez.deserialize(target);
       RtUserEvent ready;
       derez.deserialize(ready);
       IndexSpaceNode *node = context->get_node(handle);
-      std::set<ColorPoint> results;
+      std::vector<LegionColor> results;
       node->get_colors(results);
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(target);
         rez.serialize<size_t>(results.size());
-        for (std::set<ColorPoint>::const_iterator it = results.begin();
+        for (std::vector<LegionColor>::const_iterator it = results.begin();
               it != results.end(); it++)
-          it->serialize(rez);
+          rez.serialize(*it);
         rez.serialize(ready);
       }
       context->runtime->send_index_space_colors_response(source, rez);
@@ -6867,15 +5206,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      std::set<ColorPoint> *target;
+      std::vector<LegionColor> *target;
       derez.deserialize(target);
       size_t num_colors;
       derez.deserialize(num_colors);
       for (unsigned idx = 0; idx < num_colors; idx++)
       {
-        ColorPoint cp;
-        cp.deserialize(derez);
-        target->insert(cp);
+        LegionColor cp;
+        derez.deserialize(cp);
+        target->push_back(cp);
       }
       RtUserEvent ready;
       derez.deserialize(ready);
@@ -6887,34 +5226,35 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndexPartNode::IndexPartNode(IndexPartition p, IndexSpaceNode *par,
-                                 ColorPoint c, Domain cspace,
-                                 bool dis, AllocateMode m,
-                                 RegionTreeForest *ctx)
-      : IndexTreeNode(c, par->depth+1, ctx), handle(p), color_space(cspace),
-        mode(m), parent(par), total_children(cspace.get_volume()), 
-        disjoint(dis), disjoint_ready(RtEvent::NO_RT_EVENT), has_complete(false)
+    IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
+                                 IndexSpaceNode *par, IndexSpaceNode *color_sp,
+                                 LegionColor c, bool dis, ApEvent part_ready)
+      : IndexTreeNode(ctx, par->depth+1, c), handle(p), parent(par), 
+        color_space(color_sp), total_children(color_sp->get_volume()), 
+        max_linearized_color(color_sp->get_max_linearized_color()),
+        partition_ready(part_ready), disjoint(dis), has_complete(false)
     //--------------------------------------------------------------------------
     { 
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode::IndexPartNode(IndexPartition p, IndexSpaceNode *par,
-                                 ColorPoint c, Domain cspace,
-                                 RtEvent ready, AllocateMode m,
-                                 RegionTreeForest *ctx)
-      : IndexTreeNode(c, par->depth+1, ctx), handle(p), color_space(cspace),
-        mode(m), parent(par), total_children(cspace.get_volume()), 
-        disjoint(false), disjoint_ready(ready), has_complete(false)
+    IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
+                                 IndexSpaceNode *par, IndexSpaceNode *color_sp,
+                                 LegionColor c, RtEvent dis_ready,
+                                 ApEvent part_ready)
+      : IndexTreeNode(ctx, par->depth+1, c), handle(p), parent(par), 
+        color_space(color_sp), total_children(color_sp->get_volume()),
+        max_linearized_color(color_sp->get_max_linearized_color()),
+        partition_ready(part_ready), disjoint(false), 
+        disjoint_ready(dis_ready), has_complete(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(const IndexPartNode &rhs)
-      : IndexTreeNode(), handle(IndexPartition::NO_PART), 
-        color_space(Domain::NO_DOMAIN), mode(NO_MEMORY), 
-        parent(NULL), total_children(0), disjoint(false), has_complete(false)
+      : IndexTreeNode(), handle(IndexPartition::NO_PART), parent(NULL),
+        color_space(NULL), total_children(0), max_linearized_color(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6934,20 +5274,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* IndexPartNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexPartNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -6993,16 +5319,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t IndexPartNode::get_num_elmts(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      return parent->get_num_elmts();
     }
 
     //--------------------------------------------------------------------------
@@ -7137,7 +5453,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::has_child(const ColorPoint &c)
+    bool IndexPartNode::has_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -7145,91 +5461,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceNode* IndexPartNode::get_child(const ColorPoint &c)
+    IndexSpaceNode* IndexPartNode::get_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       // First check to see if we can find it
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/); 
-        std::map<ColorPoint,IndexSpaceNode*>::const_iterator finder = 
+        std::map<LegionColor,IndexSpaceNode*>::const_iterator finder = 
           color_map.find(c);
         if (finder != color_map.end())
           return finder->second;
       }
-#ifdef DEBUG_LEGION
-      if (!color_space.contains(c.get_point()))
+      if (!color_space->contains_color(c, true/*report error*/))
       {
-        switch (c.get_dim())
-        {
-          case 0:
-            {
-              log_index.error("Invalid request for color %d in "
-                              "index partition %x.", c.get_index(), handle.id);
-              break;
-            }
-          case 1:
-            {
-              log_index.error("Invalid request for color %d in "
-                              "index partition %x.", c[0], handle.id);
-              break;
-            }
-          case 2:
-            {
-              log_index.error("Invalid request for color (%d,%d) in "
-                              "index partition %x.", c[0], c[1], handle.id);
-              break;
-            }
-          case 3:
-            {
-              log_index.error("Invalid request for color (%d,%d,%d) in "
-                              "index partition %x.", 
-                              c[0], c[1], c[2], handle.id);
-              break;
-            }
-          default:
-            assert(false);
-        }
+#ifdef DEBUG_LEGION
         assert(false);
+#endif
         exit(ERROR_INVALID_INDEX_SPACE_COLOR);
       }
-#endif
       AddressSpaceID owner_space = get_owner_space();
       AddressSpaceID local_space = context->runtime->address_space;
       // If we own the index partition, create a new subspace here
       if (owner_space == local_space)
       {
         IndexSpace is(context->runtime->get_unique_index_space_id(),
-                      handle.get_tree_id());
-
+                      handle.get_tree_id(), handle.get_type_tag());
+        // Make a new index space node ready when the partition is ready
+        IndexSpaceNode *result = context->create_node(is, NULL/*realm is*/, 
+                                                  this, c, partition_ready); 
         if (Runtime::legion_spy_enabled)
         {
-          LegionSpy::log_index_subspace(handle.id, is.id, c.get_point());
+          LegionSpy::log_index_subspace(handle.id, is.id, 
+                        result->get_domain_point_color());
           LegionSpy::log_empty_index_space(is.id);
         }
-
-        if (parent->kind == UNSTRUCTURED_KIND)
-        {
-          // Make a new sub-index space first based on the 
-          // parent. Determine if it is allocable based on the
-          // properties of this partition object.
-          const Domain &parent_dom = parent->get_domain_no_wait();
-          Realm::IndexSpace parent_space = parent_dom.get_index_space();
-          Realm::ElementMask new_mask(get_num_elmts());
-          Realm::IndexSpace new_space =  
-            Realm::IndexSpace::create_index_space(parent_space, new_mask,
-                                                     (mode & ALLOCABLE));
-          IndexSpaceNode *result = context->create_node(is, Domain(new_space),
-              this, c, UNSTRUCTURED_KIND, mode);
-          return result;
-        }
-        else
-        {
-          // Easy case just make an empty domain and use that
-          Domain empty = Domain::NO_DOMAIN;
-          IndexSpaceNode *result = context->create_node(is, empty,
-              this, c, DENSE_ARRAY_KIND, parent->mode);
-          return result;
-        }
+        return result; 
       }
       // Otherwise, request a child node from the owner node
       else
@@ -7264,34 +5530,20 @@ namespace Legion {
       assert(color_map.find(child->color) == color_map.end());
 #endif
       color_map[child->color] = child;
-      valid_map[child->color] = child;
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::remove_child(const ColorPoint &c)
+    void IndexPartNode::remove_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
-      valid_map.erase(c);
-      // Mark that any completeness computations we've done are no longer valid
-      has_complete = false;
+      // Do nothing for the moment
     }
 
     //--------------------------------------------------------------------------
     size_t IndexPartNode::get_num_children(void) const
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      return valid_map.size();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::get_children(
-                                 std::map<ColorPoint,IndexSpaceNode*> &children)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      children = color_map;
+      return color_space->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -7302,31 +5554,45 @@ namespace Legion {
       assert(disjoint_ready.exists() && !disjoint_ready.has_triggered());
       assert(ready_event == disjoint_ready);
 #endif
-      // Make a copy of our color map 
-      std::set<ColorPoint> current_colors;
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
-              color_map.begin(); it != color_map.end(); it++)
-          current_colors.insert(it->first);
-      }
       // Now do the pairwise disjointness tests
       disjoint = true;
-      for (std::set<ColorPoint>::const_iterator it1 = current_colors.begin();
-            disjoint && (it1 != current_colors.end()); it1++)
+      if (total_children == max_linearized_color)
       {
-        for (std::set<ColorPoint>::const_iterator it2 = it1;
-              disjoint && (it2 != current_colors.end()); it2++)
+        for (LegionColor c1 = 0; disjoint && 
+              (c1 < max_linearized_color); c1++)
         {
-          if ((*it1) == (*it2))
+          for (LegionColor c2 = c1 + 1; disjoint && 
+                (c2 < max_linearized_color); c2++)
+          {
+            if (!are_disjoint(c1, c2, true/*force compute*/))
+              disjoint = false;
+          }
+        }
+      }
+      else
+      {
+        for (LegionColor c1 = 0; disjoint && 
+              (c1 < max_linearized_color); c1++)
+        {
+          if (!color_space->contains_color(c1))
             continue;
-          if (!are_disjoint(*it1, *it2, true/*force compute*/))
-            disjoint = false;
+          for (LegionColor c2 = c1 + 1; disjoint &&
+                (c2 < max_linearized_color); c2++)
+          {
+            if (!color_space->contains_color(c2))
+              continue;
+            if (!are_disjoint(c1, c2, true/*force compute*/))
+              disjoint = false;
+          }
         }
       }
       // Once we get here, we know the disjointness result so we can
       // trigger the event saying when the disjointness value is ready
       Runtime::trigger_event(ready_event);
+      // Record the result for Legion Spy
+      if (Runtime::legion_spy_enabled)
+          LegionSpy::log_index_partition(parent->handle.id, handle.id, 
+                                         disjoint, color);
     }
 
     //--------------------------------------------------------------------------
@@ -7339,7 +5605,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::are_disjoint(const ColorPoint &c1, const ColorPoint &c2,
+    bool IndexPartNode::are_disjoint(const LegionColor c1, const LegionColor c2,
                                      bool force_compute)
     //--------------------------------------------------------------------------
     {
@@ -7348,7 +5614,7 @@ namespace Legion {
       if (!force_compute && is_disjoint(false/*appy query*/))
         return true;
       bool issue_dynamic_test = false;
-      std::pair<ColorPoint,ColorPoint> key(c1,c2);
+      std::pair<LegionColor,LegionColor> key(c1,c2);
       RtEvent ready_event;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -7358,7 +5624,7 @@ namespace Legion {
           return false;
         else
         {
-          std::map<std::pair<ColorPoint,ColorPoint>,RtEvent>::const_iterator
+          std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
             finder = pending_tests.find(key);
           if (finder != pending_tests.end())
             ready_event = finder->second;
@@ -7369,7 +5635,8 @@ namespace Legion {
             else
             {
               aliased_subspaces.insert(key);
-              aliased_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+              aliased_subspaces.insert(
+                  std::pair<LegionColor,LegionColor>(c2,c1));
               return false;
             }
           }
@@ -7379,11 +5646,11 @@ namespace Legion {
       {
         IndexSpaceNode *left = get_child(c1);
         IndexSpaceNode *right = get_child(c2);
-        ApEvent left_pre = left->get_domain_precondition();
-        ApEvent right_pre = right->get_domain_precondition();
+        ApEvent left_pre = left->index_space_ready;
+        ApEvent right_pre = right->index_space_ready;
         AutoLock n_lock(node_lock);
         // Test again to see if we lost the race
-        std::map<std::pair<ColorPoint,ColorPoint>,RtEvent>::const_iterator
+        std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
           finder = pending_tests.find(key);
         if (finder == pending_tests.end())
         {
@@ -7395,7 +5662,7 @@ namespace Legion {
           ready_event = context->runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_PRIORITY, NULL, Runtime::protect_event(pre));
           pending_tests[key] = ready_event;
-          pending_tests[std::pair<ColorPoint,ColorPoint>(c2,c1)] = ready_event;
+          pending_tests[std::pair<LegionColor,LegionColor>(c2,c1)] =ready_event;
         }
         else
           ready_event = finder->second;
@@ -7410,7 +5677,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexPartNode::record_disjointness(bool result,
-                                     const ColorPoint &c1, const ColorPoint &c2)
+                                     const LegionColor c1, const LegionColor c2)
     //--------------------------------------------------------------------------
     {
       if (c1 == c2)
@@ -7422,20 +5689,20 @@ namespace Legion {
 #endif
       if (result)
       {
-        disjoint_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
-        disjoint_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+        disjoint_subspaces.insert(std::pair<LegionColor,LegionColor>(c1,c2));
+        disjoint_subspaces.insert(std::pair<LegionColor,LegionColor>(c2,c1));
       }
       else
       {
-        aliased_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c1,c2));
-        aliased_subspaces.insert(std::pair<ColorPoint,ColorPoint>(c2,c1));
+        aliased_subspaces.insert(std::pair<LegionColor,LegionColor>(c1,c2));
+        aliased_subspaces.insert(std::pair<LegionColor,LegionColor>(c2,c1));
       }
-      pending_tests.erase(std::pair<ColorPoint,ColorPoint>(c1,c2));
-      pending_tests.erase(std::pair<ColorPoint,ColorPoint>(c2,c1));
+      pending_tests.erase(std::pair<LegionColor,LegionColor>(c1,c2));
+      pending_tests.erase(std::pair<LegionColor,LegionColor>(c2,c1));
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::is_complete(void)
+    bool IndexPartNode::is_complete(bool from_app/*=false*/)
     //--------------------------------------------------------------------------
     {
       // If we've cached the value then we are good to go
@@ -7444,75 +5711,53 @@ namespace Legion {
         if (has_complete)
           return complete;
       }
-      // Otherwise compute it 
-      std::set<Domain> parent_domains, child_domains;
-      bool can_cache = false;
-      if (parent->has_component_domains())
-        parent_domains = parent->get_component_domains_blocking();
-      else
-      {
-        const Domain &dom = parent->get_domain_blocking();
-        parent_domains.insert(dom);
-        // We can cache the result if we know the domains
-        // has dimension greater than zero indicating we have
-        // a structured index space
-        can_cache = (dom.get_dim() > 0);
-      }
-      for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); it++)
-      {
-        if (it->second->has_component_domains())
-        {
-          const std::set<Domain> &child_doms = 
-                            it->second->get_component_domains_blocking();
-          child_domains.insert(child_doms.begin(), child_doms.end());
-        }
-        else
-          child_domains.insert(it->second->get_domain_blocking());
-      }
       bool result = false;
-      if (is_disjoint())
+      // Otherwise compute it 
+      if (is_disjoint(from_app))
       {
 	// if the partition is disjoint, we can determine completeness by
 	//  seeing if the total volume of the child domains matches the volume
 	//  of the parent domains
-	size_t parent_volume = 0;
-	for (std::set<Domain>::const_iterator it = parent_domains.begin();
-	     it != parent_domains.end();
-	     ++it)
-	  parent_volume += it->get_volume();
+	const size_t parent_volume = parent->get_volume();
 	size_t child_volume = 0;
-	for (std::set<Domain>::const_iterator it = child_domains.begin();
-	     it != child_domains.end();
-	     ++it)
-	  child_volume += it->get_volume();
+        if (total_children == max_linearized_color)
+        {
+          for (LegionColor c = 0; c < max_linearized_color; c++)
+          {
+            IndexSpaceNode *child = get_child(c);
+            child_volume += child->get_volume();
+          }
+        }
+        else
+        {
+          for (LegionColor c = 0; c < max_linearized_color; c++)
+          {
+            if (!color_space->contains_color(c))
+              continue;
+            IndexSpaceNode *child = get_child(c);
+            child_volume += child->get_volume();
+          }
+        }
 	result = (child_volume == parent_volume);
       } 
       else 
       {
 	// if not disjoint, we have to do a considerably-more-expensive test
 	//  that handles overlap (i.e. double-counting) in the child domains
-	result = compute_dominates(child_domains, parent_domains);
+	result = compute_complete();
       }
-      if (can_cache)
-      {
-        AutoLock n_lock(node_lock);
-        complete = result;
-        has_complete = true;
-      }
-      return result;
+      // Save the result for the future
+      AutoLock n_lock(node_lock);
+      complete = result;
+      has_complete = true;
+      return complete;
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::get_colors(std::set<ColorPoint> &colors)
+    void IndexPartNode::get_colors(std::vector<LegionColor> &colors)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
-            valid_map.begin(); it != valid_map.end(); it++)
-      {
-        colors.insert(it->first);
-      }
+      color_space->instantiate_colors(colors);
     }
 
     //--------------------------------------------------------------------------
@@ -7556,37 +5801,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::destroy_node(AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // If we've already been destroyed then we are done
-      if (destroyed)
-        return;
-      std::set<PartitionNode*> to_destroy;
-      {
-        AutoLock n_lock(node_lock);
-        if (!destroyed)
-        {
-          destroyed = true;
-          if (!creation_set.empty())
-          {
-            DestructionFunctor functor(handle, context->runtime);
-            creation_set.map(functor);
-          }
-          to_destroy = logical_nodes;
-          
-        }
-      }
-      for (std::set<PartitionNode*>::const_iterator it = 
-            to_destroy.begin(); it != to_destroy.end(); it++)
-      {
-        (*it)->destroy_node(source);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::add_pending_child(const ColorPoint &child_color,
-                                          ApUserEvent handle_ready, 
+    void IndexPartNode::add_pending_child(const LegionColor child_color,
                                           ApUserEvent domain_ready)
     //--------------------------------------------------------------------------
     {
@@ -7596,8 +5811,7 @@ namespace Legion {
         // Duplicate insertions can happen legally so avoid them
         if (pending_children.find(child_color) == pending_children.end())
         {
-          pending_children[child_color] = 
-            std::pair<ApUserEvent,ApUserEvent>(handle_ready, domain_ready);
+          pending_children[child_color] = domain_ready;
           launch_remove = true;
         }
       }
@@ -7608,30 +5822,28 @@ namespace Legion {
         args.pending_child = child_color;
         // Don't remove the pending child until the handle is ready
         context->runtime->issue_runtime_meta_task(args,LG_LATENCY_PRIORITY,NULL,
-                                          Runtime::protect_event(handle_ready));
+                                          Runtime::protect_event(domain_ready));
       }
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::get_pending_child(const ColorPoint &child_color,
-                                          ApUserEvent &handle_ready,
+    bool IndexPartNode::get_pending_child(const LegionColor child_color,
                                           ApUserEvent &domain_ready)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock, 1, false/*exclusive*/);
-      std::map<ColorPoint,std::pair<ApUserEvent,ApUserEvent> >::const_iterator
-        finder = pending_children.find(child_color);
+      std::map<LegionColor,ApUserEvent>::const_iterator finder = 
+        pending_children.find(child_color);
       if (finder != pending_children.end())
       {
-        handle_ready = finder->second.first;
-        domain_ready = finder->second.second;
+        domain_ready = finder->second;
         return true;
       }
       return false;
     }
     
     //--------------------------------------------------------------------------
-    void IndexPartNode::remove_pending_child(const ColorPoint &child_color)
+    void IndexPartNode::remove_pending_child(const LegionColor child_color)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
@@ -7647,516 +5859,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_equal_children(size_t granularity)
+    ApEvent IndexPartNode::create_equal_children(Operation *op,
+                                                 size_t granularity)
     //--------------------------------------------------------------------------
     {
-      if (parent->kind == UNSTRUCTURED_KIND)
-      {
-        size_t num_subspaces = color_space.get_volume();
-        std::vector<Realm::IndexSpace> subspaces(num_subspaces);
-        ApEvent precondition;
-        const Domain &parent_dom = parent->get_domain(precondition);
-        // Launch the operation down to the low-level runtime
-        ApEvent ready_event(
-          parent_dom.get_index_space().create_equal_subspaces(num_subspaces,
-                                                            granularity,
-                                                            subspaces,
-                                                            (mode & ALLOCABLE),
-                                                            precondition));
-        // Fill in all the subspaces
-        unsigned idx = 0;
-        for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
-        {
-          ColorPoint is_color(itr.p);
-          IndexSpaceNode *child_node = get_child(is_color);
-#ifdef DEBUG_LEGION
-          assert(subspaces[idx].exists());
-#endif
-          child_node->set_domain(Domain(subspaces[idx]));
-        }
-        return ready_event;
-      }
-      else
-      {
-        // TODO: Implement structured kinds
-        assert(false);
-        return ApEvent::NO_AP_EVENT;
-      }
+      return parent->create_equal_children(op, this, granularity); 
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_weighted_children(
-                   const std::map<DomainPoint,int> &weights, size_t granularity)
+    ApEvent IndexPartNode::create_by_union(Operation *op, 
+                                           IndexPartNode *left, 
+                                           IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      if (parent->kind == UNSTRUCTURED_KIND)
-      {
-        size_t num_subspaces = weights.size();
-        std::vector<int> local_weights(num_subspaces);
-        unsigned idx = 0;
-        for (std::map<DomainPoint,int>::const_iterator it = weights.begin();
-              it != weights.end(); it++, idx++)
-        {
-          local_weights[idx] = it->second;
-        }
-        std::vector<Realm::IndexSpace> subspaces(num_subspaces);
-        ApEvent precondition;
-        const Domain &parent_dom = parent->get_domain(precondition);
-        // Launch the operation down to the low-level runtime
-        ApEvent ready_event(
-          parent_dom.get_index_space().create_weighted_subspaces(num_subspaces,
-                                                             granularity,
-                                                             local_weights,
-                                                             subspaces,
-                                                             (mode & ALLOCABLE),
-                                                             precondition));
-        // Now create each of the sub-spaces
-        idx = 0; 
-        for (std::map<DomainPoint,int>::const_iterator it = weights.begin();
-              it != weights.end(); it++, idx++)
-        {
-          ColorPoint is_color(it->first);
-          IndexSpaceNode *child_node = get_child(is_color);
-#ifdef DEBUG_LEGION
-          assert(subspaces[idx].exists());
-#endif
-          child_node->set_domain(Domain(subspaces[idx]));
-        }
-        return ready_event;
-      }
-      else
-      {
-        // TODO: Implement structured kinds
-        assert(false);
-        return ApEvent::NO_AP_EVENT;
-      }
+      return parent->create_by_union(op, this, left, right); 
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_by_operation(IndexPartNode *left, 
-                                               IndexPartNode *right,
-                                      Realm::IndexSpace::IndexSpaceOperation op)
+    ApEvent IndexPartNode::create_by_intersection(Operation *op,
+                                                  IndexPartNode *left,
+                                                  IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      if (parent->kind == UNSTRUCTURED_KIND)
-      {
-        size_t num_subspaces = color_space.get_volume();  
-        std::vector<Realm::IndexSpace::BinaryOpDescriptor> 
-                                                    operations(num_subspaces);
-        std::set<ApEvent> preconditions;
-        ApEvent parent_pre;
-        const Domain parent_dom = parent->get_domain(parent_pre); 
-        if (parent_pre.exists())
-          preconditions.insert(parent_pre);
-        unsigned idx = 0;
-        for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
-        {
-          ColorPoint child_color(itr.p);
-          IndexSpaceNode *left_child = left->get_child(child_color);
-          IndexSpaceNode *right_child = right->get_child(child_color);
-          ApEvent left_pre, right_pre;
-          const Domain &left_dom = left_child->get_domain(left_pre);
-          if (left_pre.exists())
-            preconditions.insert(left_pre);
-          const Domain &right_dom = right_child->get_domain(right_pre);
-          if (right_pre.exists())
-            preconditions.insert(right_pre);
-          operations[idx].op = op;
-          operations[idx].parent = parent_dom.get_index_space();
-          operations[idx].left_operand = left_dom.get_index_space();
-          operations[idx].right_operand = right_dom.get_index_space();
-        }
-        // Merge all the preconditions and issue to the low-level runtime
-        ApEvent precondition = Runtime::merge_events(preconditions);
-        ApEvent result(Realm::IndexSpace::compute_index_spaces(operations,
-                                                            (mode & ALLOCABLE),
-                                                            precondition));
-#ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(precondition, result);
-#endif
-        // Now set the domains for all the nodes
-        idx = 0;
-        for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
-        {
-          ColorPoint is_color(itr.p);
-#ifdef DEBUG_LEGION
-          assert(operations[idx].result.exists());
-#endif
-          IndexSpaceNode *child_node = get_child(is_color);
-          child_node->set_domain(Domain(operations[idx].result));
-        }
-        return result;
-      }
-      else
-      {
-        // TODO: implement structured kinds
-        assert(false);
-        return ApEvent::NO_AP_EVENT;
-      }
+      return parent->create_by_intersection(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexPartNode::create_by_operation(IndexSpaceNode *left,
-                                               IndexPartNode *right,
-                                      Realm::IndexSpace::IndexSpaceOperation op)
+    ApEvent IndexPartNode::create_by_difference(Operation *op,
+                                                IndexPartNode *left,
+                                                IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      if (parent->kind == UNSTRUCTURED_KIND)
-      {
-        size_t num_subspaces = color_space.get_volume();  
-        std::vector<Realm::IndexSpace::BinaryOpDescriptor> 
-                                                    operations(num_subspaces);
-        std::set<ApEvent> preconditions;
-        ApEvent parent_pre;
-        const Domain parent_dom = parent->get_domain(parent_pre); 
-        if (parent_pre.exists())
-          preconditions.insert(parent_pre);
-        ApEvent left_pre;
-        const Domain left_dom = left->get_domain(left_pre);
-        if (left_pre.exists())
-          preconditions.insert(left_pre);
-        unsigned idx = 0;
-        for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
-        {
-          ColorPoint child_color(itr.p);
-          IndexSpaceNode *child = right->get_child(child_color);
-          ApEvent child_pre;
-          const Domain child_dom = child->get_domain(child_pre);
-          if (child_pre.exists())
-            preconditions.insert(child_pre);
-          operations[idx].op = op;
-          operations[idx].parent = parent_dom.get_index_space();
-          operations[idx].left_operand = left_dom.get_index_space();
-          operations[idx].right_operand = child_dom.get_index_space();
-        }
-        // Merge all the preconditions and issue to the low-level runimte
-        ApEvent precondition = Runtime::merge_events(preconditions);
-        ApEvent result(Realm::IndexSpace::compute_index_spaces(operations,
-                                                            (mode & ALLOCABLE),
-                                                            precondition));
-#ifdef LEGION_SPY
-        LegionSpy::log_event_dependence(precondition, result);
-#endif
-        // Now set the domains for the nodes
-        idx = 0;
-        for (Domain::DomainPointIterator itr(color_space); itr; itr++, idx++)
-        {
-          ColorPoint is_color(itr.p);
-#ifdef DEBUG_LEGION
-          assert(operations[idx].result.exists());
-#endif
-          IndexSpaceNode *child = get_child(is_color);
-          child->set_domain(Domain(operations[idx].result));
-        }
-        return result;
-      }
-      else
-      {
-        // TODO: implement structured kinds
-        assert(false);
-        return ApEvent::NO_AP_EVENT;
-      }
+      return parent->create_by_difference(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::get_subspace_domain_preconditions(
-                                               std::set<ApEvent> &preconditions)
+    ApEvent IndexPartNode::create_by_restriction(const void *transform,
+                                                 const void *extent)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock, 1, false/*exclusive*/);
-      for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); it++)
-      {
-        preconditions.insert(it->second->get_domain_precondition());
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::get_subspace_domains(std::set<Domain> &subspaces)
-    //--------------------------------------------------------------------------
-    {
-      // If we are a remote copy of this partition, we need to actually
-      // get all the sub-region domains if we don't already have them
-      RtEvent wait_on;
-      {
-        AutoLock n_lock(node_lock, 1, false/*exclusive*/);
-        if (color_map.size() == total_children)
-        {
-          for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
-                color_map.begin(); it != color_map.end(); it++)
-          {
-            if (it->second->has_component_domains())
-            {
-              const std::set<Domain> &components = 
-                                  it->second->get_component_domains_blocking();
-              subspaces.insert(components.begin(), components.end());
-            }
-            else
-              subspaces.insert(it->second->get_domain_blocking());
-          }
-          return;
-        }
-        // Otherwise we fall through and request all the subregions
-        wait_on = all_children_request;
-      }
-      // See if we have to send the request ourself
-      RtUserEvent request_event;
-      std::vector<ColorPoint> needed_points;
-      if (!wait_on.exists())
-      {
-        AutoLock n_lock(node_lock);
-        // See if we lost the race
-        if (!all_children_request.exists())
-        {
-          request_event = Runtime::create_rt_user_event();
-          all_children_request = request_event;
-          // Figure out which points we need
-          for (Domain::DomainPointIterator itr(color_space); 
-                itr; itr++)
-          {
-            ColorPoint p(itr.p);
-            if (color_map.find(p) == color_map.end())
-              needed_points.push_back(p);
-          }
-#ifdef DEBUG_LEGION
-          assert(!needed_points.empty());
-#endif
-        }
-        wait_on = all_children_request;
-      }
-      // Send the request if necessary
-      if (request_event.exists())
-      {
-        AddressSpaceID target = get_owner_space(); 
-#ifdef DEBUG_LEGION
-        assert(target != context->runtime->address_space);
-#endif
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize(request_event);
-          rez.serialize<size_t>(needed_points.size());
-          for (std::vector<ColorPoint>::const_iterator it = 
-                needed_points.begin(); it != needed_points.end(); it++)
-            rez.serialize(*it);
-        }
-        context->runtime->send_index_partition_children_request(target, rez);
-      }
-      // Wait for all the children, then recurse 
-      wait_on.wait();
-      // Now we can call this and know that all the children are there
-      get_subspace_domains(subspaces);
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::intersects_with(IndexSpaceNode *other, bool compute)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder != intersections.end()) &&
-            (!compute || finder->second.intersections_valid))
-          return finder->second.has_intersects;
-      }
-      std::set<Domain> local_domains, intersect;
-      bool result;
-      get_subspace_domains(local_domains);
-      if (other->has_component_domains())
-      {
-        result = compute_intersections(local_domains, 
-                   other->get_component_domains_blocking(), intersect, compute);
-      }
-      else
-      {
-        result = compute_intersections(local_domains, 
-                                       other->get_domain_blocking(), 
-                                       intersect, compute);
-      }
-      AutoLock n_lock(node_lock);
-      if (result)
-      {
-        // Check to make sure we didn't lose the race
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder == intersections.end()) ||
-            (compute && !finder->second.intersections_valid))
-        {
-          if (compute)
-            intersections[other] = IntersectInfo(intersect);
-          else
-            intersections[other] = IntersectInfo(true/*result*/);
-        }
-      }
-      else
-        intersections[other] = IntersectInfo(false/*result*/);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::intersects_with(IndexPartNode *other, bool compute)
-    //--------------------------------------------------------------------------
-    {
-      if (other == this)
-        return true;
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        // Only return the value if we know we are valid and we didn't
-        // want to compute anything or we already did compute it
-        if ((finder != intersections.end()) &&
-            (!compute || finder->second.intersections_valid))
-          return finder->second.has_intersects;
-      }
-      std::set<Domain> local_domains, other_domains, intersect;
-      get_subspace_domains(local_domains);
-      other->get_subspace_domains(other_domains);
-      bool result = compute_intersections(local_domains, other_domains, 
-                                          intersect, compute);
-      AutoLock n_lock(node_lock);
-      if (result)
-      {
-        // Check to make sure we didn't lose the race
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder == intersections.end()) ||
-            (compute && !finder->second.intersections_valid))
-        {
-          if (compute)
-            intersections[other] = IntersectInfo(intersect);
-          else
-            intersections[other] = IntersectInfo(false/*result*/);
-        }
-      }
-      else
-        intersections[other] = IntersectInfo(false/*result*/);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& IndexPartNode::get_intersection_domains(
-                                                          IndexSpaceNode *other)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder != intersections.end()) &&
-            finder->second.intersections_valid)
-          return finder->second.intersections;
-      }
-      std::set<Domain> local_domains, intersect;
-      bool result;
-      get_subspace_domains(local_domains);
-      if (other->has_component_domains())
-      {
-        result = compute_intersections(local_domains, 
-           other->get_component_domains_blocking(), intersect, true/*compute*/);
-      }
-      else
-      {
-        result = compute_intersections(local_domains, 
-                                       other->get_domain_blocking(), 
-                                       intersect, true/*compute*/);
-      }
-      AutoLock n_lock(node_lock);
-      if (result)
-      {
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder == intersections.end()) ||
-            !finder->second.intersections_valid)
-          intersections[other] = IntersectInfo(intersect);
-      }
-      else
-        intersections[other] = IntersectInfo(false/*false*/);
-      return intersections[other].intersections;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::set<Domain>& IndexPartNode::get_intersection_domains(
-                                                           IndexPartNode *other)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder != intersections.end()) &&
-            finder->second.intersections_valid)
-          return finder->second.intersections;
-      }
-      std::set<Domain> local_domains, other_domains, intersect;
-      get_subspace_domains(local_domains);
-      other->get_subspace_domains(other_domains);
-      bool result = compute_intersections(local_domains, other_domains, 
-                                          intersect, true/*compute*/);
-      AutoLock n_lock(node_lock);
-      if (result)
-      {
-        std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder = 
-          intersections.find(other);
-        if ((finder == intersections.end()) ||
-            !finder->second.intersections_valid)
-          intersections[other] = IntersectInfo(intersect);
-      }
-      else
-        intersections[other] = IntersectInfo(false/*result*/);
-      return intersections[other].intersections;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::dominates(IndexSpaceNode *other)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,bool>::const_iterator finder = 
-          dominators.find(other);
-        if (finder != dominators.end())
-          return finder->second;
-      }
-      std::set<Domain> local;
-      get_subspace_domains(local);
-      bool result;
-      if (other->has_component_domains())
-        result = compute_dominates(local, 
-                  other->get_component_domains_blocking()); 
-      else
-      {
-        std::set<Domain> other_doms;
-        other_doms.insert(other->get_domain_blocking());
-        result = compute_dominates(local, other_doms);
-      }
-      AutoLock n_lock(node_lock);
-      dominators[other] = result;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::dominates(IndexPartNode *other)
-    //--------------------------------------------------------------------------
-    {
-      if (other == this)
-        return true;
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<IndexTreeNode*,bool>::const_iterator finder = 
-          dominators.find(other);
-        if (finder != dominators.end())
-          return finder->second;
-      }
-      std::set<Domain> local, other_doms;
-      get_subspace_domains(local);
-      other->get_subspace_domains(other_doms);
-      bool result = compute_dominates(local, other_doms);
-      AutoLock n_lock(node_lock);
-      dominators[other] = result;
-      return result;
+      return color_space->create_by_restriction(this, transform, extent,
+                     NT_TemplateHelper::get_dim(handle.get_type_tag()));
     }
 
     //--------------------------------------------------------------------------
@@ -8164,20 +5907,22 @@ namespace Legion {
              IndexPartNode *parent, IndexSpaceNode *left, IndexSpaceNode *right)
     //--------------------------------------------------------------------------
     {
-      bool disjoint = RegionTreeForest::are_disjoint(left, right);
+      bool disjoint = !left->intersects_with(right);
       parent->record_disjointness(disjoint, left->color, right->color);
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::send_node(AddressSpaceID target, bool up, bool down)
+    void IndexPartNode::send_node(AddressSpaceID target, bool up)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
 #endif
       if (up)
-        parent->send_node(target, true/*up*/, false/*down*/);
-      std::map<ColorPoint,IndexSpaceNode*> valid_copy;
+        parent->send_node(target, true/*up*/);
+      // Always send the color space ahead of this 
+      color_space->send_node(target, false/*up*/);
+      std::map<LegionColor,IndexSpaceNode*> valid_copy;
       {
         // Make sure we know if this is disjoint or not yet
         bool disjoint_result = is_disjoint();
@@ -8188,11 +5933,11 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(handle);
-            rez.serialize(color_space);
-            rez.serialize(mode);
             rez.serialize(parent->handle); 
+            rez.serialize(color_space->handle);
             rez.serialize(color);
             rez.serialize<bool>(disjoint_result);
+            rez.serialize(partition_ready);
             rez.serialize<size_t>(semantic_info.size());
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
@@ -8203,36 +5948,19 @@ namespace Legion {
               rez.serialize(it->second.is_mutable);
             }
             rez.serialize<size_t>(pending_children.size());
-            for (std::map<ColorPoint,std::pair<ApUserEvent,ApUserEvent> >
-                  ::const_iterator it = pending_children.begin();
-                  it != pending_children.end(); it++)
+            for (std::map<LegionColor,ApUserEvent>::const_iterator it = 
+                  pending_children.begin(); it != pending_children.end(); it++)
             {
               rez.serialize(it->first);
-              rez.serialize(it->second.first);
-              rez.serialize(it->second.second);
+              rez.serialize(it->second);
             }
           }
           context->runtime->send_index_partition_node(target, rez);
           creation_set.add(target);
         }
-        // See if we need to go down
-        if (down && child_creation.contains(target))
-          down = false;
         if (destroyed)
           // Send the deletion notification
           context->runtime->send_index_partition_destruction(handle, target);
-        if (down)
-          valid_copy = valid_map;
-      }
-      if (down)
-      {
-        for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
-              valid_copy.begin(); it != valid_copy.end(); it++)
-        {
-          it->second->send_node(target, false/*up*/, true/*down*/);
-        }
-        AutoLock n_lock(node_lock);
-        child_creation.add(target);
       }
     }
 
@@ -8244,22 +5972,24 @@ namespace Legion {
       DerezCheck z(derez);
       IndexPartition handle;
       derez.deserialize(handle);
-      Domain color_space;
-      derez.deserialize(color_space);
-      AllocateMode mode;
-      derez.deserialize(mode);
       IndexSpace parent;
       derez.deserialize(parent);
-      ColorPoint color;
+      IndexSpace color_space;
+      derez.deserialize(color_space);
+      LegionColor color;
       derez.deserialize(color);
       bool disjoint;
       derez.deserialize(disjoint);
+      ApEvent ready_event;
+      derez.deserialize(ready_event);
       IndexSpaceNode *parent_node = context->get_node(parent);
+      IndexSpaceNode *color_space_node = context->get_node(parent);
 #ifdef DEBUG_LEGION
       assert(parent_node != NULL);
+      assert(color_space_node != NULL);
 #endif
-      IndexPartNode *node = context->create_node(handle, parent_node, color,
-                                color_space, disjoint, mode);
+      IndexPartNode *node = context->create_node(handle, parent_node, 
+                      color_space_node, color, disjoint, ready_event);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -8283,13 +6013,11 @@ namespace Legion {
       derez.deserialize(num_pending);
       for (unsigned idx = 0; idx < num_pending; idx++)
       {
-        ColorPoint child_color;
+        LegionColor child_color;
         derez.deserialize(child_color);
-        ApUserEvent handle_ready;
-        derez.deserialize(handle_ready);
-        ApUserEvent domain_ready;
-        derez.deserialize(domain_ready);
-        node->add_pending_child(child_color, handle_ready, domain_ready);
+        ApUserEvent child_ready;
+        derez.deserialize(child_ready);
+        node->add_pending_child(child_color, child_ready);
       }
     } 
 
@@ -8303,7 +6031,7 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle);
-      target->send_node(source, true/*up*/, false/*down*/);
+      target->send_node(source, true/*up*/);
       Serializer rez;
       rez.serialize(to_trigger);
       forest->runtime->send_index_partition_return(source, rez);
@@ -8326,7 +6054,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexPartition handle;
       derez.deserialize(handle);
-      ColorPoint child_color;
+      LegionColor child_color;
       derez.deserialize(child_color);
       IndexSpace *target;
       derez.deserialize(target);
@@ -8370,80 +6098,14 @@ namespace Legion {
       derez.deserialize(pid);
       IndexSpace parent;
       derez.deserialize(parent);
-      ColorPoint part_color;
+      LegionColor part_color;
       derez.deserialize(part_color);
-      Domain color_space;
-      derez.deserialize(color_space);
-      PartitionKind part_kind;
-      derez.deserialize(part_kind);
-      AllocateMode mode;
-      derez.deserialize(mode);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-#ifdef DEBUG_LEGION
-      assert(part_kind != COMPUTE_KIND);
-#endif
       IndexSpaceNode *parent_node = forest->get_node(parent);
-      // We know it is safe to make this node because this message only
-      // comes before the handle has been given back to the application
-      forest->create_node(pid, parent_node, part_color, color_space,
-                          (part_kind == DISJOINT_KIND), mode);
+      parent_node->record_remote_child(pid, part_color);
       // Now we can trigger the done event
       Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexPartNode::handle_node_children_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      IndexPartition handle;
-      derez.deserialize(handle);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      size_t num_points;
-      derez.deserialize(num_points);
-      IndexPartNode *node = forest->get_node(handle);
-      Serializer rez;
-      {
-        RezCheck z2(rez);
-        rez.serialize(done_event);
-        rez.serialize(num_points);
-        for (unsigned idx = 0; idx < num_points; idx++)
-        {
-          ColorPoint child_color;
-          derez.deserialize(child_color);
-          IndexSpaceNode *child = node->get_child(child_color);
-          rez.serialize(child->handle);
-        }
-      }
-      forest->runtime->send_index_partition_children_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexPartNode::handle_node_children_response(
-                                  RegionTreeForest *forest, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      size_t num_points;
-      derez.deserialize(num_points);
-      std::set<RtEvent> ready_events;
-      for (unsigned idx = 0; idx < num_points; idx++)
-      {
-        IndexSpace handle;
-        derez.deserialize(handle);
-        RtEvent ready = forest->request_node(handle);
-        if (ready.exists())
-          ready_events.insert(ready);
-      }
-      if (!ready_events.empty())
-        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
-      else
-        Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -9892,9 +7554,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < field_sizes.size(); idx++)
         only_sizes[idx] = field_sizes[idx].second;
       LayoutConstraintSet constraints;
-      const Domain &dom = node->get_domain_blocking();
       PhysicalInstance inst = 
-        attach_op->create_instance(dom, only_sizes, constraints);
+        attach_op->create_instance(node->row_source, only_sizes, constraints);
       // Pull out the pointer constraint so that we can use it separately
       // and not have it included in the layout constraints
       PointerConstraint pointer_constraint = constraints.pointer_constraint;
@@ -9919,8 +7580,9 @@ namespace Legion {
       InstanceManager *result = legion_new<InstanceManager>(context, did, 
                                          context->runtime->address_space,
                                          context->runtime->address_space,
-                                         memory, inst, dom, false/*own*/,
-                                         node, layout, pointer_constraint,
+                                         memory, inst, node->row_source, 
+                                         false/*own*/, node, layout, 
+                                         pointer_constraint,
                                          true/*register now*/, 
                                          ApEvent::NO_AP_EVENT,
                                          Reservation::create_reservation());
@@ -10524,7 +8186,7 @@ namespace Legion {
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
       FieldMask open_below;
-      ColorPoint next_child;
+      LegionColor next_child;
       if (!arrived)
         next_child = path.get_child(depth);
       // Now check to see if we need to do any close operations
@@ -10877,7 +8539,7 @@ namespace Legion {
                                                 const TraceInfo &trace_info,
                            LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
                                                 bool parent_is_upper_bound,
-                                                const ColorPoint &next_child) 
+                                                const LegionColor next_child) 
     //--------------------------------------------------------------------------
     {
       // These are the fields for which we have to issue an advance op
@@ -10945,7 +8607,7 @@ namespace Legion {
                                               ProjectionInfo &proj_info,
                                               const LogicalUser &user,
                                               const FieldMask &open_mask,
-                                              const ColorPoint &next_child)
+                                              const LegionColor next_child)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10957,7 +8619,7 @@ namespace Legion {
            proj_info.projection_domain, are_all_children_disjoint());
         merge_new_field_state(state, new_state);
       }
-      else if (next_child.is_valid())
+      else if (next_child != INVALID_COLOR)
       {
         FieldState new_state(user, open_mask, next_child);
         merge_new_field_state(state, new_state);
@@ -10975,7 +8637,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
-      const ColorPoint empty_next_child;
+      const LegionColor empty_next_child = INVALID_COLOR;
       perform_advance_analysis(ctx, state, advance_op, advance_user, 
           create_user, empty_next_child, false/*traced*/, false/*root*/);
     }
@@ -10986,7 +8648,7 @@ namespace Legion {
                                                   AdvanceOp *advance_op,
                                                 const LogicalUser &advance_user,
                                                 const LogicalUser &create_user,
-                                                const ColorPoint &next_child,
+                                                const LegionColor next_child,
                                                 const bool already_traced,
                                                 const bool advance_root)
     //--------------------------------------------------------------------------
@@ -11009,14 +8671,14 @@ namespace Legion {
       // we know there is nothing
       if (!already_traced)
       {
-        const bool has_next_child = next_child.is_valid();
+        const bool has_next_child = (next_child != INVALID_COLOR);
         for (LegionList<FieldState>::aligned::const_iterator fit = 
              state.field_states.begin(); fit != state.field_states.end(); fit++)
         {
           const FieldMask overlap = advance_user.field_mask & fit->valid_fields;
           if (!overlap)
             continue;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
                fit->open_children.begin(); it != fit->open_children.end(); it++)
           {
             if (has_next_child && (it->first == next_child))
@@ -11105,7 +8767,7 @@ namespace Legion {
           // Recursively perform any close operations
           FieldMask already_open;
           perform_close_operations(closer, overlap, *it,
-                                   ColorPoint()/*next child*/,
+                                   INVALID_COLOR/*next child*/,
                                    false/*allow next*/,
                                    NULL/*aliased children*/,
                                    false/*upgrade*/,
@@ -11143,7 +8805,7 @@ namespace Legion {
                                               const FieldMask &current_mask,
                                               const FieldMask *aliased_children,
                                               bool record_close_operations,
-                                              const ColorPoint &next_child,
+                                              const LegionColor next_child,
                                               FieldMask &open_below)
     //--------------------------------------------------------------------------
     {
@@ -11174,7 +8836,7 @@ namespace Legion {
       // generate two close operations: a read-only one for the predicate
       // true case, and normal close operation for the predicate false case
       const bool overwriting = IS_WRITE_ONLY(closer.user.usage) && 
-        !next_child.is_valid() && !closer.user.op->is_predicated_op();
+        (next_child == INVALID_COLOR) && !closer.user.op->is_predicated_op();
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
             state.field_states.begin(); it != 
@@ -11195,9 +8857,9 @@ namespace Legion {
               {
                 // Everything is read-only
                 // See if the child that we want is already open
-                if (next_child.is_valid())
+                if (next_child != INVALID_COLOR)
                 {
-                  LegionMap<ColorPoint,FieldMask>::aligned::const_iterator 
+                  LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
                     finder = it->open_children.find(next_child);
                   if (finder != it->open_children.end())
                   {
@@ -11264,7 +8926,7 @@ namespace Legion {
           case OPEN_SINGLE_REDUCE:
             {
               // Check to see if we have a child we want to go down
-              if (next_child.is_valid())
+              if (next_child != INVALID_COLOR)
               {
                 // There are four cases here:
                 //   1. Same reduction, same child -> everything stays the same
@@ -11276,9 +8938,9 @@ namespace Legion {
                 {
                   // Cases 1 and 2
                   bool needs_recompute = false;
-                  std::vector<ColorPoint> to_delete;
+                  std::vector<LegionColor> to_delete;
                   // Go through all the children and see if there is any overlap
-                  for (LegionMap<ColorPoint,FieldMask>::aligned::iterator 
+                  for (LegionMap<LegionColor,FieldMask>::aligned::iterator 
                         cit = it->open_children.begin(); cit !=
                         it->open_children.end(); cit++)
                   {
@@ -11319,10 +8981,10 @@ namespace Legion {
                   if (needs_recompute)
                   {
                     // Remove all the empty children
-                    for (std::vector<ColorPoint>::const_iterator cit = 
+                    for (std::vector<LegionColor>::const_iterator cit = 
                           to_delete.begin(); cit != to_delete.end(); cit++)
                     {
-                      LegionMap<ColorPoint,FieldMask>::aligned::iterator 
+                      LegionMap<LegionColor,FieldMask>::aligned::iterator 
                         finder = it->open_children.find(*cit);
 #ifdef DEBUG_LEGION
                       assert(finder != it->open_children.end());
@@ -11332,7 +8994,7 @@ namespace Legion {
                     }
                     // Then recompute the valid mask for the current state
                     FieldMask new_valid_mask;
-                    for (LegionMap<ColorPoint,FieldMask>::aligned::
+                    for (LegionMap<LegionColor,FieldMask>::aligned::
                           const_iterator cit = it->open_children.begin(); 
                           cit != it->open_children.end(); cit++)
                     {
@@ -11401,9 +9063,9 @@ namespace Legion {
               if (IS_REDUCE(closer.user.usage) &&
                   (closer.user.usage.redop == it->redop))
               {
-                if (next_child.is_valid())
+                if (next_child != INVALID_COLOR)
                 {
-                  LegionMap<ColorPoint,FieldMask>::aligned::const_iterator
+                  LegionMap<LegionColor,FieldMask>::aligned::const_iterator
                     finder = it->open_children.find(next_child);
                   if (finder != it->open_children.end())
                   {
@@ -11443,7 +9105,7 @@ namespace Legion {
               // If we are reading at this level, we can
               // leave it open otherwise we need a read-only close
               if (!IS_READ_ONLY(closer.user.usage) ||
-                  next_child.is_valid())
+                  (next_child != INVALID_COLOR))
               {
                 if (record_close_operations)
                 {
@@ -11494,7 +9156,8 @@ namespace Legion {
             {
               // If we are reducing at this level we can 
               // leave it open otherwise we need a close
-              if (!IS_REDUCE(closer.user.usage) || next_child.is_valid() ||
+              if (!IS_REDUCE(closer.user.usage) || 
+                  (next_child != INVALID_COLOR) ||
                   (closer.user.usage.redop != it->redop))
               {
                 if (record_close_operations)
@@ -11529,7 +9192,7 @@ namespace Legion {
       // If we had any fields that still need to be opened, create
       // a new field state and add it into the set of new states
       FieldMask open_mask = current_mask - open_below;
-      if (next_child.is_valid() && !!open_mask)
+      if ((next_child != INVALID_COLOR) && !!open_mask)
         new_states.push_back(FieldState(closer.user, open_mask, next_child));
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
@@ -11553,7 +9216,7 @@ namespace Legion {
 #endif
       LegionDeque<FieldState>::aligned new_states;
       // First let's see if we need to flush any reductions
-      ColorPoint no_next_child; // never a next child here
+      LegionColor no_next_child = INVALID_COLOR; // never a next child here
       if (!!state.reduction_fields)
       {
         FieldMask reduction_flush_fields = 
@@ -11707,9 +9370,11 @@ namespace Legion {
                     // function to indicate that we are open in 
                     // disjoint shallow mode with read-write
                     RegionUsage close_usage(READ_WRITE, EXCLUSIVE, 0);
+                    IndexSpaceNode *color_space = 
+                      as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        as_partition_node()->row_source->color_space,
+                        color_space->get_color_space_domain(),
                         true/*disjoint*/));
                   }
                 }
@@ -11813,9 +9478,11 @@ namespace Legion {
                     // function to indicate that we are open in 
                     // disjoint shallow mode with read-write
                     RegionUsage close_usage(READ_WRITE, EXCLUSIVE, 0);
+                    IndexSpaceNode *color_space = 
+                      as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        as_partition_node()->row_source->color_space,
+                        color_space->get_color_space_domain(),
                         true/*disjoint*/));
                   }
                 }
@@ -11860,7 +9527,7 @@ namespace Legion {
                                                   LogicalState &state,
                                               FieldMask &reduction_flush_fields,
                                                   bool record_close_operations,
-                                                  const ColorPoint &next_child,
+                                                  const LegionColor next_child,
                                    LegionDeque<FieldState>::aligned &new_states)
     //--------------------------------------------------------------------------
     {
@@ -11936,7 +9603,7 @@ namespace Legion {
     void RegionTreeNode::perform_close_operations(LogicalCloser &closer,
                                             const FieldMask &closing_mask,
                                             FieldState &state,
-                                            const ColorPoint &next_child, 
+                                            const LegionColor next_child, 
                                             bool allow_next_child,
                                             const FieldMask *aliased_children,
                                             bool upgrade_next_child,
@@ -11958,7 +9625,7 @@ namespace Legion {
       // are disjoint, then we can skip a lot of this
       bool removed_fields = false;
       const bool all_children_disjoint = are_all_children_disjoint();
-      if (next_child.is_valid() && all_children_disjoint)
+      if ((next_child != INVALID_COLOR) && all_children_disjoint)
       {
         // If we have a next child and all the children are disjoint
         // then there are never any close operations, all we have to
@@ -11968,7 +9635,7 @@ namespace Legion {
         assert(aliased_children == NULL);
 #endif
         // Check to see if we have any open fields already 
-        LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+        LegionMap<LegionColor,FieldMask>::aligned::iterator finder = 
                               state.open_children.find(next_child);
         if (finder != state.open_children.end())
         {
@@ -11993,8 +9660,8 @@ namespace Legion {
         // any issues, so we can selectively filter what we need to close
         // Overwriting closes are the same as read-only closes, but 
         // they actually do need to close all the children
-        std::vector<ColorPoint> to_delete;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
+        std::vector<LegionColor> to_delete;
+        for (LegionMap<LegionColor,FieldMask>::aligned::iterator it = 
               state.open_children.begin(); it != 
               state.open_children.end(); it++)
         {
@@ -12002,7 +9669,7 @@ namespace Legion {
           if (!close_mask)
             continue;
           // Check for same child, only allow
-          if (allow_next_child && next_child.is_valid() && 
+          if (allow_next_child && (next_child != INVALID_COLOR) && 
               (next_child == it->first))
           {
             if (aliased_children == NULL)
@@ -12042,7 +9709,7 @@ namespace Legion {
             }
           }
           // Check for child disjointness
-          if (!overwriting_close && next_child.is_valid() && 
+          if (!overwriting_close && (next_child != INVALID_COLOR) && 
               (it->first != next_child) && (all_children_disjoint || 
                are_children_disjoint(it->first, next_child)))
             continue;
@@ -12066,7 +9733,7 @@ namespace Legion {
             output_mask |= close_mask;
         }
         // Remove the children that can be deleted
-        for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
+        for (std::vector<LegionColor>::const_iterator it = to_delete.begin();
               it != to_delete.end(); it++)
           state.open_children.erase(*it);
       }
@@ -12077,10 +9744,10 @@ namespace Legion {
         // If there is no next_child, then we have to close all
         // children, otherwise figure out which fields need closes
         FieldMask full_close;
-        if (next_child.is_valid())
+        if (next_child != INVALID_COLOR)
         {
           // Figure what if any children need to be closed
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
                 state.open_children.begin(); it !=
                 state.open_children.end(); it++)
           {
@@ -12133,7 +9800,7 @@ namespace Legion {
           // We need to do a full close, but the closing mask
           // can be an overapproximation, so find all the fields
           // for the actual children that are here
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
                 state.open_children.begin(); it !=
                 state.open_children.end(); it++)
           {
@@ -12153,9 +9820,9 @@ namespace Legion {
             closer.record_close_operation(full_close, false/*projection*/);
           if (record_closed_fields)
             output_mask |= full_close;
-          std::vector<ColorPoint> to_delete;
+          std::vector<LegionColor> to_delete;
           // Go through and delete all the children which are to be closed
-          for (LegionMap<ColorPoint,FieldMask>::aligned::iterator it = 
+          for (LegionMap<LegionColor,FieldMask>::aligned::iterator it = 
                 state.open_children.begin(); it !=
                 state.open_children.end(); it++)
           {
@@ -12173,15 +9840,15 @@ namespace Legion {
               to_delete.push_back(it->first);
           }
           // Remove the children that can be deleted
-          for (std::vector<ColorPoint>::const_iterator it = to_delete.begin();
-                it != to_delete.end(); it++)
+          for (std::vector<LegionColor>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
             state.open_children.erase(*it);
         }
         // If we allow the next child, we need to see if the next
         // child is already open or not
-        if (allow_next_child && next_child.is_valid())
+        if (allow_next_child && (next_child != INVALID_COLOR))
         {
-          LegionMap<ColorPoint,FieldMask>::aligned::iterator finder = 
+          LegionMap<LegionColor,FieldMask>::aligned::iterator finder = 
                                 state.open_children.find(next_child);
           if (finder != state.open_children.end())
           {
@@ -12211,7 +9878,7 @@ namespace Legion {
         {
           // Rebuild the valid fields mask
           FieldMask new_valid_mask;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
                 state.open_children.begin(); it != 
                 state.open_children.end(); it++)
           {
@@ -12382,13 +10049,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // For every child and every field, it should only be open in one mode
-      LegionMap<ColorPoint,FieldMask>::aligned previous_children;
+      LegionMap<LegionColor,FieldMask>::aligned previous_children;
       for (std::list<FieldState>::const_iterator fit = 
-            state.field_states.begin(); fit != 
-            state.field_states.end(); fit++)
+            state.field_states.begin(); fit != state.field_states.end(); fit++)
       {
         FieldMask actually_valid;
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
               fit->open_children.begin(); it != 
               fit->open_children.end(); it++)
         {
@@ -12422,11 +10088,11 @@ namespace Legion {
             continue;
           const FieldState &f1 = *it1;
           const FieldState &f2 = *it2;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator 
+          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
                 cit1 = f1.open_children.begin(); cit1 != 
                 f1.open_children.end(); cit1++)
           {
-            for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator 
+            for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
                   cit2 = f2.open_children.begin(); 
                   cit2 != f2.open_children.end(); cit2++)
             {
@@ -12435,8 +10101,8 @@ namespace Legion {
               if (cit1->second * cit2->second)
                 continue;
 #ifndef NDEBUG
-              ColorPoint c1 = cit1->first;
-              ColorPoint c2 = cit2->first;
+              LegionColor c1 = cit1->first;
+              LegionColor c2 = cit2->first;
 #endif
               // Some aliasing in the fields, so do the check 
               // for child disjointness
@@ -12543,7 +10209,7 @@ namespace Legion {
       if (!arrived)
       {
         FieldMask open_below;
-        ColorPoint next_child = path.get_child(depth);
+        LegionColor next_child = path.get_child(depth);
         if (!!check_mask)
         {
           // Perform any close operations
@@ -12624,13 +10290,13 @@ namespace Legion {
     void RegionTreeNode::siphon_logical_deletion(LogicalCloser &closer,
                                                  LogicalState &state,
                                                  const FieldMask &current_mask,
-                                                 const ColorPoint &next_child,
+                                                 const LegionColor next_child,
                                                  FieldMask &open_below,
                                                  bool force_close_next)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(next_child.is_valid());
+      assert(next_child != INVALID_COLOR);
       sanity_check_logical_state(state);
 #endif
       LegionDeque<FieldState>::aligned new_states;
@@ -12645,7 +10311,7 @@ namespace Legion {
           continue;
         }
         // See if our child is open, if it's not then we can keep going
-        LegionMap<ColorPoint,FieldMask>::aligned::const_iterator finder = 
+        LegionMap<LegionColor,FieldMask>::aligned::const_iterator finder = 
           it->open_children.find(next_child);
         if (it->is_projection_state() ||
             (finder == it->open_children.end()))
@@ -12848,7 +10514,7 @@ namespace Legion {
             assert(fit->projection == NULL);
 #endif
           rez.serialize<size_t>(fit->open_children.size());
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
                 fit->open_children.begin(); it != 
                 fit->open_children.end(); it++)
           {
@@ -12932,7 +10598,7 @@ namespace Legion {
         derez.deserialize(num_open_children);
         for (unsigned idx = 0; idx < num_open_children; idx++)
         {
-          ColorPoint color;
+          LegionColor color;
           derez.deserialize(color);
           derez.deserialize(fit->open_children[color]);
         }
@@ -13711,8 +11377,8 @@ namespace Legion {
       {
         EventSet &pre_set = *pit;
         // Build the src and dst fields vectors
-        std::vector<Domain::CopySrcDstField> src_fields;
-        std::vector<Domain::CopySrcDstField> dst_fields;
+        std::vector<CopySrcDstField> src_fields;
+        std::vector<CopySrcDstField> dst_fields;
         LegionMap<MaterializedView*,FieldMask>::aligned update_views;
         for (LegionMap<MaterializedView*,FieldMask>::aligned::const_iterator 
               it = src_instances.begin(); it != src_instances.end(); it++)
@@ -14181,11 +11847,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::find_complete_fields(const FieldMask &scope_fields,
-                       const LegionMap<ColorPoint,FieldMask>::aligned &children,
-                       FieldMask &complete_fields)
+                     const LegionMap<LegionColor,FieldMask>::aligned &children,
+                     FieldMask &complete_fields)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it = 
+      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
         FieldMask test_fields = it->second - complete_fields;
@@ -14860,7 +12526,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::has_child(const ColorPoint &c)
+    bool RegionNode::has_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -14868,7 +12534,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::has_color(const ColorPoint &c)
+    bool RegionNode::has_color(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       // Ask the row source since it eagerly instantiates
@@ -14876,13 +12542,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PartitionNode* RegionNode::get_child(const ColorPoint &c)
+    PartitionNode* RegionNode::get_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       // check to see if we have it, if not try to make it
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<ColorPoint,PartitionNode*>::const_iterator finder = 
+        std::map<LegionColor,PartitionNode*>::const_iterator finder = 
           color_map.find(c);
         if (finder != color_map.end())
           return finder->second;
@@ -14911,7 +12577,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::remove_child(const ColorPoint &c)
+    void RegionNode::remove_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
@@ -14981,7 +12647,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const ColorPoint& RegionNode::get_color(void) const
+    LegionColor RegionNode::get_color(void) const
     //--------------------------------------------------------------------------
     {
       return row_source->color;
@@ -15009,7 +12675,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeNode* RegionNode::get_tree_child(const ColorPoint &c)
+    RegionTreeNode* RegionNode::get_tree_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       return get_child(c);
@@ -15017,109 +12683,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionNode::issue_copy(Operation *op,
-                        const std::vector<Domain::CopySrcDstField> &src_fields,
-                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const std::vector<CopySrcDstField> &src_fields,
+                        const std::vector<CopySrcDstField> &dst_fields,
                         ApEvent precondition, PredEvent predicate_guard,
                         RegionTreeNode *intersect/*=NULL*/,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
-      Realm::ProfilingRequestSet requests;
-      op->add_copy_profiling_request(requests);
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_copy_request(requests, op);
-      ApEvent result;
-      if (intersect == NULL)
-      {
-        // This is a normal copy
-        if (row_source->has_component_domains())
-        {
-          ApEvent dom_pre;
-          const std::set<Domain> &doms = 
-            row_source->get_component_domains(dom_pre);
-          if (dom_pre.exists() && !dom_pre.has_triggered())
-            precondition = Runtime::merge_events(precondition, dom_pre);
-          std::set<ApEvent> done_events;
-          if (predicate_guard.exists())
-          {
-            // Have to protect against misspeculation
-            ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                     ApEvent(predicate_guard));
-            for (std::set<Domain>::const_iterator it = doms.begin();
-                  it != doms.end(); it++)
-              done_events.insert(Runtime::ignorefaults(it->copy(
-                      src_fields, dst_fields, requests, pred_pre, 
-                      redop, reduction_fold)));
-          }
-          else
-          {
-            for (std::set<Domain>::const_iterator it = doms.begin();
-                  it != doms.end(); it++)
-              done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
-                                                  requests, precondition,
-                                                  redop, reduction_fold)));
-          }
-          result = Runtime::merge_events(done_events);
-        }
-        else
-        {
-          ApEvent dom_pre;
-          const Domain &dom = row_source->get_domain(dom_pre);
-          if (dom_pre.exists() && !dom_pre.has_triggered())
-            precondition = Runtime::merge_events(precondition, dom_pre);
-          // Have to protect against misspeculation
-          if (predicate_guard.exists())
-          {
-            ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                     ApEvent(predicate_guard));
-            result = Runtime::ignorefaults(dom.copy(src_fields, dst_fields,
-                                requests, pred_pre, redop, reduction_fold));
-          }
-          else
-            result = ApEvent(dom.copy(src_fields, dst_fields, requests, 
-                                      precondition, redop, reduction_fold));
-        }
-      }
-      else
-      {
-        // This is a copy between the intersection of two regions
-        const std::set<Domain> *intersection_doms;
-        if (intersect->is_region())
-          intersection_doms = &(row_source->get_intersection_domains(
-                intersect->as_region_node()->row_source));
-        else
-          intersection_doms = &(row_source->get_intersection_domains(
-                intersect->as_partition_node()->row_source));
-        std::set<ApEvent> done_events;
-        if (predicate_guard.exists())
-        {
-          // have to protect against misspeculation
-          ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                   ApEvent(predicate_guard));
-          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-                it != intersection_doms->end(); it++)
-            done_events.insert(Runtime::ignorefaults(it->copy(
-                    src_fields, dst_fields, requests, pred_pre, 
-                    redop, reduction_fold)));
-        }
-        else
-        {
-          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-                it != intersection_doms->end(); it++)
-            done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
-                                                requests, precondition,
-                                                redop, reduction_fold)));
-        }
-        result = Runtime::merge_events(done_events);
-      }
+      ApEvent result = row_source->issue_copy(op, src_fields, dst_fields,
+          precondition, predicate_guard, 
+          (intersect == NULL) ? NULL : intersect->get_row_source(),
+          redop, reduction_fold);
 #ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
-        result = new_result;
-      }
       LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
                                  precondition, result);
       for (unsigned idx = 0; idx < src_fields.size(); idx++)
@@ -15149,7 +12724,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionNode::issue_fill(Operation *op,
-                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const std::vector<CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
                         ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
@@ -15158,98 +12733,10 @@ namespace Legion {
                         RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
-      Realm::ProfilingRequestSet requests;
-      op->add_copy_profiling_request(requests);
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_fill_request(requests, op);
-      ApEvent result;
-      if (intersect == NULL)
-      {
-        // This is a normal fill 
-        if (row_source->has_component_domains())
-        {
-          ApEvent dom_pre;
-          const std::set<Domain> &doms = 
-            row_source->get_component_domains(dom_pre);
-          if (dom_pre.exists() && !dom_pre.has_triggered())
-            precondition = Runtime::merge_events(precondition, dom_pre);
-          std::set<ApEvent> done_events;
-          if (predicate_guard.exists())
-          {
-            ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                     ApEvent(predicate_guard));
-            // Have to protect against misspeculation
-            for (std::set<Domain>::const_iterator it = doms.begin();
-                  it != doms.end(); it++)
-              done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
-                      requests, fill_value, fill_size, pred_pre)));
-          }
-          else
-          {
-            for (std::set<Domain>::const_iterator it = doms.begin();
-                  it != doms.end(); it++)
-              done_events.insert(ApEvent(it->fill(dst_fields, requests, 
-                                         fill_value, fill_size, precondition)));
-          }
-          result = Runtime::merge_events(done_events);
-        }
-        else
-        {
-          ApEvent dom_pre;
-          const Domain &dom = row_source->get_domain(dom_pre);
-          if (dom_pre.exists() && !dom_pre.has_triggered())
-            precondition = Runtime::merge_events(precondition, dom_pre);
-          // Have to protect against misspeculation
-          if (predicate_guard.exists())
-          {
-            ApEvent pred_pre = Runtime::merge_events(precondition, 
-                                                     ApEvent(predicate_guard));
-            result = ApEvent(Runtime::ignorefaults(dom.fill(dst_fields, 
-                    requests, fill_value, fill_size, pred_pre)));
-          }
-          else
-            result = ApEvent(dom.fill(dst_fields, requests, 
-                                      fill_value, fill_size, precondition));
-        }
-      }
-      else
-      {
-        // This is the fill between the intersection of two regions
-        const std::set<Domain> *intersection_doms;
-        if (intersect->is_region())
-          intersection_doms = &(row_source->get_intersection_domains(
-                intersect->as_region_node()->row_source));
-        else
-          intersection_doms = &(row_source->get_intersection_domains(
-                intersect->as_partition_node()->row_source));
-        std::set<ApEvent> done_events;
-        if (predicate_guard.exists())
-        {
-          ApEvent pred_pre = Runtime::merge_events(precondition,
-                                                   ApEvent(predicate_guard));
-          // Have to protect the against misspeculation
-          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-                it != intersection_doms->end(); it++)
-            done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
-                    requests, fill_value, fill_size, pred_pre)));
-        }
-        else
-        {
-          for (std::set<Domain>::const_iterator it = intersection_doms->begin();
-                it != intersection_doms->end(); it++)
-            done_events.insert(ApEvent(it->fill(dst_fields, requests,
-                                       fill_value, fill_size, precondition)));
-        }
-        result = Runtime::merge_events(done_events);
-      }
+      ApEvent result = row_source->issue_fill(op, dst_fields,
+          fill_value, fill_size, precondition, predicate_guard,
+          (intersect == NULL) ? NULL : intersect->get_row_source());
 #ifdef LEGION_SPY
-      if (!result.exists())
-      {
-        ApUserEvent new_result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(new_result);
-        result = new_result;
-      }
       LegionSpy::log_fill_events(op->get_unique_op_id(), handle, 
                                  precondition, result, fill_uid);
       for (unsigned idx = 0; idx < dst_fields.size(); idx++)
@@ -15276,8 +12763,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::are_children_disjoint(const ColorPoint &c1, 
-                                           const ColorPoint &c2)
+    bool RegionNode::are_children_disjoint(const LegionColor c1, 
+                                           const LegionColor c2)
     //--------------------------------------------------------------------------
     {
       return row_source->are_disjoint(c1, c2);
@@ -15294,11 +12781,11 @@ namespace Legion {
     void RegionNode::instantiate_children(void)
     //--------------------------------------------------------------------------
     {
-      std::set<ColorPoint> all_colors;
+      std::vector<LegionColor> all_colors;
       row_source->get_colors(all_colors);
       // This may look like it does nothing, but it checks to see
       // if we have instantiated all the child nodes
-      for (std::set<ColorPoint>::const_iterator it = all_colors.begin(); 
+      for (std::vector<LegionColor>::const_iterator it = all_colors.begin(); 
             it != all_colors.end(); it++)
         get_child(*it);
     }
@@ -15360,10 +12847,9 @@ namespace Legion {
         {
           // If we are forcing instantiation, then grab the set of 
           // colors from the row source and use them to instantiate children
-          std::set<ColorPoint> children_colors;
-          row_source->get_child_colors(children_colors, 
-                                       traverser->visit_only_valid());
-          for (std::set<ColorPoint>::const_iterator it = 
+          std::vector<LegionColor> children_colors;
+          row_source->get_colors(children_colors); 
+          for (std::vector<LegionColor>::const_iterator it = 
                 children_colors.begin(); it != children_colors.end(); it++)
           {
             bool result = get_child(*it)->visit_node(traverser);
@@ -15374,7 +12860,7 @@ namespace Legion {
         }
         else
         {
-          std::map<ColorPoint,PartitionNode*> children;
+          std::map<LegionColor,PartitionNode*> children;
           // Need to hold the lock when reading from 
           // the color map or the valid map
           if (traverser->visit_only_valid())
@@ -15387,7 +12873,7 @@ namespace Legion {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
             children = color_map;
           }
-          for (std::map<ColorPoint,PartitionNode*>::const_iterator it = 
+          for (std::map<LegionColor,PartitionNode*>::const_iterator it = 
                 children.begin(); it != children.end(); it++)
           {
             bool result = it->second->visit_node(traverser);
@@ -15398,27 +12884,6 @@ namespace Legion {
         }
       }
       return continue_traversal;
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& RegionNode::get_domain_blocking(void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_domain_blocking();
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& RegionNode::get_domain(ApEvent &precondition) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_domain(precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& RegionNode::get_domain_no_wait(void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_domain_no_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -15562,6 +13027,32 @@ namespace Legion {
         }
       }
     } 
+
+    //--------------------------------------------------------------------------
+    void RegionNode::find_open_complete_partitions(ContextID ctx,
+               const FieldMask &mask, std::vector<LogicalPartition> &partitions)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = get_logical_state(ctx);
+      std::set<LogicalPartition> unique_partitions;
+      for (LegionList<FieldState>::aligned::const_iterator sit = 
+            state.field_states.begin(); sit != state.field_states.end(); sit++)
+      {
+        if ((sit->valid_fields * mask) || (sit->is_projection_state()))
+          continue;
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
+              sit->open_children.begin(); it != sit->open_children.end(); it++)
+        {
+          if (it->second * mask)
+            continue;
+          PartitionNode *child = get_child(it->first);
+          if (child->is_complete())
+            unique_partitions.insert(child->handle);
+        }
+      }
+      partitions.insert(partitions.end(), 
+                        unique_partitions.begin(), unique_partitions.end());
+    }
 
     //--------------------------------------------------------------------------
     void RegionNode::premap_region(ContextID ctx,
@@ -16002,76 +13493,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::find_field_descriptors(ContextID ctx, ApEvent term_event,
-                                            const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            FieldID field_id, Operation *op,
-                                            unsigned index,
-                                  std::vector<FieldDataDescriptor> &field_data,
-                                            std::set<ApEvent> &preconditions,
-                                            VersionInfo &version_info,
-                                            std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalState *state = get_physical_state(version_info);
-      // First pull down any valid instance views
-      pull_valid_instance_views(ctx, state, user_mask, 
-                                false/*need space*/, version_info);
-      // Now go through the list of valid instances and see if we can find
-      // one that satisfies the field that we need.
-      DeferredView *deferred_view = NULL;
-      for (LegionMap<LogicalView*,FieldMask>::track_aligned::const_iterator
-            it = state->valid_views.begin(); 
-            it != state->valid_views.end(); it++)
-      {
-        // Check to see if the instance is valid for our target field
-        if (!!(it->second & user_mask))
-        {
-          // See if this is a composite view or not
-          if (it->first->is_instance_view())
-          {
-#ifdef DEBUG_LEGION
-            assert(it->first->as_instance_view()->is_materialized_view());
-#endif
-            MaterializedView *view = 
-              it->first->as_instance_view()->as_materialized_view(); 
-            // Record the instance and its information
-            field_data.push_back(FieldDataDescriptor());
-            view->set_descriptor(field_data.back(), field_id);
-            // Register ourselves as user of this instance
-            ApEvent ready_event = view->add_user_fused(usage, term_event, 
-              user_mask, op, index, &version_info, applied_events);
-            if (ready_event.exists())
-              preconditions.insert(ready_event);
-            // We found an actual instance so we are done
-            deferred_view = NULL;
-            break;
-          }
-          else
-          {
-            // Save it as a composite view and keep going
-#ifdef DEBUG_LEGION
-            assert(it->first->is_deferred_view());
-            // There should be at most one composite view for this field
-            assert(deferred_view == NULL);
-#endif
-            deferred_view = it->first->as_deferred_view();
-          }
-        }
-      }
-      if (deferred_view != NULL)
-      {
-        // If this is a fill view, we either need to make a new physical
-        // instance or apply it to all the existing physical instances
-        if (!deferred_view->is_composite_view())
-          assert(false); // TODO: implement this
-        deferred_view->find_field_descriptors(term_event, usage, 
-                                              user_mask, field_id, op, index,
-                                              field_data, preconditions);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
                                  const void *value, size_t value_size,
                                  UniqueID logical_ctx_uid,
@@ -16197,7 +13618,7 @@ namespace Legion {
         {
           // If we have a predicate guard we add that to the set now
           ApEvent precondition = Runtime::merge_events(pit->preconditions);
-          std::vector<Domain::CopySrcDstField> dst_fields;
+          std::vector<CopySrcDstField> dst_fields;
           target->copy_to(pit->set_mask, dst_fields);
           ApEvent fill_event = issue_fill(op, dst_fields, value, 
                                           value_size, precondition, true_guard
@@ -16534,20 +13955,14 @@ namespace Legion {
                                            const FieldMask &capture_mask) 
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
+      DomainPoint color = row_source->get_domain_point_color();
+      switch (color.get_dim())
       {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth());
-            break;
-          }
         case 1:
           {
             logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth());
+              color[0], logger->get_depth());
             break;
           }
         case 2:
@@ -16555,8 +13970,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth());
+              color[0], color[1], logger->get_depth());
             break;
           }
         case 3:
@@ -16564,15 +13978,14 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth());
+              color[0], color[1], color[2], logger->get_depth());
             break;
           }
         default:
           assert(false);
       }
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
+      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
         LogicalState &state = get_logical_state(ctx);
@@ -16585,10 +13998,10 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
               to_traverse.begin(); it != to_traverse.end(); it++)
         {
-          std::map<ColorPoint,PartitionNode*>::const_iterator finder = 
+          std::map<LegionColor,PartitionNode*>::const_iterator finder = 
             color_map.find(it->first);
           if (finder != color_map.end())
             finder->second->print_logical_context(ctx, logger, it->second);
@@ -16603,20 +14016,14 @@ namespace Legion {
                                             const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
+      DomainPoint color = row_source->get_domain_point_color();
+      switch (color.get_dim())
       {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth());
-            break;
-          }
         case 1:
           {
             logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth());
+              color[0], logger->get_depth());
             break;
           }
         case 2:
@@ -16624,8 +14031,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth());
+              color[0], color[1], logger->get_depth());
             break;
           }
         case 3:
@@ -16633,15 +14039,14 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth());
+              color[0], color[1], color[2], logger->get_depth());
             break;
           }
         default:
           assert(false);
       }
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
+      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
         VersionManager &manager= get_current_version_manager(ctx);
@@ -16654,10 +14059,10 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
               to_traverse.begin(); it != to_traverse.end(); it++)
         {
-          std::map<ColorPoint,PartitionNode*>::const_iterator finder = 
+          std::map<LegionColor,PartitionNode*>::const_iterator finder = 
             color_map.find(it->first);
           if (finder != color_map.end())
             finder->second->print_physical_context(ctx, logger, it->second);
@@ -16669,7 +14074,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::print_logical_state(LogicalState &state,
                                          const FieldMask &capture_mask,
-                         LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                          TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
@@ -16684,7 +14089,7 @@ namespace Legion {
           it->print_state(logger, capture_mask);
           if (it->valid_fields * capture_mask)
             continue;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator 
+          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
                 cit = it->open_children.begin(); cit != 
                 it->open_children.end(); cit++)
           {
@@ -16708,22 +14113,15 @@ namespace Legion {
                                           const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
+      DomainPoint color = row_source->get_domain_point_color();
+      switch (color.get_dim())
       {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at "
-                        "depth %d (%p)", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth(), this);
-            break;
-          }
         case 1:
           {
             logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth(), this);
+              color[0], logger->get_depth(), this);
             break;
           }
         case 2:
@@ -16731,8 +14129,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth(), this);
+              color[0], color[1], logger->get_depth(), this);
             break;
           }
         case 3:
@@ -16740,15 +14137,14 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth(), this);
+              color[0], color[1], color[2], logger->get_depth(), this);
             break;
           }
         default:
           assert(false);
       }
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
+      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
         print_logical_state(get_logical_state(ctx), capture_mask,
                             to_traverse, logger);
@@ -16757,10 +14153,10 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =  
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =  
               to_traverse.begin(); it != to_traverse.end(); it++)
         {
-          std::map<ColorPoint,PartitionNode*>::const_iterator finder = 
+          std::map<LegionColor,PartitionNode*>::const_iterator finder = 
             color_map.find(it->first);
           if (finder != color_map.end())
             finder->second->dump_logical_context(ctx, logger, it->second);
@@ -16775,22 +14171,15 @@ namespace Legion {
                                            const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
+      DomainPoint color = row_source->get_domain_point_color();
+      switch (color.get_dim())
       {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at "
-                        "depth %d (%p)", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth(), this);
-            break;
-          }
         case 1:
           {
             logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth(), this);
+              color[0], logger->get_depth(), this);
             break;
           }
         case 2:
@@ -16798,8 +14187,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth(), this);
+              color[0], color[1], logger->get_depth(), this);
             break;
           }
         case 3:
@@ -16807,15 +14195,14 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth(), this);
+              color[0], color[1], color[2], logger->get_depth(), this);
             break;
           }
         default:
           assert(false);
       }
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
+      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
@@ -16826,10 +14213,10 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
               to_traverse.begin(); it != to_traverse.end(); it++)
         {
-          std::map<ColorPoint,PartitionNode*>::const_iterator finder = 
+          std::map<LegionColor,PartitionNode*>::const_iterator finder = 
             color_map.find(it->first);
           if (finder != color_map.end())
             finder->second->dump_physical_context(ctx, logger, it->second);
@@ -16894,7 +14281,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::has_child(const ColorPoint &c)
+    bool PartitionNode::has_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -16902,7 +14289,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::has_color(const ColorPoint &c)
+    bool PartitionNode::has_color(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       // Ask the row source because it eagerly instantiates
@@ -16910,13 +14297,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionNode* PartitionNode::get_child(const ColorPoint &c)
+    RegionNode* PartitionNode::get_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       // check to see if we have it, if not try to make it
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        std::map<ColorPoint,RegionNode*>::const_iterator finder = 
+        std::map<LegionColor,RegionNode*>::const_iterator finder = 
           color_map.find(c);
         if (finder != color_map.end())
           return finder->second;
@@ -16941,15 +14328,13 @@ namespace Legion {
       assert(color_map.find(child->row_source->color) == color_map.end());
 #endif
       color_map[child->row_source->color] = child;
-      valid_map[child->row_source->color] = child;
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::remove_child(const ColorPoint &c)
+    void PartitionNode::remove_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
-      valid_map.erase(c);
+      // Don't do anything for now
     }
 
     //--------------------------------------------------------------------------
@@ -17007,7 +14392,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const ColorPoint& PartitionNode::get_color(void) const
+    LegionColor PartitionNode::get_color(void) const
     //--------------------------------------------------------------------------
     {
       return row_source->color;
@@ -17035,7 +14420,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RegionTreeNode* PartitionNode::get_tree_child(const ColorPoint &c)
+    RegionTreeNode* PartitionNode::get_tree_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       return get_child(c);
@@ -17043,8 +14428,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent PartitionNode::issue_copy(Operation *op,
-                        const std::vector<Domain::CopySrcDstField> &src_fields,
-                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const std::vector<CopySrcDstField> &src_fields,
+                        const std::vector<CopySrcDstField> &dst_fields,
                         ApEvent precondition, PredEvent predicate_guard,
                         RegionTreeNode *intersect/*=NULL*/,
                         ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/)
@@ -17056,7 +14441,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent PartitionNode::issue_fill(Operation *op,
-                        const std::vector<Domain::CopySrcDstField> &dst_fields,
+                        const std::vector<CopySrcDstField> &dst_fields,
                         const void *fill_value, size_t fill_size,
                         ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
@@ -17074,8 +14459,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::are_children_disjoint(const ColorPoint &c1, 
-                                              const ColorPoint &c2)
+    bool PartitionNode::are_children_disjoint(const LegionColor c1, 
+                                              const LegionColor c2)
     //--------------------------------------------------------------------------
     {
       return row_source->are_disjoint(c1, c2);
@@ -17092,11 +14477,11 @@ namespace Legion {
     void PartitionNode::instantiate_children(void)
     //--------------------------------------------------------------------------
     {
-      std::set<ColorPoint> all_colors;
+      std::vector<LegionColor> all_colors;
       row_source->get_colors(all_colors);
       // This may look like it does nothing, but it checks to see
       // if we have instantiated all the child nodes
-      for (std::set<ColorPoint>::const_iterator it = all_colors.begin(); 
+      for (std::vector<LegionColor>::const_iterator it = all_colors.begin(); 
             it != all_colors.end(); it++)
         get_child(*it);
     }
@@ -17156,32 +14541,39 @@ namespace Legion {
         const bool break_early = traverser->break_early();
         if (traverser->force_instantiation)
         {
-          for (Domain::DomainPointIterator itr(row_source->color_space); 
-                itr; itr++)
+          if (row_source->total_children == row_source->max_linearized_color)
           {
-            ColorPoint child_color(itr.p);
-            bool result = get_child(child_color)->visit_node(traverser);
-            continue_traversal = continue_traversal && result;
-            if (!result && break_early)
-              break;
+            for (LegionColor c = 0; c < row_source->total_children; c++)
+            {
+              bool result = get_child(c)->visit_node(traverser);
+              continue_traversal = continue_traversal && result;
+              if (!result && break_early)
+                break;
+            }
+          }
+          else
+          {
+            for (LegionColor c = 0; c < row_source->max_linearized_color; c++)
+            {
+              if (!row_source->color_space->contains_color(c))
+                continue;
+              bool result = get_child(c)->visit_node(traverser);
+              continue_traversal = continue_traversal && result;
+              if (!result && break_early)
+                break;
+            }
           }
         }
         else
         {
-          std::map<ColorPoint,RegionNode*> children;
+          std::map<LegionColor,RegionNode*> children;
           // Need to hold the lock when reading from 
           // the color map or the valid map
-          if (traverser->visit_only_valid())
-          {
-            AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            children = valid_map;
-          }
-          else
           {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
             children = color_map;
           }
-          for (std::map<ColorPoint,RegionNode*>::const_iterator it = 
+          for (std::map<LegionColor,RegionNode*>::const_iterator it = 
                 children.begin(); it != children.end(); it++)
           {
             bool result = it->second->visit_node(traverser);
@@ -17192,36 +14584,6 @@ namespace Legion {
         }
       }
       return continue_traversal;
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& PartitionNode::get_domain_blocking(void) const
-    //--------------------------------------------------------------------------
-    {
- #ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif     
-      return parent->get_domain_blocking();
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& PartitionNode::get_domain(ApEvent &precondition) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      return parent->get_domain(precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    const Domain& PartitionNode::get_domain_no_wait(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      return parent->get_domain_no_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -17514,51 +14876,12 @@ namespace Legion {
                                               const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), row_source->is_disjoint(), 
-              logger->get_depth());
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->is_disjoint(), 
-              logger->get_depth());
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
+                  "disjoint %d at depth %d", 
+        handle.index_partition.id, handle.field_space.id,handle.tree_id,
+        row_source->color, row_source->is_disjoint(), logger->get_depth());
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
+      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
         LogicalState &state = get_logical_state(ctx);
@@ -17572,10 +14895,10 @@ namespace Legion {
       if (!to_traverse.empty())
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
               to_traverse.begin(); it != to_traverse.end(); it++)
         {
-          std::map<ColorPoint,RegionNode*>::const_iterator finder = 
+          std::map<LegionColor,RegionNode*>::const_iterator finder = 
             color_map.find(it->first);
           if (finder != color_map.end())
             finder->second->print_logical_context(ctx, logger, it->second);
@@ -17590,51 +14913,12 @@ namespace Legion {
                                                const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
+                  "disjoint %d at depth %d", 
+        handle.index_partition.id, handle.field_space.id,handle.tree_id,
+        row_source->color, row_source->is_disjoint(), logger->get_depth());
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
+      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
@@ -17647,10 +14931,10 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
               to_traverse.begin(); it != to_traverse.end(); it++)
         {
-          std::map<ColorPoint,RegionNode*>::const_iterator 
+          std::map<LegionColor,RegionNode*>::const_iterator 
             finder = color_map.find(it->first);
           if (finder != color_map.end())
             finder->second->print_physical_context(ctx, logger, it->second);
@@ -17662,7 +14946,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PartitionNode::print_logical_state(LogicalState &state,
                                         const FieldMask &capture_mask,
-                   LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                   LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                         TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
@@ -17677,7 +14961,7 @@ namespace Legion {
           it->print_state(logger, capture_mask);
           if (it->valid_fields * capture_mask)
             continue;
-          for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator 
+          for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator 
                 cit = it->open_children.begin(); cit != 
                 it->open_children.end(); cit++)
           {
@@ -17701,51 +14985,12 @@ namespace Legion {
                                              const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
+                  "disjoint %d at depth %d (%p)", 
+        handle.index_partition.id, handle.field_space.id,handle.tree_id,
+        row_source->color, row_source->is_disjoint(), logger->get_depth(),this);
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
+      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
         LogicalState &state = get_logical_state(ctx);
@@ -17758,10 +15003,10 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
               to_traverse.begin(); it != to_traverse.end(); it++)
         {
-          std::map<ColorPoint,RegionNode*>::const_iterator finder = 
+          std::map<LegionColor,RegionNode*>::const_iterator finder = 
             color_map.find(it->first);
           if (finder != color_map.end())
             finder->second->dump_logical_context(ctx, logger, it->second);
@@ -17776,51 +15021,12 @@ namespace Legion {
                                               const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
+                  "disjoint %d at depth %d (%p)", 
+        handle.index_partition.id, handle.field_space.id,handle.tree_id,
+        row_source->color, row_source->is_disjoint(), logger->get_depth(),this);
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
+      LegionMap<LegionColor,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
@@ -17833,10 +15039,10 @@ namespace Legion {
       logger->log("");
       if (!to_traverse.empty())
       {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+        for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
               to_traverse.begin(); it != to_traverse.end(); it++)
         {
-          std::map<ColorPoint,RegionNode*>::const_iterator finder = 
+          std::map<LegionColor,RegionNode*>::const_iterator finder = 
             color_map.find(it->first);
           if (finder != color_map.end())
             finder->second->dump_physical_context(ctx, logger, it->second);

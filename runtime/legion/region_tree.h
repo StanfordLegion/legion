@@ -26,6 +26,18 @@
 
 namespace Legion {
   namespace Internal {
+
+    /**
+     * \struct FieldDataDescriptor
+     * A small helper class for performing dependent
+     * partitioning operations
+     */
+    struct FieldDataDescriptor {
+    public:
+      IndexSpace index_space;
+      PhysicalInstance inst;
+      size_t field_offset;
+    };
     
     /**
      * \class RegionTreeForest
@@ -57,7 +69,7 @@ namespace Legion {
       public:
         IndexPartition handle;
         RtUserEvent ready;
-      };  
+      };   
     public:
       RegionTreeForest(Runtime *rt);
       RegionTreeForest(const RegionTreeForest &rhs);
@@ -65,121 +77,120 @@ namespace Legion {
     public:
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
-      void create_index_space(IndexSpace handle, const Domain &domain,
-                              IndexSpaceKind kind, AllocateMode mode);
-      void create_index_space(IndexSpace handle, const Domain &hull,
-                              const std::set<Domain> &domains,
-                              IndexSpaceKind kind, AllocateMode mode);
-      void create_index_partition(IndexPartition pid, IndexSpace parent,
-                                  ColorPoint part_color, 
-                                  const std::map<DomainPoint,Domain> &subspaces,
-                                  const Domain &color_space, 
-                                  PartitionKind part_kind, AllocateMode mode);
-      void create_index_partition(IndexPartition pid, IndexSpace parent,
-                                  ColorPoint part_color, 
-                                  const std::map<DomainPoint,Domain> &hulls, 
-                  const std::map<DomainPoint,std::set<Domain> > &components,
-                                  const Domain &color_space, 
-                                  PartitionKind part_kind, AllocateMode mode);
+      IndexSpace create_child_space_name(IndexPartition pid) const;
+      void create_index_space(IndexSpace handle, const void *realm_is);
+      void create_union_space(IndexSpace handle, TaskOp *op,
+                              const std::vector<IndexSpace> &sources);
+      void create_intersection_space(IndexSpace handle, TaskOp *op,
+                              const std::vector<IndexSpace> &source);
+      void create_difference_space(IndexSpace handle, TaskOp *op,
+                                   IndexSpace left, IndexSpace right);
+      RtEvent create_pending_partition(IndexPartition pid,
+                                       IndexSpace parent,
+                                       IndexSpace color_space,
+                                       LegionColor partition_color,
+                                       PartitionKind part_kind,
+                                       ApEvent partition_ready,
+             ApUserEvent instantiate = ApUserEvent::NO_AP_USER_EVENT);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source);
       void destroy_index_partition(IndexPartition handle, 
                                    AddressSpaceID source);
     public:
-      ApEvent create_equal_partition(IndexPartition pid, size_t granularity);
-      ApEvent create_weighted_partition(IndexPartition pid, size_t granularity,
-                                      const std::map<DomainPoint,int> &weights);
-    public:
-      ApEvent create_partition_by_union(IndexPartition pid,
+      ApEvent create_equal_partition(Operation *op, 
+                                     IndexPartition pid, 
+                                     size_t granularity);
+      ApEvent create_partition_by_union(Operation *op,
+                                        IndexPartition pid,
                                         IndexPartition handle1,
                                         IndexPartition handle2);
-      ApEvent create_partition_by_intersection(IndexPartition pid,
+      ApEvent create_partition_by_intersection(Operation *op,
+                                               IndexPartition pid,
                                                IndexPartition handle1,
                                                IndexPartition handle2);
-      ApEvent create_partition_by_difference(IndexPartition pid,
+      ApEvent create_partition_by_difference(Operation *op,
+                                           IndexPartition pid,
                                            IndexPartition handle1,
                                            IndexPartition handle2);
-      ApEvent create_cross_product_partitions(IndexPartition base,
+      ApEvent create_partition_by_restriction(IndexPartition pid,
+                                              const void *transform,
+                                              const void *extent);
+      ApEvent create_cross_product_partitions(Operation *op,
+                                              IndexPartition base,
                                               IndexPartition source,
-                      std::map<DomainPoint,IndexPartition> &handles);
-    public:
-      void compute_pending_color_space(IndexSpace parent,
-                                       IndexPartition handle1,
-                                       IndexPartition handle2,
-                                       Domain &color_space,
-                         Realm::IndexSpace::IndexSpaceOperation op);
-      void create_pending_partition(IndexPartition pid,
-                                    IndexSpace parent,
-                                    const Domain &color_space,
-                                    ColorPoint partition_color,
-                                    PartitionKind part_kind,
-                                    bool allocable, 
-                                    ApEvent handle_ready,
-                                    ApEvent domain_ready,
-                                    bool create = false);
+                                              LegionColor part_color);
+    public: 
       void create_pending_cross_product(IndexPartition handle1,
                                         IndexPartition handle2,
-                  std::map<DomainPoint,IndexPartition> &our_handles,
-                  std::map<DomainPoint,IndexPartition> &user_handles,
+                  std::map<IndexSpace,IndexPartition> &user_handles,
                                            PartitionKind kind,
-                                           ColorPoint &part_color,
-                                           bool allocable,
-                                           ApEvent handle_ready,
+                                           LegionColor &part_color,
                                            ApEvent domain_ready);
-      ApEvent create_partition_by_field(RegionTreeContext ctx,
-                                        Operation *op, unsigned index,
-                                        const RegionRequirement &req,
+      ApEvent create_partition_by_field(Operation *op,
                                         IndexPartition pending,
-                                        const Domain &color_space,
-                                        ApEvent term_event,
-                                        VersionInfo &version_info,
-                                        std::set<RtEvent> &applied_events);
-      ApEvent create_partition_by_image(RegionTreeContext ctx,
-                                      Operation *op, unsigned index,
-                                      const RegionRequirement &req,
-                                      IndexPartition pending,
-                                      const Domain &color_space,
-                                      ApEvent term_event,
-                                      VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
-      ApEvent create_partition_by_preimage(RegionTreeContext ctx,
-                                      Operation *op, unsigned index,
-                                      const RegionRequirement &req,
-                                      IndexPartition projection,
-                                      IndexPartition pending,
-                                      const Domain &color_space,
-                                      ApEvent term_event,
-                                      VersionInfo &version_info,
-                                      std::set<RtEvent> &applied_events);
+                    const std::vector<FieldDataDescriptor> &instances,
+                                        ApEvent instances_ready);
+      ApEvent create_partition_by_image(Operation *op,
+                                        IndexPartition pending,
+                                        IndexPartition projection,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                        ApEvent instances_ready);
+      ApEvent create_partition_by_image_range(Operation *op,
+                                              IndexPartition pending,
+                                              IndexPartition projection,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                              ApEvent instances_ready);
+      ApEvent create_partition_by_preimage(Operation *op,
+                                           IndexPartition pending,
+                                           IndexPartition projection,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                           ApEvent instances_ready);
+      ApEvent create_partition_by_preimage_range(Operation *op,
+                                                 IndexPartition pending,
+                                                 IndexPartition projection,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                                 ApEvent instances_ready);
+      ApEvent create_association(Operation *op, 
+                                 IndexSpace domain, IndexSpace range,
+                    const std::vector<FieldDataDescriptor> &instances,
+                                 ApEvent instances_ready);
+    public:
+      bool check_partition_by_field_size(IndexPartition pid,
+                                         FieldSpace fspace, FieldID fid,
+                                         bool is_range,
+                                         bool use_color_space = false);
+      bool check_association_field_size(IndexSpace is,
+                                        FieldSpace fspace, FieldID fid);
     public:
       IndexSpace find_pending_space(IndexPartition parent,
-                                    const DomainPoint &color,
-                                    ApUserEvent &handle_ready,
+                                    const void *realm_color,
+                                    TypeTag type_tag,
                                     ApUserEvent &domain_ready);
-      ApEvent compute_pending_space(IndexSpace result,
+      ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     const std::vector<IndexSpace> &handles,
                                     bool is_union);
-      ApEvent compute_pending_space(IndexSpace result,
+      ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     IndexPartition handle,
                                     bool is_union);
-      ApEvent compute_pending_space(IndexSpace result,
+      ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     IndexSpace initial,
                                     const std::vector<IndexSpace> &handles);
     public:
-      IndexPartition get_index_partition(IndexSpace parent, 
-                                         const ColorPoint &color);
+      IndexPartition get_index_partition(IndexSpace parent, Color color); 
+      bool has_index_subspace(IndexPartition parent,
+                              const void *realm_color, TypeTag type_tag);
       IndexSpace get_index_subspace(IndexPartition parent, 
-                                    const ColorPoint &color);
-      bool has_multiple_domains(IndexSpace handle);
-      Domain get_index_space_domain(IndexSpace handle);
-      void get_index_space_domains(IndexSpace handle,
-                                   std::vector<Domain> &domains);
-      Domain get_index_partition_color_space(IndexPartition p);
+                                    const void *realm_color,
+                                    TypeTag type_tag);
+      void get_index_space_domain(IndexSpace handle, 
+                                  void *realm_is, TypeTag type_tag);
+      IndexSpace get_index_partition_color_space(IndexPartition p);
       void get_index_space_partition_colors(IndexSpace sp,
-                                            std::set<ColorPoint> &colors);
-      ColorPoint get_index_space_color(IndexSpace handle);
-      ColorPoint get_index_partition_color(IndexPartition handle);
+                                            std::set<Color> &colors);
+      void get_index_space_color(IndexSpace handle, 
+                                 void *realm_color, TypeTag type_tag); 
+      Color get_index_partition_color(IndexPartition handle);
       IndexSpace get_parent_index_space(IndexPartition handle);
       bool has_parent_index_partition(IndexSpace handle);
       IndexPartition get_parent_index_partition(IndexSpace handle);
@@ -189,6 +200,8 @@ namespace Legion {
       size_t get_domain_volume(IndexSpace handle);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(IndexPartition p);
+      bool safe_cast(IndexSpace handle, 
+                     const void *realm_point, TypeTag type_tag);
     public:
       void create_field_space(FieldSpace handle);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source);
@@ -217,21 +230,21 @@ namespace Legion {
       LogicalPartition get_logical_partition(LogicalRegion parent, 
                                              IndexPartition handle);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent, 
-                                                      const ColorPoint &color);
-      bool has_logical_partition_by_color(LogicalRegion parent,
-                                          const ColorPoint &color);
+                                                      Color color);
+      bool has_logical_partition_by_color(LogicalRegion parent, Color color);
       LogicalPartition get_logical_partition_by_tree(
           IndexPartition handle, FieldSpace space, RegionTreeID tid);
       LogicalRegion get_logical_subregion(LogicalPartition parent,
                                           IndexSpace handle);
-      LogicalRegion get_logical_subregion_by_color(
-                              LogicalPartition parent, const ColorPoint &color);
+      LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
+                                  const void *realm_color, TypeTag type_tag);
       bool has_logical_subregion_by_color(LogicalPartition parent,
-                                          const ColorPoint &color);
+                                  const void *realm_color, TypeTag type_tag);
       LogicalRegion get_logical_subregion_by_tree(
             IndexSpace handle, FieldSpace space, RegionTreeID tid);
-      ColorPoint get_logical_region_color(LogicalRegion handle);
-      ColorPoint get_logical_partition_color(LogicalPartition handle);
+      void get_logical_region_color(LogicalRegion handle, 
+                                    void *realm_color, TypeTag type_tag);
+      Color get_logical_partition_color(LogicalPartition handle);
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
       bool has_parent_logical_partition(LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
@@ -250,6 +263,10 @@ namespace Legion {
                                      RegionRequirement &req,
                                      RestrictInfo &restrict_info,
                                      RegionTreePath &path);
+      // Used by dependent partition operations
+      void find_open_complete_partitions(Operation *op, unsigned idx,
+                                         const RegionRequirement &req,
+                                     std::vector<LogicalPartition> &partitions);
       // For privileges flowing back across node boundaries
       void send_back_logical_state(RegionTreeContext context,
                                    UniqueID context_uid,
@@ -437,26 +454,19 @@ namespace Legion {
       void check_context_state(RegionTreeContext ctx);
     public:
       // We know the domain of the index space
-      IndexSpaceNode* create_node(IndexSpace is, const Domain &d, 
-                                  IndexPartNode *par, ColorPoint color,
-                                  IndexSpaceKind kind, AllocateMode mode);
-      // Give the event for when the domain is ready
-      IndexSpaceNode* create_node(IndexSpace is, const Domain &d, ApEvent ready,
-                                  IndexPartNode *par, ColorPoint color,
-                                  IndexSpaceKind kind, AllocateMode mode);
-      // Give two events for when the domain handle and domain are ready
-      IndexSpaceNode* create_node(IndexSpace is, 
-                                  ApEvent handle_ready, ApEvent domain_ready,
-                                  IndexPartNode *par, ColorPoint color,
-                                  IndexSpaceKind kind, AllocateMode mode);
+      IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
+                                  IndexPartNode *par, LegionColor color,
+                                  ApEvent is_ready = ApEvent::NO_AP_EVENT);
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
-                                  ColorPoint color, Domain color_space, 
-                                  bool disjoint, AllocateMode mode);
+                                  IndexSpaceNode *color_space, 
+                                  LegionColor color, bool disjoint,
+                                  ApEvent partition_ready);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
-                                  ColorPoint color, Domain color_space,
-                                  RtEvent ready_event, AllocateMode mode);
+                                  IndexSpaceNode *color_space,LegionColor color,
+                                  RtEvent disjointness_ready_event,
+                                  ApEvent partition_ready);
       FieldSpaceNode* create_node(FieldSpace space);
       FieldSpaceNode* create_node(FieldSpace space, Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
@@ -498,9 +508,9 @@ namespace Legion {
       bool is_dominated(IndexSpace src, IndexSpace dst);
     public:
       bool compute_index_path(IndexSpace parent, IndexSpace child,
-                              std::vector<ColorPoint> &path);
+                              std::vector<LegionColor> &path);
       bool compute_partition_path(IndexSpace parent, IndexPartition child,
-                                  std::vector<ColorPoint> &path); 
+                                  std::vector<LegionColor> &path); 
     public:
       void initialize_path(IndexSpace child, IndexSpace parent,
                            RegionTreePath &path);
@@ -517,23 +527,6 @@ namespace Legion {
       unsigned get_projection_depth(LogicalRegion result, LogicalRegion upper);
       unsigned get_projection_depth(LogicalRegion result, 
                                     LogicalPartition upper);
-#endif
-    public:
-#ifdef NEW_INSTANCE_CREATION
-      ApEvent create_instance(const Domain &dom, Memory target,
-                            const std::vector<std::pair<FieldID,size_t> > &fids,
-                            PhysicalInstance &instance,
-                            LegionConstraintSet &constraints);
-#else
-      PhysicalInstance create_instance(const Domain &dom, Memory target,
-                                       const std::vector<size_t> &field_sizes,
-                                       size_t blocking_factor, 
-                                       ReductionOpID redop, UniqueID op_id);
-#endif
-    public:
-      template<typename T>
-      Color generate_unique_color(const std::map<Color,T> &current_map);
-#ifdef DEBUG_LEGION
     public:
       // These are debugging methods and are never called from
       // actual code, therefore they never take locks
@@ -604,44 +597,22 @@ namespace Legion {
       std::map<IndexPartition,RtEvent>    index_part_requests;
       std::map<FieldSpace,RtEvent>       field_space_requests;
       std::map<RegionTreeID,RtEvent>     region_tree_requests;
-    public:
-      static bool are_disjoint(const Domain &left,
-                               const Domain &right);
-      static bool are_disjoint(IndexSpaceNode *left,
-                               IndexSpaceNode *right);
     };
 
     /**
      * \class IndexTreeNode
      * The abstract base class for nodes in the index space trees.
      */
-    class IndexTreeNode {
-    public:
-      struct IntersectInfo {
-      public:
-        IntersectInfo(void)
-          : has_intersects(false),
-            intersections_valid(false) { }
-        IntersectInfo(bool has)
-          : has_intersects(has), 
-            intersections_valid(!has) { }
-        IntersectInfo(const std::set<Domain> &ds)
-          : has_intersects(true), intersections_valid(true),
-            intersections(ds) { }
-      public:
-        bool has_intersects;
-        bool intersections_valid;
-        std::set<Domain> intersections;
-      };
+    class IndexTreeNode { 
     public:
       IndexTreeNode(void);
-      IndexTreeNode(ColorPoint color, unsigned depth, RegionTreeForest *ctx); 
+      IndexTreeNode(RegionTreeForest *ctx, unsigned depth,
+                    LegionColor color); 
       virtual ~IndexTreeNode(void);
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
-      virtual size_t get_num_elmts(void) = 0;
-      virtual void get_colors(std::set<ColorPoint> &colors) = 0;
-      virtual void send_node(AddressSpaceID target, bool up, bool down) = 0;
+      virtual void get_colors(std::vector<LegionColor> &colors) = 0;
+      virtual void send_node(AddressSpaceID target, bool up) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
 #ifdef DEBUG_LEGION
@@ -663,23 +634,9 @@ namespace Legion {
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
                         const void *buffer, size_t size, bool is_mutable) = 0;
     public:
-      static bool compute_intersections(const std::set<Domain> &left,
-                                        const std::set<Domain> &right,
-                                        std::set<Domain> &result,
-                                        bool compute);
-      static bool compute_intersections(const std::set<Domain> &left,
-                                        const Domain &right,
-                                        std::set<Domain> &result,
-                                        bool compute);
-      static bool compute_intersection(const Domain &left,
-                                       const Domain &right,
-                                       Domain &result, bool compute);
-      static bool compute_dominates(const std::set<Domain> &left_set,
-                                    const std::set<Domain> &right_set);
-    public:
-      const unsigned depth;
-      const ColorPoint color;
       RegionTreeForest *const context;
+      const unsigned depth;
+      const LegionColor color;
     public:
       NodeSet creation_set;
       NodeSet child_creation;
@@ -687,12 +644,11 @@ namespace Legion {
     protected:
       Reservation node_lock;
     protected:
-      std::map<IndexTreeNode*,IntersectInfo> intersections;
       std::map<IndexTreeNode*,bool> dominators;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     protected:
-      std::map<std::pair<ColorPoint,ColorPoint>,RtEvent> pending_tests;
+      std::map<std::pair<LegionColor,LegionColor>,RtEvent> pending_tests;
     };
 
     /**
@@ -729,24 +685,13 @@ namespace Legion {
         Runtime *const runtime;
       };
     public:
-      IndexSpaceNode(IndexSpace handle, const Domain &d, 
-                     IndexPartNode *par, ColorPoint c,
-                     IndexSpaceKind kind, AllocateMode mode,
-                     RegionTreeForest *ctx);
-      IndexSpaceNode(IndexSpace handle, const Domain &d, ApEvent ready,
-                     IndexPartNode *par, ColorPoint c,
-                     IndexSpaceKind kind, AllocateMode mode,
-                     RegionTreeForest *ctx);
-      IndexSpaceNode(IndexSpace handle, ApEvent handle_ready, ApEvent dom_ready,
-                     IndexPartNode *par, ColorPoint c,
-                     IndexSpaceKind kind, AllocateMode mode,
-                     RegionTreeForest *ctx);
+      IndexSpaceNode(RegionTreeForest *ctx, IndexSpace handle,
+                     IndexPartNode *parent, LegionColor color,
+                     ApEvent index_space_ready);
       IndexSpaceNode(const IndexSpaceNode &rhs);
       virtual ~IndexSpaceNode(void);
     public:
       IndexSpaceNode& operator=(const IndexSpaceNode &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -757,8 +702,7 @@ namespace Legion {
       static AddressSpaceID get_owner_space(IndexSpace handle, Runtime *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
-      virtual size_t get_num_elmts(void);
-      virtual void get_colors(std::set<ColorPoint> &colors);
+      virtual void get_colors(std::vector<LegionColor> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
@@ -771,62 +715,27 @@ namespace Legion {
       static void handle_semantic_info(RegionTreeForest *forest,
                                  Deserializer &derez, AddressSpaceID source);
     public:
-      bool has_child(const ColorPoint &c);
-      IndexPartNode* get_child(const ColorPoint &c);
+      bool has_child(const LegionColor c);
+      IndexPartNode* get_child(const LegionColor c);
       void add_child(IndexPartNode *child);
-      void remove_child(const ColorPoint &c);
+      void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
-      void get_children(std::map<ColorPoint,IndexPartNode*> &children);
-      void get_child_colors(std::set<ColorPoint> &colors, bool only_valid);
     public:
-      ApEvent get_domain_precondition(void);
-      const Domain& get_domain_blocking(void);
-      const Domain& get_domain(ApEvent &ready_event);
-      const Domain& get_domain_no_wait(void);
-      void set_domain(const Domain &dom);
-      void get_domains_blocking(std::vector<Domain> &domains);
-      void get_domains(std::vector<Domain> &domains, ApEvent &precondition);
-      size_t get_domain_volume(bool app_query = false);
-    public:
-      bool are_disjoint(const ColorPoint &c1, const ColorPoint &c2); 
+      bool are_disjoint(const LegionColor c1, const LegionColor c2); 
       void record_disjointness(bool disjoint, 
-                               const ColorPoint &c1, const ColorPoint &c2);
-      Color generate_color(void);
+                               const LegionColor c1, const LegionColor c2);
+      LegionColor generate_color(void);
+      void record_remote_child(IndexPartition pid, LegionColor part_color);
     public:
       void add_instance(RegionNode *inst);
       bool has_instance(RegionTreeID tid);
       void add_creation_source(AddressSpaceID source);
-      void destroy_node(AddressSpaceID source);
-    public:
-      bool has_component_domains(void) const;
-      void update_component_domains(const std::set<Domain> &domains);
-      const std::set<Domain>& get_component_domains_blocking(void) const;
-      const std::set<Domain>& get_component_domains(ApEvent &pre) const;
-      bool intersects_with(IndexSpaceNode *other, bool compute = true);
-      bool intersects_with(IndexPartNode *other, bool compute = true);
-      const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
-      const std::set<Domain>& get_intersection_domains(IndexPartNode *other);
-      bool dominates(IndexSpaceNode *other);
-      bool dominates(IndexPartNode *other);
-    public:
-      ApEvent create_subspaces_by_field(
-          const std::vector<FieldDataDescriptor> &field_data,
-          std::map<DomainPoint, Realm::IndexSpace> &subspaces,
-          bool mutable_results, ApEvent precondition);
-      ApEvent create_subspaces_by_image(
-          const std::vector<FieldDataDescriptor> &field_data,
-          std::map<Realm::IndexSpace, Realm::IndexSpace> &subpsaces,
-          bool mutable_results, ApEvent precondition);
-      ApEvent create_subspaces_by_preimage(
-          const std::vector<FieldDataDescriptor> &field_data,
-          std::map<Realm::IndexSpace, Realm::IndexSpace> &subspaces,
-          bool mutable_results, ApEvent precondition);
     public:
       static void handle_disjointness_test(IndexSpaceNode *parent,
                                            IndexPartNode *left,
                                            IndexPartNode *right);
     public:
-      virtual void send_node(AddressSpaceID target, bool up, bool down);
+      virtual void send_node(AddressSpaceID target, bool up);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -845,32 +754,518 @@ namespace Legion {
       inline bool has_allocator(void) const { return (allocator != NULL); }
       IndexSpaceAllocator* get_allocator(void);
     public:
-      static void log_index_space_domain(IndexSpace handle, const Domain &dom);
+      virtual void initialize_union_space(ApUserEvent to_trigger,
+              TaskOp *op, const std::vector<IndexSpace> &handles) = 0;
+      virtual void initialize_intersection_space(ApUserEvent to_trigger,
+              TaskOp *op, const std::vector<IndexSpace> &handles) = 0;
+      virtual void initialize_difference_space(ApUserEvent to_trigger,
+              TaskOp *op, IndexSpace left, IndexSpace right) = 0;
+    public:
+      virtual void log_index_space_points(void) const = 0;
+      virtual ApEvent compute_pending_space(Operation *op,
+            const std::vector<IndexSpace> &handles, bool is_union) = 0;
+      virtual ApEvent compute_pending_space(Operation *op,
+                              IndexPartition handle, bool is_union) = 0;
+      virtual ApEvent compute_pending_difference(Operation *op, 
+          IndexSpace initial, const std::vector<IndexSpace> &handles) = 0;
+      virtual void get_index_space_domain(void *realm_is, TypeTag type_tag) = 0;
+      virtual size_t get_volume(void) const = 0;
+      virtual bool contains_point(const void *realm_point, 
+                                  TypeTag type_tag) const = 0;
+      virtual IndexSpaceAllocator* create_allocator(void) const = 0;
+      virtual void destroy_node(AddressSpaceID source) = 0;
+    public:
+      virtual LegionColor get_max_linearized_color(void) const = 0;
+      virtual LegionColor linearize_color(const void *realm_color,
+                                          TypeTag type_tag) = 0;
+      virtual void delinearize_color(LegionColor color, 
+                                     void *realm_color, TypeTag type_tag) = 0;
+      virtual bool contains_color(LegionColor color, 
+                                  bool report_error = false) = 0;
+      virtual void instantiate_color_space(IndexPartNode *partition,
+                                           ApUserEvent instantiate) = 0;
+      virtual void instantiate_colors(std::vector<LegionColor> &colors) = 0;
+      virtual Domain get_color_space_domain(void) const = 0;
+      virtual DomainPoint get_domain_point_color(void) const = 0;
+    public:
+      virtual bool intersects_with(IndexSpaceNode *rhs) = 0;
+      virtual bool intersects_with(IndexPartNode *rhs) = 0;
+      virtual bool dominates(IndexSpaceNode *rhs) = 0;
+      virtual bool dominates(IndexPartNode *rhs) = 0;
+    public:
+      virtual void pack_index_space(Serializer &rez) const = 0;
+    public:
+      virtual ApEvent create_equal_children(Operation *op,
+                                            IndexPartNode *partition, 
+                                            size_t granularity) = 0;
+      virtual ApEvent create_by_union(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *left,
+                                      IndexPartNode *right) = 0;
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
+                                             IndexPartNode *left,
+                                             IndexPartNode *right) = 0;
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
+                                             // Left is implicit "this"
+                                             IndexPartNode *right) = 0;
+      virtual ApEvent create_by_difference(Operation *op,
+                                           IndexPartNode *partition,
+                                           IndexPartNode *left,
+                                           IndexPartNode *right) = 0;
+      // Called on color space and not parent
+      virtual ApEvent create_by_restriction(IndexPartNode *partition,
+                                            const void *transform,
+                                            const void *extent,
+                                            int partition_dim) = 0;
+      virtual ApEvent create_by_field(Operation *op,
+                                      IndexPartNode *partition,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_image(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_image_range(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_preimage(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_preimage_range(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_association(Operation *op,
+                                      IndexSpaceNode *range,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual bool check_field_size(size_t field_size, bool range) = 0;
+    public:
+      virtual ApEvent issue_copy(Operation *op, 
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  IndexTreeNode *intersect = NULL,
+                  ReductionOpID redop = 0, bool reduction_fold = true) = 0;
+      virtual ApEvent issue_fill(Operation *op,
+                  const std::vector<CopySrcDstField> &dst_fields,
+                  const void *fill_value, size_t fill_size,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  IndexTreeNode *intersect = NULL) = 0;
+    public:
+#ifdef NEW_INSTANCE_CREATION
+      virtual ApEvent create_instance(Memory target,
+                            const std::vector<std::pair<FieldID,size_t> > &fids,
+                            PhysicalInstance &instance,
+                            LegionConstraintSet &constraints) = 0;
+#else
+      virtual PhysicalInstance create_instance(Memory target,
+                                       const std::vector<size_t> &field_sizes,
+                                       size_t blocking_factor, 
+                                       UniqueID op_id) = 0;
+#endif
+      virtual PhysicalInstance create_file_instance(const char *file_name,
+                                   const std::vector<size_t> &field_sizes,
+                                   legion_lowlevel_file_mode_t file_mode) = 0;
+      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<const char*> &field_files,
+                                   bool read_only) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
-      const IndexSpaceKind kind;
-      const AllocateMode mode;
-    protected:
-      // Track when the domain handle is ready
-      ApEvent handle_ready;
-      // Track when the domain has actually been computed
-      ApEvent domain_ready;
-      Domain domain;
+      const ApEvent index_space_ready;
     protected:
       // Must hold the node lock when accessing the
       // remaining data structures
-      // Color map is all children seen ever
-      std::map<ColorPoint,IndexPartNode*> color_map;
-      // Valid map is all chidlren that haven't been deleted
-      std::map<ColorPoint,IndexPartNode*> valid_map;
+      std::map<LegionColor,IndexPartNode*> color_map;
+      std::map<LegionColor,IndexPartition> remote_colors;
       std::set<RegionNode*> logical_nodes;
-      std::set<std::pair<ColorPoint,ColorPoint> > disjoint_subsets;
-      std::set<std::pair<ColorPoint,ColorPoint> > aliased_subsets;
-      // If we have component domains keep track of those as well
-      std::set<Domain> component_domains;
+      std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
+      std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
     private:
       IndexSpaceAllocator *allocator;
+    };
+
+    /**
+     * \class IndexSpaceNodeT
+     * A templated class for handling any templated realm calls
+     * associated with realm index spaces
+     */
+    template<int DIM, typename T>
+    class IndexSpaceNodeT : public IndexSpaceNode { 
+    public:
+      IndexSpaceNodeT(RegionTreeForest *ctx, IndexSpace handle,
+                      IndexPartNode *parent, LegionColor color, 
+                      const Realm::ZIndexSpace<DIM,T> *realm_is,
+                      ApEvent ready_event);
+      IndexSpaceNodeT(const IndexSpaceNodeT &rhs);
+      virtual ~IndexSpaceNodeT(void);
+    public:
+      IndexSpaceNodeT& operator=(const IndexSpaceNodeT &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
+    public:
+      inline void get_realm_index_space(Realm::ZIndexSpace<DIM,T> &result) const
+        { result = realm_index_space; }
+      inline void set_realm_index_space(const Realm::ZIndexSpace<DIM,T> &value)
+        { realm_index_space = value; }
+    public:
+      virtual void initialize_union_space(ApUserEvent to_trigger,
+              TaskOp *op, const std::vector<IndexSpace> &handles);
+      virtual void initialize_intersection_space(ApUserEvent to_trigger,
+              TaskOp *op, const std::vector<IndexSpace> &handles);
+      virtual void initialize_difference_space(ApUserEvent to_trigger,
+              TaskOp *op, IndexSpace left, IndexSpace right);
+    public:
+      virtual void log_index_space_points(void) const;
+      virtual ApEvent compute_pending_space(Operation *op,
+            const std::vector<IndexSpace> &handles, bool is_union);
+      virtual ApEvent compute_pending_space(Operation *op,
+                             IndexPartition handle, bool is_union);
+      virtual ApEvent compute_pending_difference(Operation *op,
+          IndexSpace initial, const std::vector<IndexSpace> &handles);
+      virtual void get_index_space_domain(void *realm_is, TypeTag type_tag);
+      virtual size_t get_volume(void) const;
+      virtual bool contains_point(const void *realm_point, 
+                                  TypeTag type_tag) const;
+      virtual IndexSpaceAllocator* create_allocator(void) const;
+      virtual void destroy_node(AddressSpaceID source);
+    public:
+      virtual LegionColor get_max_linearized_color(void) const;
+      virtual LegionColor linearize_color(const void *realm_color,
+                                          TypeTag type_tag);
+      virtual void delinearize_color(LegionColor color, 
+                                     void *realm_color, TypeTag type_tag);
+      virtual bool contains_color(LegionColor color,
+                                  bool report_error = false);
+      virtual void instantiate_color_space(IndexPartNode *partition,
+                                           ApUserEvent instantiate);
+      virtual void instantiate_colors(std::vector<LegionColor> &colors);
+      virtual Domain get_color_space_domain(void) const;
+      virtual DomainPoint get_domain_point_color(void) const;
+    public:
+      virtual bool intersects_with(IndexSpaceNode *rhs);
+      virtual bool intersects_with(IndexPartNode *rhs);
+      virtual bool dominates(IndexSpaceNode *rhs);
+      virtual bool dominates(IndexPartNode *rhs);
+    public:
+      virtual void pack_index_space(Serializer &rez) const;
+    public:
+      virtual ApEvent create_equal_children(Operation *op,
+                                            IndexPartNode *partition, 
+                                            size_t granularity);
+      virtual ApEvent create_by_union(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *left,
+                                      IndexPartNode *right);
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
+                                             IndexPartNode *left,
+                                             IndexPartNode *right);
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
+                                             // Left is implicit "this"
+                                             IndexPartNode *right);
+      virtual ApEvent create_by_difference(Operation *op,
+                                           IndexPartNode *partition,
+                                           IndexPartNode *left,
+                                           IndexPartNode *right);
+      // Called on color space and not parent
+      virtual ApEvent create_by_restriction(IndexPartNode *partition,
+                                            const void *transform,
+                                            const void *extent,
+                                            int partition_dim);
+      template<int N>
+      ApEvent create_by_restriction_helper(IndexPartNode *partition,
+                                   const Realm::ZMatrix<N,DIM> &transform,
+                                   const Realm::ZRect<N,T> &extent);
+      virtual ApEvent create_by_field(Operation *op,
+                                      IndexPartNode *partition,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int COLOR_DIM, typename COLOR_T>
+      ApEvent create_by_field_helper(Operation *op,
+                                     IndexPartNode *partition,
+                const std::vector<FieldDataDescriptor> &instances,
+                                     ApEvent instances_ready);
+      virtual ApEvent create_by_image(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_by_image_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_by_image_range(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_by_image_range_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_by_preimage(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_by_preimage_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_by_preimage_range(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_by_preimage_range_helper(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *projection,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_association(Operation *op,
+                                      IndexSpaceNode *range,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      template<int DIM2, typename T2>
+      ApEvent create_association_helper(Operation *op,
+                                      IndexSpaceNode *range,
+                const std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual bool check_field_size(size_t field_size, bool range);
+    public:
+      virtual ApEvent issue_copy(Operation *op, 
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  IndexTreeNode *intersect = NULL,
+                  ReductionOpID redop = 0, bool reduction_fold = true);
+      virtual ApEvent issue_fill(Operation *op,
+                  const std::vector<CopySrcDstField> &dst_fields,
+                  const void *fill_value, size_t fill_size,
+                  ApEvent precondition, PredEvent predicate_guard,
+                  IndexTreeNode *intersect = NULL);
+    public:
+#ifdef NEW_INSTANCE_CREATION
+      virtual ApEvent create_instance(Memory target,
+                            const std::vector<std::pair<FieldID,size_t> > &fids,
+                            PhysicalInstance &instance,
+                            LegionConstraintSet &constraints);
+#else
+      virtual PhysicalInstance create_instance(Memory target,
+                                       const std::vector<size_t> &field_sizes,
+                                       size_t blocking_factor, UniqueID op_id);
+#endif
+      virtual PhysicalInstance create_file_instance(const char *file_name,
+                                   const std::vector<size_t> &field_sizes,
+                                   legion_lowlevel_file_mode_t file_mode);
+      virtual PhysicalInstance create_hdf5_instance(const char *file_name,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<const char*> &field_files,
+                                   bool read_only);
+    protected:
+      void compute_linearization_metadata(void);
+    protected:
+      Realm::ZIndexSpace<DIM,T> realm_index_space;
+    protected:
+      std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> > intersections;
+    protected: // linearization meta-data, computed on demand
+      Realm::ZPoint<DIM,ptrdiff_t> strides;
+      size_t offset;
+      bool linearization_ready;
+    public:
+      struct CreateByFieldHelper {
+      public:
+        CreateByFieldHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), instances(i), ready(r) { }
+      public:
+        template<typename COLOR_DIM, typename COLOR_T>
+        static inline void demux(CreateByFieldHelper *creator)
+        {
+          creator->result = 
+           creator->node->template create_by_field_helper<COLOR_DIM::N,COLOR_T>(
+           creator->op, creator->partition, creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateByImageHelper {
+      public:
+        CreateByImageHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), projection(j), 
+            instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateByImageHelper *creator)
+        {
+          creator->result = 
+           creator->node->template create_by_image_helper<DIM2::N,T2>(
+               creator->op, creator->partition, creator->projection,
+               creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        IndexPartNode *projection;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateByImageRangeHelper {
+      public:
+        CreateByImageRangeHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), projection(j), 
+            instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateByImageRangeHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_by_image_range_helper<DIM2::N,T2>(
+               creator->op, creator->partition, creator->projection,
+               creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        IndexPartNode *projection;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateByPreimageHelper {
+      public:
+        CreateByPreimageHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), projection(j), 
+            instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateByPreimageHelper *creator)
+        {
+          creator->result = 
+           creator->node->template create_by_preimage_helper<DIM2::N,T2>(
+               creator->op, creator->partition, creator->projection,
+               creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        IndexPartNode *projection;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateByPreimageRangeHelper {
+      public:
+        CreateByPreimageRangeHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), partition(p), projection(j), 
+            instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateByPreimageRangeHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_by_preimage_range_helper<DIM2::N,T2>(
+               creator->op, creator->partition, creator->projection,
+               creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexPartNode *partition;
+        IndexPartNode *projection;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+      struct CreateAssociationHelper {
+      public:
+        CreateAssociationHelper(IndexSpaceNodeT<DIM,T> *n,
+                            Operation *o, IndexSpaceNode *g,
+                            const std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
+          : node(n), op(o), range(g), instances(i), ready(r) { }
+      public:
+        template<typename DIM2, typename T2>
+        static inline void demux(CreateAssociationHelper *creator)
+        {
+          creator->result = creator->node->template 
+            create_association_helper<DIM2::N,T2>(
+               creator->op, creator->range, creator->instances, creator->ready);
+        }
+      public:
+        IndexSpaceNodeT<DIM,T> *node;
+        Operation *op;
+        IndexSpaceNode *range;
+        const std::vector<FieldDataDescriptor> &instances;
+        ApEvent ready, result;
+      };
+    };
+
+    /**
+     * \class IndexSpaceCreator
+     * A small helper class for creating templated index spaces
+     */
+    class IndexSpaceCreator {
+    public:
+      IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, const void *i,
+                        IndexPartNode *p, LegionColor c, ApEvent r)
+        : forest(f), space(s), realm_is(i), parent(p), 
+          color(c), ready(r), result(NULL) { }
+    public:
+      template<typename N, typename T>
+      static inline void demux(IndexSpaceCreator *creator)
+      {
+        const Realm::ZIndexSpace<N::N,T> *is = 
+          (const Realm::ZIndexSpace<N::N,T>*)creator->realm_is;
+        creator->result = new IndexSpaceNodeT<N::N,T>(creator->forest,
+            creator->space, creator->parent, creator->color, is,
+            creator->ready);
+      }
+    public:
+      RegionTreeForest *const forest;
+      const IndexSpace space; 
+      const void *const realm_is;
+      IndexPartNode *const parent;
+      const LegionColor color;
+      const ApEvent ready;
+      IndexSpaceNode *result;
     };
 
     /**
@@ -892,7 +1287,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_PENDING_CHILD_TASK_ID;
       public:
         IndexPartNode *parent;
-        ColorPoint pending_child;
+        LegionColor pending_child;
       };
       struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
       public:
@@ -913,20 +1308,18 @@ namespace Legion {
         Runtime *const runtime;
       };
     public:
-      IndexPartNode(IndexPartition p, IndexSpaceNode *par,
-                    ColorPoint c, Domain color_space, 
-                    bool disjoint, AllocateMode mode,
-                    RegionTreeForest *ctx);
-      IndexPartNode(IndexPartition p, IndexSpaceNode *par,
-                    ColorPoint c, Domain color_space,
-                    RtEvent ready_event, AllocateMode mode,
-                    RegionTreeForest *ctx);
+      IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
+                    IndexSpaceNode *par, IndexSpaceNode *color_space,
+                    LegionColor c, bool disjoint,
+                    ApEvent partition_ready);
+      IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
+                    IndexSpaceNode *par, IndexSpaceNode *color_space,
+                    LegionColor c, RtEvent disjointness_ready,
+                    ApEvent partition_ready);
       IndexPartNode(const IndexPartNode &rhs);
       virtual ~IndexPartNode(void);
     public:
       IndexPartNode& operator=(const IndexPartNode &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -937,8 +1330,7 @@ namespace Legion {
       static AddressSpaceID get_owner_space(IndexPartition handle, Runtime *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
-      virtual size_t get_num_elmts(void);
-      virtual void get_colors(std::set<ColorPoint> &colors);
+      virtual void get_colors(std::vector<LegionColor> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
@@ -951,55 +1343,53 @@ namespace Legion {
       static void handle_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:
-      bool has_child(const ColorPoint &c);
-      IndexSpaceNode* get_child(const ColorPoint &c);
+      bool has_child(const LegionColor c);
+      IndexSpaceNode* get_child(const LegionColor c);
       void add_child(IndexSpaceNode *child);
-      void remove_child(const ColorPoint &c);
+      void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
-      void get_children(std::map<ColorPoint,IndexSpaceNode*> &children);
+      void get_subspace_preconditions(std::set<ApEvent> &preconditions);
     public:
       void compute_disjointness(RtUserEvent ready_event);
       bool is_disjoint(bool from_app = false);
-      bool are_disjoint(const ColorPoint &c1, const ColorPoint &c2,
+      bool are_disjoint(const LegionColor c1, const LegionColor c2,
                         bool force_compute = false);
       void record_disjointness(bool disjoint,
-                               const ColorPoint &c1, const ColorPoint &c2);
-      bool is_complete(void);
+                               const LegionColor c1, const LegionColor c2);
+      bool is_complete(bool from_app = false);
     public:
       void add_instance(PartitionNode *inst);
       bool has_instance(RegionTreeID tid);
       void add_creation_source(AddressSpaceID source);
-      void destroy_node(AddressSpaceID source);
     public:
-      void add_pending_child(const ColorPoint &child_color,
-                         ApUserEvent handle_ready, ApUserEvent domain_ready);
-      bool get_pending_child(const ColorPoint &child_color,
-                         ApUserEvent &handle_ready, ApUserEvent &domain_ready);
-      void remove_pending_child(const ColorPoint &child_color);
+      void add_pending_child(const LegionColor child_color,
+                            ApUserEvent domain_ready);
+      bool get_pending_child(const LegionColor child_color,
+                             ApUserEvent &domain_ready);
+      void remove_pending_child(const LegionColor child_color);
       static void handle_pending_child_task(const void *args);
     public:
-      ApEvent create_equal_children(size_t granularity);
-      ApEvent create_weighted_children(const std::map<DomainPoint,int> &weights,
-                                       size_t granularity);
-      ApEvent create_by_operation(IndexPartNode *left, IndexPartNode *right,
-                                  Realm::IndexSpace::IndexSpaceOperation op);
-      ApEvent create_by_operation(IndexSpaceNode *left, IndexPartNode *right,
-                                  Realm::IndexSpace::IndexSpaceOperation op);
+      ApEvent create_equal_children(Operation *op, size_t granularity);
+      ApEvent create_by_union(Operation *Op,
+                              IndexPartNode *left, IndexPartNode *right);
+      ApEvent create_by_intersection(Operation *op,
+                              IndexPartNode *left, IndexPartNode *right);
+      ApEvent create_by_difference(Operation *op,
+                              IndexPartNode *left, IndexPartNode *right);
+      ApEvent create_by_restriction(const void *transform, const void *extent);
     public:
-      void get_subspace_domain_preconditions(std::set<ApEvent> &preconditions);
-      void get_subspace_domains(std::set<Domain> &subspaces);
-      bool intersects_with(IndexSpaceNode *other, bool compute = true);
-      bool intersects_with(IndexPartNode *other, bool compute = true);
-      const std::set<Domain>& get_intersection_domains(IndexSpaceNode *other);
-      const std::set<Domain>& get_intersection_domains(IndexPartNode *other);
-      bool dominates(IndexSpaceNode *other);
-      bool dominates(IndexPartNode *other);
+      virtual bool compute_complete(void) = 0;
+      virtual bool intersects_with(IndexSpaceNode *other) = 0; 
+      virtual bool intersects_with(IndexPartNode *other) = 0; 
+      virtual bool dominates(IndexSpaceNode *other) = 0;
+      virtual bool dominates(IndexPartNode *other) = 0;
+      virtual void destroy_node(AddressSpaceID source) = 0;
     public:
       static void handle_disjointness_test(IndexPartNode *parent,
                                            IndexSpaceNode *left,
                                            IndexSpaceNode *right);
     public:
-      virtual void send_node(AddressSpaceID target, bool up, bool down);
+      virtual void send_node(AddressSpaceID target, bool up);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -1013,33 +1403,109 @@ namespace Legion {
       static void handle_node_child_response(Deserializer &derez);
       static void handle_notification(RegionTreeForest *context, 
                                       Deserializer &derez);
-      static void handle_node_children_request(
-          RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
-      static void handle_node_children_response(
-          RegionTreeForest *forest, Deserializer &derez);
     public:
       const IndexPartition handle;
-      const Domain color_space;
-      const AllocateMode mode;
       IndexSpaceNode *const parent;
-      const unsigned total_children;
+      IndexSpaceNode *const color_space;
+      const LegionColor total_children;
+      const LegionColor max_linearized_color;
+      const ApEvent partition_ready;
     protected:
       bool disjoint;
-      ApEvent disjoint_ready;
+      RtEvent disjoint_ready;
       RtEvent all_children_request;
     protected:
       bool has_complete, complete;
     protected:
       // Must hold the node lock when accessing
       // the remaining data structures
-      std::map<ColorPoint,IndexSpaceNode*> color_map;
-      std::map<ColorPoint,IndexSpaceNode*> valid_map;
+      std::map<LegionColor,IndexSpaceNode*> color_map;
       std::set<PartitionNode*> logical_nodes;
-      std::set<std::pair<ColorPoint,ColorPoint> > disjoint_subspaces;
-      std::set<std::pair<ColorPoint,ColorPoint> > aliased_subspaces;
+      std::set<std::pair<LegionColor,LegionColor> > disjoint_subspaces;
+      std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
     protected:
       // Support for pending child spaces that still need to be computed
-      std::map<ColorPoint,std::pair<ApUserEvent,ApUserEvent> > pending_children;
+      std::map<LegionColor,ApUserEvent> pending_children;
+    }; 
+
+    /**
+     * \class IndexPartNodeT
+     * A template class for handling any templated realm calls
+     * associated with realm index spaces
+     */
+    template<int DIM, typename T>
+    class IndexPartNodeT : public IndexPartNode {
+    public:
+      IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
+                     IndexSpaceNode *par, IndexSpaceNode *color_space,
+                     LegionColor c, bool disjoint,
+                     ApEvent partition_ready);
+      IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
+                     IndexSpaceNode *par, IndexSpaceNode *color_space,
+                     LegionColor c, RtEvent disjointness_ready,
+                     ApEvent partition_ready);
+      IndexPartNodeT(const IndexPartNodeT &rhs);
+      virtual ~IndexPartNodeT(void);
+    public:
+      IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
+      void* operator new(size_t count);
+      void operator delete(void *ptr);
+    public:
+      virtual bool compute_complete(void);
+      virtual bool intersects_with(IndexSpaceNode *other); 
+      virtual bool intersects_with(IndexPartNode *other); 
+      virtual bool dominates(IndexSpaceNode *other);
+      virtual bool dominates(IndexPartNode *other);
+      virtual void destroy_node(AddressSpaceID source);
+    public:
+      ApEvent get_union_index_space(Realm::ZIndexSpace<DIM,T> &space);
+    protected:
+      Realm::ZIndexSpace<DIM,T> partition_union_space;
+      ApEvent partition_union_ready;
+      bool has_union_space;
+    protected:
+      std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> > intersections;
+    };
+
+    /**
+     * \class IndexPartCreator
+     * A msall helper class for creating templated index partitions
+     */
+    class IndexPartCreator {
+    public:
+      IndexPartCreator(RegionTreeForest *f, IndexPartition p,
+                       IndexSpaceNode *par, IndexSpaceNode *cs,
+                       LegionColor c, bool d, ApEvent r)
+        : forest(f), partition(p), parent(par), color_space(cs),
+          color(c), disjoint(d), ready(r) { }
+      IndexPartCreator(RegionTreeForest *f, IndexPartition p,
+                       IndexSpaceNode *par, IndexSpaceNode *cs,
+                       LegionColor c, RtEvent d, ApEvent r)
+        : forest(f), partition(p), parent(par), color_space(cs),
+          color(c), disjoint(false), disjoint_ready(d), ready(r) { }
+    public:
+      template<typename N, typename T>
+      static inline void demux(IndexPartCreator *creator)
+      {
+        if (creator->disjoint_ready.exists()) 
+          creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
+              creator->partition, creator->parent, creator->color_space,
+              creator->color, creator->disjoint_ready, creator->ready);
+        else
+          creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
+              creator->partition, creator->parent, creator->color_space,
+              creator->color, creator->disjoint, creator->ready);
+      }
+    public:
+      RegionTreeForest *const forest;
+      const IndexPartition partition;
+      IndexSpaceNode *const parent;
+      IndexSpaceNode *const color_space;
+      const LegionColor color;
+      const bool disjoint;
+      const RtEvent disjoint_ready;
+      const ApEvent ready;
+      IndexPartNode *result;
     };
 
     /**
@@ -1321,7 +1787,7 @@ namespace Legion {
                                   const TraceInfo &trace_info,
                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
                                   bool parent_is_upper_bound,
-                                  const ColorPoint &next_child);
+                                  const LegionColor next_child);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
                                const TraceInfo &trace_info);
@@ -1329,7 +1795,7 @@ namespace Legion {
                                 ProjectionInfo &projection_info,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
-                                const ColorPoint &next_child);
+                                const LegionColor next_child);
       void traverse_advance_analysis(ContextID ctx, AdvanceOp *advance,
                                      const LogicalUser &advance_user,
                                      const LogicalUser &create_user);
@@ -1337,7 +1803,7 @@ namespace Legion {
                                     AdvanceOp *advance,
                                     const LogicalUser &advance_user,
                                     const LogicalUser &create_user,
-                                    const ColorPoint &next_child,
+                                    const LegionColor next_child,
                                     const bool already_traced,
                                     const bool advance_root = true);
       void close_logical_node(LogicalCloser &closer,
@@ -1348,7 +1814,7 @@ namespace Legion {
                                    const FieldMask &closing_mask,
                                    const FieldMask *aliased_children,
                                    bool record_close_operations,
-                                   const ColorPoint &next_child,
+                                   const LegionColor next_child,
                                    FieldMask &open_below);
       void siphon_logical_projection(LogicalCloser &closer,
                                      LogicalState &state,
@@ -1360,14 +1826,14 @@ namespace Legion {
                                     LogicalState &state,
                                     FieldMask &reduction_flush_fields,
                                     bool record_close_operations,
-                                    const ColorPoint &next_child,
+                                    const LegionColor next_child,
                               LegionDeque<FieldState>::aligned &new_states);
       // Note that 'allow_next_child' and 
       // 'record_closed_fields' are mutually exclusive
       void perform_close_operations(LogicalCloser &closer,
                                     const FieldMask &closing_mask,
                                     FieldState &closing_state,
-                                    const ColorPoint &next_child, 
+                                    const LegionColor next_child, 
                                     bool allow_next_child,
                                     const FieldMask *aliased_children,
                                     bool upgrade_next_child, 
@@ -1402,7 +1868,7 @@ namespace Legion {
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &current_mask,
-                                   const ColorPoint &next_child,
+                                   const LegionColor next_child,
                                    FieldMask &open_below,
                                    bool force_close_next);
     public:
@@ -1546,7 +2012,7 @@ namespace Legion {
                                   ReductionView *new_view);
     public: // Help for physical analysis
       void find_complete_fields(const FieldMask &scope_fields,
-          const LegionMap<ColorPoint,FieldMask>::aligned &children,
+          const LegionMap<LegionColor,FieldMask>::aligned &children,
           FieldMask &complete_fields);
       InstanceView* convert_manager(PhysicalManager *manager,InnerContext *ctx);
       InstanceView* convert_reference(const InstanceRef &ref,InnerContext *ctx);
@@ -1568,11 +2034,11 @@ namespace Legion {
       PhysicalManager* find_manager(DistributedID did);
     public:
       virtual unsigned get_depth(void) const = 0;
-      virtual const ColorPoint& get_color(void) const = 0;
+      virtual LegionColor get_color(void) const = 0;
       virtual IndexTreeNode *get_row_source(void) const = 0;
       virtual RegionTreeID get_tree_id(void) const = 0;
       virtual RegionTreeNode* get_parent(void) const = 0;
-      virtual RegionTreeNode* get_tree_child(const ColorPoint &c) = 0; 
+      virtual RegionTreeNode* get_tree_child(const LegionColor c) = 0; 
       virtual void instantiate_children(void) = 0;
       virtual bool is_region(void) const = 0;
 #ifdef DEBUG_LEGION
@@ -1588,13 +2054,13 @@ namespace Legion {
     public:
       // Interfaces to Realm
       virtual ApEvent issue_copy(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &src_fields,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true) = 0;
       virtual ApEvent issue_fill(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
@@ -1602,12 +2068,9 @@ namespace Legion {
 #endif
                   RegionTreeNode *intersect = NULL) = 0;
     public:
-      virtual bool are_children_disjoint(const ColorPoint &c1, 
-                                         const ColorPoint &c2) = 0;
+      virtual bool are_children_disjoint(const LegionColor c1, 
+                                         const LegionColor c2) = 0;
       virtual bool are_all_children_disjoint(void) = 0;
-      virtual const Domain& get_domain_blocking(void) const = 0;
-      virtual const Domain& get_domain(ApEvent &precondition) const = 0;
-      virtual const Domain& get_domain_no_wait(void) const = 0;
       virtual bool is_complete(void) = 0;
       virtual bool intersects_with(RegionTreeNode *other) = 0;
       virtual bool dominates(RegionTreeNode *other) = 0;
@@ -1705,29 +2168,29 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
-      bool has_child(const ColorPoint &p);
-      bool has_color(const ColorPoint &p);
-      PartitionNode* get_child(const ColorPoint &p);
+      bool has_child(const LegionColor p);
+      bool has_color(const LegionColor p);
+      PartitionNode* get_child(const LegionColor p);
       void add_child(PartitionNode *child);
-      void remove_child(const ColorPoint &p);
+      void remove_child(const LegionColor p);
       void add_creation_source(AddressSpaceID source);
       void destroy_node(AddressSpaceID source);
     public:
       virtual unsigned get_depth(void) const;
-      virtual const ColorPoint& get_color(void) const;
+      virtual LegionColor get_color(void) const;
       virtual IndexTreeNode *get_row_source(void) const;
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
-      virtual RegionTreeNode* get_tree_child(const ColorPoint &c);
+      virtual RegionTreeNode* get_tree_child(const LegionColor c);
     public:
       virtual ApEvent issue_copy(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &src_fields,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
@@ -1735,8 +2198,8 @@ namespace Legion {
 #endif
                   RegionTreeNode *intersect = NULL);
     public:
-      virtual bool are_children_disjoint(const ColorPoint &c1, 
-                                         const ColorPoint &c2);
+      virtual bool are_children_disjoint(const LegionColor c1, 
+                                         const LegionColor c2);
       virtual bool are_all_children_disjoint(void);
       virtual void instantiate_children(void);
       virtual bool is_region(void) const;
@@ -1748,9 +2211,6 @@ namespace Legion {
       static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual const Domain& get_domain_blocking(void) const;
-      virtual const Domain& get_domain(ApEvent &precondition) const;
-      virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
@@ -1783,7 +2243,7 @@ namespace Legion {
                                           const FieldMask &mask);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
-                         LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
 #ifdef DEBUG_LEGION
     public:
@@ -1795,6 +2255,10 @@ namespace Legion {
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
 #endif
+    public:
+      void find_open_complete_partitions(ContextID ctx,
+                                         const FieldMask &mask,
+                    std::vector<LogicalPartition> &partitions);
     public:
       void premap_region(ContextID ctx, 
                          const RegionRequirement &req,
@@ -1815,14 +2279,6 @@ namespace Legion {
       void close_state(const TraversalInfo &info, RegionUsage &usage, 
                        UniqueID logical_context_uid, InnerContext *context, 
                        InstanceSet &targets);
-      void find_field_descriptors(ContextID ctx, ApEvent term_event,
-                                  const RegionUsage &usage,
-                                  const FieldMask &user_mask,
-                                  FieldID fid, Operation *op, unsigned index,
-                                  std::vector<FieldDataDescriptor> &field_data,
-                                  std::set<ApEvent> &preconditions,
-                                  VersionInfo &version_info,
-                                  std::set<RtEvent> &applied_events);
       void fill_fields(ContextID ctx, const FieldMask &fill_mask,
                        const void *value, size_t value_size, 
                        UniqueID logical_ctx_uid, InnerContext *context, 
@@ -1867,8 +2323,8 @@ namespace Legion {
       PartitionNode *const parent;
       IndexSpaceNode *const row_source;
     protected:
-      std::map<ColorPoint,PartitionNode*> color_map;
-      std::map<ColorPoint,PartitionNode*> valid_map;
+      std::map<LegionColor,PartitionNode*> color_map;
+      std::map<LegionColor,PartitionNode*> valid_map;
     };
 
     /**
@@ -1906,29 +2362,29 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
-      bool has_child(const ColorPoint &c);
-      bool has_color(const ColorPoint &c);
-      RegionNode* get_child(const ColorPoint &c);
+      bool has_child(const LegionColor c);
+      bool has_color(const LegionColor c);
+      RegionNode* get_child(const LegionColor c);
       void add_child(RegionNode *child);
-      void remove_child(const ColorPoint &c);
+      void remove_child(const LegionColor c);
       void add_creation_source(AddressSpaceID source);
       void destroy_node(AddressSpaceID source);
     public:
       virtual unsigned get_depth(void) const;
-      virtual const ColorPoint& get_color(void) const;
+      virtual LegionColor get_color(void) const;
       virtual IndexTreeNode *get_row_source(void) const;
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
-      virtual RegionTreeNode* get_tree_child(const ColorPoint &c);
+      virtual RegionTreeNode* get_tree_child(const LegionColor c);
     public:
       virtual ApEvent issue_copy(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &src_fields,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &src_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   ApEvent precondition, PredEvent predicate_guard,
                   RegionTreeNode *intersect = NULL,
                   ReductionOpID redop = 0, bool reduction_fold = true);
       virtual ApEvent issue_fill(Operation *op,
-                  const std::vector<Domain::CopySrcDstField> &dst_fields,
+                  const std::vector<CopySrcDstField> &dst_fields,
                   const void *fill_value, size_t fill_size,
                   ApEvent precondition, PredEvent predicate_guard,
 #ifdef LEGION_SPY
@@ -1936,8 +2392,8 @@ namespace Legion {
 #endif
                   RegionTreeNode *intersect = NULL);
     public:
-      virtual bool are_children_disjoint(const ColorPoint &c1, 
-                                         const ColorPoint &c2);
+      virtual bool are_children_disjoint(const LegionColor c1, 
+                                         const LegionColor c2);
       virtual bool are_all_children_disjoint(void);
       virtual void instantiate_children(void);
       virtual bool is_region(void) const;
@@ -1950,9 +2406,6 @@ namespace Legion {
                                             Runtime *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
-      virtual const Domain& get_domain_blocking(void) const;
-      virtual const Domain& get_domain(ApEvent &precondition) const;
-      virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other);
       virtual bool dominates(RegionTreeNode *other);
@@ -1989,7 +2442,7 @@ namespace Legion {
                                           const FieldMask &mask);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
-                         LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                TreeStateLogger *logger);
 #ifdef DEBUG_LEGION
     public:
@@ -2006,8 +2459,7 @@ namespace Legion {
       RegionNode *const parent;
       IndexPartNode *const row_source;
     protected:
-      std::map<ColorPoint,RegionNode*> color_map;
-      std::map<ColorPoint,RegionNode*> valid_map;
+      std::map<LegionColor,RegionNode*> color_map;
     }; 
 
     // some inline implementations

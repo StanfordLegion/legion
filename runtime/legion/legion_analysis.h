@@ -452,7 +452,7 @@ namespace Legion {
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
       PhysicalUser(void);
-      PhysicalUser(const RegionUsage &u, const ColorPoint &child, 
+      PhysicalUser(const RegionUsage &u, LegionColor child, 
                    UniqueID op_id, unsigned index, RegionNode *node);
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
@@ -465,7 +465,7 @@ namespace Legion {
                                        RegionTreeForest *forest);
     public:
       RegionUsage usage;
-      ColorPoint child;
+      LegionColor child;
       UniqueID op_id;
       unsigned index; // region requirement index
       RegionNode *node;
@@ -517,7 +517,7 @@ namespace Legion {
       }
     public:
       FieldMask valid_fields;
-      LegionMap<ColorPoint,FieldMask>::aligned open_children;
+      LegionMap<LegionColor,FieldMask>::aligned open_children;
     };
 
     /**
@@ -530,7 +530,7 @@ namespace Legion {
     public:
       FieldState(void);
       FieldState(const GenericUser &u, const FieldMask &m, 
-                 const ColorPoint &child);
+                 LegionColor child);
       FieldState(const RegionUsage &u, const FieldMask &m,
                  ProjectionFunction *proj, const Domain &proj_domain, 
                  bool dis, bool dirty_reduction = false);
@@ -827,7 +827,7 @@ namespace Legion {
       void clone_to(const FieldMask &mask, VersionInfo &target_info) const;
     public:
       void print_physical_state(const FieldMask &capture_mask,
-          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+          LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
     public:
       RegionTreeNode *const node;
@@ -953,7 +953,7 @@ namespace Legion {
                             ProjectionEpochID advance_epoch = 0,
                             const FieldMask *dirty_previous = NULL);
       void update_child_versions(InnerContext *context,
-                                 const ColorPoint &child_color,
+                                 LegionColor child_color,
                                  VersioningSet<> &new_states,
                                  std::set<RtEvent> &applied_events);
       void invalidate_version_infos(const FieldMask &invalidate_mask);
@@ -963,7 +963,7 @@ namespace Legion {
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
-                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
+                         LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
     protected:
       VersionState* create_new_version_state(VersionID vid);
@@ -1086,7 +1086,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID;
       public:
         VersionState *proxy_this;
-        ColorPoint child_color;
+        LegionColor child_color;
         VersioningSet<> *children;
         Reservation state_lock;
       };
@@ -1155,7 +1155,7 @@ namespace Legion {
       void merge_physical_state(const PhysicalState *state, 
                                 const FieldMask &merge_mask,
                                 std::set<RtEvent> &applied_conditions);
-      void reduce_open_children(const ColorPoint &child_color,
+      void reduce_open_children(const LegionColor child_color,
                                 const FieldMask &update_mask,
                                 VersioningSet<> &new_states,
                                 std::set<RtEvent> &applied_conditions,
@@ -1257,7 +1257,7 @@ namespace Legion {
       // is how we keep the distributed version state tree live
       typedef VersioningSet<VERSION_STATE_TREE_REF,
                             false/*LOCAL*/> StateVersions;
-      LegionMap<ColorPoint,StateVersions>::aligned open_children;
+      LegionMap<LegionColor,StateVersions>::aligned open_children;
       // The valid instance views
       LegionMap<LogicalView*, FieldMask,
                 VALID_VIEW_ALLOC>::track_aligned valid_views;
@@ -1296,17 +1296,17 @@ namespace Legion {
       RegionTreePath(void);
     public:
       void initialize(unsigned min_depth, unsigned max_depth);
-      void register_child(unsigned depth, const ColorPoint &color);
+      void register_child(unsigned depth, const LegionColor color);
       void record_aliased_children(unsigned depth, const FieldMask &mask);
       void clear();
     public:
 #ifdef DEBUG_LEGION 
       bool has_child(unsigned depth) const;
-      const ColorPoint& get_child(unsigned depth) const;
+      LegionColor get_child(unsigned depth) const;
 #else
       inline bool has_child(unsigned depth) const
         { return path[depth].is_valid(); }
-      inline const ColorPoint& get_child(unsigned depth) const
+      inline LegionColor get_child(unsigned depth) const
         { return path[depth]; }
 #endif
       inline unsigned get_path_length(void) const
@@ -1316,7 +1316,7 @@ namespace Legion {
     public:
       const FieldMask* get_aliased_children(unsigned depth) const;
     protected:
-      std::vector<ColorPoint> path;
+      std::vector<LegionColor> path;
       LegionMap<unsigned/*depth*/,FieldMask>::aligned interfering_children;
       unsigned min_depth;
       unsigned max_depth;
@@ -1348,7 +1348,7 @@ namespace Legion {
       // Fields are only valid during traversal
       unsigned depth;
       bool has_child;
-      ColorPoint next_child;
+      LegionColor next_child;
     };
 
     /**

@@ -143,6 +143,7 @@ extern "C" {
   typedef struct legion_index_space_t {
     legion_index_space_id_t id;
     legion_index_tree_id_t tid;
+    legion_type_tag_t type_tag;
   } legion_index_space_t;
 
   /**
@@ -151,6 +152,7 @@ extern "C" {
   typedef struct legion_index_partition_t {
     legion_index_partition_id_t id;
     legion_index_tree_id_t tid;
+    legion_type_tag_t type_tag;
   } legion_index_partition_t;
 
   /**
@@ -948,10 +950,9 @@ extern "C" {
   legion_index_partition_create_equal(legion_runtime_t runtime,
                                       legion_context_t ctx,
                                       legion_index_space_t parent,
-                                      legion_domain_t color_space,
+                                      legion_index_space_t color_space,
                                       size_t granularity,
-                                      int color /* = AUTO_GENERATE_ID */,
-                                      bool allocable /* = false */);
+                                      int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -965,9 +966,9 @@ extern "C" {
     legion_index_space_t parent,
     legion_index_partition_t handle1,
     legion_index_partition_t handle2,
+    legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
-    bool allocable /* = false */);
+    int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -981,9 +982,9 @@ extern "C" {
     legion_index_space_t parent,
     legion_index_partition_t handle1,
     legion_index_partition_t handle2,
+    legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
-    bool allocable /* = false */);
+    int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -997,9 +998,9 @@ extern "C" {
     legion_index_space_t parent,
     legion_index_partition_t handle1,
     legion_index_partition_t handle2,
+    legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
-    bool allocable /* = false */);
+    int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1012,9 +1013,8 @@ extern "C" {
                                          legion_logical_region_t handle,
                                          legion_logical_region_t parent,
                                          legion_field_id_t fid,
-                                         legion_domain_t color_space,
-                                         int color /* = AUTO_GENERATE_ID */,
-                                         bool allocable /* = false */);
+                                         legion_index_space_t color_space,
+                                         int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1029,10 +1029,9 @@ extern "C" {
     legion_logical_partition_t projection,
     legion_logical_region_t parent,
     legion_field_id_t fid,
-    legion_domain_t color_space,
+    legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
-    bool allocable /* = false */);
+    int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1047,10 +1046,9 @@ extern "C" {
     legion_logical_region_t handle,
     legion_logical_region_t parent,
     legion_field_id_t fid,
-    legion_domain_t color_space,
+    legion_index_space_t color_space,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
-    int color /* = AUTO_GENERATE_ID */,
-    bool allocable /* = false */);
+    int color /* = AUTO_GENERATE_ID */);
 
   /**
    * @see LegionRuntime::HighLevel::Runtime::is_index_partition_disjoint()

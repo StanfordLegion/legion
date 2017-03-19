@@ -124,6 +124,17 @@ int main(int argc, const char *argv[])
     assert(hi.is_idxspace());
   }
 
+  // sparsity
+  {
+    ID lo = ID::make_sparsity(0, 0, 0);
+    ID hi = ID::make_sparsity(-1U, -1U, -1U);
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "sparsity";
+    assert(lo.is_sparsity());
+    assert(hi.is_sparsity());
+  }
+
   // allocator
   {
     ID lo = ID::make_allocator(0, 0, 0);

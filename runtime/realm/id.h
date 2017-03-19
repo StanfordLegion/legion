@@ -40,6 +40,7 @@ namespace Realm {
       // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
       // PROCGROUP:   tag:8 = 0x1c, owner_node:16,   creator_node:16, pgroup_idx: 24
       // IDXSPACE:    tag:4 = 0x5,  owner_node:16,   creator_node:16, idxspace_idx: 28
+      // SPARSITY:    tag:4 = 0x4,  owner_node:16,   creator_node:16, sparsity_idx: 28
       // ALLOCATOR:   tag:8 = 0x1b, owner_node:16,   creator_node:16, allocator_idx: 24
 
       static const int NODE_FIELD_WIDTH = 16;
@@ -118,6 +119,14 @@ namespace Realm {
 	static const IDType TAG_VALUE = 0x5;
       };
 
+      struct FMT_Sparsity {
+	IDType sparsity_idx : 28;
+	IDType creator_node : 16;
+	IDType owner_node : 16;
+	IDType type_tag : 4;
+	static const IDType TAG_VALUE = 0x4;
+      };
+
       struct FMT_Allocator {
 	IDType allocator_idx : 24;
 	IDType creator_node : 16;
@@ -135,6 +144,7 @@ namespace Realm {
       static ID make_processor(unsigned owner_node, unsigned proc_idx);
       static ID make_procgroup(unsigned owner_node, unsigned creator_node, unsigned pgroup_idx);
       static ID make_idxspace(unsigned owner_node, unsigned creator_node, unsigned idxspace_idx);
+      static ID make_sparsity(unsigned owner_node, unsigned creator_node, unsigned sparsity_idx);
       static ID make_allocator(unsigned owner_node, unsigned creator_node, unsigned allocator_idx);
 
       bool is_null(void) const;
@@ -147,6 +157,7 @@ namespace Realm {
       bool is_processor(void) const;
       bool is_procgroup(void) const;
       bool is_idxspace(void) const;
+      bool is_sparsity(void) const;
       bool is_allocator(void) const;
 
       enum ID_Types {
@@ -161,7 +172,7 @@ namespace Realm {
 	ID_PROCESSOR,
 	ID_PROCGROUP,
 	ID_INDEXSPACE,
-	ID_UNUSED_11,
+	ID_SPARSITY,
 	ID_ALLOCATOR,
 	ID_UNUSED_13,
 	ID_INSTANCE,
@@ -195,6 +206,7 @@ namespace Realm {
 	FMT_Processor proc;
 	FMT_ProcGroup pgroup;
 	FMT_IdxSpace idxspace;
+	FMT_Sparsity sparsity;
 	FMT_Allocator allocator;
       };
 

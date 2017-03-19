@@ -98,13 +98,10 @@ namespace Legion {
       }
 
       static inline void log_index_partition(IDType parent_id, 
-                IDType unique_id, bool disjoint, const DomainPoint& point)
+                IDType unique_id, bool disjoint, LegionColor point)
       {
-        log_spy.print("Index Partition " IDFMT " " IDFMT " %u %u %d %d %d",
-		      parent_id, unique_id, disjoint, point.dim, 
-                    (int)point.point_data[0],
-                    (int)point.point_data[1],
-                    (int)point.point_data[2]);
+        log_spy.print("Index Partition " IDFMT " " IDFMT " %u 1 %lld",
+		      parent_id, unique_id, disjoint, point); 
       }
 
       static inline void log_index_partition_name(IDType unique_id,
@@ -115,13 +112,13 @@ namespace Legion {
       }
 
       static inline void log_index_subspace(IDType parent_id, 
-                              IDType unique_id, const DomainPoint& point)
+                              IDType unique_id, const DomainPoint &point)
       {
         log_spy.print("Index Subspace " IDFMT " " IDFMT " %u %d %d %d",
-		      parent_id, unique_id, point.dim, 
-		      (int)point.point_data[0],
-		      (int)point.point_data[1],
-		      (int)point.point_data[2]);
+		      parent_id, unique_id, point.dim,
+                      (int)point.point_data[0],
+                      (int)point.point_data[1],
+                      (int)point.point_data[2]);
       }
 
       static inline void log_field_space(unsigned unique_id)
@@ -175,28 +172,29 @@ namespace Legion {
       }
 
       // For capturing information about the shape of index spaces
-      template<int DIM>
-      static inline void log_index_space_point(IDType handle, 
-                                               long long int *vals)
+      template<int DIM, typename T>
+      static inline void log_index_space_point(IDType handle,
+                           const Realm::ZPoint<DIM,T> &point)
       {
-        log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld", handle, 
-		      DIM, vals[0],
-		      DIM < 2 ? 0 : vals[1],
-		      DIM < 3 ? 0 : vals[2]);
+        LEGION_STATIC_ASSERT(DIM <= 3);
+        log_spy.print() << "Index Space Point " << handle << " " << DIM
+                        << " " << point[0]
+                        << " " << ((DIM < 2) ? 0 : point[1])
+                        << " " << ((DIM < 3) ? 0 : point[2]);
       }
 
-      template<int DIM>
+      template<int DIM, typename T>
       static inline void log_index_space_rect(IDType handle, 
-                                              long long int *lower, 
-                                              long long int *higher)
+                                              const Realm::ZRect<DIM,T> &rect)
       {
-        log_spy.print("Index Space Rect " IDFMT " %d "
-		      "%lld %lld %lld %lld %lld %lld",
-		      handle, DIM, lower[0],
-		      DIM < 2 ? 0 : lower[1], 
-		      DIM < 3 ? 0 : lower[2], higher[0],
-		      DIM < 2 ? 0 : higher[1],
-		      DIM < 3 ? 0 : higher[2]);
+        LEGION_STATIC_ASSERT(DIM <= 3);
+        log_spy.print() << "Index Space Rect " << handle << " "
+                        << DIM << " " << rect.lo[0]
+                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
+                        << " " << rect.hi[0]
+                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.hi[2]);
       }
 
       static inline void log_empty_index_space(IDType handle)
@@ -367,11 +365,10 @@ namespace Legion {
 
       static inline void log_dependent_partition_operation(UniqueID context,
                                                            UniqueID unique_id,
-                                                           IDType pid,
                                                            int kind)
       {
-        log_spy.print("Dependent Partition Operation %llu %llu " IDFMT " %d",
-		      context, unique_id, pid, kind);
+        log_spy.print("Dependent Partition Operation %llu %llu %d",
+		      context, unique_id, kind);
       }
 
       static inline void log_pending_partition_operation(UniqueID context,

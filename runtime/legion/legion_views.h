@@ -67,7 +67,7 @@ namespace Legion {
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
-      virtual LogicalView* get_subview(const ColorPoint &c) = 0;
+      virtual LogicalView* get_subview(const LegionColor c) = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
       virtual void notify_active(ReferenceMutator *mutator) = 0;
@@ -127,7 +127,7 @@ namespace Legion {
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
-      virtual LogicalView* get_subview(const ColorPoint &c) = 0;
+      virtual LogicalView* get_subview(const LegionColor c) = 0;
       virtual Memory get_location(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
@@ -203,19 +203,19 @@ namespace Legion {
     public:
       // Getting field information for performing copies
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields,
+                   std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+                   std::vector<CopySrcDstField> &src_fields) = 0;
       virtual bool reduce_to(ReductionOpID redop, 
                              const FieldMask &reduce_mask,
-                     std::vector<Domain::CopySrcDstField> &src_fields,
+                     std::vector<CopySrcDstField> &src_fields,
                              CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void reduce_from(ReductionOpID redop,
                                const FieldMask &reduce_mask, 
-                       std::vector<Domain::CopySrcDstField> &src_fields) = 0;
+                       std::vector<CopySrcDstField> &src_fields) = 0;
     public:
-      inline InstanceView* get_instance_subview(const ColorPoint &c) 
+      inline InstanceView* get_instance_subview(const LegionColor c) 
         { return get_subview(c)->as_instance_view(); }
       
 #ifdef DISTRIBUTED_INSTANCE_VIEWS
@@ -318,25 +318,25 @@ namespace Legion {
     public:
       virtual bool has_space(const FieldMask &space_mask) const;
     public:
-      MaterializedView* get_materialized_subview(const ColorPoint &c);
+      MaterializedView* get_materialized_subview(const LegionColor c);
       static void handle_subview_did_request(Deserializer &derez,
                              Runtime *runtime, AddressSpaceID source);
       static void handle_subview_did_response(Deserializer &derez); 
       MaterializedView* get_materialized_parent_view(void) const;
     public:
-      void copy_field(FieldID fid, std::vector<Domain::CopySrcDstField> &infos);
+      void copy_field(FieldID fid, std::vector<CopySrcDstField> &infos);
     public:
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields,
+                   std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &src_fields);
+                   std::vector<CopySrcDstField> &src_fields);
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::vector<Domain::CopySrcDstField> &dst_fields,
+                     std::vector<CopySrcDstField> &dst_fields,
                              CopyAcrossHelper *across_helper = NULL);
       virtual void reduce_from(ReductionOpID redop,
                                const FieldMask &reduce_mask,
-                          std::vector<Domain::CopySrcDstField> &src_fields);
+                          std::vector<CopySrcDstField> &src_fields);
     public:
       void accumulate_events(std::set<ApEvent> &all_events);
     public:
@@ -344,7 +344,7 @@ namespace Legion {
       virtual PhysicalManager* get_manager(void) const { return manager; }
       virtual bool has_parent(void) const { return (parent != NULL); }
       virtual LogicalView* get_parent(void) const { return parent; }
-      virtual LogicalView* get_subview(const ColorPoint &c);
+      virtual LogicalView* get_subview(const LegionColor c);
       virtual Memory get_location(void) const;
     public:
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
@@ -362,7 +362,7 @@ namespace Legion {
       void find_copy_preconditions_above(ReductionOpID redop, bool reading,
                                          bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
-                                         const ColorPoint &child_color,
+                                         const LegionColor child_color,
                                          RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
@@ -376,7 +376,7 @@ namespace Legion {
       void find_local_copy_preconditions(ReductionOpID redop, bool reading,
                                          bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
-                                         const ColorPoint &child_color,
+                                         const LegionColor child_color,
                                          RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
@@ -387,7 +387,7 @@ namespace Legion {
       void find_local_copy_preconditions_above(ReductionOpID redop,bool reading,
                                          bool single_copy, bool restrict_out,
                                          const FieldMask &copy_mask,
-                                         const ColorPoint &child_color,
+                                         const LegionColor child_color,
                                          RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID creator_op_id,
@@ -406,7 +406,7 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events);
     protected:
       void add_copy_user_above(const RegionUsage &usage, ApEvent copy_term,
-                               const ColorPoint &child_color,
+                               const LegionColor child_color,
                                RegionNode *origin_node,
                                VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
@@ -416,7 +416,7 @@ namespace Legion {
                                std::set<RtEvent> &applied_events);
       void add_local_copy_user(const RegionUsage &usage, ApEvent copy_term,
                                bool base_user, bool restrict_out,
-                               const ColorPoint &child_color,
+                               const LegionColor child_color,
                                RegionNode *origin_node,
                                VersionTracker *version_tracker,
                                const UniqueID creator_op_id,
@@ -435,7 +435,7 @@ namespace Legion {
     protected:
       void find_user_preconditions_above(const RegionUsage &usage,
                                          ApEvent term_event,
-                                         const ColorPoint &child_color,
+                                         const LegionColor child_color,
                                          RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID op_id,
@@ -445,7 +445,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events);
       void find_local_user_preconditions(const RegionUsage &usage,
                                          ApEvent term_event,
-                                         const ColorPoint &child_color,
+                                         const LegionColor child_color,
                                          RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID op_id,
@@ -455,7 +455,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied_events);
       void find_local_user_preconditions_above(const RegionUsage &usage,
                                          ApEvent term_event,
-                                         const ColorPoint &child_color,
+                                         const LegionColor child_color,
                                          RegionNode *origin_node,
                                          VersionTracker *version_tracker,
                                          const UniqueID op_id,
@@ -477,7 +477,7 @@ namespace Legion {
                                    std::set<RtEvent> &applied_events); 
     protected:
       void add_user_above(const RegionUsage &usage, ApEvent term_event,
-                          const ColorPoint &child_color, 
+                          const LegionColor child_color, 
                           RegionNode *origin_node,
                           VersionTracker *version_tracker,
                           const UniqueID op_id, const unsigned index,
@@ -486,7 +486,7 @@ namespace Legion {
                           const AddressSpaceID source,
                           std::set<RtEvent> &applied_events);
       bool add_local_user(const RegionUsage &usage, ApEvent term_event,
-                          const ColorPoint &child_color, 
+                          const LegionColor child_color, 
                           RegionNode *origin_node,
                           VersionTracker *version_tracker,
                           const UniqueID op_id, const unsigned index,
@@ -512,7 +512,7 @@ namespace Legion {
                                    bool update_versions = true);
     protected:
       void add_user_above_fused(const RegionUsage &usage, ApEvent term_event,
-                                const ColorPoint &child_color,
+                                const LegionColor child_color,
                                 RegionNode *origin_node,
                                 VersionTracker *version_tracker,
                                 const UniqueID op_id,
@@ -577,7 +577,7 @@ namespace Legion {
       template<bool TRACK_DOM>
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
-                                      const ColorPoint &child_color,
+                                      const LegionColor child_color,
                                       RegionNode *origin_node,
                                       ApEvent term_event,
                                       const UniqueID op_id,
@@ -589,7 +589,7 @@ namespace Legion {
                                       FieldMask &non_dominated);
       void find_previous_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
-                                      const ColorPoint &child_color,
+                                      const LegionColor child_color,
                                       RegionNode *origin_node,
                                       ApEvent term_event,
                                       const UniqueID op_id,
@@ -600,7 +600,7 @@ namespace Legion {
       template<bool TRACK_DOM>
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
-                                      const ColorPoint &child_color,
+                                      const LegionColor child_color,
                                       RegionNode *origin_node,
                                       const UniqueID op_id,
                                       const unsigned index,
@@ -611,7 +611,7 @@ namespace Legion {
                                       FieldMask &non_dominated);
       void find_previous_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
-                                      const ColorPoint &child_color,
+                                      const LegionColor child_color,
                                       RegionNode *origin_node,
                                       const UniqueID op_id,
                                       const unsigned index,
@@ -621,15 +621,13 @@ namespace Legion {
                   LegionMap<ApEvent,FieldMask>::aligned &filter_events);
       inline bool has_local_precondition(PhysicalUser *prev_user,
                                      const RegionUsage &next_user,
-                                     const ColorPoint &child_color,
+                                     const LegionColor child_color,
                                      const UniqueID op_id,
                                      const unsigned index,
                                      RegionNode *origin_node);
     public:
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
-    public:
-      void set_descriptor(FieldDataDescriptor &desc, FieldID field_id) const;
     public:
       void find_field_reservations(const std::vector<FieldID> &needed_fields,
                                    std::vector<Reservation> &results);
@@ -688,7 +686,7 @@ namespace Legion {
       // top-level view for an instance needs to track this.
       std::map<FieldID,Reservation> atomic_reservations;
       // Keep track of the child views
-      std::map<ColorPoint,MaterializedView*> children;
+      std::map<LegionColor,MaterializedView*> children;
       // There are three operations that are done on materialized views
       // 1. iterate over all the users for use analysis
       // 2. garbage collection to remove old users for an event
@@ -827,7 +825,7 @@ namespace Legion {
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
         { assert(false); return NULL; } 
-      virtual LogicalView* get_subview(const ColorPoint &c);
+      virtual LogicalView* get_subview(const LegionColor c);
       virtual Memory get_location(void) const;
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
@@ -898,16 +896,16 @@ namespace Legion {
                                       std::set<ApEvent> &wait_on);
     public:
       virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::vector<Domain::CopySrcDstField> &dst_fields,
+                     std::vector<CopySrcDstField> &dst_fields,
                              CopyAcrossHelper *across_helper = NULL);
       virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &dst_fields,
+                   std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<Domain::CopySrcDstField> &src_fields);
+                   std::vector<CopySrcDstField> &src_fields);
       virtual void reduce_from(ReductionOpID redop,
                                const FieldMask &reduce_mask,
-                          std::vector<Domain::CopySrcDstField> &src_fields);
+                          std::vector<CopySrcDstField> &src_fields);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -979,7 +977,7 @@ namespace Legion {
       { return NULL; }
       virtual bool has_parent(void) const = 0;
       virtual LogicalView* get_parent(void) const = 0;
-      virtual LogicalView* get_subview(const ColorPoint &c) = 0;
+      virtual LogicalView* get_subview(const LegionColor c) = 0;
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
@@ -1000,13 +998,6 @@ namespace Legion {
                                   const std::vector<unsigned> &dst_indexes,
                                         ApEvent precondition, PredEvent guard,
                                         std::set<ApEvent> &postconditions);
-      void find_field_descriptors(ApEvent term_event,
-                                  const RegionUsage &usage,
-                                  const FieldMask &user_mask,
-                                  FieldID field_id, Operation *op,
-                                  const unsigned index,
-                          std::vector<FieldDataDescriptor> &field_data,
-                                  std::set<ApEvent> &preconditions);
     public:
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
@@ -1255,7 +1246,7 @@ namespace Legion {
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
         { assert(false); return NULL; }
-      virtual LogicalView* get_subview(const ColorPoint &c);
+      virtual LogicalView* get_subview(const LegionColor c);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -1312,7 +1303,7 @@ namespace Legion {
       void record_valid_view(LogicalView *view, const FieldMask &mask);
       void record_reduction_fields(const FieldMask &reduction_fields);
       void record_reduction_view(ReductionView *view, const FieldMask &mask);
-      void record_child_version_state(const ColorPoint &child_color, 
+      void record_child_version_state(const LegionColor child_color, 
          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator);
       void finalize_capture(bool need_prune);
     public:
@@ -1397,7 +1388,7 @@ namespace Legion {
       void record_valid_view(LogicalView *view, const FieldMask &mask);
       void record_reduction_fields(const FieldMask &reduction_fields);
       void record_reduction_view(ReductionView *view, const FieldMask &mask);
-      void record_child_version_state(const ColorPoint &child_color, 
+      void record_child_version_state(const LegionColor child_color, 
          VersionState *state, const FieldMask &mask, ReferenceMutator *mutator);
       void record_version_state(VersionState *state, const FieldMask &mask, 
                                 ReferenceMutator *mutator, bool root);
@@ -1467,7 +1458,7 @@ namespace Legion {
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
         { assert(false); return NULL; }
-      virtual LogicalView* get_subview(const ColorPoint &c);
+      virtual LogicalView* get_subview(const LegionColor c);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -1543,7 +1534,7 @@ namespace Legion {
       virtual bool has_parent(void) const { return false; }
       virtual LogicalView* get_parent(void) const 
         { assert(false); return NULL; }
-      virtual LogicalView* get_subview(const ColorPoint &c);
+      virtual LogicalView* get_subview(const LegionColor c);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -1816,7 +1807,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     inline bool MaterializedView::has_local_precondition(PhysicalUser *user,
                                                  const RegionUsage &next_user,
-                                                 const ColorPoint &child_color,
+                                                 const LegionColor child_color,
                                                  const UniqueID op_id,
                                                  const unsigned index,
                                                  RegionNode *origin_node)
@@ -1829,13 +1820,13 @@ namespace Legion {
       // copies will catch dependences
       if ((op_id == user->op_id) && (index != user->index))
         return false;
-      if (child_color.is_valid())
+      if (child_color != INVALID_COLOR)
       {
         // Same child, already done the analysis
         if (child_color == user->child)
           return false;
         // Disjoint children means we can skip it
-        if (user->child.is_valid() && (disjoint_children || 
+        if ((user->child != INVALID_COLOR) && (disjoint_children || 
               logical_node->are_children_disjoint(child_color, user->child)))
           return false;
         // See if the two origin nodes don't intersect

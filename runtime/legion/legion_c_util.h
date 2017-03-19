@@ -269,6 +269,7 @@ namespace Legion {
         legion_index_space_t is_;
         is_.id = is.id;
         is_.tid = is.tid;
+        is_.type_tag = is.type_tag;
         return is_;
       }
 
@@ -278,6 +279,7 @@ namespace Legion {
         IndexSpace is;
         is.id = is_.id;
         is.tid = is_.tid;
+        is.type_tag = is_.type_tag;
         return is;
       }
 
@@ -287,6 +289,7 @@ namespace Legion {
         legion_index_partition_t ip_;
         ip_.id = ip.id;
         ip_.tid = ip.tid;
+        ip_.type_tag = ip.type_tag;
         return ip_;
       }
 
@@ -296,6 +299,7 @@ namespace Legion {
         IndexPartition ip;
         ip.id = ip_.id;
         ip.tid = ip_.tid;
+        ip.type_tag = ip_.type_tag;
         return ip;
       }
 

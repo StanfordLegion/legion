@@ -368,6 +368,7 @@ typedef enum legion_error_t {
   ERROR_REQUEST_FOR_EMPTY_FUTURE = 162,
   ERROR_ILLEGAL_REMAP_IN_STATIC_TRACE = 163,
   ERROR_REPLICABLE_NOT_IDEMPOTENT = 164,
+  ERROR_DYNAMIC_TYPE_MISMATCH = 165,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -405,12 +406,6 @@ typedef enum legion_region_flags_t {
   RESTRICTED_FLAG = 0x00000004,
   MUST_PREMAP_FLAG= 0x00000008,
 } legion_region_flags_t;
-
-typedef enum legion_index_space_kind_t {
-  UNSTRUCTURED_KIND,
-  SPARSE_ARRAY_KIND,
-  DENSE_ARRAY_KIND,
-} legion_index_space_kind_t;
 
 typedef enum legion_projection_type_t {
   SINGULAR, // a single logical region
@@ -579,6 +574,7 @@ typedef unsigned int legion_trace_id_t;
 typedef unsigned int legion_mapper_id_t;
 typedef unsigned int legion_context_id_t;
 typedef unsigned int legion_instance_id_t;
+typedef unsigned int legion_type_tag_t;
 typedef unsigned int legion_index_space_id_t;
 typedef unsigned int legion_index_partition_id_t;
 typedef unsigned int legion_index_tree_id_t;
@@ -601,6 +597,7 @@ typedef unsigned long long legion_version_id_t;
 typedef unsigned long long legion_projection_epoch_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
+typedef unsigned long long legion_internal_color_t;
 
 #endif // __LEGION_CONFIG_H__
 

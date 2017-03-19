@@ -53,6 +53,7 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
 
 TESTS := serializing test_profiling ctxswitch barrier_reduce taskreg memspeed idcheck
 TESTS_SINGLENODE := proc_group
+TESTS += deppart
 
 ifeq ($(strip $(USE_GASNET)),1)
   ifdef NODECOUNT

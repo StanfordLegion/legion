@@ -24,6 +24,7 @@
 #include "activemsg.h"
 
 #include "cmdline.h"
+#include "partitions.h"
 
 #include "codedesc.h"
 
@@ -285,6 +286,167 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class RemoteIDAllocator
+  //
+
+  Logger log_remote_id("remoteid");
+
+  RemoteIDAllocator::RemoteIDAllocator(void)
+  {}
+
+  RemoteIDAllocator::~RemoteIDAllocator(void)
+  {}
+
+  void RemoteIDAllocator::set_request_size(ID::ID_Types id_type, int batch_size, int low_water_mark)
+  {
+    batch_sizes[id_type] = batch_size;
+    low_water_marks[id_type] = low_water_mark;
+  }
+
+  void RemoteIDAllocator::make_initial_requests(void)
+  {
+    AutoHSLLock al(mutex);
+
+    for(std::map<ID::ID_Types, int>::const_iterator it = batch_sizes.begin();
+	it != batch_sizes.end();
+	it++) {
+      ID::ID_Types id_type = it->first;
+      int batch_size = it->second;
+
+      for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
+	if(i == gasnet_mynode()) continue;
+
+	reqs_in_flight[id_type].insert(i);
+
+	RemoteIDRequestMessage::send_request(i, id_type, batch_size);
+      }
+    }
+  }
+
+  ID::IDType RemoteIDAllocator::get_remote_id(gasnet_node_t target, ID::ID_Types id_type)
+  {
+    assert(batch_sizes.count(id_type) > 0);
+
+    ID::IDType id;
+    bool request_more = false;
+    {
+      AutoHSLLock al(mutex);
+      std::vector<std::pair<ID::IDType, ID::IDType> >& tgt_ranges = id_ranges[id_type][target];
+      assert(!tgt_ranges.empty());
+      id = tgt_ranges[0].first;
+      if(tgt_ranges[0].first == tgt_ranges[0].second) {
+	tgt_ranges.erase(tgt_ranges.begin());
+      } else {
+	tgt_ranges[0].first++;
+      }
+      if(tgt_ranges.empty() || 
+	 ((tgt_ranges.size() == 1) && 
+	  ((tgt_ranges[0].second - tgt_ranges[0].first) < (ID::IDType)low_water_marks[id_type]))) {
+	// want to request more ids, as long as a request isn't already in flight
+	if(reqs_in_flight[id_type].count(target) == 0) {
+	  reqs_in_flight[id_type].insert(target);
+	  request_more = true;
+	}
+      }
+    }
+
+    if(request_more)
+      RemoteIDRequestMessage::send_request(target,
+					   id_type,
+					   batch_sizes[id_type]);
+
+    log_remote_id.debug() << "assigned remote ID: target=" << target << " type=" << id_type << " id=" << id;
+    return id;
+  }
+
+  void RemoteIDAllocator::add_id_range(gasnet_node_t target, ID::ID_Types id_type, ID::IDType first, ID::IDType last)
+  {
+    AutoHSLLock al(mutex);
+
+    std::set<gasnet_node_t>::iterator it = reqs_in_flight[id_type].find(target);
+    assert(it != reqs_in_flight[id_type].end());
+    reqs_in_flight[id_type].erase(it);
+
+    id_ranges[id_type][target].push_back(std::make_pair(first, last));
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteIDRequestMessage
+  //
+
+  /*static*/ void RemoteIDRequestMessage::handle_request(RequestArgs args)
+  {
+    log_remote_id.debug() << "received remote id request: sender=" << args.sender
+			  << " type=" << args.id_type << " count=" << args.count;
+
+    int first = 0;
+    int last = 0;
+    ID first_id;
+    ID last_id;
+
+    switch(args.id_type) {
+    case ID::ID_SPARSITY: {
+      get_runtime()->local_sparsity_map_free_list->alloc_range(args.count, first, last);
+      first_id = ID::make_sparsity(gasnet_mynode(), 0, first);
+      last_id = ID::make_sparsity(gasnet_mynode(), 0, last);
+      break;
+    }
+    default: assert(0);
+    }
+
+    RemoteIDResponseMessage::send_request(args.sender, args.id_type, first_id.id, last_id.id);
+  }
+
+  /*static*/ void RemoteIDRequestMessage::send_request(gasnet_node_t target, ID::ID_Types id_type, int count)
+  {
+    RequestArgs args;
+
+    log_remote_id.debug() << "sending remote id request: target=" << target << " type=" << id_type << " count=" << count;
+    args.sender = gasnet_mynode();
+    args.id_type = id_type;
+    args.count = count;
+    Message::request(target, args);
+  }
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class RemoteIDResponseMessage
+  //
+
+  /*static*/ void RemoteIDResponseMessage::handle_request(RequestArgs args)
+  {
+    log_remote_id.debug() << "received remote id response: responder=" << args.responder
+			  << " type=" << args.id_type
+			  << " first=" << std::hex << args.first_id << " last=" << args.last_id << std::dec;
+
+    get_runtime()->remote_id_allocator.add_id_range(args.responder,
+						    args.id_type,
+						    args.first_id,
+						    args.last_id);
+  }
+
+  /*static*/ void RemoteIDResponseMessage::send_request(gasnet_node_t target, ID::ID_Types id_type,
+							ID::IDType first_id, ID::IDType last_id)
+  {
+    RequestArgs args;
+
+    log_remote_id.debug() << "sending remote id response: target=" << target
+			 << " type=" << id_type 
+			 << " first=" << std::hex << first_id << " last=" << last_id << std::dec;
+
+    args.responder = gasnet_mynode();
+    args.id_type = id_type;
+    args.first_id = first_id;
+    args.last_id = last_id;
+
+    Message::request(target, args);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class CoreModule
   //
 
@@ -405,7 +567,9 @@ namespace Realm {
 	nodes(0), global_memory(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0), local_index_space_free_list(0),
-	local_proc_group_free_list(0), run_method_called(false),
+	local_proc_group_free_list(0),
+	local_sparsity_map_free_list(0),
+	run_method_called(false),
 	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
 	core_map(0), core_reservations(0),
 	sampling_profiler(true /*system default*/),
@@ -666,6 +830,8 @@ namespace Realm {
       module_registrar.create_static_modules(cmdline, modules);
       module_registrar.create_dynamic_modules(cmdline, modules);
 
+      PartitioningOpQueue::configure_from_cmdline(cmdline);
+
       // low-level runtime parameters
 #ifdef USE_GASNET
       size_t gasnet_mem_size_in_mb = 256;
@@ -842,11 +1008,33 @@ namespace Realm {
       hcount += UpdateBytesReadMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Read AM");
       hcount += RegisterTaskMessage::Message::add_handler_entries(&handlers[hcount], "Register Task AM");
       hcount += RegisterTaskCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Register Task Complete AM");
+      hcount += RemoteMicroOpMessage::Message::add_handler_entries(&handlers[hcount], "Remote Micro Op AM");
+      hcount += RemoteMicroOpCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Micro Op Complete AM");
+      hcount += RemoteSparsityContribMessage::Message::add_handler_entries(&handlers[hcount], "Remote Sparsity Contrib AM");
+      hcount += RemoteSparsityRequestMessage::Message::add_handler_entries(&handlers[hcount], "Remote Sparsity Request AM");
+      hcount += ApproxImageResponseMessage::Message::add_handler_entries(&handlers[hcount], "Approx Image Response AM");
+      hcount += SetContribCountMessage::Message::add_handler_entries(&handlers[hcount], "Set Contrib Count AM");
+      hcount += RemoteIDRequestMessage::Message::add_handler_entries(&handlers[hcount], "Remote ID Request AM");
+      hcount += RemoteIDResponseMessage::Message::add_handler_entries(&handlers[hcount], "Remote ID Response AM");
       hcount += RemoteIBAllocRequestAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Alloc Request AM");
       hcount += RemoteIBAllocResponseAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Alloc Response AM");
       hcount += RemoteIBFreeRequestAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Free Request AM");
       //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");
       //hcount += TestMessage2::add_handler_entries(&handlers[hcount], "Test 2 AM");
+
+      nodes = new Node[gasnet_nodes()];
+
+      // create allocators for local node events/locks/index spaces - do this before we start handling
+      //  active messages
+      {
+	Node& n = nodes[gasnet_mynode()];
+	local_event_free_list = new EventTableAllocator::FreeList(n.events, gasnet_mynode());
+	local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, gasnet_mynode());
+	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, gasnet_mynode());
+	local_index_space_free_list = new IndexSpaceTableAllocator::FreeList(n.index_spaces, gasnet_mynode());
+	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, gasnet_mynode());
+	local_sparsity_map_free_list = new SparsityMapTableAllocator::FreeList(n.sparsity_maps, gasnet_mynode());
+      }
 
       init_endpoints(handlers, hcount, 
 		     gasnet_mem_size_in_mb, reg_mem_size_in_mb, reg_ib_mem_size_in_mb,
@@ -863,17 +1051,8 @@ namespace Realm {
       // doesn't make any calls between gasnet_init and gasnet_attach
       gasnet_set_waitmode(GASNET_WAIT_BLOCK);
 
-      nodes = new Node[gasnet_nodes()];
-
-      // create allocators for local node events/locks/index spaces
-      {
-	Node& n = nodes[gasnet_mynode()];
-	local_event_free_list = new EventTableAllocator::FreeList(n.events, gasnet_mynode());
-	local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, gasnet_mynode());
-	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, gasnet_mynode());
-	local_index_space_free_list = new IndexSpaceTableAllocator::FreeList(n.index_spaces, gasnet_mynode());
-	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, gasnet_mynode());
-      }
+      remote_id_allocator.set_request_size(ID::ID_SPARSITY, 4096, 3072);
+      remote_id_allocator.make_initial_requests();
 
 #ifdef DEADLOCK_TRACE
       next_thread = 0;
@@ -928,6 +1107,8 @@ namespace Realm {
 
       LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
                                                         *core_reservations);
+
+      PartitioningOpQueue::start_worker_threads(*core_reservations);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -1696,6 +1877,7 @@ namespace Realm {
       // Shutdown all the threads
 
       // threads that cause inter-node communication have to stop first
+      PartitioningOpQueue::stop_worker_threads();
       LegionRuntime::LowLevel::stop_dma_worker_threads();
       LegionRuntime::LowLevel::stop_dma_system();
       stop_activemsg_threads();
@@ -1825,6 +2007,15 @@ namespace Realm {
 	assert(check.barrier.creator_node == id.barrier.creator_node);
 	assert(check.barrier.barrier_idx == id.barrier.barrier_idx);
       }
+      return impl;
+    }
+
+    SparsityMapImplWrapper *RuntimeImpl::get_sparsity_impl(ID id)
+    {
+      Node *n = &nodes[id.sparsity.creator_node];
+      SparsityMapImplWrapper *impl = n->sparsity_maps.lookup_entry(id.sparsity.sparsity_idx,
+								   id.sparsity.creator_node);
+      assert(impl->me == id);
       return impl;
     }
 

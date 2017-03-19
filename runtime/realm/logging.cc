@@ -307,7 +307,16 @@ namespace Realm {
     }
 
     // lots of choices for log output
-    if(logname.empty() || (logname == "stdout")) {
+    if(logname.empty()) {
+      // the gasnet UDP job spawner (amudprun) seems to buffer stdout, so make stderr the default
+#ifdef GASNET_CONDUIT_UDP
+      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stderr, false),
+							    true);
+#else
+      stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stdout, false),
+							    true);
+#endif
+    } else if(logname == "stdout") {
       stream = new LoggerStreamSerialized<LoggerFileStream>(new LoggerFileStream(stdout, false),
 							    true);
     } else if(logname == "stderr") {
