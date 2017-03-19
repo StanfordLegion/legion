@@ -1343,6 +1343,7 @@ namespace Realm {
     f = fopen(str, "r");
     if(!f) {
       std::cout << "can't read '" << str << "' - skipping";
+      return -1;
     }
     int sib_core_id;
     int count = fscanf(f, "%d", &sib_core_id);
