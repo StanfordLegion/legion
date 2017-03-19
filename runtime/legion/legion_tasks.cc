@@ -6300,7 +6300,7 @@ namespace Legion {
         runtime->forest->find_launch_space_domain(launch_space, index_domain);
       else
         index_domain = launcher.launch_domain;
-      internal_domain = launcher.launch_domain;
+      internal_domain = index_domain;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
