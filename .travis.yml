@@ -23,6 +23,10 @@ matrix:
   exclude:
     - os: osx
       compiler: gcc
+    - os: osx
+      env: CC_FLAGS="-std=c++98" DEBUG=0 TEST_LEGION_CXX=0 TEST_REALM=0
+    - os: osx
+      env: CC_FLAGS="-std=c++98 -DLEGION_SPY" DEBUG=1 USE_SPY=1 TEST_LEGION_CXX=0 TEST_REALM=0
 # blacklist some branches
 branches:
   only:
