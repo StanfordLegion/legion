@@ -875,6 +875,7 @@ namespace Legion {
     public:
       void initialize(TaskContext *ctx,
                       const IndexCopyLauncher &launcher,
+                      IndexSpace launch_space,
                       bool check_privileges);
     public:
       virtual void activate(void);
@@ -891,6 +892,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       void check_point_requirements(void);
 #endif
+    public:
+      IndexSpace                    launch_space;
     public:
       std::vector<ProjectionInfo>   src_projection_infos;
       std::vector<ProjectionInfo>   dst_projection_infos;
@@ -1324,7 +1327,7 @@ namespace Legion {
                       ClosedNode *closed_tree, const TraceInfo &trace_info,
                       int close_idx, const VersionInfo &version_info,
                       const FieldMask &close_mask, Operation *create_op,
-                      const Domain &close_domain);
+                      IndexSpaceNode* launch_node);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1337,6 +1340,7 @@ namespace Legion {
     public:
       ProjectionInfo                projection_info;
     protected:
+      IndexSpace                    launch_space;
       Domain                        point_domain;
       std::vector<PointCloseOp*>    points;
       unsigned                      points_committed;
@@ -2424,6 +2428,7 @@ namespace Legion {
       MapperManager *mapper;
     protected:
       // For index versions of this operation
+      IndexSpace                        launch_space;
       std::vector<FieldDataDescriptor>  instances;
       std::set<ApEvent>                 index_preconditions;
       std::vector<PointDepPartOp*>      points; 
@@ -2547,6 +2552,7 @@ namespace Legion {
     public:
       void initialize(TaskContext *ctx,
                       const IndexFillLauncher &launcher,
+                      IndexSpace launch_space,
                       bool check_privileges);
     public:
       virtual void activate(void);
@@ -2564,6 +2570,7 @@ namespace Legion {
 #endif
     public:
       ProjectionInfo                projection_info;
+      IndexSpace                    launch_space;
     protected:
       std::vector<PointFillOp*>     points;
       unsigned                      points_committed;

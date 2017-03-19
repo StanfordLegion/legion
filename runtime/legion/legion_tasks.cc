@@ -1405,7 +1405,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskOp::unpack_projection_infos(Deserializer &derez,
                                          std::vector<ProjectionInfo> &infos,
-                                         const Domain &launch_domain)
+                                         IndexSpace launch_space)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -1414,6 +1414,7 @@ namespace Legion {
       derez.deserialize(num_projections);
       if (num_projections > 0)
       {
+        IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
         for (unsigned idx = 0; idx < num_projections; idx++)
         {
           unsigned index;
@@ -1422,7 +1423,7 @@ namespace Legion {
           assert(index < infos.size());
 #endif
           infos[index].unpack_info(derez, runtime, 
-                                   regions[index], launch_domain);
+                                   regions[index], launch_node);
         }
       }
     }
@@ -4252,6 +4253,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
       activate_task();
+      launch_space = IndexSpace::NO_SPACE;
+      internal_domain = Domain::NO_DOMAIN;
       sliced = false;
       redop = 0;
       reduction_op = NULL;
@@ -4547,6 +4550,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, PACK_MULTI_CALL);
       RezCheck z(rez);
       pack_base_task(rez, target);
+      rez.serialize(launch_space);
       rez.serialize(sliced);
       rez.serialize(redop);
     }
@@ -4559,6 +4563,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, UNPACK_MULTI_CALL);
       DerezCheck z(derez);
       unpack_base_task(derez, ready_events); 
+      derez.deserialize(launch_space);
       derez.deserialize(sliced);
       derez.deserialize(redop);
       if (redop > 0)
@@ -6754,6 +6759,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap IndexTask::initialize_task(TaskContext *ctx,
                                          const IndexTaskLauncher &launcher,
+                                         IndexSpace launch_sp,
                                          bool check_privileges,
                                          bool track /*= true*/)
     //--------------------------------------------------------------------------
@@ -6781,8 +6787,12 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       is_index_space = true;
-      index_domain = launcher.launch_domain;
-      internal_domain = launcher.launch_domain;
+      launch_space = launch_sp;
+      if (!launcher.launch_domain.exists())
+        runtime->forest->find_launch_space_domain(launch_space, index_domain);
+      else
+        index_domain = launcher.launch_domain;
+      internal_domain = index_domain;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
@@ -6816,6 +6826,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Future IndexTask::initialize_task(TaskContext *ctx,
                                       const IndexTaskLauncher &launcher,
+                                      IndexSpace launch_sp,
                                       ReductionOpID redop_id, 
                                       bool check_privileges,
                                       bool track /*= true*/)
@@ -6844,8 +6855,12 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       is_index_space = true;
-      index_domain = launcher.launch_domain;
-      internal_domain = launcher.launch_domain;
+      launch_space = launch_sp;
+      if (!launcher.launch_domain.exists())
+        runtime->forest->find_launch_space_domain(launch_space, index_domain);
+      else
+        index_domain = launcher.launch_domain;
+      internal_domain = index_domain;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -6990,35 +7005,8 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       { 
         for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-        }
-        switch (index_domain.get_dim())
-        {
-          case 1:
-            {
-	      LegionRuntime::Arrays::Rect<1> rect = index_domain.get_rect<1>();
-              LegionSpy::log_launch_index_space_rect<1>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 2:
-            {
-              LegionRuntime::Arrays::Rect<2> rect = index_domain.get_rect<2>();
-              LegionSpy::log_launch_index_space_rect<2>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          case 3:
-            {
-              LegionRuntime::Arrays::Rect<3> rect = index_domain.get_rect<3>();
-              LegionSpy::log_launch_index_space_rect<3>(unique_op_id,
-                                                        rect.lo.x, rect.hi.x);
-              break;
-            }
-          default:
-            assert(false);
-        }
+        runtime->forest->log_launch_space(launch_space, unique_op_id);
       }
     }
 
@@ -7072,7 +7060,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         projection_infos[idx] = 
-          ProjectionInfo(runtime, regions[idx], index_domain);
+          ProjectionInfo(runtime, regions[idx], launch_space);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
                                                      restrict_infos[idx],
                                                      version_infos[idx],
@@ -8380,7 +8368,7 @@ namespace Legion {
       derez.deserialize(internal_domain);
       unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
-      unpack_projection_infos(derez, projection_infos, internal_domain);
+      unpack_projection_infos(derez, projection_infos, launch_space);
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
       if (runtime->profiler != NULL)

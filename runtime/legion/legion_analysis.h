@@ -407,9 +407,9 @@ namespace Legion {
     public:
       ProjectionInfo(void)
         : projection(NULL), projection_type(SINGULAR),
-          projection_domain(Domain::NO_DOMAIN), dirty_reduction(false) { }
+          projection_space(NULL), dirty_reduction(false) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
-                     const Domain &launch_domain);
+                     IndexSpace launch_space);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
       inline const LegionMap<ProjectionEpochID,FieldMask>::aligned&
@@ -422,11 +422,11 @@ namespace Legion {
     public:
       void pack_info(Serializer &rez) const;
       void unpack_info(Deserializer &derez, Runtime *runtime,
-          const RegionRequirement &req, const Domain &launch_domain);
+          const RegionRequirement &req, IndexSpaceNode* launch_node);
     public:
       ProjectionFunction *projection;
       ProjectionType projection_type;
-      Domain projection_domain;
+      IndexSpaceNode *projection_space;
     protected:
       // Use this information to deduplicate between different points
       // trying to advance information for the same projection epoch
@@ -532,7 +532,7 @@ namespace Legion {
       FieldState(const GenericUser &u, const FieldMask &m, 
                  LegionColor child);
       FieldState(const RegionUsage &u, const FieldMask &m,
-                 ProjectionFunction *proj, const Domain &proj_domain, 
+                 ProjectionFunction *proj, IndexSpaceNode *proj_space, 
                  bool dis, bool dirty_reduction = false);
     public:
       inline bool is_projection_state(void) const 
@@ -541,7 +541,7 @@ namespace Legion {
       bool overlaps(const FieldState &rhs) const;
       void merge(const FieldState &rhs, RegionTreeNode *node);
     public:
-      bool projection_domain_dominates(const Domain &next_domain) const;
+      bool projection_domain_dominates(IndexSpaceNode *next_space) const;
     public:
       void print_state(TreeStateLogger *logger, 
                        const FieldMask &capture_mask) const;
@@ -549,7 +549,7 @@ namespace Legion {
       OpenState open_state;
       ReductionOpID redop;
       ProjectionFunction *projection;
-      Domain projection_domain;
+      IndexSpaceNode *projection_space;
       unsigned rebuild_timeout;
     };  
 
@@ -572,12 +572,12 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
-      void insert(ProjectionFunction *function, const Domain &d);
+      void insert(ProjectionFunction *function, IndexSpaceNode *space);
     public:
       const ProjectionEpochID epoch_id;
       FieldMask valid_fields;
     public:
-      std::map<ProjectionFunction*,std::set<Domain> > projections;
+      std::map<ProjectionFunction*,std::set<IndexSpaceNode*> > projections;
     };
 
     /**
@@ -669,7 +669,7 @@ namespace Legion {
       void record_projections(const ProjectionEpoch *epoch,
                               const FieldMask &closed_fields);
       void record_projection(ProjectionFunction *function,
-              const Domain &domain, const FieldMask &mask);
+                             IndexSpaceNode *domain, const FieldMask &mask);
     public:
       void fix_closed_tree(void);
       void filter_dominated_fields(const ClosedNode *old_tree,
@@ -677,7 +677,8 @@ namespace Legion {
     protected:
       void filter_dominated_projection_fields(FieldMask &non_dominated_mask,
           const std::map<ProjectionFunction*,
-             LegionMap<Domain,FieldMask>::aligned> &new_projections) const;
+             LegionMap<IndexSpaceNode*,
+                       FieldMask>::aligned> &new_projections) const;
       void filter_dominated_children(FieldMask &non_dominated_mask,
           const std::map<RegionTreeNode*,ClosedNode*> &new_children) const;
     public:
@@ -692,7 +693,7 @@ namespace Legion {
       FieldMask covered_fields; // Fields totally written to at this node
       std::map<RegionTreeNode*,ClosedNode*> children;
       std::map<ProjectionFunction*,
-               LegionMap<Domain,FieldMask>::aligned> projections;
+               LegionMap<IndexSpaceNode*,FieldMask>::aligned> projections;
     };
  
     /**

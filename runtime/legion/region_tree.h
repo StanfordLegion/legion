@@ -250,6 +250,10 @@ namespace Legion {
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
       size_t get_domain_volume(LogicalRegion handle);
     public:
+      // Index space operation methods
+      void find_launch_space_domain(IndexSpace handle, Domain &launch_domain);
+      void log_launch_space(IndexSpace handle, UniqueID op_id);
+    public:
       // Logical analysis methods
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
@@ -880,6 +884,9 @@ namespace Legion {
                                    const std::vector<const char*> &field_files,
                                    bool read_only) = 0;
     public:
+      virtual void get_launch_space_domain(Domain &launch_domain) = 0;
+      virtual void log_launch_space(UniqueID op_id) = 0;
+    public:
       const IndexSpace handle;
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
@@ -1081,6 +1088,9 @@ namespace Legion {
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<const char*> &field_files,
                                    bool read_only);
+    public:
+      virtual void get_launch_space_domain(Domain &launch_domain);
+      virtual void log_launch_space(UniqueID op_id);
     protected:
       void compute_linearization_metadata(void);
     protected:

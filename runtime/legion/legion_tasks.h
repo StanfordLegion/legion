@@ -270,7 +270,7 @@ namespace Legion {
                                  std::vector<ProjectionInfo> &infos);
       void unpack_projection_infos(Deserializer &derez,
                                    std::vector<ProjectionInfo> &infos,
-                                   const Domain &launch_domain);
+                                   IndexSpace launch_space);
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);
@@ -573,6 +573,7 @@ namespace Legion {
       std::vector<ProjectionInfo> projection_infos;
       bool sliced;
     protected:
+      IndexSpace launch_space;
       Domain internal_domain;
       ReductionOpID redop;
       const ReductionOp *reduction_op;
@@ -859,10 +860,12 @@ namespace Legion {
     public:
       FutureMap initialize_task(TaskContext *ctx,
                                 const IndexTaskLauncher &launcher,
+                                IndexSpace launch_space,
                                 bool check_privileges,
                                 bool track = true);
       Future initialize_task(TaskContext *ctx,
                              const IndexTaskLauncher &launcher,
+                             IndexSpace launch_space,
                              ReductionOpID redop,
                              bool check_privileges,
                              bool track = true);

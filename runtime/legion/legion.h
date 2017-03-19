@@ -1323,6 +1323,14 @@ namespace Legion {
                         bool must = false,
                         MapperID id = 0,
                         MappingTagID tag = 0);
+      IndexTaskLauncher(Processor::TaskFuncID tid,
+                        IndexSpace launch_space,
+                        TaskArgument global_arg,
+                        ArgumentMap map,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        bool must = false,
+                        MapperID id = 0,
+                        MappingTagID tag = 0);
     public:
       inline IndexSpaceRequirement&
                   add_index_requirement(const IndexSpaceRequirement &req);
@@ -1344,6 +1352,7 @@ namespace Legion {
     public:
       Processor::TaskFuncID              task_id;
       Domain                             launch_domain;
+      IndexSpace                         launch_space;
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
@@ -1476,7 +1485,10 @@ namespace Legion {
      */
     struct IndexCopyLauncher {
     public:
+      IndexCopyLauncher(void);
       IndexCopyLauncher(Domain domain, Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+      IndexCopyLauncher(IndexSpace space, Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0);
     public:
       inline unsigned add_copy_requirements(const RegionRequirement &src,
@@ -1495,7 +1507,8 @@ namespace Legion {
       std::vector<Grant>              grants;
       std::vector<PhaseBarrier>       wait_barriers;
       std::vector<PhaseBarrier>       arrive_barriers;
-      Domain                          domain;
+      Domain                          launch_domain;
+      IndexSpace                      launch_space;
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
@@ -1575,6 +1588,16 @@ namespace Legion {
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0);
+      IndexFillLauncher(IndexSpace space, LogicalRegion handle, 
+                        LogicalRegion parent, TaskArgument arg,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+      IndexFillLauncher(IndexSpace space, LogicalRegion handle, 
+                        LogicalRegion parent, Future f,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
       // Partition projection
       IndexFillLauncher(Domain domain, LogicalPartition handle, 
                         LogicalRegion parent, TaskArgument arg,
@@ -1582,6 +1605,16 @@ namespace Legion {
                         Predicate pred = Predicate::TRUE_PRED,
                         MapperID id = 0, MappingTagID tag = 0);
       IndexFillLauncher(Domain domain, LogicalPartition handle, 
+                        LogicalRegion parent, Future f,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+      IndexFillLauncher(IndexSpace space, LogicalPartition handle, 
+                        LogicalRegion parent, TaskArgument arg,
+                        ProjectionID projection = 0,
+                        Predicate pred = Predicate::TRUE_PRED,
+                        MapperID id = 0, MappingTagID tag = 0);
+      IndexFillLauncher(IndexSpace space, LogicalPartition handle, 
                         LogicalRegion parent, Future f,
                         ProjectionID projection = 0,
                         Predicate pred = Predicate::TRUE_PRED,
@@ -1596,7 +1629,8 @@ namespace Legion {
       inline void add_wait_handshake(MPILegionHandshake handshake);
       inline void add_arrival_handshake(MPILegionHandshake handshake);
     public:
-      Domain                          domain;
+      Domain                          launch_domain;
+      IndexSpace                      launch_space;
       LogicalRegion                   region;
       LogicalPartition                partition;
       LogicalRegion                   parent;

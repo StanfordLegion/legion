@@ -482,18 +482,18 @@ namespace Legion {
                       unique_id, index, pid);
       }
 
-      template<int DIM>
-      static inline void log_launch_index_space_rect(UniqueID unique_id,
-                                                     long long int *lower, 
-                                                     long long int *higher)
+      template<int DIM, typename T>
+      static inline void log_launch_index_space_rect(UniqueID unique_id, 
+                                              const Realm::ZRect<DIM,T> &rect)
       {
-        log_spy.print("Index Launch Rect %llu %d "
-                      "%lld %lld %lld %lld %lld %lld",
-		      unique_id, DIM, lower[0],
-		      DIM < 2 ? 0 : lower[1], 
-		      DIM < 3 ? 0 : lower[2], higher[0],
-		      DIM < 2 ? 0 : higher[1],
-		      DIM < 3 ? 0 : higher[2]);
+        LEGION_STATIC_ASSERT(DIM <= 3);
+        log_spy.print() << "Index Launch Rect " << unique_id << " "
+                        << DIM << " " << rect.lo[0]
+                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
+                        << " " << rect.hi[0]
+                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.hi[2]);
       }
 
       // Logger calls for futures

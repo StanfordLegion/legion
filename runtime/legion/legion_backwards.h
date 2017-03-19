@@ -294,6 +294,8 @@ namespace Legion {
 
       bool exists(void) const { return (dim > 0); }
 
+      bool dense(void) const { return (is_id == 0); }
+
       template<int DIM>
       static Domain from_rect(typename LegionRuntime::Arrays::Rect<DIM> r)
       {
