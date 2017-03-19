@@ -50,6 +50,13 @@ task vec2_sub(a : vec2, b : vec2) : vec2
 end
 
 __demand(__inline)
+task vec2_neg(a : vec2) : vec2
+  a.x = -a.x
+  a.y = -a.y
+  return a
+end
+
+__demand(__inline)
 task vec2_mul_lhs(a : double, b : vec2) : vec2
   b.x *= a
   b.y *= a
@@ -655,17 +662,16 @@ do
 
         var rx = z.zr
         var ex = max(z.ze, 0.0)
-        var px = gm1 * rx * ex
         var prex = gm1 * ex
         var perx = gm1 * rx
-        var csqd = max(ss2, prex + perx * px / (rx * rx))
+        var px = perx * ex
+        var csqd = max(ss2, prex + gm1 * prex)
         var z0per = perx
-        var zss = sqrt(csqd)
-        z.zss = zss
+        z.zss = sqrt(csqd)
 
         var zminv = 1.0 / z.zm
         var dv = (z.zvolp - z.zvol0) * zminv
-        var bulk = z.zr * zss * zss
+        var bulk = z.zr * csqd
         var denom = 1.0 + 0.5 * z0per * dv
         var src = z.zwrate * dth * zminv
         z.zp = px + (z0per * src - z.zr * bulk * dv) / denom
@@ -720,10 +726,10 @@ do
         var z = s.mapsz
         var p1 = unsafe_cast(ptr(point, rpp), s.mapsp1)
 
-        zuc += (1.0 / double(z.znump))*p1.pu
+        zuc += p1.pu
 
         if nside == z.znump then
-          z.zuc = zuc
+          z.zuc = (1.0 / double(z.znump))*zuc
           zuc = vec2 { x = 0.0, y = 0.0 }
           nside = 0
         end
@@ -738,10 +744,10 @@ do
         var z = s.mapsz
         var p1 = s.mapsp1
 
-        zuc += (1.0 / double(z.znump))*p1.pu
+        zuc += p1.pu
 
         if nside == z.znump then
-          z.zuc = zuc
+          z.zuc = (1.0 / double(z.znump))*zuc
           zuc = vec2 { x = 0.0, y = 0.0 }
           nside = 0
         end
@@ -779,7 +785,9 @@ do
         var xp3 = e1.exp
 
         -- compute 2d cartesian volume of corner
-        var cvolume = 0.5 * vec2_cross(vec2_sub(xp2, xp0), vec2_sub(xp3, xp1))
+        var xp2sub0 = vec2_sub(xp2, xp0)
+        var xp3sub1 = vec2_sub(xp3, xp1)
+        var cvolume = 0.5 * vec2_cross(xp2sub0, xp3sub1)
         c.carea = cvolume
 
         -- compute cosine angle
@@ -792,13 +800,15 @@ do
         c.ccos = cond1 * 4.0 * vec2_dot(v1, v2) / (de1 * de2)
 
         -- compute divergence of corner
-        var cdiv = (vec2_cross(vec2_sub(up2, up0), vec2_sub(xp3, xp1)) -
-                    vec2_cross(vec2_sub(up3, up1), vec2_sub(xp2, xp0))) / (2.0 * cvolume)
+        var up2sub0 = vec2_sub(up2, up0)
+        var up3sub1 = vec2_sub(up3, up1)
+        var cdiv = (vec2_cross(up2sub0, xp3sub1) -
+                    vec2_cross(up3sub1, xp2sub0)) / (2.0 * cvolume)
         c.cdiv = cdiv
 
         -- compute evolution factor
-        var dxx1 = vec2_mul_lhs(0.5, vec2_sub(vec2_sub(vec2_add(xp1, xp2), xp0), xp3))
-        var dxx2 = vec2_mul_lhs(0.5, vec2_sub(vec2_sub(vec2_add(xp2, xp3), xp0), xp1))
+        var dxx1 = vec2_mul_lhs(0.5, vec2_add(vec2_neg(xp3sub1), xp2sub0))
+        var dxx2 = vec2_mul_lhs(0.5, vec2_add(xp2sub0, xp3sub1))
         var dx1 = vec2_length(dxx1)
         var dx2 = vec2_length(dxx2)
 
@@ -816,8 +826,8 @@ do
         var evol = min(sqrt(4.0 * cvolume * r), 2.0 * minelen)
 
         -- compute delta velocity
-        var dv1 = vec2_length(vec2_sub(vec2_sub(vec2_add(up1, up2), up0), up3))
-        var dv2 = vec2_length(vec2_sub(vec2_sub(vec2_add(up2, up3), up0), up1))
+        var dv1 = vec2_length(vec2_add(vec2_neg(up3sub1), up2sub0))
+        var dv2 = vec2_length(vec2_add(up2sub0, up3sub1))
         var du = max(dv1, dv2)
 
         var cond3 = [int](cdiv < 0.0)
@@ -853,7 +863,9 @@ do
         var xp3 = e1.exp
 
         -- compute 2d cartesian volume of corner
-        var cvolume = 0.5 * vec2_cross(vec2_sub(xp2, xp0), vec2_sub(xp3, xp1))
+        var xp2sub0 = vec2_sub(xp2, xp0)
+        var xp3sub1 = vec2_sub(xp3, xp1)
+        var cvolume = 0.5 * vec2_cross(xp2sub0, xp3sub1)
         c.carea = cvolume
 
         -- compute cosine angle
@@ -866,13 +878,15 @@ do
         c.ccos = cond1 * 4.0 * vec2_dot(v1, v2) / (de1 * de2)
 
         -- compute divergence of corner
-        var cdiv = (vec2_cross(vec2_sub(up2, up0), vec2_sub(xp3, xp1)) -
-                    vec2_cross(vec2_sub(up3, up1), vec2_sub(xp2, xp0))) / (2.0 * cvolume)
+        var up2sub0 = vec2_sub(up2, up0)
+        var up3sub1 = vec2_sub(up3, up1)
+        var cdiv = (vec2_cross(up2sub0, xp3sub1) -
+                    vec2_cross(up3sub1, xp2sub0)) / (2.0 * cvolume)
         c.cdiv = cdiv
 
         -- compute evolution factor
-        var dxx1 = vec2_mul_lhs(0.5, vec2_sub(vec2_sub(vec2_add(xp1, xp2), xp0), xp3))
-        var dxx2 = vec2_mul_lhs(0.5, vec2_sub(vec2_sub(vec2_add(xp2, xp3), xp0), xp1))
+        var dxx1 = vec2_mul_lhs(0.5, vec2_add(vec2_neg(xp3sub1), xp2sub0))
+        var dxx2 = vec2_mul_lhs(0.5, vec2_add(xp2sub0, xp3sub1))
         var dx1 = vec2_length(dxx1)
         var dx2 = vec2_length(dxx2)
 
@@ -890,8 +904,8 @@ do
         var evol = min(sqrt(4.0 * cvolume * r), 2.0 * minelen)
 
         -- compute delta velocity
-        var dv1 = vec2_length(vec2_sub(vec2_sub(vec2_add(up1, up2), up0), up3))
-        var dv2 = vec2_length(vec2_sub(vec2_sub(vec2_add(up2, up3), up0), up1))
+        var dv1 = vec2_length(vec2_add(vec2_neg(up3sub1), up2sub0))
+        var dv2 = vec2_length(vec2_add(up2sub0, up3sub1))
         var du = max(dv1, dv2)
 
         var cond3 = [int](cdiv < 0.0)
@@ -1097,21 +1111,16 @@ do
     -- 4a. Apply boundary conditions.
     --
 
-    do
-      var vfixx = {x = 1.0, y = 0.0}
-      var vfixy = {x = 0.0, y = 1.0}
-      for p_raw = p_span.start, p_span.stop do
-        var p = unsafe_cast(ptr(point, rp), p_raw)
+    __demand(__vectorize)
+    for p_raw = p_span.start, p_span.stop do
+      var p = unsafe_cast(ptr(point, rp), p_raw)
 
-        if p.has_bcx then
-          p.pu0 = project(p.pu0, vfixx)
-          p.pf = project(p.pf, vfixx)
-        end
-        if p.has_bcy then
-          p.pu0 = project(p.pu0, vfixy)
-          p.pf = project(p.pf, vfixy)
-        end
-      end
+      var cond_x = 1 - [int](p.has_bcx)
+      var cond_y = 1 - [int](p.has_bcy)
+      p.pu0.x *= cond_x
+      p.pf.x *= cond_x
+      p.pu0.y *= cond_y
+      p.pf.y *= cond_y
     end
 
     --
