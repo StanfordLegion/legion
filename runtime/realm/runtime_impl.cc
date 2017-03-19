@@ -1206,6 +1206,21 @@ namespace Realm {
 	    adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
 	  }
 
+        for (std::vector<MemoryImpl *>::const_iterator it = n->ib_memories.begin();
+             it != n->ib_memories.end();
+             it++)
+          if(*it) {
+            Memory m = (*it)->me;
+            Memory::Kind k = (*it)->me.kind();
+
+            num_ib_memories++;
+            adata[apos++] = NODE_ANNOUNCE_IB_MEM;
+            adata[apos++] = m.id;
+            adata[apos++] = k;
+            adata[apos++] = (*it)->size;
+            adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
+          }
+
 	// announce each processor's affinities
 	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
 	    it != n->processors.end();
@@ -1250,21 +1265,6 @@ namespace Realm {
 	      adata[apos++] = it2->latency;
 	    }
 	  }
-
-        for (std::vector<MemoryImpl *>::const_iterator it = n->ib_memories.begin();
-             it != n->ib_memories.end();
-             it++)
-          if(*it) {
-            Memory m = (*it)->me;
-            Memory::Kind k = (*it)->me.kind();
-
-            num_ib_memories++;
-            adata[apos++] = NODE_ANNOUNCE_IB_MEM;
-            adata[apos++] = m.id;
-            adata[apos++] = k;
-            adata[apos++] = (*it)->size;
-            adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
-          }
 
 	adata[apos++] = NODE_ANNOUNCE_DONE;
 	assert(apos < ADATA_SIZE);
