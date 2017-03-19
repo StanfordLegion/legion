@@ -867,6 +867,7 @@ namespace Legion {
     public:
       void initialize(TaskContext *ctx,
                       const IndexCopyLauncher &launcher,
+                      IndexSpace launch_space,
                       bool check_privileges);
     public:
       virtual void activate(void);
@@ -883,6 +884,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       void check_point_requirements(void);
 #endif
+    public:
+      IndexSpace                    launch_space;
     public:
       std::vector<ProjectionInfo>   src_projection_infos;
       std::vector<ProjectionInfo>   dst_projection_infos;
@@ -1266,7 +1269,7 @@ namespace Legion {
                       int close_idx, const VersionInfo &version_info,
                       const FieldMask &close_mask, Operation *create_op);
       ProjectionInfo& initialize_disjoint_close(const FieldMask &disjoint_mask,
-                                                const Domain &launch_domain);
+                                                IndexSpace launch_space);
       DisjointCloseInfo* find_disjoint_close_child(unsigned index,
                                                    RegionTreeNode *child);
       void perform_disjoint_close(RegionTreeNode *child_to_close, 
@@ -2371,6 +2374,7 @@ namespace Legion {
       MapperManager *mapper;
     protected:
       // For index versions of this operation
+      IndexSpace                        launch_space;
       std::vector<FieldDataDescriptor>  instances;
       std::set<ApEvent>                 index_preconditions;
       std::vector<PointDepPartOp*>      points; 
@@ -2494,6 +2498,7 @@ namespace Legion {
     public:
       void initialize(TaskContext *ctx,
                       const IndexFillLauncher &launcher,
+                      IndexSpace launch_space,
                       bool check_privileges);
     public:
       virtual void activate(void);
@@ -2511,6 +2516,7 @@ namespace Legion {
 #endif
     public:
       ProjectionInfo                projection_info;
+      IndexSpace                    launch_space;
     protected:
       std::vector<PointFillOp*>     points;
       unsigned                      points_committed;

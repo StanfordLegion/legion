@@ -770,6 +770,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::find_launch_space_domain(IndexSpace handle,
+                                                    Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(handle);
+      node->get_launch_space_domain(launch_domain);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::log_launch_space(IndexSpace handle, UniqueID op_id)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(handle);
+      node->log_launch_space(op_id);
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeForest::is_index_partition_disjoint(IndexPartition p)
     //--------------------------------------------------------------------------
     {
@@ -8629,7 +8646,7 @@ namespace Legion {
       if (arrived && proj_info.is_projecting())
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
-           proj_info.projection_domain, are_all_children_disjoint());
+           proj_info.projection_space, are_all_children_disjoint());
         merge_new_field_state(state, new_state);
       }
       else if (next_child != INVALID_COLOR)
@@ -9337,7 +9354,7 @@ namespace Legion {
               // same projection function with the same or smaller
               // size domain as the original index space launch
               if ((it->projection == proj_info.projection) &&
-                  it->projection_domain_dominates(proj_info.projection_domain)) 
+                  it->projection_domain_dominates(proj_info.projection_space)) 
               {
                 // If we're a reduction we have to go into a dirty 
                 // reduction mode since we know we're already open below
@@ -9349,7 +9366,7 @@ namespace Legion {
                   open_below |= overlap;
                   // Make the new state to add
                   new_states.push_back(FieldState(closer.user.usage, overlap, 
-                           proj_info.projection, proj_info.projection_domain, 
+                           proj_info.projection, proj_info.projection_space, 
                            are_all_children_disjoint(), true/*dirty reduce*/));
                   // If we are a reduction, we can go straight there
                   it->valid_fields -= overlap;
@@ -9361,7 +9378,7 @@ namespace Legion {
                 else
                 {
                   // Update the domain  
-                  it->projection_domain = proj_info.projection_domain;
+                  it->projection_space = proj_info.projection_space;
                   open_below |= (it->valid_fields & current_mask);
                   it++;
                 }
@@ -9395,8 +9412,7 @@ namespace Legion {
                       as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space->get_color_space_domain(),
-                        true/*disjoint*/));
+                        color_space, true/*disjoint*/));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -9414,14 +9430,14 @@ namespace Legion {
               assert(are_all_children_disjoint());
 #endif
               if (IS_REDUCE(closer.user.usage) &&
-                  it->projection_domain_dominates(proj_info.projection_domain))
+                  it->projection_domain_dominates(proj_info.projection_space))
               {
                 const FieldMask overlap = it->valid_fields & current_mask;
                 // Record that some fields are already open
                 open_below |= overlap;
                 // Make the new state to add
                 new_states.push_back(FieldState(closer.user.usage, overlap, 
-                         proj_info.projection, proj_info.projection_domain, 
+                         proj_info.projection, proj_info.projection_space, 
                          are_all_children_disjoint(), true/*dirty reduce*/));
                 // If we are a reduction, we can go straight there
                 it->valid_fields -= overlap;
@@ -9507,8 +9523,7 @@ namespace Legion {
                       as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space->get_color_space_domain(),
-                        true/*disjoint*/));
+                        color_space, true/*disjoint*/));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -9538,7 +9553,7 @@ namespace Legion {
       if (!!open_mask)
       {
         new_states.push_back(FieldState(closer.user.usage, open_mask, 
-              proj_info.projection, proj_info.projection_domain, 
+              proj_info.projection, proj_info.projection_space, 
               are_all_children_disjoint()));
       }
       merge_new_field_states(state, new_states);
@@ -10513,14 +10528,14 @@ namespace Legion {
           rez.serialize((*pit)->epoch_id);
           rez.serialize((*pit)->valid_fields);
           rez.serialize<size_t>((*pit)->projections.size());
-          for (std::map<ProjectionFunction*,std::set<Domain> >::const_iterator
-                fit = (*pit)->projections.begin(); 
+          for (std::map<ProjectionFunction*,std::set<IndexSpaceNode*> >::
+                const_iterator fit = (*pit)->projections.begin(); 
                 fit != (*pit)->projections.end(); fit++)
           {
             rez.serialize(fit->first->projection_id);
-            for (std::set<Domain>::const_iterator it = fit->second.begin();
-                  it != fit->second.end(); it++)
-              rez.serialize(*it);
+            for (std::set<IndexSpaceNode*>::const_iterator it = 
+                  fit->second.begin(); it != fit->second.end(); it++)
+              rez.serialize((*it)->handle);
           }
         }
         rez.serialize<size_t>(state.field_states.size());
@@ -10537,7 +10552,7 @@ namespace Legion {
             assert(fit->projection != NULL);
 #endif
             rez.serialize(fit->projection->projection_id);
-            rez.serialize(fit->projection_domain);
+            rez.serialize(fit->projection_space->handle);
           }
 #ifdef DEBUG_LEGION
           else
@@ -10597,14 +10612,14 @@ namespace Legion {
           derez.deserialize(proj_id);
           ProjectionFunction *function = 
             context->runtime->find_projection_function(proj_id);
-          std::set<Domain> &doms = epoch->projections[function];
+          std::set<IndexSpaceNode*> &spaces = epoch->projections[function];
           size_t num_doms;
           derez.deserialize(num_doms);
           for (unsigned idx3 = 0; idx3 < num_doms; idx3++)
           {
-            Domain dom;
-            derez.deserialize(dom);
-            doms.insert(dom);
+            IndexSpace handle;
+            derez.deserialize(handle);
+            spaces.insert(context->get_node(handle));
           }
         }
       }
@@ -10622,7 +10637,9 @@ namespace Legion {
           ProjectionID proj_id;
           derez.deserialize(proj_id);
           fit->projection = context->runtime->find_projection_function(proj_id);
-          derez.deserialize(fit->projection_domain);
+          IndexSpace handle;
+          derez.deserialize(handle);
+          fit->projection_space = context->get_node(handle);
         }
         size_t num_open_children;
         derez.deserialize(num_open_children);

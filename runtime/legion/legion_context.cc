@@ -3616,17 +3616,28 @@ namespace Legion {
         result->complete_all_futures();
         return FutureMap(result);
       }
+      if (launcher.launch_domain.exists() && 
+          (launcher.launch_domain.get_volume() == 0))
+      {
+        log_run.warning("Ignoring empty index task launch in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return FutureMap();
+      }
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launcher.launch_domain);
       IndexTask *task = runtime->get_available_index_task(true);
 #ifdef DEBUG_LEGION
       FutureMap result = 
-        task->initialize_task(this, launcher, Runtime::check_privileges);
+        task->initialize_task(this, launcher, launch_space,
+                              Runtime::check_privileges);
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "
                      "address space %d",
                      task->get_unique_id(), task->get_task_name(), 
                      task->get_unique_id(), runtime->address_space);
 #else
-      FutureMap result = task->initialize_task(this, launcher,
+      FutureMap result = task->initialize_task(this, launcher, launch_space,
                                                false/*check privileges*/);
 #endif
       execute_task_launch(task, true/*index*/, 
@@ -3681,17 +3692,28 @@ namespace Legion {
         result->complete_future();
         return Future(result);
       }
+      if (launcher.launch_domain.exists() &&
+          (launcher.launch_domain.get_volume() == 0))
+      {
+        log_run.warning("Ignoring empty index task launch in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return Future();
+      }
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launcher.launch_domain);
       IndexTask *task = runtime->get_available_index_task(true);
 #ifdef DEBUG_LEGION
       Future result = 
-        task->initialize_task(this, launcher, redop, Runtime::check_privileges);
+        task->initialize_task(this, launcher, launch_space, redop, 
+                              Runtime::check_privileges);
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "
                      "address space %d",
                      task->get_unique_id(), task->get_task_name(), 
                      task->get_unique_id(), runtime->address_space);
 #else
-      Future result = task->initialize_task(this, launcher, redop, 
+      Future result = task->initialize_task(this, launcher, launch_space, redop,
                                             false/*check privileges*/);
 #endif
       execute_task_launch(task, true/*index*/, 
@@ -3828,19 +3850,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (launcher.domain.get_volume() == 0)
+      if (launcher.launch_domain.exists() && 
+          (launcher.launch_domain.get_volume() == 0))
       {
         log_run.warning("Ignoring empty index space fill in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
         return;
       }
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launcher.launch_domain);
       IndexFillOp *fill_op = runtime->get_available_index_fill_op(true);
 #ifdef DEBUG_LEGION
-      fill_op->initialize(this, launcher, Runtime::check_privileges);
+      fill_op->initialize(this, launcher, launch_space, 
+                          Runtime::check_privileges);
       log_run.debug("Registering an index fill operation in task %s (ID %lld)",
                      get_task_name(), get_unique_id());
 #else
-      fill_op->initialize(this, launcher, false/*check privileges*/);
+      fill_op->initialize(this, launcher, launch_space,
+                          false/*check privileges*/);
 #endif
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
@@ -3904,19 +3932,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (launcher.domain.get_volume() == 0)
+      if (launcher.launch_domain.exists() &&
+          (launcher.launch_domain.get_volume() == 0))
       {
-        log_run.warning("Ignoring empty index space copy in task %s (ID %lld)",
-                        get_task_name(), get_unique_id());
+        log_run.warning("Ignoring empty index space copy in task %s "
+                        "(ID %lld)", get_task_name(), get_unique_id());
         return;
       }
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launcher.launch_domain);
       IndexCopyOp *copy_op = runtime->get_available_index_copy_op(true);
 #ifdef DEBUG_LEGION
-      copy_op->initialize(this, launcher, Runtime::check_privileges);
+      copy_op->initialize(this, launcher, launch_space, 
+                          Runtime::check_privileges);
       log_run.debug("Registering an index copy operation in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
 #else
-      copy_op->initialize(this, launcher, false/*check privileges*/);
+      copy_op->initialize(this, launcher, launch_space, 
+                          false/*check privileges*/);
 #endif
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
@@ -6096,6 +6130,22 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       return variant_impl;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace InnerContext::find_index_launch_space(const Domain &domain)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(domain.dense());
+#endif
+      std::map<Domain,IndexSpace>::const_iterator finder = 
+        index_launch_spaces.find(domain);
+      if (finder != index_launch_spaces.end())
+        return finder->second;
+      IndexSpace result = runtime->find_index_launch_space(this, domain);
+      index_launch_spaces[domain] = result;
+      return result;
     }
     
     /////////////////////////////////////////////////////////////

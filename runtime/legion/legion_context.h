@@ -940,6 +940,9 @@ namespace Legion {
       void invalidate_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
+    protected:
+      // Find an index space name for a concrete launch domain
+      IndexSpace find_index_launch_space(const Domain &launch_domain);
     public:
       const RegionTreeContext tree_context; 
       const UniqueID context_uid;
@@ -976,6 +979,9 @@ namespace Legion {
       RtEvent last_registration;
       RtEvent dependence_precondition;
     protected:
+      // Our cached set of index spaces for immediate domains
+      std::map<Domain,IndexSpace> index_launch_spaces;
+    protected:
       // Number of sub-tasks ready to map
       unsigned outstanding_subtasks;
       // Number of mapped sub-tasks that are yet to run
@@ -1003,7 +1009,7 @@ namespace Legion {
     protected:
       // Tracking information for dynamic collectives
       std::map<unsigned long/*ID*/,std::map<unsigned/*gen*/,
-               std::vector<Future> > > collective_contributions;
+               std::vector<Future> > > collective_contributions; 
     };
 
     /**

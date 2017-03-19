@@ -1963,12 +1963,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionInfo::ProjectionInfo(Runtime *runtime, 
-                      const RegionRequirement &req, const Domain &launch_domain)
+                      const RegionRequirement &req, IndexSpace launch_space)
       : projection((req.handle_type != SINGULAR) ? 
           runtime->find_projection_function(req.projection) : NULL),
         projection_type(req.handle_type),
-        projection_domain((req.handle_type != SINGULAR) ?
-            launch_domain : Domain::NO_DOMAIN), dirty_reduction(false)
+        projection_space((req.handle_type != SINGULAR) ?
+            runtime->forest->get_node(launch_space) : NULL),
+        dirty_reduction(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1992,7 +1993,7 @@ namespace Legion {
     {
       projection = NULL;
       projection_type = SINGULAR;
-      projection_domain = Domain::NO_DOMAIN;
+      projection_space = NULL;
       projection_epochs.clear();
       dirty_reduction = false;
     }
@@ -2013,14 +2014,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionInfo::unpack_info(Deserializer &derez, Runtime *runtime,
-                      const RegionRequirement &req, const Domain &launch_domain)
+                      const RegionRequirement &req, IndexSpaceNode *launch_node)
     //--------------------------------------------------------------------------
     {
       projection_type = req.handle_type;
       if (req.handle_type != SINGULAR)
       {
         projection = runtime->find_projection_function(req.projection);
-        projection_domain = launch_domain; 
+        projection_space = launch_node; 
       }
       size_t num_epochs;
       derez.deserialize(num_epochs);
@@ -2448,13 +2449,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionEpoch::insert(ProjectionFunction *function, const Domain &d)
+    void ProjectionEpoch::insert(ProjectionFunction *function, 
+                                 IndexSpaceNode* node)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!valid_fields);
 #endif
-      projections[function].insert(d);
+      projections[function].insert(node);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2699,7 +2701,7 @@ namespace Legion {
       // If it didn't already exist, start a new projection epoch
       ProjectionEpoch *new_epoch = 
         new ProjectionEpoch(ProjectionEpoch::first_epoch, capture_mask);
-      new_epoch->insert(info.projection, info.projection_domain);
+      new_epoch->insert(info.projection, info.projection_space);
       projection_epochs.push_back(new_epoch);
       // Record it
       info.record_projection_epoch(ProjectionEpoch::first_epoch, capture_mask);
@@ -2734,7 +2736,7 @@ namespace Legion {
         FieldMask overlap = (*it)->valid_fields & update_mask;
         if (!overlap)
           continue;
-        (*it)->insert(info.projection, info.projection_domain);
+        (*it)->insert(info.projection, info.projection_space);
         update_mask -= overlap;
         if (!update_mask)
           return;
@@ -2745,7 +2747,7 @@ namespace Legion {
       // If we get here will still have an update mask so make an epoch
       ProjectionEpoch *new_epoch = 
         new ProjectionEpoch(ProjectionEpoch::first_epoch, update_mask);
-      new_epoch->insert(info.projection, info.projection_domain);
+      new_epoch->insert(info.projection, info.projection_space);
       projection_epochs.push_back(new_epoch);
     }
 
@@ -2756,7 +2758,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(void)
       : open_state(NOT_OPEN), redop(0), projection(NULL), 
-        projection_domain(Domain::NO_DOMAIN), rebuild_timeout(1)
+        projection_space(NULL), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
     }
@@ -2765,7 +2767,7 @@ namespace Legion {
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
                            const LegionColor c)
       : ChildState(m), redop(0), projection(NULL), 
-        projection_domain(Domain::NO_DOMAIN), rebuild_timeout(1)
+        projection_space(NULL), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
       if (IS_READ_ONLY(user.usage))
@@ -2782,10 +2784,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
-                           ProjectionFunction *proj, const Domain &proj_dom, 
+                           ProjectionFunction *proj, IndexSpaceNode *proj_space,
                            bool disjoint, bool dirty_reduction)
       : ChildState(m), redop(0), projection(proj), 
-        projection_domain(proj_dom), rebuild_timeout(1)
+        projection_space(proj_space), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2816,7 +2818,7 @@ namespace Legion {
       if (projection != rhs.projection)
         return false;
       // Only do this test if they are both projections
-      if ((projection != NULL) && (projection_domain != rhs.projection_domain))
+      if ((projection != NULL) && (projection_space != rhs.projection_space))
         return false;
       if (redop == 0)
         return (open_state == rhs.open_state);
@@ -2881,47 +2883,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FieldState::projection_domain_dominates(const Domain &next_dom) const
+    bool FieldState::projection_domain_dominates(
+                                               IndexSpaceNode *next_space) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(projection_domain.get_dim() > 0);
+      assert(projection_space != NULL);
 #endif
-      // If the domains do not have the same dimension, the answer must be no
-      if (projection_domain.get_dim() != next_dom.get_dim())
-        return false;
-      if (projection_domain == next_dom)
+      if (projection_space == next_space)
         return true;
-      switch (projection_domain.get_dim())
-      {
-        case 1:
-          {
-            LegionRuntime::Arrays::Rect<1> local_rect =  
-              projection_domain.get_rect<1>();
-            LegionRuntime::Arrays::Rect<1> next_rect = 
-              next_dom.get_rect<1>();
-            return local_rect.dominates(next_rect);
-          }
-        case 2:
-          {
-            LegionRuntime::Arrays::Rect<2> local_rect =  
-              projection_domain.get_rect<2>();
-            LegionRuntime::Arrays::Rect<2> next_rect = 
-              next_dom.get_rect<2>();
-            return local_rect.dominates(next_rect);
-          }
-        case 3:
-          {
-            LegionRuntime::Arrays::Rect<3> local_rect =  
-              projection_domain.get_rect<3>();
-            LegionRuntime::Arrays::Rect<3> next_rect = 
-              next_dom.get_rect<3>();
-            return local_rect.dominates(next_rect);
-          }
-        default:
-          assert(false);
-      }
-      return false;
+      // If the domains do not have the same type, the answer must be no
+      if (projection_space->handle.get_type_tag() != 
+          next_space->handle.get_type_tag())
+        return false;
+      return projection_space->dominates(next_space);
     }
 
     //--------------------------------------------------------------------------
@@ -3060,10 +3035,10 @@ namespace Legion {
 #endif
       ClosedNode *result = new ClosedNode(child_node);
       for (std::map<ProjectionFunction*,
-                    LegionMap<Domain,FieldMask>::aligned>::const_iterator pit =
+            LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator pit =
             projections.begin(); pit != projections.end(); pit++)
       {
-        for (LegionMap<Domain,FieldMask>::aligned::const_iterator it = 
+        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it = 
               pit->second.begin(); it != pit->second.end(); it++)
         {
           FieldMask overlap = it->second & close_mask;
@@ -3077,10 +3052,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ClosedNode::record_projection(ProjectionFunction *function,
-                                    const Domain &domain, const FieldMask &mask)
+                                   IndexSpaceNode *space, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      projections[function][domain] |= mask;
+      projections[function][space] |= mask;
     }
 
     //--------------------------------------------------------------------------
@@ -3105,17 +3080,18 @@ namespace Legion {
                                         const FieldMask &fields)
     //--------------------------------------------------------------------------
     {
-      for (std::map<ProjectionFunction*,std::set<Domain> >::const_iterator pit =
-            epoch->projections.begin(); pit != epoch->projections.end(); pit++)
+      for (std::map<ProjectionFunction*,std::set<IndexSpaceNode*> >::
+            const_iterator pit = epoch->projections.begin(); 
+            pit != epoch->projections.end(); pit++)
       {
-        std::map<ProjectionFunction*,LegionMap<Domain,FieldMask>::aligned>::
-          iterator finder = projections.find(pit->first);
+        std::map<ProjectionFunction*,LegionMap<IndexSpaceNode*,FieldMask>::
+          aligned>::iterator finder = projections.find(pit->first);
         if (finder != projections.end())
         {
-          for (std::set<Domain>::const_iterator it = pit->second.begin();
-                it != pit->second.end(); it++)
+          for (std::set<IndexSpaceNode*>::const_iterator it = 
+                pit->second.begin(); it != pit->second.end(); it++)
           {
-            LegionMap<Domain,FieldMask>::aligned::iterator finder2 = 
+            LegionMap<IndexSpaceNode*,FieldMask>::aligned::iterator finder2 = 
               finder->second.find(*it);
             if (finder2 == finder->second.end())
               finder->second[*it] = fields;
@@ -3126,10 +3102,11 @@ namespace Legion {
         else
         {
           // Didn't exist before so we can just insert 
-          LegionMap<Domain,FieldMask>::aligned &doms = projections[pit->first];
-          for (std::set<Domain>::const_iterator it = pit->second.begin();
-                it != pit->second.end(); it++)
-            doms[*it] = fields;
+          LegionMap<IndexSpaceNode*,FieldMask>::aligned &spaces = 
+            projections[pit->first];
+          for (std::set<IndexSpaceNode*>::const_iterator it = 
+                pit->second.begin(); it != pit->second.end(); it++)
+            spaces[*it] = fields;
         }
       }
     }
@@ -3177,11 +3154,11 @@ namespace Legion {
       if (!projections.empty())
       {
         for (std::map<ProjectionFunction*,
-                  LegionMap<Domain,FieldMask>::aligned>::const_iterator pit = 
-              projections.begin(); pit != projections.end(); pit++) 
+                  LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
+              pit = projections.begin(); pit != projections.end(); pit++) 
         {
-          for (LegionMap<Domain,FieldMask>::aligned::const_iterator it = 
-                pit->second.begin(); it != pit->second.end(); it++)
+          for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
+                it = pit->second.begin(); it != pit->second.end(); it++)
             valid_fields |= it->second;
         }
       }
@@ -3220,22 +3197,22 @@ namespace Legion {
     void ClosedNode::filter_dominated_projection_fields(
         FieldMask &non_dominated_mask,
         const std::map<ProjectionFunction*,
-                  LegionMap<Domain,FieldMask>::aligned> &new_projections) const
+          LegionMap<IndexSpaceNode*,FieldMask>::aligned> &new_projections) const
     //--------------------------------------------------------------------------
     {
       // In order to remove a dominated field, for each of our projection
       // operations, we need to find one in the new set that dominates it
       FieldMask dominated_mask = non_dominated_mask;
       for (std::map<ProjectionFunction*,
-                    LegionMap<Domain,FieldMask>::aligned>::const_iterator pit =
-            projections.begin(); pit != projections.end(); pit++)
+              LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator 
+            pit = projections.begin(); pit != projections.end(); pit++)
       {
         // Set this iterator to the begining to start
         // Use it later to find domains with the same projection function
         std::map<ProjectionFunction*,
-                 LegionMap<Domain,FieldMask>::aligned>::const_iterator
+                 LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
                    finder = new_projections.begin();
-        for (LegionMap<Domain,FieldMask>::aligned::const_iterator dit = 
+        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator dit =
               pit->second.begin(); dit != pit->second.end(); dit++)
         {
           FieldMask overlap = dit->second & dominated_mask;
@@ -3247,53 +3224,23 @@ namespace Legion {
           // If we found it then we can try to find overlapping domains
           if (finder != new_projections.end())
           {
-            for (LegionMap<Domain,FieldMask>::aligned::const_iterator it = 
-                  finder->second.begin(); it != finder->second.end(); it++)
+            for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
+                  it = finder->second.begin(); it != finder->second.end(); it++)
             {
               FieldMask dom_overlap = overlap & it->second;
               if (!dom_overlap)
                 continue; 
-              // Dimensions don't have to match, if they don't we don't care
-              if (it->first.get_dim() != dit->first.get_dim())
+              // Types don't have to match, if they don't we don't care
+              if (it->first->handle.get_type_tag() !=
+                  dit->first->handle.get_type_tag())
                 continue;
               // See if the domain dominates
-              switch (it->first.get_dim())
+              if (it->first->dominates(dit->first))
               {
-                case 1:
-                  {
-                    LegionRuntime::Arrays::Rect<1>
-		      prev_rect = dit->first.get_rect<1>();
-                    LegionRuntime::Arrays::Rect<1>
-		      next_rect = it->first.get_rect<1>();
-                    if (next_rect.dominates(prev_rect))
-                      overlap -= dom_overlap;
-                    break;
-                  }
-                case 2:
-                  {
-                    LegionRuntime::Arrays::Rect<2>
-		      prev_rect = dit->first.get_rect<2>();
-                    LegionRuntime::Arrays::Rect<2>
-		      next_rect = it->first.get_rect<2>();
-                    if (next_rect.dominates(prev_rect))
-                      overlap -= dom_overlap;
-                    break;
-                  }
-                case 3:
-                  {
-                    LegionRuntime::Arrays::Rect<3>
-		      prev_rect = dit->first.get_rect<3>();
-                    LegionRuntime::Arrays::Rect<3>
-		      next_rect = it->first.get_rect<3>();
-                    if (next_rect.dominates(prev_rect))
-                      overlap -= dom_overlap;
-                    break;
-                  }
-                default:
-                  assert(false); // bad dimension size
+                overlap -= dom_overlap;
+                if (!overlap)
+                  break;
               }
-              if (!overlap)
-                break;
             }
           }
           // Any fields still in overlap are not dominated
@@ -3325,11 +3272,11 @@ namespace Legion {
       if (!projections.empty())
       {
         for (std::map<ProjectionFunction*,
-                      LegionMap<Domain,FieldMask>::aligned>::const_iterator
+                LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
               pit = projections.begin(); pit != projections.end(); pit++)
         {
-          for (LegionMap<Domain,FieldMask>::aligned::const_iterator it = 
-                pit->second.begin(); it != pit->second.end(); it++)
+          for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
+                it = pit->second.begin(); it != pit->second.end(); it++)
           {
             const FieldMask overlap = it->second & dominated_fields;
             if (!overlap)
@@ -3376,15 +3323,15 @@ namespace Legion {
       rez.serialize(covered_fields);
       rez.serialize<size_t>(projections.size());
       for (std::map<ProjectionFunction*,
-                    LegionMap<Domain,FieldMask>::aligned>::const_iterator pit =
-            projections.begin(); pit != projections.end(); pit++)
+              LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator 
+            pit = projections.begin(); pit != projections.end(); pit++)
       {
         rez.serialize(pit->first->projection_id);
         rez.serialize<size_t>(pit->second.size());
-        for (LegionMap<Domain,FieldMask>::aligned::const_iterator it = 
+        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
               pit->second.begin(); it != pit->second.end(); it++)
         {
-          rez.serialize(it->first);
+          rez.serialize(it->first->handle);
           rez.serialize(it->second);
         }
       }
@@ -3408,14 +3355,16 @@ namespace Legion {
         ProjectionID pid;
         derez.deserialize(pid);
         ProjectionFunction *function = runtime->find_projection_function(pid);
-        LegionMap<Domain,FieldMask>::aligned &doms = projections[function];
+        LegionMap<IndexSpaceNode*,FieldMask>::aligned &spaces = 
+          projections[function];
         size_t num_doms;
         derez.deserialize(num_doms);
         for (unsigned idx2 = 0; idx2 < num_doms; idx2++)
         {
-          Domain dom;
-          derez.deserialize(dom);
-          derez.deserialize(doms[dom]);
+          IndexSpace handle;
+          derez.deserialize(handle);
+          IndexSpaceNode *node = runtime->forest->get_node(handle);
+          derez.deserialize(spaces[node]);
         }
       }
       size_t num_children;
@@ -3628,11 +3577,9 @@ namespace Legion {
           // Record the disjoint close, advance the projection epochs
           // and then record the new projection epoch that the close
           // will be a part of
-          const Domain &color_space = root_node->as_partition_node()->
-                        row_source->color_space->get_color_space_domain();
           ProjectionInfo &proj_info = 
             normal_close_op->initialize_disjoint_close(disjoint_close_mask,
-                                                       color_space);
+               root_node->as_partition_node()->row_source->color_space->handle);
           // Advance these epochs and then mark that we no longer need
           // to advance them during update_state
           state.advance_projection_epochs(disjoint_close_mask);

@@ -8332,6 +8332,7 @@ namespace Legion {
         distributed_id_lock(Reservation::create_reservation()),
         unique_distributed_id((unique == 0) ? runtime_stride : unique),
         distributed_collectable_lock(Reservation::create_reservation()),
+        is_launch_lock(Reservation::create_reservation()),
         gc_epoch_lock(Reservation::create_reservation()), gc_epoch_counter(0),
         context_lock(Reservation::create_reservation()),
         random_lock(Reservation::create_reservation()),
@@ -8852,6 +8853,8 @@ namespace Legion {
       distributed_id_lock = Reservation::NO_RESERVATION;
       distributed_collectable_lock.destroy_reservation();
       distributed_collectable_lock = Reservation::NO_RESERVATION;
+      is_launch_lock.destroy_reservation();
+      is_launch_lock = Reservation::NO_RESERVATION;
       gc_epoch_lock.destroy_reservation();
       gc_epoch_lock = Reservation::NO_RESERVATION;
       context_lock.destroy_reservation();
@@ -15061,6 +15064,44 @@ namespace Legion {
         dist_collectables[did] = result;
       }
       result->record_future_registered(mutator);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::find_index_launch_space(Context ctx, const Domain &dom)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock is_lock(is_launch_lock);
+      std::map<Domain,IndexSpace>::const_iterator finder = 
+        index_launch_spaces.find(dom);
+      if (finder != index_launch_spaces.end())
+        return finder->second;
+      IndexSpace result = IndexSpace::NO_SPACE;
+      switch (dom.get_dim())
+      {
+        case 1:
+          {
+            Realm::ZIndexSpace<1,coord_t> is = dom;
+            result = ctx->create_index_space(forest, &is, 
+                NT_TemplateHelper::encode_tag<1,coord_t>());
+            break;
+          }
+        case 2:
+          {
+            Realm::ZIndexSpace<2,coord_t> is = dom;
+            result = ctx->create_index_space(forest, &is, 
+                NT_TemplateHelper::encode_tag<2,coord_t>());
+          }
+        case 3:
+          {
+            Realm::ZIndexSpace<3,coord_t> is = dom;
+            result = ctx->create_index_space(forest, &is, 
+                NT_TemplateHelper::encode_tag<3,coord_t>());
+          }
+        default:
+          assert(false);
+      }
+      index_launch_spaces[dom] = result;
       return result;
     }
 

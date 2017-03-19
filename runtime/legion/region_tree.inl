@@ -2264,6 +2264,28 @@ namespace Legion {
           realm_index_space, field_sizes, field_files, read_only, requests);
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::get_launch_space_domain(Domain &launch_domain)
+    //--------------------------------------------------------------------------
+    {
+      if (!index_space_ready.has_triggered())
+        index_space_ready.wait();
+      launch_domain = realm_index_space;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::log_launch_space(UniqueID op_id)
+    //--------------------------------------------------------------------------
+    {
+      if (!index_space_ready.has_triggered())
+        index_space_ready.wait();
+      for (Realm::ZIndexSpaceIterator<DIM,T> itr(realm_index_space); 
+            itr.valid; itr.step())
+        LegionSpy::log_launch_index_space_rect<DIM>(op_id, itr.rect);
+    }
+
     /////////////////////////////////////////////////////////////
     // Templated Index Partition Node 
     /////////////////////////////////////////////////////////////
