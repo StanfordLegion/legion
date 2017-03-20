@@ -11,7 +11,7 @@ SAVEOBJ=1 $root_dir/../regent.py $root_dir/../examples/circuit.rg -fflow 0
 mv circuit circuit.none
 
 for c in 10; do
-    SAVEOBJ=1 $root_dir/../regent.py $root_dir/../examples/circuit.rg -fflow 1 -fflow-spmd 1 -fflow-spmd-shardsize "$c"
+    SAVEOBJ=1 $root_dir/../regent.py $root_dir/../examples/circuit_sparse.rg -fflow 1 -fflow-spmd 1 -fflow-spmd-shardsize "$c"
     mv circuit circuit.spmd"$c"
 done
 
