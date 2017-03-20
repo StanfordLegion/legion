@@ -137,7 +137,7 @@ namespace Legion {
   class TaskResult;
   class CObjectWrapper;
 
-  // legion_backwards.h
+  // legion_domain.h
   class DomainPoint;
   class Domain;
   class IndexSpaceAllocator;

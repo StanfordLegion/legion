@@ -34,7 +34,7 @@
 #endif
 
 #include "legion_types.h"
-#include "legion_backwards.h"
+#include "legion_domain.h"
 #include "legion_constraint.h"
 
 // temporary helper macro to turn link errors into runtime errors
