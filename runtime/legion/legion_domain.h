@@ -13,15 +13,16 @@
  * limitations under the License.
  */
 
-#ifndef __LEGION_BACKWARDS_H__
-#define __LEGION_BACKWARDS_H__
+#ifndef __LEGION_DOMAIN_H__
+#define __LEGION_DOMAIN_H__
 
 #include "realm.h"
 
 /**
- * \file legion_backwards.h
- * This file provides some backwards compatibility types necessary
- * for maintaining older versions of the runtime
+ * \file legion_domain.h
+ * This file provides some untyped representations of points
+ * and domains as well as backwards compatibility types 
+ * necessary for maintaining older versions of the runtime
  */
 
 namespace Legion {
@@ -787,5 +788,5 @@ namespace Legion {
 
 }; // namespace Legion
 
-#endif // __LEGION_BACKWARDS_H__
+#endif // __LEGION_DOMAIN_H__
 
