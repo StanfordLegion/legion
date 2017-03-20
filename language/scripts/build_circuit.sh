@@ -19,3 +19,4 @@ cp $root_dir/../../bindings/terra/liblegion_terra.so .
 cp $root_dir/../examples/libcircuit.so .
 
 cp $root_dir/../scripts/*_circuit.sh .
+cp $root_dir/../scripts/summarize.py .

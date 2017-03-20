@@ -19,3 +19,4 @@ cp $root_dir/../../bindings/terra/liblegion_terra.so .
 cp $root_dir/../miniaero/librdir_1ghost.so .
 
 cp $root_dir/../scripts/*_miniaero.sh .
+cp $root_dir/../scripts/summarize.py .

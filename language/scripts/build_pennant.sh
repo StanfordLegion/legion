@@ -21,3 +21,4 @@ cp $root_dir/../examples/libpennant.so .
 cp -r $root_dir/../examples/pennant.tests .
 
 cp $root_dir/../scripts/*_pennant.sh .
+cp $root_dir/../scripts/summarize.py .
