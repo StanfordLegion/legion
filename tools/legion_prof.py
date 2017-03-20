@@ -1179,13 +1179,13 @@ class Operation(object):
 
     def get_info(self):
         info = '<'+str(self.op_id)+">"
-        if self.owner <> None:
-            prev = self.owner
-            next = prev.owner
-            while next <> None:
-                prev = next
-                next = next.owner
-            info += ' (<-' + repr(self.owner) + ')'
+        # if self.owner <> None:
+        #     prev = self.owner
+        #     next = prev.owner
+        #     while next <> None:
+        #         prev = next
+        #         next = next.owner
+        #     info += ' (<-' + repr(self.owner) + ')'
         return info
 
     def get_timing(self):
