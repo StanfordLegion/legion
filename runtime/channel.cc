@@ -1045,6 +1045,24 @@ namespace LegionRuntime {
       long MemcpyChannel::submit(Request** requests, long nr)
       {
         MemcpyRequest** mem_cpy_reqs = (MemcpyRequest**) requests;
+        for (long i = 0; i < nr; i++) {
+          MemcpyRequest* req = mem_cpy_reqs[i];
+          if (req->dim == Request::DIM_1D) {
+            memcpy(req->dst_base, req->src_base, req->nbytes);
+          } else {
+            assert(req->dim == Request::DIM_2D);
+            char *src = req->src_base, *dst = req->dst_base;
+            for (size_t i = 0; i < req->nlines; i++) {
+              memcpy(dst, src, req->nbytes);
+              src += req->src_str;
+              dst += req->dst_str;
+            }
+          }
+          req->xd->notify_request_read_done(req);
+          req->xd->notify_request_write_done(req);
+        }
+        return nr;
+        /*
         pthread_mutex_lock(&pending_lock);
         //if (nr > 0)
           //printf("MemcpyChannel::submit[nr = %ld]\n", nr);
@@ -1057,6 +1075,7 @@ namespace LegionRuntime {
         }
         pthread_mutex_unlock(&pending_lock);
         return nr;
+        */
         /*
         for (int i = 0; i < nr; i++) {
           push_request(mem_cpy_reqs[i]);
@@ -1558,8 +1577,8 @@ namespace LegionRuntime {
       {
         log_new_dma.info("XferDesQueue: start_workers");
         // TODO: count is currently ignored
-        num_threads = 3;
-        num_memcpy_threads = 2;
+        num_threads = 2;
+        num_memcpy_threads = 0;
 #ifdef USE_HDF
         // Need a dedicated thread for handling HDF requests
         num_threads ++;
@@ -1570,19 +1589,23 @@ namespace LegionRuntime {
         int idx = 0;
         dma_threads = (DMAThread**) calloc(num_threads, sizeof(DMAThread*));
         // dma thread #1: memcpy
+        std::vector<Channel*> memcpy_channels;
         MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
-        dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, memcpy_channel);
+        memcpy_channels.push_back(memcpy_channel);
+        //memcpy_channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
+        //memcpy_channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));
+        dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, memcpy_channels);
         // dma thread #2: async xfer
-        std::vector<Channel*> async_channels, gasnet_channels;
+        std::vector<Channel*> async_channels;
         async_channels.push_back(channel_manager->create_remote_write_channel(max_nr));
         async_channels.push_back(channel_manager->create_disk_read_channel(max_nr));
         async_channels.push_back(channel_manager->create_disk_write_channel(max_nr));
         async_channels.push_back(channel_manager->create_file_read_channel(max_nr));
         async_channels.push_back(channel_manager->create_file_write_channel(max_nr));
         dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, async_channels);
-        gasnet_channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
-        gasnet_channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));
-        dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, gasnet_channels);
+        //gasnet_channels.push_back(channel_manager->create_gasnet_read_channel(max_nr));
+        //gasnet_channels.push_back(channel_manager->create_gasnet_write_channel(max_nr));
+        //dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, gasnet_channels);
 #ifdef USE_CUDA
         std::vector<Channel*> gpu_channels;
         std::vector<GPU*>::iterator it;

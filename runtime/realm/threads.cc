@@ -1324,38 +1324,46 @@ namespace Realm {
 
 #ifdef __linux__
   // find bulldozer cpus that share fpu
-  static int get_bd_sibling_id(int cpu_id, int core_id) {
+  static bool get_bd_sibling_id(int cpu_id, int core_id,
+				std::set<int>& sibling_ids) {
     char str[1024];
     sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
     FILE *f = fopen(str, "r");
     if(!f) {
-      std::cout << "can't read '" << str << "' - skipping";
+      log_thread.warning() << "can't read '" << str << "' - skipping";
+      return false;
     }
     hwloc_bitmap_t set = hwloc_bitmap_alloc();
     hwloc_linux_parse_cpumap_file(f, set);
 
     fclose(f);
 
-    hwloc_bitmap_clr(set, cpu_id);
-    int siblingid = hwloc_bitmap_first(set);
+    // loop over all siblings (except ourselves)
+    for(int siblingid = hwloc_bitmap_first(set);
+	siblingid != -1;
+	siblingid = hwloc_bitmap_next(set, siblingid)) {
+      if(siblingid == cpu_id) continue;
 
-    sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
-    f = fopen(str, "r");
-    if(!f) {
-      std::cout << "can't read '" << str << "' - skipping";
-      return -1;
+      sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
+      f = fopen(str, "r");
+      if(!f) {
+	log_thread.warning() << "can't read '" << str << "' - skipping";
+	continue;
+      }
+      int sib_core_id;
+      int count = fscanf(f, "%d", &sib_core_id);
+      fclose(f);
+      if(count != 1) {
+	log_thread.warning() << "can't find core id in '" << str << "' - skipping";
+	continue;
+      }      
+      if(sib_core_id != core_id)
+	sibling_ids.insert(sib_core_id);
     }
-    int sib_core_id;
-    int count = fscanf(f, "%d", &sib_core_id);
-    fclose(f);
-    if(count != 1) {
-      std::cout << "can't find core id in '" << str << "' - skipping";
-    }
-    if (sib_core_id != core_id) {
-      return siblingid;
-    } else {
-      return -1;
-    }
+
+    hwloc_bitmap_free(set);
+
+    return true;
   }
 #endif
 
@@ -1396,11 +1404,15 @@ namespace Realm {
 
 #ifdef __linux__
           // add bulldozer sets
-          int bd_sib_id = get_bd_sibling_id(cpu_id, core_id);
-          if (bd_sib_id != -1) {
-            bd_sets[bd_sib_id].insert(p);
-            bd_sets[cpu_id].insert(p);
-          }
+	  std::set<int> sibling_ids;
+	  if(get_bd_sibling_id(cpu_id, core_id, sibling_ids) &&
+	     !sibling_ids.empty()) {
+	    bd_sets[cpu_id].insert(p);
+	    for(std::set<int>::const_iterator it = sibling_ids.begin();
+		it != sibling_ids.end();
+		++it)
+	      bd_sets[*it].insert(p);
+	  }
 #endif
 
           cpu_id = hwloc_bitmap_next(obj->cpuset, cpu_id);
