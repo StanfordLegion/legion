@@ -186,7 +186,7 @@ function filterAndMergeBlocks(state) {
   for (var index in state.flattenedLayoutData) {
     var timelineElement = state.flattenedLayoutData[index];
     if (timelineElement.type == "proc" && timelineElement.enabled && timelineElement.visible) {
-      var items = state.processorData[timelineElement.text];
+      var items = state.processorData[timelineElement.full_text];
       for (var level in items) {
         // gap merging below assumes intervals are sorted - do that first
         //items[level].sort(function(a,b) { return a.start - b.start; });

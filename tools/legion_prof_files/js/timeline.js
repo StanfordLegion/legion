@@ -1423,7 +1423,7 @@ function defaultKeyUp(e) {
 }
 
 function load_proc_timeline(proc) {
-  var proc_name = proc.text;
+  var proc_name = proc.full_text;
   state.processorData[proc_name] = {};
   d3.tsv(proc.tsv,
     function(d, i) {
