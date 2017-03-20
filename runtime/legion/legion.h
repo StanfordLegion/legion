@@ -1208,6 +1208,16 @@ namespace Legion {
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
     public:
+      // Users can tell the runtime this task is eligible
+      // for inlining by the mapper. This will invoke the 
+      // select_task_options call inline as part of the launch
+      // logic for this task to allow the mapper to decide
+      // whether to inline the task or not. Note that if the
+      // mapper pre-empts during execution then resuming it
+      // may take a long time if another long running task
+      // gets scheduled on the processor that launched this task.
+      bool                               enable_inlining;
+    public:
       // Users can inform the runtime that all region requirements
       // are independent of each other in this task. Independent
       // means that either field sets are independent or region
@@ -1281,6 +1291,16 @@ namespace Legion {
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence> *static_dependences;
+    public:
+      // Users can tell the runtime this task is eligible
+      // for inlining by the mapper. This will invoke the 
+      // select_task_options call inline as part of the launch
+      // logic for this task to allow the mapper to decide
+      // whether to inline the task or not. Note that if the
+      // mapper pre-empts during execution then resuming it
+      // may take a long time if another long running task
+      // gets scheduled on the processor that launched this task.
+      bool                               enable_inlining;
     public:
       // Users can inform the runtime that all region requirements
       // are independent of each other in this task. Independent
