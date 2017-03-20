@@ -316,6 +316,7 @@ namespace Legion {
       bool complete_received;
       bool commit_received;
     protected:
+      bool options_selected;
       bool map_locally;
     protected:
       // For managing predication

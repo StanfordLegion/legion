@@ -1934,11 +1934,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::execute_task_launch(TaskOp *task, bool index,
-                              LegionTrace *current_trace, bool silence_warnings)
+       LegionTrace *current_trace, bool silence_warnings, bool inlining_enabled)
     //--------------------------------------------------------------------------
     {
-      // First ask the mapper to set the options for the task
-      const bool inline_task = task->select_task_options();
+      bool inline_task = false;
+      if (inlining_enabled)
+        inline_task = task->select_task_options();
       // Now check to see if we're inling the task or just performing
       // a normal asynchronous task launch
       if (inline_task)
@@ -3518,8 +3519,8 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher,
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(task, false/*index*/, 
-                          current_trace, launcher.silence_warnings);
+      execute_task_launch(task, false/*index*/, current_trace, 
+                          launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 
@@ -3640,8 +3641,8 @@ namespace Legion {
       FutureMap result = task->initialize_task(this, launcher, launch_space,
                                                false/*check privileges*/);
 #endif
-      execute_task_launch(task, true/*index*/, 
-                          current_trace, launcher.silence_warnings);
+      execute_task_launch(task, true/*index*/, current_trace, 
+                          launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 
@@ -3716,8 +3717,8 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher, launch_space, redop,
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(task, true/*index*/, 
-                          current_trace, launcher.silence_warnings);
+      execute_task_launch(task, true/*index*/, current_trace, 
+                          launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 

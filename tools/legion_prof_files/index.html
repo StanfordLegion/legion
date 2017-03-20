@@ -14,7 +14,7 @@
       }
 
       text.desc {
-        font-size: 8pt;
+        font-size: 10pt;
         font-family: Consolas, monospace;
         fill: #fff;
         -webkit-user-select: none; /* Chrome/Safari */
@@ -23,7 +23,7 @@
       }
 
       text.processor {
-        font-size: 8pt;
+        font-size: 10pt;
         font-family: Consolas, monospace;
         fill: #000;
         -webkit-user-select: none; /* Chrome/Safari */
@@ -44,7 +44,7 @@
       div.scrollable {
         overflow-x: scroll;
         overflow-y: scroll;
-        margin-left: 310px;
+        margin-left: 200px;
         margin-right: 50px;
       }
 
@@ -90,9 +90,10 @@
     <script src="http://d3js.org/d3.v3.js"></script>
   </head>
   <body>
+    <div id="overlay" style="position: absolute; left: 0%; top: 0%;"></div>
+    <div id="loader-icon" style="position: absolute; left: 50%; top: 50%;"></div>
     <div id="processors" class="fixed-left"></div>
     <div id="timeline" class="scrollable"></div>
-    <div id="loader-icon" style="position: absolute; left: 50%; top: 50%;"></div>
 
     <script src="js/util.js"></script>
     <script src="js/timeline.js"></script>

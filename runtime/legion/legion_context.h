@@ -516,7 +516,8 @@ namespace Legion {
       inline void begin_task_wait(bool from_runtime);
       inline void end_task_wait(void);
       void execute_task_launch(TaskOp *task, bool index, 
-                             LegionTrace *current_trace, bool silence_warnings);
+                               LegionTrace *current_trace, 
+                               bool silence_warnings, bool inlining_enabled);
       void remap_unmapped_regions(LegionTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions);
     public:
