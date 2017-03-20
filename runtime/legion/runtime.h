@@ -2461,6 +2461,19 @@ namespace Legion {
                                                   bool has_lock = false);
       TimingOp*             get_available_timing_op(bool need_cont,
                                                   bool has_lock = false);
+    public: // Control replication operations
+      ReplIndividualTask*   get_available_repl_individual_task(bool need_cont,
+                                                  bool has_lock = false);
+      ReplIndexTask*        get_available_repl_index_task(bool need_cont,
+                                                  bool has_lock = false);
+      ReplFillOp*           get_available_repl_fill_op(bool need_cont,
+                                                  bool has_lock = false);
+      ReplIndexFillOp*      get_available_repl_index_fill_op(bool need_cont,
+                                                  bool has_lock = false);
+      ReplCopyOp*           get_available_repl_copy_op(bool need_cont,
+                                                  bool has_lock = false);
+      ReplIndexCopyOp*      get_available_repl_index_copy_op(bool need_cont,
+                                                  bool has_lock = false);
       ReplDeletionOp*       get_available_repl_deletion_op(bool need_cont,
                                                   bool has_lock = false);
       ReplPendingPartitionOp* get_available_repl_pending_partition_op(
@@ -2468,6 +2481,10 @@ namespace Legion {
                                                   bool has_lock = false);
       ReplDependentPartitionOp* get_available_repl_dependent_partition_op(
                                                   bool need_cont,
+                                                  bool has_lock = false);
+      ReplMustEpochOp*      get_available_repl_epoch_op(bool need_cont,
+                                                  bool has_lock = false);
+      ReplTimingOp*         get_available_repl_timing_op(bool need_cont,
                                                   bool has_lock = false);
     public:
       void free_individual_task(IndividualTask *task);
@@ -2508,9 +2525,18 @@ namespace Legion {
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
+    public: // Control replication operations
+      void free_repl_individual_task(ReplIndividualTask *task);
+      void free_repl_index_task(ReplIndexTask *task);
+      void free_repl_fill_op(ReplFillOp *op);
+      void free_repl_index_fill_op(ReplIndexFillOp *op);
+      void free_repl_copy_op(ReplCopyOp *op);
+      void free_repl_index_copy_op(ReplIndexCopyOp *op);
       void free_repl_deletion_op(ReplDeletionOp *op);
       void free_repl_pending_partition_op(ReplPendingPartitionOp *op);
       void free_repl_dependent_partition_op(ReplDependentPartitionOp *op);
+      void free_repl_epoch_op(ReplMustEpochOp *op);
+      void free_repl_timing_op(ReplTimingOp *op);
     public:
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
@@ -2822,12 +2848,20 @@ namespace Legion {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
-      // Replicated operations
+    protected: // Control replication operations
+      std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
+      std::deque<ReplIndexTask*>        available_repl_index_tasks;
+      std::deque<ReplFillOp*>           available_repl_fill_ops;
+      std::deque<ReplIndexFillOp*>      available_repl_index_fill_ops;
+      std::deque<ReplCopyOp*>           available_repl_copy_ops;
+      std::deque<ReplIndexCopyOp*>      available_repl_index_copy_ops;
       std::deque<ReplDeletionOp*>       available_repl_deletion_ops;
       std::deque<ReplPendingPartitionOp*> 
                                         available_repl_pending_partition_ops;
       std::deque<ReplDependentPartitionOp*> 
                                         available_repl_dependent_partition_ops;
+      std::deque<ReplMustEpochOp*>      available_repl_must_epoch_ops;
+      std::deque<ReplTimingOp*>         available_repl_timing_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of

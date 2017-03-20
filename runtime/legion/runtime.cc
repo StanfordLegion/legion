@@ -8884,6 +8884,48 @@ namespace Legion {
       available_timing_ops.clear();
       timing_op_lock.destroy_reservation();
       timing_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<ReplIndividualTask*>::const_iterator it = 
+            available_repl_individual_tasks.begin(); it !=
+            available_repl_individual_tasks.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_individual_tasks.clear();
+      for (std::deque<ReplIndexTask*>::const_iterator it = 
+            available_repl_index_tasks.begin(); it !=
+            available_repl_index_tasks.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_index_tasks.clear();
+      for (std::deque<ReplFillOp*>::const_iterator it = 
+            available_repl_fill_ops.begin(); it !=
+            available_repl_fill_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_fill_ops.clear();
+      for (std::deque<ReplIndexFillOp*>::const_iterator it = 
+            available_repl_index_fill_ops.begin(); it !=
+            available_repl_index_fill_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_index_fill_ops.clear();
+      for (std::deque<ReplCopyOp*>::const_iterator it = 
+            available_repl_copy_ops.begin(); it !=
+            available_repl_copy_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_copy_ops.clear();
+      for (std::deque<ReplIndexCopyOp*>::const_iterator it = 
+            available_repl_index_copy_ops.begin(); it !=
+            available_repl_index_copy_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_index_copy_ops.clear();
       for (std::deque<ReplDeletionOp*>::const_iterator it = 
             available_repl_deletion_ops.begin(); it !=
             available_repl_deletion_ops.end(); it++)
@@ -8905,6 +8947,20 @@ namespace Legion {
         legion_delete(*it);
       }
       available_repl_dependent_partition_ops.clear();
+      for (std::deque<ReplMustEpochOp*>::const_iterator it = 
+            available_repl_must_epoch_ops.begin(); it !=
+            available_repl_must_epoch_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_must_epoch_ops.clear();
+      for (std::deque<ReplTimingOp*>::const_iterator it = 
+            available_repl_timing_ops.begin(); it !=
+            available_repl_timing_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_timing_ops.clear();
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -16434,6 +16490,118 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplIndividualTask* Runtime::get_available_repl_individual_task(
+                                                  bool need_cont, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplIndividualTask*,
+                        &Runtime::get_available_repl_individual_task>
+                          continuation(this, individual_task_lock);
+        return continuation.get_result();
+      }
+      return get_available(individual_task_lock,
+                           available_repl_individual_tasks, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexTask* Runtime::get_available_repl_index_task(bool need_cont, 
+                                                          bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplIndexTask*,
+                        &Runtime::get_available_repl_index_task>
+                          continuation(this, index_task_lock);
+        return continuation.get_result();
+      }
+      return get_available(index_task_lock,
+                           available_repl_index_tasks, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFillOp* Runtime::get_available_repl_fill_op(bool need_cont, 
+                                                    bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplFillOp*,
+                      &Runtime::get_available_repl_fill_op>
+                        continuation(this, fill_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(fill_op_lock, available_repl_fill_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexFillOp* Runtime::get_available_repl_index_fill_op(bool need_cont, 
+                                                               bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplIndexFillOp*,
+                      &Runtime::get_available_repl_index_fill_op>
+                        continuation(this, fill_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(fill_op_lock, 
+                           available_repl_index_fill_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplCopyOp* Runtime::get_available_repl_copy_op(bool need_cont, 
+                                                    bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplCopyOp*,
+                      &Runtime::get_available_repl_copy_op>
+                        continuation(this, copy_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(copy_op_lock, available_repl_copy_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplIndexCopyOp* Runtime::get_available_repl_index_copy_op(bool need_cont, 
+                                                               bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplIndexCopyOp*,
+                      &Runtime::get_available_repl_index_copy_op>
+                        continuation(this, copy_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(copy_op_lock, 
+                           available_repl_index_copy_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     ReplDeletionOp* Runtime::get_available_repl_deletion_op(bool need_cont,
                                                             bool has_lock)
     //--------------------------------------------------------------------------
@@ -16488,6 +16656,43 @@ namespace Legion {
       }
       return get_available(dependent_partition_op_lock,
                            available_repl_dependent_partition_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplMustEpochOp* Runtime::get_available_repl_epoch_op(bool need_cont,
+                                                          bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplMustEpochOp*,
+                      &Runtime::get_available_repl_epoch_op>
+                        continuation(this, epoch_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(epoch_op_lock, 
+                           available_repl_must_epoch_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplTimingOp* Runtime::get_available_repl_timing_op(bool need_cont, 
+                                                        bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplTimingOp*,
+                      &Runtime::get_available_repl_timing_op>
+                        continuation(this, timing_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(timing_op_lock, available_repl_timing_ops, has_lock);
     }
 
     //--------------------------------------------------------------------------
@@ -16815,6 +17020,54 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::free_repl_individual_task(ReplIndividualTask *task)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(individual_task_lock);
+      release_operation<false>(available_repl_individual_tasks, task);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_index_task(ReplIndexTask *task)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(index_task_lock);
+      release_operation<false>(available_repl_index_tasks, task);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_fill_op(ReplFillOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(fill_op_lock);
+      release_operation<false>(available_repl_fill_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_index_fill_op(ReplIndexFillOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock f_lock(fill_op_lock);
+      release_operation<false>(available_repl_index_fill_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_copy_op(ReplCopyOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(copy_op_lock);
+      release_operation<false>(available_repl_copy_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_index_copy_op(ReplIndexCopyOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(copy_op_lock);
+      release_operation<false>(available_repl_index_copy_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_repl_deletion_op(ReplDeletionOp *op)
     //--------------------------------------------------------------------------
     {
@@ -16836,6 +17089,22 @@ namespace Legion {
     {
       AutoLock d_lock(dependent_partition_op_lock);
       release_operation<false>(available_repl_dependent_partition_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_epoch_op(ReplMustEpochOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(epoch_op_lock);
+      release_operation<false>(available_repl_must_epoch_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_timing_op(ReplTimingOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(timing_op_lock);
+      release_operation<false>(available_repl_timing_ops, op);
     }
 
     //--------------------------------------------------------------------------

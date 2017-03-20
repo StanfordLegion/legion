@@ -1232,9 +1232,17 @@ namespace Legion {
     class TaskOp;
 
     // legion_control.h
+    class ReplIndividualTask;
+    class ReplIndexTask;
+    class ReplFillOp;
+    class ReplIndexFillOp;
+    class ReplCopyOp;
+    class ReplIndexCopyOp;
     class ReplDeletionOp;
     class ReplPendingPartitionOp;
     class ReplDependentPartitionOp;
+    class ReplMustEpochOp;
+    class ReplTimingOp;
 
     // legion_tasks.h
     class ExternalTask;
@@ -1424,9 +1432,17 @@ namespace Legion {
     friend class Internal::PointTask;                       \
     friend class Internal::IndexTask;                       \
     friend class Internal::SliceTask;                       \
+    friend class Internal::ReplIndividualTask;              \
+    friend class Internal::ReplIndexTask;                   \
+    friend class Internal::ReplFillOp;                      \
+    friend class Internal::ReplIndexFillOp;                 \
+    friend class Internal::ReplCopyOp;                      \
+    friend class Internal::ReplIndexCopyOp;                 \
     friend class Internal::ReplDeletionOp;                  \
     friend class Internal::ReplPendingPartitionOp;          \
     friend class Internal::ReplDependentPartitionOp;        \
+    friend class Internal::ReplMustEpochOp;                 \
+    friend class Internal::ReplTimingOp;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
     friend class Internal::IndexPartNode;                   \

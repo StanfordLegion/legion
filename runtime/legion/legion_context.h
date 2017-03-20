@@ -1233,15 +1233,24 @@ namespace Legion {
       virtual void destroy_logical_partition(LogicalPartition handle);
       virtual IndexAllocator create_index_allocator(RegionTreeForest *forest,
                                                     IndexSpace handle);
-      virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
-                                                    FieldSpace handle);
     public:
+      virtual Future execute_task(const TaskLauncher &launcher);
+      virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
+      virtual Future execute_index_space(const IndexTaskLauncher &launcher,
+                                         ReductionOpID redop);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual void remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
+      virtual void fill_fields(const FillLauncher &launcher);
+      virtual void fill_fields(const IndexFillLauncher &launcher);
+      virtual void issue_copy(const CopyLauncher &launcher);
+      virtual void issue_copy(const IndexCopyLauncher &launcher);
+      virtual void issue_acquire(const AcquireLauncher &launcher);
+      virtual void issue_release(const ReleaseLauncher &launcher);
       virtual PhysicalRegion attach_resource(const AttachLauncher &launcher);
       virtual void detach_resource(PhysicalRegion region);
       virtual FutureMap execute_must_epoch(const MustEpochLauncher &launcher);
+      virtual Future issue_timing_measurement(const TimingLauncher &launcher);
     public:
       virtual unsigned register_new_child_operation(Operation *op,
                             const std::vector<StaticDependence> *dependences);

@@ -7100,6 +7100,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     FieldID ReplicateContext::allocate_field(RegionTreeForest *forest,
                                          FieldSpace space, size_t field_size,
@@ -7139,6 +7140,7 @@ namespace Legion {
       }
       return fid;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::free_field(FieldSpace space, FieldID fid)
@@ -7150,6 +7152,7 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplicateContext::allocate_fields(RegionTreeForest *forest, 
                                          FieldSpace space,
@@ -7196,6 +7199,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::free_fields(FieldSpace space, 
@@ -7279,12 +7283,569 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator ReplicateContext::create_field_allocator(
-                                   Legion::Runtime *external, FieldSpace handle)
+    Future ReplicateContext::execute_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      return FieldAllocator(handle, this, external);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+      {
+        if (launcher.predicate_false_future.impl != NULL)
+          return launcher.predicate_false_future;
+        // Otherwise check to see if we have a value
+        FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/,
+          runtime->get_available_distributed_id(true), 
+          runtime->address_space, runtime->address_space);
+        if (launcher.predicate_false_result.get_size() > 0)
+          result->set_result(launcher.predicate_false_result.get_ptr(),
+                             launcher.predicate_false_result.get_size(),
+                             false/*own*/);
+        else
+        {
+          // We need to check to make sure that the task actually
+          // does expect to have a void return type
+          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
+          {
+            log_run.error("Predicated task launch for task %s in parent "
+                          "task %s (UID %lld) has non-void return type "
+                          "but no default value for its future if the task "
+                          "predicate evaluates to false.  Please set either "
+                          "the 'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "TaskLauncher struct.", impl->get_name(), 
+                          get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+        }
+        // Now we can fix the future result
+        result->complete_future();
+        return Future(result);
+      }
+      ReplIndividualTask *task = 
+        runtime->get_available_repl_individual_task(true);
+#ifdef DEBUG_LEGION
+      Future result = 
+        task->initialize_task(this, launcher, Runtime::check_privileges);
+      if (owner_shard->shard_id == 0)
+        log_task.debug("Registering new single task with unique id %lld "
+                        "and task %s (ID %lld) with high level runtime in "
+                        "addresss space %d",
+                        task->get_unique_id(), task->get_task_name(), 
+                        task->get_unique_id(), runtime->address_space);
+#else
+      Future result = task->initialize_task(this, launcher,
+                                            false/*check privileges*/);
+#endif
+      execute_task_launch(task, false/*index*/, 
+                          current_trace, launcher.silence_warnings);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap ReplicateContext::execute_index_space(
+                                              const IndexTaskLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      if (launcher.must_parallelism)
+      {
+        // Turn around and use a must epoch launcher
+        MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
+        epoch_launcher.add_index_task(launcher);
+        FutureMap result = execute_must_epoch(epoch_launcher);
+        return result;
+      }
+      AutoRuntimeCall call(this);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+      {
+        FutureMapImpl *result = legion_new<FutureMapImpl>(this, runtime);
+        if (launcher.predicate_false_future.impl != NULL)
+        {
+          ApEvent ready_event = 
+            launcher.predicate_false_future.impl->get_ready_event(); 
+          if (ready_event.has_triggered())
+          {
+            const void *f_result = 
+              launcher.predicate_false_future.impl->get_untyped_result();
+            size_t f_result_size = 
+              launcher.predicate_false_future.impl->get_untyped_size();
+            for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                  itr; itr++)
+            {
+              Future f = result->get_future(itr.p);
+              f.impl->set_result(f_result, f_result_size, false/*own*/);
+            }
+            result->complete_all_futures();
+          }
+          else
+          {
+            // Otherwise launch a task to complete the future map,
+            // add the necessary references to prevent premature
+            // garbage collection by the runtime
+            result->add_reference();
+            launcher.predicate_false_future.impl->add_base_gc_ref(
+                                                FUTURE_HANDLE_REF);
+            Runtime::DeferredFutureMapSetArgs args;
+            args.future_map = result;
+            args.result = launcher.predicate_false_future.impl;
+            args.domain = launcher.launch_domain;
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
+                                        Runtime::protect_event(ready_event));
+          }
+          return FutureMap(result);
+        }
+        if (launcher.predicate_false_result.get_size() == 0)
+        {
+          // Check to make sure the task actually does expect to
+          // have a void return type
+          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
+          {
+            log_run.error("Predicated index task launch for task %s "
+                          "in parent task %s (UID %lld) has non-void "
+                          "return type but no default value for its "
+                          "future if the task predicate evaluates to "
+                          "false.  Please set either the "
+                          "'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "IndexTaskLauncher struct.", impl->get_name(), 
+                          get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+          // Just initialize all the futures
+          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                itr; itr++)
+            result->get_future(itr.p);
+        }
+        else
+        {
+          const void *ptr = launcher.predicate_false_result.get_ptr();
+          size_t ptr_size = launcher.predicate_false_result.get_size();
+          for (Domain::DomainPointIterator itr(launcher.launch_domain); 
+                itr; itr++)
+          {
+            Future f = result->get_future(itr.p);
+            f.impl->set_result(ptr, ptr_size, false/*own*/);
+          }
+        }
+        result->complete_all_futures();
+        return FutureMap(result);
+      }
+      if (launcher.launch_domain.exists() && 
+          (launcher.launch_domain.get_volume() == 0))
+      {
+        log_run.warning("Ignoring empty index task launch in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return FutureMap();
+      }
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launcher.launch_domain);
+      ReplIndexTask *task = runtime->get_available_repl_index_task(true);
+#ifdef DEBUG_LEGION
+      FutureMap result = task->initialize_task(this, launcher, launch_space,
+                                               Runtime::check_privileges);
+      if (owner_shard->shard_id == 0)
+        log_task.debug("Registering new index space task with unique id "
+                       "%lld and task %s (ID %lld) with high level runtime in "
+                       "address space %d",
+                       task->get_unique_id(), task->get_task_name(), 
+                       task->get_unique_id(), runtime->address_space);
+#else
+      FutureMap result = task->initialize_task(this, launcher, launch_space,
+                                               false/*check privileges*/);
+#endif
+      execute_task_launch(task, true/*index*/, 
+                          current_trace, launcher.silence_warnings);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future ReplicateContext::execute_index_space(
+                         const IndexTaskLauncher &launcher, ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      if (launcher.must_parallelism)
+        assert(false); // TODO: add support for this
+      AutoRuntimeCall call(this);
+      // Quick out for predicate false
+      if (launcher.predicate == Predicate::FALSE_PRED)
+      {
+        if (launcher.predicate_false_future.impl != NULL)
+          return launcher.predicate_false_future;
+        // Otherwise check to see if we have a value
+        FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/, 
+          runtime->get_available_distributed_id(true), 
+          runtime->address_space, runtime->address_space);
+        if (launcher.predicate_false_result.get_size() > 0)
+          result->set_result(launcher.predicate_false_result.get_ptr(),
+                             launcher.predicate_false_result.get_size(),
+                             false/*own*/);
+        else
+        {
+          // We need to check to make sure that the task actually
+          // does expect to have a void return type
+          TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
+          if (impl->returns_value())
+          {
+            log_run.error("Predicated index task launch for task %s "
+                          "in parent task %s (UID %lld) has non-void "
+                          "return type but no default value for its "
+                          "future if the task predicate evaluates to "
+                          "false.  Please set either the "
+                          "'predicate_false_result' or "
+                          "'predicate_false_future' fields of the "
+                          "IndexTaskLauncher struct.", impl->get_name(), 
+                          get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+          }
+        }
+        // Now we can fix the future result
+        result->complete_future();
+        return Future(result);
+      }
+      if (launcher.launch_domain.exists() &&
+          (launcher.launch_domain.get_volume() == 0))
+      {
+        log_run.warning("Ignoring empty index task launch in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return Future();
+      }
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launcher.launch_domain);
+      ReplIndexTask *task = runtime->get_available_repl_index_task(true);
+#ifdef DEBUG_LEGION
+      Future result = task->initialize_task(this, launcher, launch_space, redop,
+                                            Runtime::check_privileges);
+      if (owner_shard->shard_id == 0)
+        log_task.debug("Registering new index space task with unique id "
+                       "%lld and task %s (ID %lld) with high level runtime in "
+                       "address space %d",
+                       task->get_unique_id(), task->get_task_name(), 
+                       task->get_unique_id(), runtime->address_space);
+#else
+      Future result = task->initialize_task(this, launcher, launch_space, redop,
+                                            false/*check privileges*/);
+#endif
+      execute_task_launch(task, true/*index*/, 
+                          current_trace, launcher.silence_warnings);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion ReplicateContext::map_region(const InlineLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Inline mappings are not currently supported in control "
+                    "replication context for task %s (UID %lld). They may be "
+                    "supported in the future.", 
+                    get_task_name(), get_unique_id());
+      assert(false);
+      return PhysicalRegion();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::remap_region(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Remapping of physical regions is not currently supported "
+                    "in control replication contexts for task %s (UID %lld). "
+                    "It may be supported in the future.", 
+                    get_task_name(), get_unique_id());
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::unmap_region(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Unmapping of physical regions is not currently supported "
+                    "in control replication contexts for task %s (UID %lld). "
+                    "It may be supported in the future.",
+                    get_task_name(), get_unique_id());
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::fill_fields(const FillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      ReplFillOp *fill_op = runtime->get_available_repl_fill_op(true);
+#ifdef DEBUG_LEGION
+      fill_op->initialize(this, launcher, Runtime::check_privileges);
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Registering a fill operation in task %s (ID %lld)",
+                       get_task_name(), get_unique_id());
+#else
+      fill_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_fields call in task %s (UID %lld).",
+              get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::fill_fields(const IndexFillLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (launcher.launch_domain.exists() && 
+          (launcher.launch_domain.get_volume() == 0))
+      {
+        log_run.warning("Ignoring empty index space fill in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+        return;
+      }
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launcher.launch_domain);
+      ReplIndexFillOp *fill_op = 
+        runtime->get_available_repl_index_fill_op(true);
+#ifdef DEBUG_LEGION
+      fill_op->initialize(this, launcher, launch_space, 
+                          Runtime::check_privileges);
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Registering an index fill operation in task %s "
+                      "(ID %lld)", get_task_name(), get_unique_id());
+#else
+      fill_op->initialize(this, launcher, launch_space,
+                          false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(fill_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around fill_fields call in task %s (UID %lld).",
+              get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::issue_copy(const CopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      ReplCopyOp *copy_op = runtime->get_available_repl_copy_op(true);
+#ifdef DEBUG_LEGION
+      copy_op->initialize(this, launcher, Runtime::check_privileges);
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Registering a copy operation in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#else
+      copy_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(copy_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_copy_operation call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, copy_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::issue_copy(const IndexCopyLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (launcher.launch_domain.exists() &&
+          (launcher.launch_domain.get_volume() == 0))
+      {
+        log_run.warning("Ignoring empty index space copy in task %s "
+                        "(ID %lld)", get_task_name(), get_unique_id());
+        return;
+      }
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launcher.launch_domain);
+      ReplIndexCopyOp *copy_op = 
+        runtime->get_available_repl_index_copy_op(true);
+#ifdef DEBUG_LEGION
+      copy_op->initialize(this, launcher, launch_space, 
+                          Runtime::check_privileges);
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Registering an index copy operation in task %s "
+                      "(ID %lld)", get_task_name(), get_unique_id());
+#else
+      copy_op->initialize(this, launcher, launch_space, 
+                          false/*check privileges*/);
+#endif
+      // Check to see if we need to do any unmappings and remappings
+      // before we can issue this copy operation
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(copy_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_copy_operation call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        // Unmap any regions which are conflicting
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, copy_op);
+      // Remap any regions which we unmapped
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::issue_acquire(const AcquireLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Acquire operations are not currently supported in control "
+                    "replication contexts for task %s (UID %lld). It may be "
+                    "supported in the future.",
+                    get_task_name(), get_unique_id());
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::issue_release(const ReleaseLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Release operations are not currently supported in control "
+                    "replication contexts for task %s (UID %lld). It may be "
+                    "supported in the future.",
+                    get_task_name(), get_unique_id());
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalRegion ReplicateContext::attach_resource(
+                                                 const AttachLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Attach operations are not currently supported in control "
+                    "replication contexts for task %s (UID %lld). It may be "
+                    "supported in the future.",
+                    get_task_name(), get_unique_id());
+      assert(false);
+      return PhysicalRegion();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::detach_resource(PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Detach operations are not currently supported in control "
+                    "replication contexts for task %s (UID %lld). It may be "
+                    "supported in the future.",
+                    get_task_name(), get_unique_id());
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMap ReplicateContext::execute_must_epoch(
+                                              const MustEpochLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      ReplMustEpochOp *epoch_op = runtime->get_available_repl_epoch_op(true);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Executing a must epoch in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+      FutureMap result = 
+        epoch_op->initialize(this, launcher, Runtime::check_privileges);
+#else
+      FutureMap result = epoch_op->initialize(this, launcher, 
+                                              false/*check privileges*/);
+#endif
+      // Now find all the parent task regions we need to invalidate
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        epoch_op->find_conflicted_regions(unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings && !launcher.silence_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around issue_release call in "
+              "task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Now we can issue the must epoch
+      runtime->add_to_dependence_queue(this, executing_processor, epoch_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Future ReplicateContext::issue_timing_measurement(
+                                                 const TimingLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_run.debug("Issuing a timing measurement in task %s (ID %lld)",
+                      get_task_name(), get_unique_id());
+#endif
+      ReplTimingOp *timing_op = runtime->get_available_repl_timing_op(true);
+      Future result = timing_op->initialize(this, launcher);
+      runtime->add_to_dependence_queue(this, executing_processor, timing_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
