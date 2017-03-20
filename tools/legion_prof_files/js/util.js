@@ -225,7 +225,7 @@ function filterAndMergeBlocks(state) {
                 proc: timelineElement,
                 level: d.level,
                 start: d.start,
-                end: end,
+                end: Math.round(end),
                 color: "#808080",
                 title: count + " merged tasks",
                 in: [],

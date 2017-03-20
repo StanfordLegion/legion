@@ -1,6 +1,6 @@
 // Some of the constants are read in from load_scale_json
 var constants = {
-  margin_left: 310,
+  margin_left: 200,
   margin_right: 50,
   margin_bottom: 50,
   margin_top: 50,
@@ -317,12 +317,17 @@ function drawLoaderIcon() {
 function showLoaderIcon() {
   state.numLoading++;
   state.loaderSvg.select("g").attr("visibility", "visible");
+  state.loaderSvg.attr("width", "40px")
+                 .attr("height", "40px");
 }
 
 function hideLoaderIcon() {
   state.numLoading--;
   if (state.numLoading == 0) {
     state.loaderSvg.select("g").attr("visibility", "hidden");
+    state.loaderSvg.attr("width", "0px")
+                   .attr("height", "0px");
+;
   }
 }
 
@@ -338,33 +343,58 @@ function getMouseOver() {
     var relativeX = (x - $("#timeline").scrollLeft())
     var anchor = relativeX < left ? "start" :
                  relativeX < right ? "middle" : "end";
-    var descView = state.timelineSvg.append("g").attr("id", "desc");
+    var descView = state.timelineSvg.append("g")
+                        .attr("id", "desc");
+    var text = descView.append("text")
+                       .attr("x", x)
+                       .attr("y", y)
+                       .attr("class", "desc");
+
 
     if ((d.in.length != 0) || (d.out.length != 0)) {
       d3.select(this).style("cursor", "pointer")
     }
 
+    if ((d.in.length != 0) || (d.out.length != 0)) {
+      d3.select(this).style("cursor", "pointer")
+    }
+
+    // descTexts is an array of Texts we will store in the desc view
+    var descTexts = [];
     var total = d.end - d.start;
     var initiation = "";
+    // Insert texts in reverse order
+    descTexts.push("End:   " + d.end + "us");
+    descTexts.push("Start: " + d.start + "us");
+    descTexts.push("Total: " + total + "us");
     if ((d.initiation != undefined) && d.initiation != "") {
-      initiation = " initiated by " + state.operations[d.initiation].desc;
+      descTexts.push("Initiator: " + state.operations[d.initiation].desc);
     } 
-    var title = d.title + initiation + ", total=" + total + "us, start=" + 
-                d.start + "us, end=" + d.end+ "us";
+    descTexts.push(d.title);
 
-    var text = descView.append("text")
+    var title = text.append("tspan")
       .attr("x", x)
-      .attr("y", y)
+      .attr("dy", -12)
       .attr("text-anchor", anchor)
       .attr("class", "desc")
-      .text(unescape(escape(title)));
+      .text(descTexts[0].replace(/ /g, "\u00A0")); // preserve spacing
 
-    var bbox = text.node().getBBox();
+    var titleX = title.node().getBBox().x;
+    
+    for (var i = 1; i < descTexts.length; ++i) {
+      var elem = text.append("tspan")
+        .attr("x", titleX)
+        .attr("dy", -12)
+        .attr("class", "desc")
+        .text(descTexts[i].replace(/ /g, "\u00A0")); // preserve spacing
+    }
+
+    var bbox = descView.node().getBBox();
     var padding = 2;
     var rect = descView.insert("rect", "text")
-        .attr("x", bbox.x - padding)
+        .attr("x", bbox.x - 2*padding)
         .attr("y", bbox.y - padding)
-        .attr("width", bbox.width + (padding*2))
+        .attr("width", bbox.width + (padding*4))
         .attr("height", bbox.height + (padding*2))
         .style("fill", "#222")
         .style("opacity", "0.7");
@@ -397,7 +427,7 @@ function getProcessors(stats_name) {
     var stats_proc_type = stats_match[3];
     state.processors.forEach(function(proc) {
       var proc_regex = /(\w+) Processor 0x1d([a-fA-f0-9]{4})/;
-      var proc_match = proc_regex.exec(proc.processor);
+      var proc_match = proc_regex.exec(proc.full_text);
       if (proc_match) {
         var proc_type = proc_match[1];
         var proc_node_id = parseInt(proc_match[2], 16);
@@ -414,7 +444,7 @@ function getProcessors(stats_name) {
 
 // This function gets a particular timelineElement. It will also handle
 // creating the children for expand commands
-function getElement(depth, text, type, num_levels, loader, 
+function getElement(depth, text, full_text, type, num_levels, loader, 
                     tsv, _parent, children, enabled, visible) {
 
   // build the dummy element
@@ -428,6 +458,7 @@ function getElement(depth, text, type, num_levels, loader,
     children: [],
     parent: _parent,
     text: text,
+    full_text: full_text,
     type: type,
     tsv: tsv,
     visible: visible
@@ -438,8 +469,8 @@ function getElement(depth, text, type, num_levels, loader,
   if (children != undefined) {
     children.forEach(function(child) {
       var stats_name = "node " + child;
-      var child_element = getElement(depth + 1, stats_name, "stats", 
-                                     num_levels, loader,
+      var child_element = getElement(depth + 1, stats_name, undefined, 
+                                     "stats", num_levels, loader,
                                      "tsv/" + child + "_stats.tsv",
                                      element, stats_files[child], true, false);
       element.children.push(child_element);
@@ -451,7 +482,8 @@ function getElement(depth, text, type, num_levels, loader,
     // get the children for the stats view 
     var proc_children = getProcessors(text); 
     proc_children.forEach(function(proc_child) {
-      var child_element = getElement(depth + 1, proc_child.processor, "proc", 
+      var child_element = getElement(depth + 1, proc_child.text,
+                                     proc_child.full_text, "proc", 
                                      proc_child.height, load_proc_timeline,
                                      proc_child.tsv, element, undefined, 
                                      true, false);
@@ -472,8 +504,9 @@ function calculateLayout() {
   if (num_nodes > 1) {
     var proc_kinds = stats_files["all"];
     proc_kinds.forEach(function(kind) {
-      var stats_name = "node " + kind;
-      var kind_element = getElement(0, stats_name, "stats", 
+      var tokens = kind.split(" ");
+      var stats_name = "all nodes " + tokens[1];
+      var kind_element = getElement(0, stats_name, undefined, "stats", 
                                      constants.stats_levels, load_stats,
                                      "tsv/" + kind + "_stats.tsv",
                                      undefined, stats_files[kind], false, true);
@@ -485,7 +518,7 @@ function calculateLayout() {
   state.processors.forEach(function(proc) {
     // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
     var proc_regex = /Processor 0x1d([a-fA-f0-9]{4})/;
-    var proc_match = proc_regex.exec(proc.processor);
+    var proc_match = proc_regex.exec(proc.full_text);
     if (proc_match) {
       var node_id = parseInt(proc_match[1], 16);
       if (!(node_id in seen_nodes)) {
@@ -494,7 +527,7 @@ function calculateLayout() {
 
         proc_kinds.forEach(function(kind) {
           var stats_name = "node " + kind;
-          var kind_element = getElement(0, stats_name, "stats", 
+          var kind_element = getElement(0, stats_name, undefined, "stats", 
                                          constants.stats_levels, load_stats,
                                          "tsv/" + kind + "_stats.tsv",
                                          undefined, stats_files[kind],
@@ -503,7 +536,7 @@ function calculateLayout() {
         });
       }
     } else {
-      state.layoutData.push(getElement(0, proc.processor, "proc", 
+      state.layoutData.push(getElement(0, proc.text, proc.full_text, "proc", 
                                        proc.height, load_proc_timeline,
                                        proc.tsv, undefined, undefined,
                                        false, true));
@@ -711,8 +744,8 @@ function calculateBases() {
   var base = 0;
   state.flattenedLayoutData.forEach(function(elem) {
     elem.base = base;
-    var node_id = get_node_id(elem.text);
-    var proc_in_node = get_proc_in_node(elem.text);
+    var node_id = get_node_id(elem.full_text);
+    var proc_in_node = get_proc_in_node(elem.full_text);
     if (node_id != undefined && proc_in_node != undefined) {
       base_map[(+node_id) + "," + (+proc_in_node)] = elem;
     }
@@ -775,7 +808,8 @@ function expandElement(node, proc) {
   var matchedElement = undefined;
   for (var i = 0; i < state.flattenedLayoutData.length; i++) {
     var timelineElement = state.flattenedLayoutData[i];
-    if (timelineElement.text.indexOf(expectedTitle) !=-1) {  
+    if ((timelineElement.full_text != undefined) &&
+        (timelineElement.full_text.indexOf(expectedTitle) !=-1)) {  
       matchedElement = timelineElement;
       break;
     }
@@ -829,7 +863,6 @@ function dependencyLineLevelCalculator(level) {
 }
 
 function drawLayout() {
-  
   d3.select("#processors").select("svg").remove();
   state.timelineSvg.select("g#lines").remove();
 
@@ -849,6 +882,7 @@ function drawLayout() {
 
   names.attr("text-anchor", "start")
     .attr("class", "processor")
+    .text(function(d) { return d.text; })
     .attr("x", xCalculator)
     .attr("y", lineLevelCalculator)
     .attr("visibility", function(elem) {
@@ -859,29 +893,60 @@ function drawLayout() {
       return (proc.enabled) ? 1 : 0.5;
     });
 
-  names.each(function(d) {
-    var elem = d3.select(this);
-    var text = d.text;
-    var tokens = d.text.split(" to ");
-    if (tokens.length == 1)
-      elem.append("tspan").text(d.text);
-    else {
-      var source = tokens[0];
-      var target = tokens[1].replace(" Channel", "");
-      elem.append("tspan").text(source)
-        .attr("x", xCalculator)
-        .attr("dy", -10);
-      elem.append("tspan").text("==> " + target)
-        .attr("x", xCalculator)
-        .attr("dy", 10);
-    }
-  });
+
+  // names.each(function(d) {
+  //   var elem = d3.select(this);
+  //   var text = d.text;
+  //   var tokens = d.text.split(" to ");
+  //   if (tokens.length == 1)
+  //     elem.append("tspan").text(d.text);
+  //   else {
+  //     var source = tokens[0];
+  //     var target = tokens[1].replace(" Channel", "");
+  //     elem.append("tspan").text(source)
+  //       .attr("x", xCalculator)
+  //       .attr("dy", -10);
+  //     elem.append("tspan").text("==> " + target)
+  //       .attr("x", xCalculator)
+  //       .attr("dy", 10);
+  //   }
+  // });
   names.on({
     "mouseover": function(d) {
       d3.select(this).style("cursor", "pointer")
+      if (d.full_text != undefined) {
+        var x = xCalculator(d);
+        var y = lineLevelCalculator(d) - state.thickness;
+
+        var overlaySvg = d3.select("#overlay").append("svg");
+        var descView = overlaySvg.append("g").attr("id", "desc");
+        
+        var text = descView.append("text")
+          .attr("x", x)
+          .attr("y", y)
+          .attr("text-anchor", "start")
+          .attr("class", "desc")
+          .text(unescape(escape(d.full_text)));
+
+        var bbox = text.node().getBBox();
+        var padding = 2;
+        var rect = descView.insert("rect", "text")
+            .attr("x", bbox.x - padding)
+            .attr("y", bbox.y - padding)
+            .attr("width", bbox.width + (padding*2))
+            .attr("height", bbox.height + (padding*2))
+            .style("fill", "#222")
+            .style("opacity", "0.7");
+
+        overlaySvg.attr("width", bbox.x + bbox.width + (padding*2))
+                  .attr("height", bbox.y + bbox.height + (padding*2));
+      }
     },
     "mouseout": function(d) {
       d3.select(this).style("cursor", "default")
+      if (d.full_text != undefined) {
+        d3.select("#overlay").selectAll("svg").remove();
+      }
     },
     "click": collapseHandler
   });
@@ -1144,6 +1209,7 @@ function adjustZoom(newZoom, scroll) {
     .attr("x2", state.zoom * state.width);
   svg.selectAll("#desc").remove();
   svg.selectAll("g.locator").remove();
+  d3.select("#overlay").selectAll("svg").remove();
 
   if (scroll) {
     var paneWidth = $("#timeline").width();
@@ -1174,6 +1240,7 @@ function recalculateHeight() {
 
   svg.selectAll("#desc").remove();
   svg.selectAll("g.locator").remove();
+  d3.select("#overlay").selectAll("svg").remove();
 
 }
 
@@ -1460,7 +1527,8 @@ function load_procs(callback) {
   d3.tsv('legion_prof_processor.tsv',
     function(d) {
       return {
-        processor: d.processor,
+        full_text: d.full_text,
+        text: d.text,
         height: +d.levels,
         tsv: d.tsv
       };
@@ -1531,9 +1599,10 @@ function filterStatsData(timelineElem) {
   var elem = {time: 0, count: 0};
   var startTime = data[startIndex].time;
   var startX = convertToPos(state, startTime);
+  var endTime;
 
   for (var i = startIndex; i < endIndex - 1; i++) {
-    var endTime = data[i+1].time;
+    endTime = data[i+1].time;
     elem.count += data[i].count * (endTime - data[i].time);
     //elem.time += data[i].time;
     var endX = convertToPos(state, endTime);
@@ -1548,6 +1617,8 @@ function filterStatsData(timelineElem) {
       startTime = endTime;
     }
   }
+
+  newData.push({time: endTime, count:0});
 
   return {
     text: timelineElem.text,
@@ -1686,6 +1757,7 @@ function initializeState() {
   state.loaderSvg = d3.select("#loader-icon").append("svg")
     .attr("width", "40px")
     .attr("height", "40px");
+
 
   drawLoaderIcon();
   load_data();
