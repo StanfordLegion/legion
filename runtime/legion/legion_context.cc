@@ -19,6 +19,7 @@
 #include "legion_context.h"
 #include "legion_instances.h"
 #include "legion_views.h"
+#include "legion_replication.h"
 
 namespace Legion {
   namespace Internal {
@@ -6360,6 +6361,930 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_index_space(RegionTreeForest *forest,
+                                         const void *realm_is, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Create our own local unique index space ID and tree ID
+      IndexSpace handle(get_unique_index_space_id(),
+                        get_unique_index_tree_id(), type_tag);
+      if (owner_shard->shard_id == 0)
+      {
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                        handle.id, get_task_name(), get_unique_id()); 
+#endif
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_top_index_space(handle.id);
+      }
+      forest->create_index_space(handle, realm_is);
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::union_index_spaces(RegionTreeForest *forest,
+                                          const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      if (spaces.empty())
+        return IndexSpace::NO_SPACE;
+      AutoRuntimeCall call(this);
+      // Create our own local unique index space ID and tree ID
+      IndexSpace handle(get_unique_index_space_id(),
+                        get_unique_index_tree_id(), spaces[0].get_type_tag());
+      if (owner_shard->shard_id == 0)
+      {
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                        handle.id, get_task_name(), get_unique_id()); 
+#endif
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_top_index_space(handle.id);
+      }
+      forest->create_union_space(handle, owner_task, spaces);
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::intersect_index_spaces(
+                RegionTreeForest *forest, const std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      if (spaces.empty())
+        return IndexSpace::NO_SPACE;
+      AutoRuntimeCall call(this);
+      // Create our own local unique index space ID and tree ID
+      IndexSpace handle(get_unique_index_space_id(),
+                        get_unique_index_tree_id(), spaces[0].get_type_tag());
+      if (owner_shard->shard_id == 0)
+      {
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                        handle.id, get_task_name(), get_unique_id()); 
+#endif
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_top_index_space(handle.id);
+      }
+      forest->create_intersection_space(handle, owner_task, spaces);
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::subtract_index_spaces(RegionTreeForest *forest,
+                                              IndexSpace left, IndexSpace right)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Create our own local unique index space ID and tree ID
+      IndexSpace handle(get_unique_index_space_id(),
+                        get_unique_index_tree_id(), left.get_type_tag());
+      if (owner_shard->shard_id == 0)
+      {
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating index space %x in task%s (ID %lld)", 
+                        handle.id, get_task_name(), get_unique_id()); 
+#endif
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_top_index_space(handle.id);
+      }
+      forest->create_difference_space(handle, owner_task, left, right);
+      register_index_space_creation(handle);
+      return handle;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::destroy_index_space(IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Destroying index space %x in task %s (ID %lld)", 
+                        handle.id, get_task_name(), get_unique_id());
+#endif
+      ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
+      op->initialize_index_space_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::destroy_index_partition(IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Destroying index partition %x in task %s (ID %lld)", 
+                        handle.id, get_task_name(), get_unique_id());
+#endif
+      ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
+      op->initialize_index_part_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_equal_partition(
+                                                      RegionTreeForest *forest,
+                                                      IndexSpace parent,
+                                                      IndexSpace color_space,
+                                                      size_t granularity,
+                                                      Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);  
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating equal partition %d with parent index space %x"
+                        " in task %s (ID %lld)", pid.id, parent.id,
+                        get_task_name(), get_unique_id());
+#endif
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      part_op->initialize_equal_partition(this, pid, granularity);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space,
+                                       partition_color, DISJOINT_KIND,
+                                       term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_union(
+                                          RegionTreeForest *forest,
+                                          IndexSpace parent,
+                                          IndexPartition handle1,
+                                          IndexPartition handle2,
+                                          IndexSpace color_space,
+                                          PartitionKind kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id)
+        log_index.debug("Creating union partition %d with parent index "
+                        "space %x in task %s (ID %lld)", pid.id, parent.id,
+                        get_task_name(), get_unique_id());
+      if (parent.get_tree_id() != handle1.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                        "index tree as IndexSpace %d in create "
+                        "partition by union!", handle1.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+      if (parent.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                        "index tree as IndexSpace %d in create "
+                        "partition by union!", handle2.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      part_op->initialize_union_partition(this, pid, handle1, handle2);
+      ApEvent term_event = part_op->get_completion_event();
+      // If either partition is aliased the result is aliased
+      if (kind == COMPUTE_KIND)
+      {
+        // If one of these partitions is aliased then the result is aliased
+        IndexPartNode *p1 = forest->get_node(handle1);
+        if (p1->is_disjoint(true/*from app*/))
+        {
+          IndexPartNode *p2 = forest->get_node(handle2);
+          if (!p2->is_disjoint(true/*from app*/))
+            kind = ALIASED_KIND;
+        }
+        else
+          kind = ALIASED_KIND;
+      }
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, kind, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_intersection(
+                                              RegionTreeForest *forest,
+                                              IndexSpace parent,
+                                              IndexPartition handle1,
+                                              IndexPartition handle2,
+                                              IndexSpace color_space,
+                                              PartitionKind kind, Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating intersection partition %d with parent "
+                        "index space %x in task %s (ID %lld)", pid.id, 
+                        parent.id, get_task_name(), get_unique_id());
+      if (parent.get_tree_id() != handle1.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                        "index tree as IndexSpace %d in create partition by "
+                        "intersection!", handle1.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+      if (parent.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                        "index tree as IndexSpace %d in create partition by "
+                        "intersection!", handle2.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      part_op->initialize_intersection_partition(this, pid, handle1, handle2);
+      ApEvent term_event = part_op->get_completion_event();
+      // If either partition is disjoint then the result is disjoint
+      if (kind == COMPUTE_KIND)
+      {
+        IndexPartNode *p1 = forest->get_node(handle1);
+        if (!p1->is_disjoint(true/*from app*/))
+        {
+          IndexPartNode *p2 = forest->get_node(handle2);
+          if (p2->is_disjoint(true/*from app*/))
+            kind = DISJOINT_KIND;
+        }
+        else
+          kind = DISJOINT_KIND;
+      }
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, kind, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_difference(
+                                                  RegionTreeForest *forest,
+                                                  IndexSpace parent,
+                                                  IndexPartition handle1,
+                                                  IndexPartition handle2,
+                                                  IndexSpace color_space,
+                                                  PartitionKind kind, 
+                                                  Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating difference partition %d with parent "
+                        "index space %x in task %s (ID %lld)", pid.id, 
+                        parent.id, get_task_name(), get_unique_id());
+      if (parent.get_tree_id() != handle1.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by difference!",
+                              handle1.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+      if (parent.get_tree_id() != handle2.get_tree_id())
+      {
+        log_index.error("IndexPartition %d is not part of the same "
+                              "index tree as IndexSpace %d in create "
+                              "partition by difference!",
+                              handle2.id, parent.id);
+        assert(false);
+        exit(ERROR_INDEX_TREE_MISMATCH);
+      }
+#endif
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      part_op->initialize_difference_partition(this, pid, handle1, handle2);
+      ApEvent term_event = part_op->get_completion_event();
+      // If the left-hand-side is disjoint the result is disjoint
+      if (kind == COMPUTE_KIND)
+      {
+        IndexPartNode *p1 = forest->get_node(handle1);
+        if (p1->is_disjoint(true/*from app*/))
+          kind = DISJOINT_KIND;
+      }
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space, 
+                                       partition_color, kind, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::create_association(LogicalRegion domain,
+                                              LogicalRegion domain_parent,
+                                              FieldID domain_fid,
+                                              IndexSpace range,
+                                              MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating association in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
+#endif
+      ReplDependentPartitionOp *part_op = 
+        runtime->get_available_repl_dependent_partition_op(true);
+      part_op->initialize_by_association(this, domain, domain_parent, 
+                                         domain_fid, range, id, tag);
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_association call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_restricted_partition(
+                                              RegionTreeForest *forest,
+                                              IndexSpace parent,
+                                              IndexSpace color_space,
+                                              const void *transform,
+                                              size_t transform_size,
+                                              const void *extent,
+                                              size_t extent_size,
+                                              PartitionKind part_kind,
+                                              Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating restricted partition in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color; 
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      part_op->initialize_restricted_partition(this, pid, transform, 
+                                transform_size, extent, extent_size);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, parent, color_space,
+                                       part_color, part_kind, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_field(
+                                              RegionTreeForest *forest,
+                                              LogicalRegion handle,
+                                              LogicalRegion parent_priv,
+                                              FieldID fid,
+                                              IndexSpace color_space,
+                                              Color color,
+                                              MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexSpace parent = handle.get_index_space(); 
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating partition by field in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
+      // Allocate the partition operation
+      ReplDependentPartitionOp *part_op = 
+        runtime->get_available_repl_dependent_partition_op(true);
+      part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition 
+      forest->create_pending_partition(pid, parent, color_space, part_color,
+                                       DISJOINT_KIND, term_event); 
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_field call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_image(
+                                                    RegionTreeForest *forest,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         handle.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating partition by image in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
+      // Allocate the partition operation
+      ReplDependentPartitionOp *part_op = 
+        runtime->get_available_repl_dependent_partition_op(true);
+      part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
+      ApEvent term_event = part_op->get_completion_event(); 
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle, color_space, part_color,
+                                       part_kind, term_event); 
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_image call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_image_range(
+                                                    RegionTreeForest *forest,
+                                                    IndexSpace handle,
+                                                    LogicalPartition projection,
+                                                    LogicalRegion parent,
+                                                    FieldID fid,
+                                                    IndexSpace color_space,
+                                                    PartitionKind part_kind,
+                                                    Color color,
+                                                    MapperID id, 
+                                                    MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         handle.get_tree_id(), parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating partition by image range in task %s "
+                        "(ID %lld)", get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
+      // Allocate the partition operation
+      ReplDependentPartitionOp *part_op = 
+        runtime->get_available_repl_dependent_partition_op(true);
+      part_op->initialize_by_image_range(this, pid, projection, parent, 
+                                         fid, id, tag);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle, color_space, part_color,
+                                       part_kind, term_event); 
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_image_range call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_preimage(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition projection,
+                                                  LogicalRegion handle,
+                                                  LogicalRegion parent,
+                                                  FieldID fid,
+                                                  IndexSpace color_space,
+                                                  PartitionKind part_kind,
+                                                  Color color,
+                                                  MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         handle.get_index_space().get_tree_id(),
+                         parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating partition by preimage in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
+      // Allocate the partition operation
+      ReplDependentPartitionOp *part_op = 
+        runtime->get_available_repl_dependent_partition_op(true);
+      part_op->initialize_by_preimage(this, pid, projection, handle, 
+                                      parent, fid, id, tag);
+      ApEvent term_event = part_op->get_completion_event();
+      // If the source of the preimage is disjoint then the result is disjoint
+      // Note this only applies here and not to range
+      if (part_kind == COMPUTE_KIND)
+      {
+        IndexPartNode *p = forest->get_node(projection);
+        if (p->is_disjoint(true/*from app*/))
+          part_kind = DISJOINT_KIND;
+      }
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle.get_index_space(), 
+                                       color_space, part_color, part_kind,
+                                       term_event);
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_preimage call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_partition_by_preimage_range(
+                                                  RegionTreeForest *forest,
+                                                  IndexPartition projection,
+                                                  LogicalRegion handle,
+                                                  LogicalRegion parent,
+                                                  FieldID fid,
+                                                  IndexSpace color_space,
+                                                  PartitionKind part_kind,
+                                                  Color color,
+                                                  MapperID id, MappingTagID tag)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this); 
+      IndexPartition pid(get_unique_index_partition_id(), 
+                         handle.get_index_space().get_tree_id(),
+                         parent.get_type_tag());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_index.debug("Creating partition by preimage range in task %s "
+                        "(ID %lld)", get_task_name(), get_unique_id());
+#endif
+      LegionColor part_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color;
+      // Allocate the partition operation
+      ReplDependentPartitionOp *part_op = 
+        runtime->get_available_repl_dependent_partition_op(true);
+      part_op->initialize_by_preimage_range(this, pid, projection, handle,
+                                            parent, fid, id, tag);
+      ApEvent term_event = part_op->get_completion_event();
+      // Tell the region tree forest about this partition
+      forest->create_pending_partition(pid, handle.get_index_space(), 
+                                       color_space, part_color, part_kind,
+                                       term_event);
+      // Now figure out if we need to unmap and re-map any inline mappings
+      std::vector<PhysicalRegion> unmapped_regions;
+      if (!Runtime::unsafe_launch)
+        find_conflicting_regions(part_op, unmapped_regions);
+      if (!unmapped_regions.empty())
+      {
+        if (Runtime::runtime_warnings)
+          log_run.warning("WARNING: Runtime is unmapping and remapping "
+              "physical regions around create_partition_by_preimage_range call "
+              "in task %s (UID %lld).", get_task_name(), get_unique_id());
+        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+          unmapped_regions[idx].impl->unmap_region();
+      }
+      // Issue the copy operation
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Remap any unmapped regions
+      if (!unmapped_regions.empty())
+        remap_unmapped_regions(current_trace, unmapped_regions);
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace ReplicateContext::create_field_space(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      FieldSpace space(get_unique_field_space_id());
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_field.debug("Creating field space %x in task %s (ID %lld)", 
+                        space.id, get_task_name(), get_unique_id());
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_field_space(space.id);
+
+      forest->create_field_space(space);
+      register_field_space_creation(space);
+      return space;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::destroy_field_space(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_field.debug("Destroying field space %x in task %s (ID %lld)", 
+                        handle.id, get_task_name(), get_unique_id());
+#endif
+      ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
+      op->initialize_field_space_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID ReplicateContext::allocate_field(RegionTreeForest *forest,
+                                         FieldSpace space, size_t field_size,
+                                         FieldID fid, bool local,
+                                         CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (fid == AUTO_GENERATE_ID)
+        fid = get_unique_field_id();
+#ifdef DEBUG_LEGION
+      else if (fid >= MAX_APPLICATION_FIELD_ID)
+      {
+        log_task.error("Task %s (ID %lld) attempted to allocate a field with "
+                       "ID %d which exceeds the MAX_APPLICATION_FIELD_ID bound "
+                       "set in legion_config.h", get_task_name(),
+                       get_unique_id(), fid);
+        assert(false);
+      }
+#endif
+
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_field_creation(space.id, fid, field_size);
+
+      forest->allocate_field(space, field_size, fid, serdez_id);
+      register_field_creation(space, fid, local);
+      // If we're local issue a task to reclaim to field when we're done
+      if (local)
+      {
+        ReclaimLocalFieldArgs args;
+        args.handle = space;
+        args.fid = fid;
+        RtEvent reclaim_pre = 
+          Runtime::protect_event(owner_task->get_completion_event());
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                         owner_task, reclaim_pre);
+      }
+      return fid;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::free_field(FieldSpace space, FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
+      op->initialize_field_deletion(this, space, fid);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::allocate_fields(RegionTreeForest *forest, 
+                                         FieldSpace space,
+                                         const std::vector<size_t> &sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         bool local, CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (resulting_fields.size() < sizes.size())
+        resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
+      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+      {
+        if (resulting_fields[idx] == AUTO_GENERATE_ID)
+          resulting_fields[idx] = get_unique_field_id();
+#ifdef DEBUG_LEGION
+        else if (resulting_fields[idx] >= MAX_APPLICATION_FIELD_ID)
+        {
+          log_task.error("Task %s (ID %lld) attempted to allocate a field with "
+                         "ID %d which exceeds the MAX_APPLICATION_FIELD_ID "
+                         "bound set in legion_config.h", get_task_name(),
+                         get_unique_id(), resulting_fields[idx]);
+          assert(false);
+        }
+#endif
+
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_field_creation(space.id, 
+                                        resulting_fields[idx], sizes[idx]);
+      }
+      forest->allocate_fields(space, sizes, resulting_fields, serdez_id);
+      register_field_creations(space, local, resulting_fields);
+      if (local)
+      {
+        ReclaimLocalFieldArgs args;
+        args.handle = space;
+        RtEvent reclaim_pre = 
+          Runtime::protect_event(owner_task->get_completion_event());
+        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+        {
+          args.fid = resulting_fields[idx];
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                           owner_task, reclaim_pre);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::free_fields(FieldSpace space, 
+                                       const std::set<FieldID> &to_free)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
+      op->initialize_field_deletions(this, space, to_free);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ReplicateContext::create_logical_region(
+                                                      RegionTreeForest *forest,
+                                                      IndexSpace index_space,
+                                                      FieldSpace field_space)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      RegionTreeID tid = get_unique_region_tree_id();
+      LogicalRegion region(tid, index_space, field_space);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_region.debug("Creating logical region in task %s (ID %lld) with "
+                         "index space %x and field space %x in new tree %d",
+                         get_task_name(), get_unique_id(), 
+                         index_space.id, field_space.id, tid);
+#endif
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_region(index_space.id, field_space.id, tid);
+
+      forest->create_logical_region(region);
+      // Register the creation of a top-level region with the context
+      register_region_creation(region);
+      return region;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::destroy_logical_region(LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_region.debug("Deleting logical region (%x,%x) in task %s (ID %lld)",
+                         handle.index_space.id, handle.field_space.id, 
+                         get_task_name(), get_unique_id());
+#endif
+      ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
+      op->initialize_logical_region_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::destroy_logical_partition(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      if (owner_shard->shard_id == 0)
+        log_region.debug("Deleting logical partition (%x,%x) in task %s "
+                         "(ID %lld)", handle.index_partition.id, 
+                         handle.field_space.id, get_task_name(), 
+                         get_unique_id());
+#endif
+      ReplDeletionOp *op = runtime->get_available_repl_deletion_op(true);
+      op->initialize_logical_partition_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAllocator ReplicateContext::create_index_allocator(
+                                    RegionTreeForest *forest, IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Index allocator creation not permitted in control "
+                    "replication context of task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator ReplicateContext::create_field_allocator(
+                                   Legion::Runtime *external, FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      return FieldAllocator(handle, this, external);
     }
 
     //--------------------------------------------------------------------------

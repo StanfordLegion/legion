@@ -2461,6 +2461,14 @@ namespace Legion {
                                                   bool has_lock = false);
       TimingOp*             get_available_timing_op(bool need_cont,
                                                   bool has_lock = false);
+      ReplDeletionOp*       get_available_repl_deletion_op(bool need_cont,
+                                                  bool has_lock = false);
+      ReplPendingPartitionOp* get_available_repl_pending_partition_op(
+                                                  bool need_cont, 
+                                                  bool has_lock = false);
+      ReplDependentPartitionOp* get_available_repl_dependent_partition_op(
+                                                  bool need_cont,
+                                                  bool has_lock = false);
     public:
       void free_individual_task(IndividualTask *task);
       void free_point_task(PointTask *task);
@@ -2500,6 +2508,9 @@ namespace Legion {
       void free_attach_op(AttachOp *op);
       void free_detach_op(DetachOp *op);
       void free_timing_op(TimingOp *op);
+      void free_repl_deletion_op(ReplDeletionOp *op);
+      void free_repl_pending_partition_op(ReplPendingPartitionOp *op);
+      void free_repl_dependent_partition_op(ReplDependentPartitionOp *op);
     public:
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
@@ -2811,6 +2822,12 @@ namespace Legion {
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<DetachOp*>             available_detach_ops;
       std::deque<TimingOp*>             available_timing_ops;
+      // Replicated operations
+      std::deque<ReplDeletionOp*>       available_repl_deletion_ops;
+      std::deque<ReplPendingPartitionOp*> 
+                                        available_repl_pending_partition_ops;
+      std::deque<ReplDependentPartitionOp*> 
+                                        available_repl_dependent_partition_ops;
 #ifdef DEBUG_LEGION
       TreeStateLogger *tree_state_logger;
       // For debugging purposes keep track of

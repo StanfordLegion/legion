@@ -37,6 +37,7 @@
 #include "legion_instances.h"
 #include "legion_views.h"
 #include "legion_context.h"
+#include "legion_replication.h"
 #include "mapper_manager.h"
 #include "garbage_collection.h"
 #include "default_mapper.h"
@@ -8883,6 +8884,27 @@ namespace Legion {
       available_timing_ops.clear();
       timing_op_lock.destroy_reservation();
       timing_op_lock = Reservation::NO_RESERVATION;
+      for (std::deque<ReplDeletionOp*>::const_iterator it = 
+            available_repl_deletion_ops.begin(); it !=
+            available_repl_deletion_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_deletion_ops.clear();
+      for (std::deque<ReplPendingPartitionOp*>::const_iterator it = 
+            available_repl_pending_partition_ops.begin(); it !=
+            available_repl_pending_partition_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_pending_partition_ops.clear();
+      for (std::deque<ReplDependentPartitionOp*>::const_iterator it = 
+            available_repl_dependent_partition_ops.begin(); it !=
+            available_repl_dependent_partition_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_dependent_partition_ops.clear();
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -16412,6 +16434,63 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplDeletionOp* Runtime::get_available_repl_deletion_op(bool need_cont,
+                                                            bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplDeletionOp*,
+                      &Runtime::get_available_repl_deletion_op>
+                        continuation(this, deletion_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(deletion_op_lock, 
+                           available_repl_deletion_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplPendingPartitionOp* Runtime::get_available_repl_pending_partition_op(
+                                                  bool need_cont, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplPendingPartitionOp*,
+                    &Runtime::get_available_repl_pending_partition_op>
+                      continuation(this, pending_partition_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(pending_partition_op_lock,
+                           available_repl_pending_partition_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDependentPartitionOp* Runtime::
+        get_available_repl_dependent_partition_op(bool need_cont, bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplDependentPartitionOp*,
+                    &Runtime::get_available_repl_dependent_partition_op>
+                      continuation(this, dependent_partition_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(dependent_partition_op_lock,
+                           available_repl_dependent_partition_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -16733,6 +16812,30 @@ namespace Legion {
     {
       AutoLock t_lock(timing_op_lock);
       release_operation<false>(available_timing_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_deletion_op(ReplDeletionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(deletion_op_lock);
+      release_operation<false>(available_repl_deletion_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_pending_partition_op(ReplPendingPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(pending_partition_op_lock);
+      release_operation<false>(available_repl_pending_partition_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_dependent_partition_op(ReplDependentPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(dependent_partition_op_lock);
+      release_operation<false>(available_repl_dependent_partition_ops, op);
     }
 
     //--------------------------------------------------------------------------

@@ -1253,6 +1253,13 @@ namespace Legion {
                                        std::vector<Future> &contributions);
     public:
       void exchange_common_resources(void);
+    protected:
+      IndexSpaceID       get_unique_index_space_id(void);
+      IndexPartitionID   get_unique_index_partition_id(void);
+      FieldSpaceID       get_unique_field_space_id(void);
+      IndexTreeID        get_unique_index_tree_id(void);
+      RegionTreeID       get_unique_region_tree_id(void);
+      FieldID            get_unique_field_id(void);
     public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
