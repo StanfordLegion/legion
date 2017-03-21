@@ -9366,23 +9366,23 @@ namespace Legion {
         // We're the owner space so we have to make the allocation barriers
         //index_space_allocator_barrier(Realm::Barrier::create_barrier(
         index_space_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
                 REDOP_IS_REDUCTION, &IndexSpaceReduction::identity,
                 sizeof(IndexSpaceReduction::identity)));
         index_partition_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
                 REDOP_IP_REDUCTION, &IndexPartitionReduction::identity,
                 sizeof(IndexPartitionReduction::identity)));
         field_space_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
                 REDOP_FS_REDUCTION, &FieldSpaceReduction::identity,
                 sizeof(FieldSpaceReduction::identity)));
         field_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
                 REDOP_FID_REDUCTION, &FieldReduction::identity,
                 sizeof(FieldReduction::identity)));
         logical_region_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
                 REDOP_LG_REDUCTION, &LogicalRegionReduction::identity,
                 sizeof(LogicalRegionReduction::identity)));
       }

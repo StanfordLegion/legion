@@ -6341,42 +6341,17 @@ namespace Legion {
         logical_region_allocator_shard(0)
     //--------------------------------------------------------------------------
     {
-      // Get our allocation barriers, and if we're not the allocator
-      // then we can do our arrival immediately
+      // Get our allocation barriers
       index_space_allocator_barrier = 
         manager->get_index_space_allocator_barrier();
-      if (owner_shard->shard_id != index_space_allocator_shard)
-        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
-            sizeof(IndexSpaceReduction::identity));
-
       index_partition_allocator_barrier = 
         manager->get_index_partition_allocator_barrier();
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
-
       field_space_allocator_barrier = 
         manager->get_field_space_allocator_barrier();
-      if (owner_shard->shard_id != field_space_allocator_shard)
-        Runtime::phase_barrier_arrive(field_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &FieldSpaceReduction::identity,
-            sizeof(FieldSpaceReduction::identity));
-
       field_allocator_barrier = 
         manager->get_field_allocator_barrier();
-      if (owner_shard->shard_id != field_allocator_shard)
-        Runtime::phase_barrier_arrive(field_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &FieldReduction::identity,
-            sizeof(FieldReduction::identity));
-
       logical_region_allocator_barrier = 
         manager->get_logical_region_allocator_barrier();
-      if (owner_shard->shard_id != logical_region_allocator_shard)
-        Runtime::phase_barrier_arrive(logical_region_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &LogicalRegionReduction::identity,
-            sizeof(LogicalRegionReduction::identity));
     }
 
     //--------------------------------------------------------------------------
@@ -6430,14 +6405,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result 
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_space_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_space_allocator_barrier.has_triggered())
+          index_space_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&handle, sizeof(handle));
+          index_space_allocator_barrier.get_result(&handle, sizeof(handle));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(handle.exists());
@@ -6450,11 +6423,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_space_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_space_allocator_shard)
-        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
-            sizeof(IndexSpaceReduction::identity));
       return handle;
     }
 
@@ -6488,14 +6456,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result 
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_space_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_space_allocator_barrier.has_triggered())
+          index_space_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&handle, sizeof(handle));
+          index_space_allocator_barrier.get_result(&handle, sizeof(handle));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(handle.exists());
@@ -6511,11 +6477,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_space_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_space_allocator_shard)
-        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
-            sizeof(IndexSpaceReduction::identity));
       return handle;
     }
 
@@ -6549,14 +6510,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result 
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_space_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_space_allocator_barrier.has_triggered())
+          index_space_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&handle, sizeof(handle));
+          index_space_allocator_barrier.get_result(&handle, sizeof(handle));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(handle.exists());
@@ -6572,11 +6531,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_space_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_space_allocator_shard)
-        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
-            sizeof(IndexSpaceReduction::identity));
       return handle;
     }
 
@@ -6608,14 +6562,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result 
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_space_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_space_allocator_barrier.has_triggered())
+          index_space_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&handle, sizeof(handle));
+          index_space_allocator_barrier.get_result(&handle, sizeof(handle));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(handle.exists());
@@ -6631,11 +6583,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_space_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_space_allocator_shard)
-        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
-            sizeof(IndexSpaceReduction::identity));
       return handle;
     }
 
@@ -6706,14 +6653,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -6732,11 +6677,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -6809,14 +6749,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -6834,11 +6772,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -6910,14 +6843,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -6935,11 +6866,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7008,14 +6934,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -7033,11 +6957,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7118,14 +7037,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -7145,11 +7062,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7192,14 +7104,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -7233,11 +7143,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7282,14 +7187,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -7323,11 +7226,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7372,14 +7270,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -7414,11 +7310,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7471,14 +7362,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -7514,11 +7403,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7563,14 +7447,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(index_partition_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&pid.id, sizeof(pid.id));
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
@@ -7606,11 +7488,6 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
-      // If we're not providing the next result we can already do our arrival
-      if (owner_shard->shard_id != index_partition_allocator_shard)
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
-           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7639,14 +7516,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(field_space_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!field_space_allocator_barrier.has_triggered())
+          field_space_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&space, sizeof(space));
+          field_space_allocator_barrier.get_result(&space, sizeof(space));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(space.exists());
@@ -7661,11 +7536,6 @@ namespace Legion {
         field_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(field_space_allocator_barrier);
-      // If we're not providing the next result we already do our arrival
-      if (owner_shard->shard_id != field_space_allocator_shard)
-        Runtime::phase_barrier_arrive(field_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &FieldSpaceReduction::identity,
-            sizeof(FieldSpaceReduction::identity));
       return space;
     }
 
@@ -7728,14 +7598,12 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(field_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!field_allocator_barrier.has_triggered())
+          field_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result = 
 #endif
-          previous.get_result(&fid, sizeof(fid));
+          field_allocator_barrier.get_result(&fid, sizeof(fid));
 #ifdef DEBUG_LEGION
         assert(result);
 #endif
@@ -7748,11 +7616,6 @@ namespace Legion {
         field_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(field_allocator_barrier);
-      // If we're not providing the next result we already do our arrival
-      if (owner_shard->shard_id != field_allocator_shard)
-        Runtime::phase_barrier_arrive(field_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &FieldReduction::identity,
-            sizeof(FieldReduction::identity));
       return fid;
     }
 
@@ -7825,14 +7688,13 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        RtBarrier previous = 
-          Runtime::get_previous_phase(logical_region_allocator_barrier);
-        if (!previous.has_triggered())
-          previous.wait();
+        if (!logical_region_allocator_barrier.has_triggered())
+          logical_region_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
         bool result =  
 #endif
-          previous.get_result(&handle.tree_id, sizeof(handle.tree_id));
+          logical_region_allocator_barrier.get_result(&handle.tree_id, 
+                                              sizeof(handle.tree_id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(handle.exists());
@@ -7847,11 +7709,6 @@ namespace Legion {
         logical_region_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(logical_region_allocator_barrier);
-      // If we're not providing the next result we already do our arrival
-      if (owner_shard->shard_id != logical_region_allocator_shard)
-        Runtime::phase_barrier_arrive(logical_region_allocator_barrier, 
-            1/*count*/, RtEvent::NO_RT_EVENT, &LogicalRegionReduction::identity,
-            sizeof(LogicalRegionReduction::identity));
       return handle;
     }
 
@@ -8480,7 +8337,7 @@ namespace Legion {
       if (next_ap_bar_index == application_barriers.size())
         next_ap_bar_index = 0;
       // Set the replicate mapped event
-      op->set_replicate_mapped_event(Runtime::get_previous_phase(map_barrier));
+      op->set_replicate_mapped_event(map_barrier);
       // Arrive on the barrier 
       Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
                                     op->get_mapped_event());
@@ -8500,7 +8357,7 @@ namespace Legion {
       if (next_int_bar_index == internal_barriers.size())
         next_int_bar_index = 0;
       // Set the replicate mapped event
-      op->set_replicate_mapped_event(Runtime::get_previous_phase(map_barrier));
+      op->set_replicate_mapped_event(map_barrier);
       // Arrive on the barrier 
       Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
                                     op->get_mapped_event());
