@@ -22,6 +22,7 @@
 #include "legion_instances.h"
 #include "legion_analysis.h"
 #include "legion_views.h"
+#include "legion_replication.h"
 #include <algorithm>
 
 #define PRINT_REG(reg) (reg).index_space.id,(reg).field_space.id, (reg).tree_id
@@ -3876,7 +3877,8 @@ namespace Legion {
 #endif
       // Now make the control replication manager which will use a 
       // tree broadcast to spread out across the nodes
-      shard_manager = new ShardManager(runtime, repl_context, 
+      const size_t total_shards = control_replication_map.size();
+      shard_manager = new ShardManager(runtime, repl_context, total_shards, 
                                        0/*idx*/, runtime->address_space, this);
       shard_manager->launch(address_spaces, control_replication_map);
     }
@@ -9346,9 +9348,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(Runtime *rt, ControlReplicationID id, 
-                    unsigned index, AddressSpaceID owner, SingleTask *original)
-      : runtime(rt), repl_id(id), address_space_index(index),owner_space(owner), 
-        original_task(original),manager_lock(Reservation::create_reservation()),
+        size_t total, unsigned index, AddressSpaceID owner,SingleTask *original)
+      : runtime(rt), repl_id(id), total_shards(total), 
+        address_space_index(index),owner_space(owner), original_task(original),
+        manager_lock(Reservation::create_reservation()),
         local_mapping_complete(0), remote_mapping_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
         trigger_local_commit(0), trigger_remote_commit(0), 
@@ -9358,11 +9361,36 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->register_shard_manager(repl_id, this);
+      if (owner_space == runtime->address_space)
+      {
+        // We're the owner space so we have to make the allocation barriers
+        //index_space_allocator_barrier(Realm::Barrier::create_barrier(
+        index_space_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                REDOP_IS_REDUCTION, &IndexSpaceReduction::identity,
+                sizeof(IndexSpaceReduction::identity)));
+        index_partition_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                REDOP_IP_REDUCTION, &IndexPartitionReduction::identity,
+                sizeof(IndexPartitionReduction::identity)));
+        field_space_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                REDOP_FS_REDUCTION, &FieldSpaceReduction::identity,
+                sizeof(FieldSpaceReduction::identity)));
+        field_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                REDOP_FID_REDUCTION, &FieldReduction::identity,
+                sizeof(FieldReduction::identity)));
+        logical_region_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                REDOP_LG_REDUCTION, &LogicalRegionReduction::identity,
+                sizeof(LogicalRegionReduction::identity)));
+      }
     }
 
     //--------------------------------------------------------------------------
     ShardManager::ShardManager(const ShardManager &rhs)
-      : runtime(NULL), repl_id(0), address_space_index(0), 
+      : runtime(NULL), repl_id(0), total_shards(0), address_space_index(0), 
         owner_space(0), original_task(NULL)
     //--------------------------------------------------------------------------
     {
@@ -9380,10 +9408,19 @@ namespace Legion {
         delete (*it);
       local_shards.clear();
       // Finally unregister ourselves with the runtime
-      const bool free_index = (owner_space == runtime->address_space);
-      runtime->unregister_shard_manager(repl_id, free_index);
+      const bool owner_manager = (owner_space == runtime->address_space);
+      runtime->unregister_shard_manager(repl_id, owner_manager);
       manager_lock.destroy_reservation();
       manager_lock = Reservation::NO_RESERVATION;
+      if (owner_manager)
+      {
+        // We're the owner so we have to destroy the allocation barriers
+        index_space_allocator_barrier.destroy_barrier();
+        index_partition_allocator_barrier.destroy_barrier();
+        field_space_allocator_barrier.destroy_barrier();
+        field_allocator_barrier.destroy_barrier();
+        logical_region_allocator_barrier.destroy_barrier();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9456,6 +9493,11 @@ namespace Legion {
       address_spaces.resize(num_spaces);
       for (unsigned idx = 0; idx < num_spaces; idx++)
         derez.deserialize(address_spaces[idx]);
+      derez.deserialize(index_space_allocator_barrier);
+      derez.deserialize(index_partition_allocator_barrier);
+      derez.deserialize(field_space_allocator_barrier);
+      derez.deserialize(field_allocator_barrier);
+      derez.deserialize(logical_region_allocator_barrier);
       // Configure our collective settings based on the number of spaces
       collective_participant = configure_collective_settings(
                                     address_spaces.size(),
@@ -9578,6 +9620,7 @@ namespace Legion {
           RezCheck z(rez);
           // Package up the information we need to send to the next manager
           rez.serialize(repl_id);
+          rez.serialize(total_shards);
           rez.serialize(index);
           rez.serialize(ready_event);
           rez.serialize(done);
@@ -9592,6 +9635,11 @@ namespace Legion {
           for (std::vector<AddressSpaceID>::const_iterator it = 
                 address_spaces.begin(); it != address_spaces.end(); it++)
             rez.serialize(*it);   
+          rez.serialize(index_space_allocator_barrier);
+          rez.serialize(index_partition_allocator_barrier);
+          rez.serialize(field_space_allocator_barrier);
+          rez.serialize(field_allocator_barrier);
+          rez.serialize(logical_region_allocator_barrier);
           to_clone->pack_as_shard_task(rez, address_spaces[index]); 
         }
         // Send the message
@@ -10127,9 +10175,12 @@ namespace Legion {
       DerezCheck z(derez);
       ControlReplicationID repl_id;
       derez.deserialize(repl_id);
+      size_t total_shards;
+      derez.deserialize(total_shards);
       int index;
       derez.deserialize(index);
-      ShardManager *manager = new ShardManager(runtime, repl_id, index, source);
+      ShardManager *manager = 
+        new ShardManager(runtime, repl_id, total_shards, index, source);
       manager->unpack_launch(derez);
     }
 

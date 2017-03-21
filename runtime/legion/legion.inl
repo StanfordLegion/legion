@@ -2609,6 +2609,17 @@ namespace Legion {
 #endif
         exit(ERROR_RESERVED_REDOP_ID);
       }
+      if (redop_id >= MAX_APPLICATION_REDUCTION_ID)
+      {
+        fprintf(stderr,"ERROR: ReductionOpID %d is greater than or equal "
+                       "tothe MAX_APPLICATION_REDUCTION_ID of %d set in "
+                       "legion_config.h.", redop_id, 
+                       MAX_APPLICATION_REDUCTION_ID); 
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_REDOP_ID);
+      }
       ReductionOpTable &red_table = Runtime::get_reduction_table(); 
       // Check to make sure we're not overwriting a prior reduction op 
       if (red_table.find(redop_id) != red_table.end())

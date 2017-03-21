@@ -1216,7 +1216,7 @@ namespace Legion {
         RtBarrier bar;
       };
     public:
-      ShardManager(Runtime *rt, ControlReplicationID repl_id,
+      ShardManager(Runtime *rt, ControlReplicationID repl_id, size_t total,
                    unsigned address_space_index, AddressSpaceID owner_space,
                    SingleTask *original = NULL);
       ShardManager(const ShardManager &rhs);
@@ -1224,8 +1224,16 @@ namespace Legion {
     public:
       ShardManager& operator=(const ShardManager &rhs);
     public:
-      inline size_t total_shard_count(void) const 
-        { return shard_mapping.size(); }
+      inline RtBarrier get_index_space_allocator_barrier(void) const
+        { return index_space_allocator_barrier; }
+      inline RtBarrier get_index_partition_allocator_barrier(void) const
+        { return index_partition_allocator_barrier; }
+      inline RtBarrier get_field_space_allocator_barrier(void) const
+        { return field_space_allocator_barrier; }
+      inline RtBarrier get_field_allocator_barrier(void) const
+        { return field_allocator_barrier; }
+      inline RtBarrier get_logical_region_allocator_barrier(void) const
+        { return logical_region_allocator_barrier; }
     public:
       void launch(const std::vector<AddressSpaceID> &spaces,
                   const std::map<ShardID,Processor> &shard_mapping);
@@ -1270,6 +1278,7 @@ namespace Legion {
     public:
       Runtime *const runtime;
       const ControlReplicationID repl_id;
+      const size_t total_shards;
       const unsigned address_space_index;
       const AddressSpaceID owner_space;
       SingleTask *const original_task;
@@ -1308,6 +1317,12 @@ namespace Legion {
       std::map<int,std::vector<BarrierInfo> > pending_application_barrier_infos;
       std::map<int,std::vector<BarrierInfo> > pending_internal_barrier_infos;
       std::vector<int>                        barrier_exchange_notifications;
+    protected: // Allocation barriers to be passed to shards
+      RtBarrier index_space_allocator_barrier;
+      RtBarrier index_partition_allocator_barrier;
+      RtBarrier field_space_allocator_barrier;
+      RtBarrier field_allocator_barrier;
+      RtBarrier logical_region_allocator_barrier;
     };
 
   }; // namespace Internal 

@@ -227,9 +227,14 @@ namespace Legion {
       OPEN_REDUCE_PROJ_DIRTY  = 9, // same as above but already open dirty 
     }; 
 
-    // redop IDs - none used in HLR right now, but 0 isn't allowed
+    // Internal reduction operators
     enum {
-      REDOP_ID_AVAILABLE    = 1,
+      REDOP_IS_REDUCTION    = MAX_APPLICATION_REDUCTION_ID,
+      REDOP_IP_REDUCTION    = REDOP_IS_REDUCTION + 1,
+      REDOP_FS_REDUCTION    = REDOP_IP_REDUCTION + 1,
+      REDOP_LG_REDUCTION    = REDOP_FS_REDUCTION + 1,
+      REDOP_FID_REDUCTION   = REDOP_LG_REDUCTION + 1,
+      REDOP_ID_AVAILABLE    = REDOP_FID_REDUCTION + 1,
     };
 
     // Runtime task numbering 
@@ -1833,9 +1838,13 @@ namespace Legion {
     inline operator Realm::Barrier() const
       { Realm::Barrier b; b.id = id; 
         b.timestamp = timestamp; return b; }
+  public:
     inline bool get_result(void *value, size_t value_size) const
       { Realm::Barrier b; b.id = id;
         b.timestamp = timestamp; return b.get_result(value, value_size); }
+    inline void destroy_barrier(void)
+      { Realm::Barrier b; b.id = id;
+        b.timestamp = timestamp; b.destroy_barrier(); }
   public:
     Realm::Barrier::timestamp_t timestamp;
   };
@@ -1882,9 +1891,13 @@ namespace Legion {
     inline operator Realm::Barrier() const
       { Realm::Barrier b; b.id = id; 
         b.timestamp = timestamp; return b; } 
+  public:
     inline bool get_result(void *value, size_t value_size) const
       { Realm::Barrier b; b.id = id;
         b.timestamp = timestamp; return b.get_result(value, value_size); }
+    inline void destroy_barrier(void)
+      { Realm::Barrier b; b.id = id;
+        b.timestamp = timestamp; b.destroy_barrier(); }
   public:
     Realm::Barrier::timestamp_t timestamp;
   }; 

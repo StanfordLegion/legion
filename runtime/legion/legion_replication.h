@@ -23,6 +23,181 @@ namespace Legion {
   namespace Internal {
 
     /**
+     * \class IndexSpaceReduction
+     * A class for performing reductions of index spaces
+     */
+    class IndexSpaceReduction {
+    public:
+      typedef IndexSpace LHS;
+      typedef IndexSpace RHS;
+      static const IndexSpace identity;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+#ifdef DEBUG_LEGION
+        assert((lhs.exists() && !rhs.exists()) ||
+               (!lhs.exists() && rhs.exists()) ||
+               (lhs.exists() && (lhs == rhs)));
+#endif
+        if (rhs.exists())
+          lhs = rhs;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+#ifdef DEBUG_LEGION
+        assert((rhs1.exists() && !rhs2.exists()) ||
+               (!rhs1.exists() && rhs2.exists()) ||
+               (rhs1.exists() && (rhs1 == rhs2)));
+#endif
+        if (rhs2.exists())
+          rhs1 = rhs2;
+      }
+    };
+
+    /**
+     * \class IndexPartitionReduction
+     * A class for performing reductions of index partition IDs
+     */
+    class IndexPartitionReduction {
+    public:
+      typedef IndexPartitionID LHS;
+      typedef IndexPartitionID RHS;
+      static const IndexPartitionID identity = 0;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+#ifdef DEBUG_LEGION
+        assert(((lhs != 0) && (rhs == 0)) ||
+               ((lhs == 0) && (rhs != 0)) ||
+               ((lhs != 0) && (lhs == rhs)));
+#endif
+        if (rhs != 0)
+          lhs = rhs;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+#ifdef DEBUG_LEGION
+        assert(((rhs1 != 0) && (rhs2 == 0)) ||
+               ((rhs1 == 0) && (rhs2 != 0)) ||
+               ((rhs1 != 0) && (rhs1 == rhs2)));
+#endif
+        if (rhs2 != 0)
+          rhs1 = rhs2;
+      }
+    };
+
+    /**
+     * \class FieldSpaceReduction
+     * A class for performing reductions of field spaces
+     */
+    class FieldSpaceReduction {
+    public:
+      typedef FieldSpace LHS;
+      typedef FieldSpace RHS;
+      static const FieldSpace identity;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+#ifdef DEBUG_LEGION
+        assert((lhs.exists() && !rhs.exists()) ||
+               (!lhs.exists() && rhs.exists()) ||
+               (lhs.exists() && (lhs == rhs)));
+#endif
+        if (rhs.exists())
+          lhs = rhs;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+#ifdef DEBUG_LEGION
+        assert((rhs1.exists() && !rhs2.exists()) ||
+               (!rhs1.exists() && rhs2.exists()) ||
+               (rhs1.exists() && (rhs1 == rhs2)));
+#endif
+        if (rhs2.exists())
+          rhs1 = rhs2;
+      }
+    };
+
+    /**
+     * \class LogicalRegionReduction
+     * A class for performing reductions of region tree IDs
+     */
+    class LogicalRegionReduction {
+    public:
+      typedef RegionTreeID LHS;
+      typedef RegionTreeID RHS;
+      static const RegionTreeID identity = 0;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+#ifdef DEBUG_LEGION
+        assert(((lhs != 0) && (rhs == 0)) ||
+               ((lhs == 0) && (rhs != 0)) ||
+               ((lhs != 0) && (lhs == rhs)));
+#endif
+        if (rhs != 0)
+          lhs = rhs;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+#ifdef DEBUG_LEGION
+        assert(((rhs1 != 0) && (rhs2 == 0)) ||
+               ((rhs1 == 0) && (rhs2 != 0)) ||
+               ((rhs1 != 0) && (rhs1 == rhs2)));
+#endif
+        if (rhs2 != 0)
+          rhs1 = rhs2;
+      }
+    };
+
+    /**
+     * \class FieldReduction
+     * A class for performing reductions of field IDs
+     */
+    class FieldReduction {
+    public:
+      typedef FieldID LHS;
+      typedef FieldID RHS;
+      static const FieldID identity = 0;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+#ifdef DEBUG_LEGION
+        assert(((lhs != 0) && (rhs == 0)) ||
+               ((lhs == 0) && (rhs != 0)) ||
+               ((lhs != 0) && (lhs == rhs)));
+#endif
+        if (rhs != 0)
+          lhs = rhs;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+#ifdef DEBUG_LEGION
+        assert(((rhs1 != 0) && (rhs2 == 0)) ||
+               ((rhs1 == 0) && (rhs2 != 0)) ||
+               ((rhs1 != 0) && (rhs1 == rhs2)));
+#endif
+        if (rhs2 != 0)
+          rhs1 = rhs2;
+      }
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.

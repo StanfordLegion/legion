@@ -18414,7 +18414,20 @@ namespace Legion {
       assert(ok); 
       
       {
-	const ReductionOpTable& red_table = get_reduction_table();
+	ReductionOpTable& red_table = get_reduction_table();
+        // Fill in our internal runtime reduction operations
+        red_table[REDOP_IS_REDUCTION] = 
+          Realm::ReductionOpUntyped::create_reduction_op<IndexSpaceReduction>();
+        red_table[REDOP_IP_REDUCTION] = 
+          Realm::ReductionOpUntyped::create_reduction_op<
+                                                     IndexPartitionReduction>();
+        red_table[REDOP_FS_REDUCTION] =
+          Realm::ReductionOpUntyped::create_reduction_op<FieldSpaceReduction>();
+        red_table[REDOP_LG_REDUCTION] = 
+          Realm::ReductionOpUntyped::create_reduction_op<
+                                                      LogicalRegionReduction>();
+        red_table[REDOP_FID_REDUCTION] = 
+          Realm::ReductionOpUntyped::create_reduction_op<FieldReduction>();
 	for(ReductionOpTable::const_iterator it = red_table.begin();
 	    it != red_table.end();
 	    it++)

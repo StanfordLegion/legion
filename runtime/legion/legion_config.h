@@ -77,6 +77,10 @@
 #ifndef MAX_APPLICATION_MAPPER_ID
 #define MAX_APPLICATION_MAPPER_ID       (1<<20)
 #endif
+// Maximum ID for an application reduction ID
+#ifndef MAX_APPLICATION_REDUCTION_ID
+#define MAX_APPLICATION_REDUCTION_ID    (1<<20)
+#endif
 // Default number of mapper slots
 #ifndef DEFAULT_MAPPER_SLOTS
 #define DEFAULT_MAPPER_SLOTS            8

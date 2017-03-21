@@ -6335,9 +6335,48 @@ namespace Legion {
                                    UniqueID ctx_uid, ShardManager *manager)
       : InnerContext(rt, owner, full, reqs, parent_indexes, virt_mapped, 
           ctx_uid), owner_shard(owner), shard_manager(manager),
-        next_ap_bar_index(0), next_int_bar_index(0)
+        next_ap_bar_index(0), next_int_bar_index(0), 
+        index_space_allocator_shard(0), index_partition_allocator_shard(0),
+        field_space_allocator_shard(0), field_allocator_shard(0),
+        logical_region_allocator_shard(0)
     //--------------------------------------------------------------------------
     {
+      // Get our allocation barriers, and if we're not the allocator
+      // then we can do our arrival immediately
+      index_space_allocator_barrier = 
+        manager->get_index_space_allocator_barrier();
+      if (owner_shard->shard_id != index_space_allocator_shard)
+        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
+            sizeof(IndexSpaceReduction::identity));
+
+      index_partition_allocator_barrier = 
+        manager->get_index_partition_allocator_barrier();
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
+
+      field_space_allocator_barrier = 
+        manager->get_field_space_allocator_barrier();
+      if (owner_shard->shard_id != field_space_allocator_shard)
+        Runtime::phase_barrier_arrive(field_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &FieldSpaceReduction::identity,
+            sizeof(FieldSpaceReduction::identity));
+
+      field_allocator_barrier = 
+        manager->get_field_allocator_barrier();
+      if (owner_shard->shard_id != field_allocator_shard)
+        Runtime::phase_barrier_arrive(field_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &FieldReduction::identity,
+            sizeof(FieldReduction::identity));
+
+      logical_region_allocator_barrier = 
+        manager->get_logical_region_allocator_barrier();
+      if (owner_shard->shard_id != logical_region_allocator_shard)
+        Runtime::phase_barrier_arrive(logical_region_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &LogicalRegionReduction::identity,
+            sizeof(LogicalRegionReduction::identity));
     }
 
     //--------------------------------------------------------------------------
@@ -6407,17 +6446,15 @@ namespace Legion {
       }
       register_index_space_creation(handle);
       index_space_allocator_shard++;
-      if (index_space_allocator_shard == shard_manager->total_shard_count())
+      if (index_space_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_space_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_space_allocator_shard)
-      {
-        IndexSpace no_space = IndexSpace::NO_SPACE;
         Runtime::phase_barrier_arrive(index_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
-      }
+            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
+            sizeof(IndexSpaceReduction::identity));
       return handle;
     }
 
@@ -6470,17 +6507,15 @@ namespace Legion {
       register_index_space_creation(handle);
       // Update our allocator shard
       index_space_allocator_shard++;
-      if (index_space_allocator_shard == shard_manager->total_shard_count())
+      if (index_space_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_space_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_space_allocator_shard)
-      {
-        IndexSpace no_space = IndexSpace::NO_SPACE;
         Runtime::phase_barrier_arrive(index_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
-      }
+            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
+            sizeof(IndexSpaceReduction::identity));
       return handle;
     }
 
@@ -6533,17 +6568,15 @@ namespace Legion {
       register_index_space_creation(handle);
       // Update the index space allocator shard
       index_space_allocator_shard++;
-      if (index_space_allocator_shard == shard_manager->total_shard_count())
+      if (index_space_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_space_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_space_allocator_shard)
-      {
-        IndexSpace no_space = IndexSpace::NO_SPACE;
         Runtime::phase_barrier_arrive(index_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
-      }
+            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
+            sizeof(IndexSpaceReduction::identity));
       return handle;
     }
 
@@ -6594,17 +6627,15 @@ namespace Legion {
       register_index_space_creation(handle);
       // Update the allocation shard
       index_space_allocator_shard++;
-      if (index_space_allocator_shard == shard_manager->total_shard_count())
+      if (index_space_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_space_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_space_allocator_shard)
-      {
-        IndexSpace no_space = IndexSpace::NO_SPACE;
         Runtime::phase_barrier_arrive(index_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
-      }
+            1/*count*/, RtEvent::NO_RT_EVENT, &IndexSpaceReduction::identity,
+            sizeof(IndexSpaceReduction::identity));
       return handle;
     }
 
@@ -6697,17 +6728,15 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Update the allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -6801,17 +6830,15 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -6904,17 +6931,15 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7004,17 +7029,15 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7118,17 +7141,15 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7208,17 +7229,15 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7300,17 +7319,15 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7393,17 +7410,15 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7495,17 +7510,15 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7589,17 +7602,15 @@ namespace Legion {
         remap_unmapped_regions(current_trace, unmapped_regions);
       // Update our allocation shard
       index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+      if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
       // If we're not providing the next result we can already do our arrival
       if (owner_shard->shard_id != index_partition_allocator_shard)
-      {
-        IndexPartition no_part = IndexPartition::NO_PART;
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
-      }
+           1/*count*/, RtEvent::NO_RT_EVENT, &IndexPartitionReduction::identity,
+           sizeof(IndexPartitionReduction::identity));
       return pid;
     }
 
@@ -7646,17 +7657,15 @@ namespace Legion {
       register_field_space_creation(space);
       // Update the allocator
       field_space_allocator_shard++;
-      if (field_space_allocator_shard == shard_manager->total_shard_count())
+      if (field_space_allocator_shard == shard_manager->total_shards)
         field_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(field_space_allocator_barrier);
       // If we're not providing the next result we already do our arrival
       if (owner_shard->shard_id != field_space_allocator_shard)
-      {
-        FieldSpace no_space = FieldSpace::NO_SPACE;
         Runtime::phase_barrier_arrive(field_space_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
-      }
+            1/*count*/, RtEvent::NO_RT_EVENT, &FieldSpaceReduction::identity,
+            sizeof(FieldSpaceReduction::identity));
       return space;
     }
 
@@ -7735,17 +7744,15 @@ namespace Legion {
       register_field_creation(space, fid, local);
       // Update the allocator
       field_allocator_shard++;
-      if (field_allocator_shard == shard_manager->total_shard_count())
+      if (field_allocator_shard == shard_manager->total_shards)
         field_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(field_allocator_barrier);
       // If we're not providing the next result we already do our arrival
       if (owner_shard->shard_id != field_allocator_shard)
-      {
-        FieldID no_fid = 0;
         Runtime::phase_barrier_arrive(field_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_fid, sizeof(no_fid));
-      }
+            1/*count*/, RtEvent::NO_RT_EVENT, &FieldReduction::identity,
+            sizeof(FieldReduction::identity));
       return fid;
     }
 
@@ -7836,17 +7843,15 @@ namespace Legion {
       register_region_creation(handle);
       // Update the allocator shard
       logical_region_allocator_shard++;
-      if (logical_region_allocator_shard == shard_manager->total_shard_count())
+      if (logical_region_allocator_shard == shard_manager->total_shards)
         logical_region_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(logical_region_allocator_barrier);
       // If we're not providing the next result we already do our arrival
       if (owner_shard->shard_id != logical_region_allocator_shard)
-      {
-        RegionTreeID no_tid = 0;
         Runtime::phase_barrier_arrive(logical_region_allocator_barrier, 
-            1/*count*/, RtEvent::NO_RT_EVENT, &no_tid, sizeof(no_tid));
-      }
+            1/*count*/, RtEvent::NO_RT_EVENT, &LogicalRegionReduction::identity,
+            sizeof(LogicalRegionReduction::identity));
       return handle;
     }
 

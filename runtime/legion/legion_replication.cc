@@ -20,6 +20,9 @@ namespace Legion {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
+    const IndexSpace IndexSpaceReduction::identity = IndexSpace::NO_SPACE;
+    const FieldSpace FieldSpaceReduction::identity = FieldSpace::NO_SPACE;
+
     /////////////////////////////////////////////////////////////
     // Repl Deletion Op 
     /////////////////////////////////////////////////////////////
