@@ -1833,6 +1833,9 @@ namespace Legion {
     inline operator Realm::Barrier() const
       { Realm::Barrier b; b.id = id; 
         b.timestamp = timestamp; return b; }
+    inline bool get_result(void *value, size_t value_size) const
+      { Realm::Barrier b; b.id = id;
+        b.timestamp = timestamp; return b.get_result(value, value_size); }
   public:
     Realm::Barrier::timestamp_t timestamp;
   };
@@ -1879,6 +1882,9 @@ namespace Legion {
     inline operator Realm::Barrier() const
       { Realm::Barrier b; b.id = id; 
         b.timestamp = timestamp; return b; } 
+    inline bool get_result(void *value, size_t value_size) const
+      { Realm::Barrier b; b.id = id;
+        b.timestamp = timestamp; return b.get_result(value, value_size); }
   public:
     Realm::Barrier::timestamp_t timestamp;
   }; 

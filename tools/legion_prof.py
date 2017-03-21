@@ -384,11 +384,11 @@ class TaskRange(TimeRange):
                          _in, out))
                 tsv_file.write("%d\t%ld\t%ld\t%s\t0.15\t%s\t%s\t%s\t%s\t%d\n" % \
                         (cur_level, wait_interval.start,
-                         wait_interval.ready, color, title, initiation, 
+                         wait_interval.ready, color, title + " (waiting)", initiation, 
                          _in, out, self.prof_uid))
                 tsv_file.write("%d\t%ld\t%ld\t%s\t0.45\t%s\t%s\t%s\t%s\n" % \
                         (cur_level, wait_interval.ready,
-                         wait_interval.end, color, title, initiation,
+                         wait_interval.end, color, title + " (ready)", initiation,
                          _in, out))
                 start_time = max(start_time, wait_interval.end)
             if start_time < self.stop_time:
@@ -653,6 +653,9 @@ class Processor(object):
         self.max_levels = 0
         self.time_points = list()
 
+    def get_short_text(self):
+        return self.kind + " Proc " + str(self.proc_in_node)
+
     def add_task(self, task):
         task.proc = self
         self.tasks.append(TaskRange(task))
@@ -762,15 +765,19 @@ class TimePoint(object):
 class Memory(object):
     def __init__(self, mem_id, kind, size):
         self.mem_id = mem_id
-        # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 1
+        # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
         # owner_node = mem_id[55:40]
         self.node_id = (mem_id >> 40) & ((1 << 16) - 1)
+        self.mem_in_node = (mem_id) & ((1 << 12) - 1)
         self.kind = kind
         self.total_size = size
         self.instances = set()
         self.time_points = list()
         self.max_live_instances = None
         self.last_time = None
+
+    def get_short_text(self):
+        return self.kind + " Memory " + str(self.mem_in_node)
 
     def add_instance(self, inst):
         self.instances.add(inst)
@@ -888,6 +895,12 @@ class Channel(object):
         self.time_points = list()
         self.max_live_copies = None 
         self.last_time = None
+
+    def get_short_text(self):
+        if self.src is None:
+            return "Fill Channel"
+        else:
+            return "Mem to Mem Channel"
 
     def add_copy(self, copy):
         copy.chan = self
@@ -1166,13 +1179,13 @@ class Operation(object):
 
     def get_info(self):
         info = '<'+str(self.op_id)+">"
-        if self.owner <> None:
-            prev = self.owner
-            next = prev.owner
-            while next <> None:
-                prev = next
-                next = next.owner
-            info += ' (<-' + repr(self.owner) + ')'
+        # if self.owner <> None:
+        #     prev = self.owner
+        #     next = prev.owner
+        #     while next <> None:
+        #         prev = next
+        #         next = next.owner
+        #     info += ' (<-' + repr(self.owner) + ')'
         return info
 
     def get_timing(self):
@@ -2523,6 +2536,7 @@ class State(object):
             stats_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_stats.tsv")
             with open(stats_tsv_filename, "w") as stats_tsv_file:
                 stats_tsv_file.write("time\tcount\n")
+                stats_tsv_file.write("0.00\t0.00\n") # initial point
                 for stat_point in statistics:
                     stats_tsv_file.write("%.2f\t%.2f\n" % stat_point)
 
@@ -2802,25 +2816,25 @@ class State(object):
                     last_time = max(last_time, mem.last_time)
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
-        processor_tsv_file.write("processor\ttsv\tlevels\n")
+        processor_tsv_file.write("full_text\ttext\ttsv\tlevels\n")
         if show_procs:
             for proc in sorted(proc_list):
                 tsv = processor_levels[proc]['tsv']
                 levels = processor_levels[proc]['levels']
-                processor_tsv_file.write("%s\t%s\t%d\n" % 
-                                (repr(proc), tsv, levels))
+                processor_tsv_file.write("%s\t%s\t%s\t%d\n" % 
+                                (repr(proc), proc.get_short_text(), tsv, levels))
         if show_channels:
             for channel in sorted(chan_list):
                 tsv = channel_levels[channel]['tsv']
                 levels = channel_levels[channel]['levels']
-                processor_tsv_file.write("%s\t%s\t%d\n" % 
-                                (repr(channel), tsv, levels))
+                processor_tsv_file.write("%s\t%s\t%s\t%d\n" % 
+                                (repr(channel), channel.get_short_text(), tsv, levels))
         if show_instances:
             for memory in sorted(mem_list):
                 tsv = memory_levels[memory]['tsv']
                 levels = memory_levels[memory]['levels']
-                processor_tsv_file.write("%s\t%s\t%d\n" % 
-                                (repr(memory), tsv, levels))
+                processor_tsv_file.write("%s\t%s\t%s\t%d\n" % 
+                                (repr(memory), memory.get_short_text(), tsv, levels))
         processor_tsv_file.close()
 
         num_stats = self.emit_statistics_tsv(output_dirname)

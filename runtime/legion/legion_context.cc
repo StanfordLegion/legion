@@ -1935,11 +1935,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskContext::execute_task_launch(TaskOp *task, bool index,
-                              LegionTrace *current_trace, bool silence_warnings)
+       LegionTrace *current_trace, bool silence_warnings, bool inlining_enabled)
     //--------------------------------------------------------------------------
     {
-      // First ask the mapper to set the options for the task
-      const bool inline_task = task->select_task_options();
+      bool inline_task = false;
+      if (inlining_enabled)
+        inline_task = task->select_task_options();
       // Now check to see if we're inling the task or just performing
       // a normal asynchronous task launch
       if (inline_task)
@@ -3519,8 +3520,8 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher,
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(task, false/*index*/, 
-                          current_trace, launcher.silence_warnings);
+      execute_task_launch(task, false/*index*/, current_trace, 
+                          launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 
@@ -3641,8 +3642,8 @@ namespace Legion {
       FutureMap result = task->initialize_task(this, launcher, launch_space,
                                                false/*check privileges*/);
 #endif
-      execute_task_launch(task, true/*index*/, 
-                          current_trace, launcher.silence_warnings);
+      execute_task_launch(task, true/*index*/, current_trace, 
+                          launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 
@@ -3717,8 +3718,8 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher, launch_space, redop,
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(task, true/*index*/, 
-                          current_trace, launcher.silence_warnings);
+      execute_task_launch(task, true/*index*/, current_trace, 
+                          launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 
@@ -6369,11 +6370,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      // Create our own local unique index space ID and tree ID
-      IndexSpace handle(get_unique_index_space_id(),
-                        get_unique_index_tree_id(), type_tag);
-      if (owner_shard->shard_id == 0)
+      IndexSpace handle = IndexSpace::NO_SPACE;
+      if (owner_shard->shard_id == index_space_allocator_shard)
       {
+        // We're the owner, so make it locally and then broadcast it
+        handle = IndexSpace(runtime->get_unique_index_space_id(),
+                            runtime->get_unique_index_tree_id(), type_tag);
+        // Have to register this before broadcasting it
+        forest->create_index_space(handle, realm_is);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &handle, sizeof(handle));
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id()); 
@@ -6381,8 +6388,36 @@ namespace Legion {
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id);
       }
-      forest->create_index_space(handle, realm_is);
+      else
+      {
+        // We need to get the barrier result 
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_space_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&handle, sizeof(handle));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(handle.exists());
+#endif
+        forest->create_index_space(handle, realm_is);
+      }
       register_index_space_creation(handle);
+      index_space_allocator_shard++;
+      if (index_space_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_space_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_space_allocator_shard)
+      {
+        IndexSpace no_space = IndexSpace::NO_SPACE;
+        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
+      }
       return handle;
     }
 
@@ -6394,11 +6429,18 @@ namespace Legion {
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
       AutoRuntimeCall call(this);
-      // Create our own local unique index space ID and tree ID
-      IndexSpace handle(get_unique_index_space_id(),
-                        get_unique_index_tree_id(), spaces[0].get_type_tag());
-      if (owner_shard->shard_id == 0)
+      IndexSpace handle = IndexSpace::NO_SPACE;
+      if (owner_shard->shard_id == index_space_allocator_shard)
       {
+        // We're the owner, so make it locally and then broadcast it
+        handle = IndexSpace(runtime->get_unique_index_space_id(),
+                            runtime->get_unique_index_tree_id(), 
+                            spaces[0].get_type_tag());
+        // Have to do our registration before broadcasting the result
+        forest->create_union_space(handle, owner_task, spaces);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &handle, sizeof(handle));
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id()); 
@@ -6406,8 +6448,39 @@ namespace Legion {
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id);
       }
-      forest->create_union_space(handle, owner_task, spaces);
+      else
+      {
+        // We need to get the barrier result 
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_space_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&handle, sizeof(handle));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(handle.exists());
+#endif
+        // Now we can do our local registration
+        forest->create_union_space(handle, owner_task, spaces);
+      }
+      // Register the local creation
       register_index_space_creation(handle);
+      // Update our allocator shard
+      index_space_allocator_shard++;
+      if (index_space_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_space_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_space_allocator_shard)
+      {
+        IndexSpace no_space = IndexSpace::NO_SPACE;
+        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
+      }
       return handle;
     }
 
@@ -6419,11 +6492,18 @@ namespace Legion {
       if (spaces.empty())
         return IndexSpace::NO_SPACE;
       AutoRuntimeCall call(this);
-      // Create our own local unique index space ID and tree ID
-      IndexSpace handle(get_unique_index_space_id(),
-                        get_unique_index_tree_id(), spaces[0].get_type_tag());
-      if (owner_shard->shard_id == 0)
+      IndexSpace handle = IndexSpace::NO_SPACE;
+      if (owner_shard->shard_id == index_space_allocator_shard)
       {
+        // We're the owner, so make it locally and then broadcast it
+        handle = IndexSpace(runtime->get_unique_index_space_id(),
+                            runtime->get_unique_index_tree_id(),
+                            spaces[0].get_type_tag());
+        // Have to do our registration before broadcasting the result
+        forest->create_intersection_space(handle, owner_task, spaces);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &handle, sizeof(handle));
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id()); 
@@ -6431,8 +6511,39 @@ namespace Legion {
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id);
       }
-      forest->create_intersection_space(handle, owner_task, spaces);
+      else
+      {
+        // We need to get the barrier result 
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_space_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&handle, sizeof(handle));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(handle.exists());
+#endif
+        // Once we have the answer we can do our own registration
+        forest->create_intersection_space(handle, owner_task, spaces);
+      }
+      // Register the creation
       register_index_space_creation(handle);
+      // Update the index space allocator shard
+      index_space_allocator_shard++;
+      if (index_space_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_space_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_space_allocator_shard)
+      {
+        IndexSpace no_space = IndexSpace::NO_SPACE;
+        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
+      }
       return handle;
     }
 
@@ -6442,11 +6553,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      // Create our own local unique index space ID and tree ID
-      IndexSpace handle(get_unique_index_space_id(),
-                        get_unique_index_tree_id(), left.get_type_tag());
-      if (owner_shard->shard_id == 0)
+      IndexSpace handle = IndexSpace::NO_SPACE;
+      if (owner_shard->shard_id == index_space_allocator_shard)
       {
+        // We're the owner, so make it locally and then broadcast it
+        handle = IndexSpace(runtime->get_unique_index_space_id(),
+                            runtime->get_unique_index_tree_id(), 
+                            left.get_type_tag());
+        // Have to do our registration before broadcasting
+        forest->create_difference_space(handle, owner_task, left, right);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &handle, sizeof(handle));
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id()); 
@@ -6454,8 +6572,39 @@ namespace Legion {
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id);
       }
-      forest->create_difference_space(handle, owner_task, left, right);
+      else
+      {
+        // We need to get the barrier result 
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_space_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&handle, sizeof(handle));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(handle.exists());
+#endif
+        // Do our own registration
+        forest->create_difference_space(handle, owner_task, left, right);
+      }
+      // Record our created space
       register_index_space_creation(handle);
+      // Update the allocation shard
+      index_space_allocator_shard++;
+      if (index_space_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_space_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_space_allocator_shard)
+      {
+        IndexSpace no_space = IndexSpace::NO_SPACE;
+        Runtime::phase_barrier_arrive(index_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
+      }
       return handle;
     }
 
@@ -6499,27 +6648,66 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);  
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         parent.get_tree_id(), parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
-        log_index.debug("Creating equal partition %d with parent index space %x"
-                        " in task %s (ID %lld)", pid.id, parent.id,
-                        get_task_name(), get_unique_id());
-#endif
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       LegionColor partition_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
-      part_op->initialize_equal_partition(this, pid, granularity);
       ApEvent term_event = part_op->get_completion_event();
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space,
-                                       partition_color, DISJOINT_KIND,
-                                       term_event);
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating equal partition %d with parent index space %x"
+                        " in task %s (ID %lld)", pid.id, parent.id,
+                        get_task_name(), get_unique_id());
+#endif
+        // Have to do our registration before broadcasting
+        forest->create_pending_partition(pid, parent, color_space,
+                                         partition_color, DISJOINT_KIND,
+                                         term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Do our registration
+        forest->create_pending_partition(pid, parent, color_space,
+                                         partition_color, DISJOINT_KIND,
+                                         term_event);
+      }
+      part_op->initialize_equal_partition(this, pid, granularity);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update the allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -6534,13 +6722,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         parent.get_tree_id(), parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id)
-        log_index.debug("Creating union partition %d with parent index "
-                        "space %x in task %s (ID %lld)", pid.id, parent.id,
-                        get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION 
       if (parent.get_tree_id() != handle1.get_tree_id())
       {
         log_index.error("IndexPartition %d is not part of the same "
@@ -6563,7 +6745,6 @@ namespace Legion {
         partition_color = color;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
-      part_op->initialize_union_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is aliased the result is aliased
       if (kind == COMPUTE_KIND)
@@ -6579,11 +6760,58 @@ namespace Legion {
         else
           kind = ALIASED_KIND;
       }
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, kind, term_event);
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating union partition %d with parent index "
+                        "space %x in task %s (ID %lld)", pid.id, parent.id,
+                        get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, parent, color_space, 
+                                         partition_color, kind, term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, parent, color_space, 
+                                         partition_color, kind, term_event);
+      }
+      part_op->initialize_union_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -6598,13 +6826,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         parent.get_tree_id(), parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
-        log_index.debug("Creating intersection partition %d with parent "
-                        "index space %x in task %s (ID %lld)", pid.id, 
-                        parent.id, get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION 
       if (parent.get_tree_id() != handle1.get_tree_id())
       {
         log_index.error("IndexPartition %d is not part of the same "
@@ -6627,7 +6849,6 @@ namespace Legion {
         partition_color = color;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
-      part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If either partition is disjoint then the result is disjoint
       if (kind == COMPUTE_KIND)
@@ -6642,11 +6863,58 @@ namespace Legion {
         else
           kind = DISJOINT_KIND;
       }
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, kind, term_event);
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating intersection partition %d with parent "
+                        "index space %x in task %s (ID %lld)", pid.id, 
+                        parent.id, get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, parent, color_space, 
+                                         partition_color, kind, term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, parent, color_space, 
+                                         partition_color, kind, term_event);
+      }
+      part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -6662,13 +6930,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this); 
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         parent.get_tree_id(), parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
-        log_index.debug("Creating difference partition %d with parent "
-                        "index space %x in task %s (ID %lld)", pid.id, 
-                        parent.id, get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION 
       if (parent.get_tree_id() != handle1.get_tree_id())
       {
         log_index.error("IndexPartition %d is not part of the same "
@@ -6693,7 +6955,6 @@ namespace Legion {
         partition_color = color;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
-      part_op->initialize_difference_partition(this, pid, handle1, handle2);
       ApEvent term_event = part_op->get_completion_event();
       // If the left-hand-side is disjoint the result is disjoint
       if (kind == COMPUTE_KIND)
@@ -6702,11 +6963,58 @@ namespace Legion {
         if (p1->is_disjoint(true/*from app*/))
           kind = DISJOINT_KIND;
       }
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, kind, term_event);
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating difference partition %d with parent "
+                        "index space %x in task %s (ID %lld)", pid.id, 
+                        parent.id, get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, parent, color_space, 
+                                         partition_color, kind, term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, parent, color_space, 
+                                         partition_color, kind, term_event);
+      }
+      part_op->initialize_difference_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -6762,26 +7070,65 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         parent.get_tree_id(), parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
-        log_index.debug("Creating restricted partition in task %s (ID %lld)", 
-                        get_task_name(), get_unique_id());
-#endif
       LegionColor part_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         part_color = color; 
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
+      ApEvent term_event = part_op->get_completion_event();
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating restricted partition in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, parent, color_space,
+                                         part_color, part_kind, term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, parent, color_space,
+                                         part_color, part_kind, term_event);
+      }
       part_op->initialize_restricted_partition(this, pid, transform, 
                                 transform_size, extent, extent_size);
-      ApEvent term_event = part_op->get_completion_event();
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space,
-                                       part_color, part_kind, term_event);
+      
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -6797,25 +7144,50 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      IndexSpace parent = handle.get_index_space(); 
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         parent.get_tree_id(), parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
-        log_index.debug("Creating partition by field in task %s (ID %lld)", 
-                        get_task_name(), get_unique_id());
-#endif
+      IndexSpace parent = handle.get_index_space();  
       LegionColor part_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
-      part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
       ApEvent term_event = part_op->get_completion_event();
-      // Tell the region tree forest about this partition 
-      forest->create_pending_partition(pid, parent, color_space, part_color,
-                                       DISJOINT_KIND, term_event); 
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating partition by field in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition 
+        forest->create_pending_partition(pid, parent, color_space, part_color,
+                                         DISJOINT_KIND, term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Tell the region tree forest about this partition 
+        forest->create_pending_partition(pid, parent, color_space, part_color,
+                                         DISJOINT_KIND, term_event);
+      }
+      part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -6834,6 +7206,19 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -6851,25 +7236,50 @@ namespace Legion {
                                                     MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this); 
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         handle.get_tree_id(), parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
-        log_index.debug("Creating partition by image in task %s (ID %lld)", 
-                        get_task_name(), get_unique_id());
-#endif
+      AutoRuntimeCall call(this);  
       LegionColor part_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
-      part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
       ApEvent term_event = part_op->get_completion_event(); 
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, handle, color_space, part_color,
-                                       part_kind, term_event); 
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating partition by image in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, handle, color_space, part_color,
+                                         part_kind, term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, handle, color_space, part_color,
+                                         part_kind, term_event);
+      }
+      part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -6888,6 +7298,19 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -6905,26 +7328,51 @@ namespace Legion {
                                                     MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this); 
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         handle.get_tree_id(), parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
-        log_index.debug("Creating partition by image range in task %s "
-                        "(ID %lld)", get_task_name(), get_unique_id());
-#endif
+      AutoRuntimeCall call(this);  
       LegionColor part_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
+      ApEvent term_event = part_op->get_completion_event();
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating partition by image range in task %s "
+                        "(ID %lld)", get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, handle, color_space, part_color,
+                                         part_kind, term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, handle, color_space, part_color,
+                                         part_kind, term_event);
+      }
       part_op->initialize_by_image_range(this, pid, projection, parent, 
                                          fid, id, tag);
-      ApEvent term_event = part_op->get_completion_event();
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, handle, color_space, part_color,
-                                       part_kind, term_event); 
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -6943,6 +7391,19 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -6959,23 +7420,13 @@ namespace Legion {
                                                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this); 
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         handle.get_index_space().get_tree_id(),
-                         parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
-        log_index.debug("Creating partition by preimage in task %s (ID %lld)",
-                        get_task_name(), get_unique_id());
-#endif
+      AutoRuntimeCall call(this);  
       LegionColor part_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
-      part_op->initialize_by_preimage(this, pid, projection, handle, 
-                                      parent, fid, id, tag);
       ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
@@ -6985,10 +7436,45 @@ namespace Legion {
         if (p->is_disjoint(true/*from app*/))
           part_kind = DISJOINT_KIND;
       }
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, handle.get_index_space(), 
-                                       color_space, part_color, part_kind,
-                                       term_event);
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating partition by preimage in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, handle.get_index_space(), 
+                                         color_space, part_color, part_kind,
+                                         term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, handle.get_index_space(), 
+                                         color_space, part_color, part_kind,
+                                         term_event);
+      }
+      part_op->initialize_by_preimage(this, pid, projection, handle, 
+                                      parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -7007,6 +7493,19 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -7023,28 +7522,53 @@ namespace Legion {
                                                   MapperID id, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this); 
-      IndexPartition pid(get_unique_index_partition_id(), 
-                         handle.get_index_space().get_tree_id(),
-                         parent.get_type_tag());
-#ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
-        log_index.debug("Creating partition by preimage range in task %s "
-                        "(ID %lld)", get_task_name(), get_unique_id());
-#endif
+      AutoRuntimeCall call(this);  
       LegionColor part_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
+      ApEvent term_event = part_op->get_completion_event();
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating partition by preimage range in task %s "
+                        "(ID %lld)", get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, handle.get_index_space(), 
+                                         color_space, part_color, part_kind,
+                                         term_event);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(index_partition_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition(pid, handle.get_index_space(), 
+                                         color_space, part_color, part_kind,
+                                         term_event);
+      }
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
                                             parent, fid, id, tag);
-      ApEvent term_event = part_op->get_completion_event();
-      // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, handle.get_index_space(), 
-                                       color_space, part_color, part_kind,
-                                       term_event);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -7063,6 +7587,19 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shard_count())
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      // If we're not providing the next result we can already do our arrival
+      if (owner_shard->shard_id != index_partition_allocator_shard)
+      {
+        IndexPartition no_part = IndexPartition::NO_PART;
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_part, sizeof(no_part));
+      }
       return pid;
     }
 
@@ -7071,17 +7608,55 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      FieldSpace space(get_unique_field_space_id());
+      FieldSpace space = FieldSpace::NO_SPACE;
+      if (owner_shard->shard_id == field_space_allocator_shard)
+      {
+        // We're the owner so make it locally and then broadcast it
+        space= FieldSpace(runtime->get_unique_field_space_id());
+        // Need to register this before broadcasting
+        forest->create_field_space(space);
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(field_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &space, sizeof(space));
 #ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
         log_field.debug("Creating field space %x in task %s (ID %lld)", 
-                        space.id, get_task_name(), get_unique_id());
+                      space.id, get_task_name(), get_unique_id());
 #endif
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_field_space(space.id);
-
-      forest->create_field_space(space);
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_field_space(space.id);
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(field_space_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&space, sizeof(space));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(space.exists());
+#endif
+        forest->create_field_space(space);
+      }
+      // Register the field space creation
       register_field_space_creation(space);
+      // Update the allocator
+      field_space_allocator_shard++;
+      if (field_space_allocator_shard == shard_manager->total_shard_count())
+        field_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(field_space_allocator_barrier);
+      // If we're not providing the next result we already do our arrival
+      if (owner_shard->shard_id != field_space_allocator_shard)
+      {
+        FieldSpace no_space = FieldSpace::NO_SPACE;
+        Runtime::phase_barrier_arrive(field_space_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_space, sizeof(no_space));
+      }
       return space;
     }
 
@@ -7100,7 +7675,6 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     FieldID ReplicateContext::allocate_field(RegionTreeForest *forest,
                                          FieldSpace space, size_t field_size,
@@ -7109,38 +7683,71 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      if (fid == AUTO_GENERATE_ID)
-        fid = get_unique_field_id();
+      if (field_allocator_shard == owner_shard->shard_id)
+      {
+        // We're the owner so we do the allocation
+        if (fid == AUTO_GENERATE_ID)
+          fid = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
-      else if (fid >= MAX_APPLICATION_FIELD_ID)
-      {
-        log_task.error("Task %s (ID %lld) attempted to allocate a field with "
-                       "ID %d which exceeds the MAX_APPLICATION_FIELD_ID bound "
-                       "set in legion_config.h", get_task_name(),
-                       get_unique_id(), fid);
-        assert(false);
-      }
+        else if (fid >= MAX_APPLICATION_FIELD_ID)
+        {
+          log_task.error("Task %s (ID %lld) attempted to allocate a field with "
+                         "ID %d which exceeds the MAX_APPLICATION_FIELD_ID "
+                         "bound set in legion_config.h", get_task_name(),
+                         get_unique_id(), fid);
+          assert(false);
+        }
 #endif
-
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_field_creation(space.id, fid, field_size);
-
-      forest->allocate_field(space, field_size, fid, serdez_id);
-      register_field_creation(space, fid, local);
-      // If we're local issue a task to reclaim to field when we're done
-      if (local)
+        forest->allocate_field(space, field_size, fid, serdez_id);
+        // Once we've done the registration then we need to do the broadcast
+        Runtime::phase_barrier_arrive(field_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &fid, sizeof(fid));
+        // If we're local issue a task to reclaim to field when we're done
+        if (local)
+        {
+          ReclaimLocalFieldArgs args;
+          args.handle = space;
+          args.fid = fid;
+          RtEvent reclaim_pre = 
+            Runtime::protect_event(owner_task->get_completion_event());
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                           owner_task, reclaim_pre);
+        }
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_field_creation(space.id, fid, field_size);
+      }
+      else
       {
-        ReclaimLocalFieldArgs args;
-        args.handle = space;
-        args.fid = fid;
-        RtEvent reclaim_pre = 
-          Runtime::protect_event(owner_task->get_completion_event());
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                         owner_task, reclaim_pre);
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(field_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result = 
+#endif
+          previous.get_result(&fid, sizeof(fid));
+#ifdef DEBUG_LEGION
+        assert(result);
+#endif
+        // No need to do the allocation since it was already done
+      }
+      register_field_creation(space, fid, local);
+      // Update the allocator
+      field_allocator_shard++;
+      if (field_allocator_shard == shard_manager->total_shard_count())
+        field_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(field_allocator_barrier);
+      // If we're not providing the next result we already do our arrival
+      if (owner_shard->shard_id != field_allocator_shard)
+      {
+        FieldID no_fid = 0;
+        Runtime::phase_barrier_arrive(field_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_fid, sizeof(no_fid));
       }
       return fid;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::free_field(FieldSpace space, FieldID fid)
@@ -7152,7 +7759,6 @@ namespace Legion {
       runtime->add_to_dependence_queue(this, executing_processor, op);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void ReplicateContext::allocate_fields(RegionTreeForest *forest, 
                                          FieldSpace space,
@@ -7161,45 +7767,13 @@ namespace Legion {
                                          bool local, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
       if (resulting_fields.size() < sizes.size())
         resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
-      for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
-      {
-        if (resulting_fields[idx] == AUTO_GENERATE_ID)
-          resulting_fields[idx] = get_unique_field_id();
-#ifdef DEBUG_LEGION
-        else if (resulting_fields[idx] >= MAX_APPLICATION_FIELD_ID)
-        {
-          log_task.error("Task %s (ID %lld) attempted to allocate a field with "
-                         "ID %d which exceeds the MAX_APPLICATION_FIELD_ID "
-                         "bound set in legion_config.h", get_task_name(),
-                         get_unique_id(), resulting_fields[idx]);
-          assert(false);
-        }
-#endif
-
-        if (Runtime::legion_spy_enabled)
-          LegionSpy::log_field_creation(space.id, 
-                                        resulting_fields[idx], sizes[idx]);
-      }
-      forest->allocate_fields(space, sizes, resulting_fields, serdez_id);
-      register_field_creations(space, local, resulting_fields);
-      if (local)
-      {
-        ReclaimLocalFieldArgs args;
-        args.handle = space;
-        RtEvent reclaim_pre = 
-          Runtime::protect_event(owner_task->get_completion_event());
-        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
-        {
-          args.fid = resulting_fields[idx];
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                           owner_task, reclaim_pre);
-        }
-      }
+      // Do this the slow way for now
+      for (unsigned idx = 0; idx < sizes.size(); idx++)
+        resulting_fields[idx] = allocate_field(forest, space, sizes[idx],
+                                resulting_fields[idx], local, serdez_id);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::free_fields(FieldSpace space, 
@@ -7220,22 +7794,60 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      RegionTreeID tid = get_unique_region_tree_id();
-      LogicalRegion region(tid, index_space, field_space);
+      LogicalRegion handle(0/*temp*/, index_space, field_space);
+      if (owner_shard->shard_id == logical_region_allocator_shard)
+      {
+        // We're the owner so make it locally and then broadcast it
+        handle.tree_id = runtime->get_unique_region_tree_id();
+        // Have to register this before doing the broadcast
+        forest->create_logical_region(handle);
+        // Perform the arrival
+        Runtime::phase_barrier_arrive(logical_region_allocator_barrier,
+            1/*count*/, RtEvent::NO_RT_EVENT, 
+            &handle.tree_id, sizeof(handle.tree_id));
 #ifdef DEBUG_LEGION
-      if (owner_shard->shard_id == 0)
         log_region.debug("Creating logical region in task %s (ID %lld) with "
                          "index space %x and field space %x in new tree %d",
-                         get_task_name(), get_unique_id(), 
-                         index_space.id, field_space.id, tid);
+                         get_task_name(), get_unique_id(), index_space.id, 
+                         field_space.id, handle.tree_id);
 #endif
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_top_region(index_space.id, field_space.id, tid);
-
-      forest->create_logical_region(region);
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_top_region(index_space.id, field_space.id, 
+                                    handle.tree_id);
+      }
+      else
+      {
+        // We need to get the barrier result
+        RtBarrier previous = 
+          Runtime::get_previous_phase(logical_region_allocator_barrier);
+        if (!previous.has_triggered())
+          previous.wait();
+#ifdef DEBUG_LEGION
+        bool result =  
+#endif
+          previous.get_result(&handle.tree_id, sizeof(handle.tree_id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(handle.exists());
+#endif
+        forest->create_logical_region(handle);
+      }
       // Register the creation of a top-level region with the context
-      register_region_creation(region);
-      return region;
+      register_region_creation(handle);
+      // Update the allocator shard
+      logical_region_allocator_shard++;
+      if (logical_region_allocator_shard == shard_manager->total_shard_count())
+        logical_region_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(logical_region_allocator_barrier);
+      // If we're not providing the next result we already do our arrival
+      if (owner_shard->shard_id != logical_region_allocator_shard)
+      {
+        RegionTreeID no_tid = 0;
+        Runtime::phase_barrier_arrive(logical_region_allocator_barrier, 
+            1/*count*/, RtEvent::NO_RT_EVENT, &no_tid, sizeof(no_tid));
+      }
+      return handle;
     }
 
     //--------------------------------------------------------------------------
@@ -7340,8 +7952,8 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher,
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(task, false/*index*/, 
-                          current_trace, launcher.silence_warnings);
+      execute_task_launch(task, false/*index*/, current_trace, 
+                          launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 
@@ -7462,8 +8074,8 @@ namespace Legion {
       FutureMap result = task->initialize_task(this, launcher, launch_space,
                                                false/*check privileges*/);
 #endif
-      execute_task_launch(task, true/*index*/, 
-                          current_trace, launcher.silence_warnings);
+      execute_task_launch(task, true/*index*/, current_trace, 
+                          launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 
@@ -7538,8 +8150,8 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher, launch_space, redop,
                                             false/*check privileges*/);
 #endif
-      execute_task_launch(task, true/*index*/, 
-                          current_trace, launcher.silence_warnings);
+      execute_task_launch(task, true/*index*/, current_trace, 
+                          launcher.silence_warnings, launcher.enable_inlining);
       return result;
     }
 

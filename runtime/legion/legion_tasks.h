@@ -317,6 +317,7 @@ namespace Legion {
       bool complete_received;
       bool commit_received;
     protected:
+      bool options_selected;
       bool map_locally;
     protected:
       // For managing predication
@@ -1222,6 +1223,9 @@ namespace Legion {
       ~ShardManager(void);
     public:
       ShardManager& operator=(const ShardManager &rhs);
+    public:
+      inline size_t total_shard_count(void) const 
+        { return shard_mapping.size(); }
     public:
       void launch(const std::vector<AddressSpaceID> &spaces,
                   const std::map<ShardID,Processor> &shard_mapping);

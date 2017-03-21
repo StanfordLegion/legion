@@ -517,7 +517,8 @@ namespace Legion {
       inline void begin_task_wait(bool from_runtime);
       inline void end_task_wait(void);
       void execute_task_launch(TaskOp *task, bool index, 
-                             LegionTrace *current_trace, bool silence_warnings);
+                               LegionTrace *current_trace, 
+                               bool silence_warnings, bool inlining_enabled);
       void remap_unmapped_regions(LegionTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions);
     public:
@@ -1262,13 +1263,6 @@ namespace Legion {
                                        std::vector<Future> &contributions);
     public:
       void exchange_common_resources(void);
-    protected:
-      IndexSpaceID       get_unique_index_space_id(void);
-      IndexPartitionID   get_unique_index_partition_id(void);
-      FieldSpaceID       get_unique_field_space_id(void);
-      IndexTreeID        get_unique_index_tree_id(void);
-      RegionTreeID       get_unique_region_tree_id(void);
-      FieldID            get_unique_field_id(void);
     public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
@@ -1282,6 +1276,18 @@ namespace Legion {
       std::vector<RtBarrier>  application_barriers;
       std::vector<RtBarrier>  internal_barriers;
       unsigned next_ap_bar_index, next_int_bar_index;
+    protected:
+      ShardID index_space_allocator_shard;
+      ShardID index_partition_allocator_shard;
+      ShardID field_space_allocator_shard;
+      ShardID field_allocator_shard;
+      ShardID logical_region_allocator_shard;
+    protected:
+      RtBarrier index_space_allocator_barrier;
+      RtBarrier index_partition_allocator_barrier;
+      RtBarrier field_space_allocator_barrier;
+      RtBarrier field_allocator_barrier;
+      RtBarrier logical_region_allocator_barrier;
     };
 
     /**

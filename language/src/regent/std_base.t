@@ -181,8 +181,7 @@ function base.task:addcudakernel(kernel)
 end
 
 function base.task:getcudakernels()
-  assert(self.cudakernels)
-  return self.cudakernels
+  return self.cudakernels or {}
 end
 
 function base.task:settype(type, force)

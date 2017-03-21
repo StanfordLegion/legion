@@ -722,6 +722,7 @@ namespace Legion {
       children_complete = false;
       children_commit = false;
       stealable = false;
+      options_selected = false;
       map_locally = false;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
@@ -977,6 +978,9 @@ namespace Legion {
     bool TaskOp::select_task_options(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!options_selected);
+#endif
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       Mapper::TaskOptions options;
@@ -985,6 +989,7 @@ namespace Legion {
       options.stealable = false;
       options.map_locally = false;
       mapper->invoke_select_task_options(this, &options);
+      options_selected = true;
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_locally = options.map_locally;
@@ -4877,6 +4882,16 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
         initialize_privilege_path(privilege_paths[idx], regions[idx]);
       update_no_access_regions();
+      if (!options_selected)
+      {
+        const bool inline_task = select_task_options();
+        if (inline_task)
+          log_run.warning("WARNING: Mapper %s requested to inline task %s "
+                          "(UID %lld) but the 'enable_inlining' option was "
+                          "not set on the task launcher so the request is "
+                          "being ignored", mapper->get_mapper_name(),
+                          get_task_name(), get_unique_id());
+      }
       // If we have a trace, it is unsound to do this until the dependence
       // analysis stage when all the operations are serialized in order
       if (need_intra_task_alias_analysis)
@@ -6994,6 +7009,16 @@ namespace Legion {
       privilege_paths.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
         initialize_privilege_path(privilege_paths[idx], regions[idx]);
+      if (!options_selected)
+      {
+        const bool inline_task = select_task_options();
+        if (inline_task)
+          log_run.warning("WARNING: Mapper %s requested to inline task %s "
+                          "(UID %lld) but the 'enable_inlining' option was "
+                          "not set on the task launcher so the request is "
+                          "being ignored", mapper->get_mapper_name(),
+                          get_task_name(), get_unique_id());
+      }
       if (need_intra_task_alias_analysis)
       {
         // If we don't have a trace, we do our alias analysis now
