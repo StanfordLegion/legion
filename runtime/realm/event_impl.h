@@ -165,6 +165,19 @@ namespace Realm {
       std::map<gen_t, bool> local_triggers;
     };
 
+  struct BarrierStrategy {
+    BarrierStrategy(unsigned _base_count, int _target_node, int _radix,
+		    ReductionOpID _redop_id,
+		    const void *_initial_data = 0, size_t _initial_size = 0);
+
+    unsigned base_count;
+    int target_node;
+    int radix;
+    ReductionOpID redop_id;
+    const ReductionOpUntyped *redop;
+    ByteArray initial_data;
+  };
+
     class BarrierImpl : public EventImpl {
     public:
       static const ID::ID_Types ID_TYPE = ID::ID_BARRIER;
@@ -210,6 +223,17 @@ namespace Realm {
 
       GASNetHSL mutex; // controls which local thread has access to internal data (not runtime-visible event)
 
+      struct AdjustMessage {
+	AdjustMessage(int _target, int _sender,
+		      int _delta, const void *_value, size_t _len);
+
+	int target;
+	int sender;
+	int delta;
+	const void *value;
+	size_t len;
+      };
+
       // class to track per-generation status
       class Generation {
       public:
@@ -218,15 +242,26 @@ namespace Realm {
 	  std::map<Barrier::timestamp_t, int> pending;
 	};
 
+	BarrierStrategy *strategy;
 	int unguarded_delta;
 	std::vector<EventWaiter *> local_waiters;
 	std::map<int, PerNodeUpdates *> pernode;
-      
+	int stages;
+	std::vector<int> stage_arrivals, stage_exp_arrivals;
+	std::vector<char> stage_fold_data;
 	
-	Generation(void);
+	Generation(BarrierStrategy *_strategy);
 	~Generation(void);
 
-	void handle_adjustment(Barrier::timestamp_t ts, int delta);
+	// returns true if the reduction value should be applied directly to
+	//  the barrier's final value
+	bool handle_adjustment(int sender, Barrier::timestamp_t ts, int delta,
+			       const void *reduce_value,
+			       std::vector<AdjustMessage>& to_send);
+
+	// if a non-null value is returned, it should be applied to the
+	//  barrier's final value before the Generation object is destryoed
+	const void *get_folded_reduce_value(void) const;
       };
 
       std::map<gen_t, Generation *> generations;
@@ -236,13 +271,19 @@ namespace Realm {
       std::map<unsigned, gen_t> remote_subscribe_gens, remote_trigger_gens;
       std::map<gen_t, gen_t> held_triggers;
 
-      unsigned base_arrival_count;
-      ReductionOpID redop_id;
+      std::map<gen_t, BarrierStrategy *> strategies;
+      BarrierStrategy *cur_strategy;
+      gen_t cur_strategy_gen_lo, cur_strategy_gen_hi;
       const ReductionOpUntyped *redop;
-      char *initial_value;  // for reduction barriers
+      //unsigned base_arrival_count;
+      ReductionOpID redop_id;
+      //char *initial_value;  // for reduction barriers
 
       unsigned value_capacity; // how many values the two allocations below can hold
       char *final_values;   // results of completed reductions
+
+      void update_current_strategy(gen_t gen);
+      void add_strategy(gen_t new_gen, BarrierStrategy *new_strat);
     };
 
   // active messages
@@ -349,8 +390,6 @@ namespace Realm {
 	EventImpl::gen_t previous_gen;
 	EventImpl::gen_t first_generation;
 	ReductionOpID redop_id;
-	gasnet_node_t migration_target;
-	unsigned base_arrival_count;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -362,25 +401,35 @@ namespace Realm {
       static void send_request(gasnet_node_t target, ID::IDType barrier_id,
 			       EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
 			       EventImpl::gen_t first_generation, ReductionOpID redop_id,
-			       gasnet_node_t migration_target, unsigned base_arrival_count,
 			       const void *data, size_t datalen);
     };
 
-    struct BarrierMigrationMessage {
-      struct RequestArgs {
-	Barrier barrier;
-	gasnet_node_t current_owner;
-      };
-
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<BARRIER_MIGRATE_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(gasnet_node_t target, Barrier barrier, gasnet_node_t owner);
+  struct BarrierStrategyMessage {
+    struct RequestArgs : public BaseMedium {
+      ID::IDType barrier_id;
+      EventImpl::gen_t effective_gen;
+      int radix;
+      ReductionOpID redop_id;
+      unsigned base_arrival_count;
+      int target_node;
     };
-	
+
+    static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+    typedef ActiveMessageMediumNoReply<BARRIER_STRATEGY_MSGID,
+				       RequestArgs,
+				       handle_request> Message;
+
+    static void send_request(gasnet_node_t target,
+			     ID::IDType barrier_id,
+			     EventImpl::gen_t effective_gen,
+			     int radix,
+			     ReductionOpID redop_id,
+			     unsigned base_arrival_count,
+			     int target_node,
+			     const void *initial_value, size_t initial_size);
+  };
+
 }; // namespace Realm
 
 #include "event_impl.inl"

@@ -1578,6 +1578,51 @@ namespace Realm {
       }
     }
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class BarrierStrategy
+  //
+
+  BarrierStrategy::BarrierStrategy(unsigned _base_count, int _target_node,
+				   int _radix,
+				   ReductionOpID _redop_id,
+				   const void *_initial_data /*= 0*/,
+				   size_t _initial_size /*= 0*/)
+    : base_count(_base_count)
+    , target_node(_target_node)
+    , radix(_radix)
+    , redop_id(_redop_id)
+    , initial_data(_initial_data, _initial_size)
+  {
+    if(redop_id != 0) {
+      redop = get_runtime()->reduce_op_table[redop_id];
+      assert(redop != 0);
+    } else
+      redop = 0;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class BarrierImpl::AdjustMessage
+  //
+
+  BarrierImpl::AdjustMessage::AdjustMessage(int _target, int _sender, 
+					    int _delta,
+					    const void *_value, size_t _len)
+    : target(_target)
+    , sender(_sender)
+    , delta(_delta)
+    , value(_value)
+    , len(_len)
+  {}
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class BarrierImpl
+  //
+
     /*static*/ BarrierImpl *BarrierImpl::create_barrier(unsigned expected_arrivals,
 							ReductionOpID redopid,
 							const void *initial_value /*= 0*/,
@@ -1587,14 +1632,39 @@ namespace Realm {
       assert(impl);
       assert(ID(impl->me).is_barrier());
 
-      // set the arrival count
-      impl->base_arrival_count = expected_arrivals;
+      // set the current strategy - decide initial target based on
+      //  arrival count - if it looks like everybody is contributing, then
+      //  guess that everybody is interested too
+      int target_node = gasnet_mynode();
+      int radix = 0;
+      // TODO: remove simple_case restriction (power of 2 nodes)
+      bool simple_case = ((expected_arrivals == gasnet_nodes()) &&
+			  // v true iff gasnet_nodes() is power-of-2
+			  ((gasnet_nodes() & (gasnet_nodes() - 1)) == 0));
+      if((gasnet_nodes() > 1) && (expected_arrivals >= gasnet_nodes())) {
+	if(simple_case) {
+	  target_node = -1;
+	  radix = 2;
+	} else {
+	  log_barrier.info() << "probable collective barrier not distributed! - nodes=" << gasnet_nodes() << " arrivals=" << expected_arrivals;
+	}
+      }
+      BarrierStrategy *strat = new BarrierStrategy(expected_arrivals,
+						   target_node,
+						   radix,
+						   redopid,
+						   initial_value,
+						   initial_value_size);
+      impl->cur_strategy = strat;
+      impl->cur_strategy_gen_lo = impl->generation;
+      impl->cur_strategy_gen_hi = (gen_t)-1;
+      impl->strategies[impl->generation] = strat;
 
       if(redopid == 0) {
 	assert(initial_value_size == 0);
 	impl->redop_id = 0;
 	impl->redop = 0;
-	impl->initial_value = 0;
+	//impl->initial_value = 0;
 	impl->value_capacity = 0;
 	impl->final_values = 0;
       } else {
@@ -1604,8 +1674,8 @@ namespace Realm {
 	assert(initial_value != 0);
 	assert(initial_value_size == impl->redop->sizeof_lhs);
 
-	impl->initial_value = (char *)malloc(initial_value_size);
-	memcpy(impl->initial_value, initial_value, initial_value_size);
+	//impl->initial_value = (char *)malloc(initial_value_size);
+	//memcpy(impl->initial_value, initial_value, initial_value_size);
 
 	impl->value_capacity = 0;
 	impl->final_values = 0;
@@ -1615,7 +1685,7 @@ namespace Realm {
       //impl->free_generation = (unsigned)-1;
 
       log_barrier.info() << "barrier created: " << impl->me << "/" << impl->generation
-			 << " base_count=" << impl->base_arrival_count << " redop=" << redopid;
+			 << " base_count=" << expected_arrivals << " redop=" << redopid;
 #ifdef EVENT_TRACING
       {
 	EventTraceItem &item = Tracer<EventTraceItem>::trace_item();
@@ -1624,6 +1694,24 @@ namespace Realm {
 	item.action = EventTraceItem::ACT_CREATE;
       }
 #endif
+
+      // if we're going to be a collective barrier, tell everybody the
+      //  strategy (TODO: use broadcast tree here too)
+      if(target_node == -1) {
+	for(gasnet_node_t node = 0; node < gasnet_nodes(); node++) {
+	  if(node == gasnet_mynode()) continue;
+	  BarrierStrategyMessage::send_request(node,
+					       impl->me.id,
+					       impl->generation,
+					       radix,
+					       redopid,
+					       expected_arrivals,
+					       target_node,
+					       initial_value,
+					       initial_value_size);
+	}
+      }
+
       return impl;
     }
 
@@ -1636,9 +1724,12 @@ namespace Realm {
       next_free = 0;
       remote_subscribe_gens.clear();
       remote_trigger_gens.clear();
-      base_arrival_count = 0;
+      cur_strategy = 0;
+      cur_strategy_gen_lo = 0;
+      cur_strategy_gen_hi = (gen_t)-1;
+      //base_arrival_count = 0;
       redop = 0;
-      initial_value = 0;
+      //initial_value = 0;
       value_capacity = 0;
       final_values = 0;
     }
@@ -1653,9 +1744,12 @@ namespace Realm {
       next_free = 0;
       remote_subscribe_gens.clear();
       remote_trigger_gens.clear();
-      base_arrival_count = 0;
+      cur_strategy = 0;
+      cur_strategy_gen_lo = 0;
+      cur_strategy_gen_hi = (gen_t)-1;
+      //base_arrival_count = 0;
       redop = 0;
-      initial_value = 0;
+      //initial_value = 0;
       value_capacity = 0;
       final_values = 0;
     }
@@ -1664,7 +1758,8 @@ namespace Realm {
     {
       log_barrier.info() << "received barrier arrival: delta=" << args.delta
 			 << " in=" << args.wait_on << " out=" << args.barrier
-			 << " (" << args.barrier.timestamp << ")";
+			 << " (" << args.barrier.timestamp << ")"
+			 << " sender=" << args.sender;
       BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
       EventImpl::gen_t gen = ID(args.barrier).barrier.generation;
       gasnet_node_t sender = args.sender;
@@ -1708,7 +1803,6 @@ namespace Realm {
     /*static*/ void BarrierTriggerMessage::send_request(gasnet_node_t target, ID::IDType barrier_id,
 							EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
 							EventImpl::gen_t first_generation, ReductionOpID redop_id,
-							gasnet_node_t migration_target,	unsigned base_arrival_count,
 							const void *data, size_t datalen)
     {
       RequestArgs args;
@@ -1719,8 +1813,6 @@ namespace Realm {
       args.previous_gen = previous_gen;
       args.first_generation = first_generation;
       args.redop_id = redop_id;
-      args.migration_target = migration_target;
-      args.base_arrival_count = base_arrival_count;
 
       Message::request(target, args, data, datalen, PAYLOAD_COPY);
     }
@@ -1784,22 +1876,56 @@ static void *bytedup(const void *data, size_t datalen)
       size_t datalen;
     };
 
-    BarrierImpl::Generation::Generation(void) : unguarded_delta(0) {}
-    BarrierImpl::Generation::~Generation(void)
-      {
-        for(std::map<int, PerNodeUpdates *>::iterator it = pernode.begin();
-            it != pernode.end();
-            it++)
-          delete (it->second);
-      }
-
-    void BarrierImpl::Generation::handle_adjustment(Barrier::timestamp_t ts, int delta)
-      {
-	if(ts == 0) {
-	  // simple case - apply delta directly
-	  unguarded_delta += delta;
-	  return;
+    BarrierImpl::Generation::Generation(BarrierStrategy *_strategy) 
+      : strategy(_strategy)
+      , unguarded_delta(0)
+    {
+      if(strategy && (strategy->radix > 0)) {
+	int relnode = gasnet_mynode();
+	if(strategy->target_node > 0) {
+	  relnode -= strategy->target_node;
+	  if(relnode < 0)
+	    relnode += gasnet_nodes();
 	}
+	stages = 0;
+	int maxnodes = 1;
+	while(maxnodes < gasnet_nodes()) {
+	  stages++;
+	  maxnodes *= strategy->radix;
+	  stage_arrivals.push_back(0);
+	  stage_exp_arrivals.push_back(maxnodes);
+	}
+	if(strategy->redop)
+	  stage_fold_data.resize(strategy->redop->sizeof_rhs * stages);
+	log_barrier.info() << "radix=" << strategy->radix
+			   << " stages=" << stages
+			   << " nodes=" << maxnodes << "(" << gasnet_nodes() << ")";
+      } else {
+	stages = 0;
+      }
+    }
+
+    BarrierImpl::Generation::~Generation(void)
+    {
+      for(std::map<int, PerNodeUpdates *>::iterator it = pernode.begin();
+	  it != pernode.end();
+	  it++)
+	delete (it->second);
+    }
+  
+    // returns true if the reduction value should be applied directly to
+    //  the barrier's final value
+    bool BarrierImpl::Generation::handle_adjustment(int sender,
+						    Barrier::timestamp_t ts,
+						    int delta,
+						    const void *reduce_value,
+						    std::vector<AdjustMessage>& to_send)
+    {
+      // if the timestamp is nonzero, we need to collect and merge values
+      // before applying them
+      if(ts != 0) {
+	// TODO: deal with reduction data in this case
+	assert(reduce_value == 0);
 
         int node = ts >> BARRIER_TIMESTAMP_NODEID_SHIFT;
         PerNodeUpdates *pn;
@@ -1812,12 +1938,12 @@ static void *bytedup(const void *data, size_t datalen)
         }
         if(delta > 0) {
           // TODO: really need two timestamps to properly order increments
-          unguarded_delta += delta;
+          //unguarded_delta += delta;
           pn->last_ts = ts;
           std::map<Barrier::timestamp_t, int>::iterator it2 = pn->pending.begin();
           while((it2 != pn->pending.end()) && (it2->first <= pn->last_ts)) {
             log_barrier.info("applying pending delta: %llx/%d", it2->first, it2->second);
-            unguarded_delta += it2->second;
+            delta += it2->second;
             pn->pending.erase(it2);
             it2 = pn->pending.begin();
           }
@@ -1826,19 +1952,159 @@ static void *bytedup(const void *data, size_t datalen)
           if(ts <= pn->last_ts) {
             log_barrier.info("adjustment can be applied immediately: %llx/%d (%llx)",
                              ts, delta, pn->last_ts);
-            unguarded_delta += delta;
           } else {
             log_barrier.info("adjustment must be deferred: %llx/%d (%llx)",
                              ts, delta, pn->last_ts);
             pn->pending[ts] += delta;
+	    return false;
           }
         }
       }
+
+      // if we get here, we can apply the delta
+      if(stages > 0) {
+	int in_stage;
+	if(sender == gasnet_mynode()) {
+	  // local data needs to be forwarded to others in first stage
+	  // TODO: if multiple local arrivals are expected, gather those first
+	  assert(strategy->target_node == -1);
+	  for(int i = 1; i < strategy->radix; i++) {
+	    int dest = (int)(gasnet_mynode()) - i;
+	    if(dest < 0) dest += gasnet_nodes();
+	    to_send.push_back(AdjustMessage(dest, sender, delta, reduce_value,
+					    strategy->redop ? strategy->redop->sizeof_rhs : 0));
+	  }
+
+	  in_stage = 0;
+	} else {
+	  // determine the relative node number of the sender
+	  int rel_sender = ((sender >= gasnet_mynode()) ?
+			      (sender - gasnet_mynode()) :
+			      (gasnet_nodes() + sender - gasnet_mynode()));
+
+	  in_stage = 0;
+	  for(int range = strategy->radix; rel_sender >= range; range *= strategy->radix)
+	    in_stage++;
+	  log_barrier.info() << "sender " << sender << " (rel " << rel_sender
+			     << ") from stage " << in_stage;
+	}
+
+	if(strategy->redop) {
+	  // is this the first RHS data for this stage?
+	  if(stage_arrivals[in_stage] == 0) {
+	    // yes, just copy the data
+	    memcpy(&stage_fold_data[strategy->redop->sizeof_rhs * in_stage],
+		   reduce_value,
+		   strategy->redop->sizeof_rhs);
+	  } else {
+	    // do a fold of existing and new data
+	    strategy->redop->fold(&stage_fold_data[strategy->redop->sizeof_rhs * in_stage],
+				  reduce_value,
+				  1);
+	  }
+	}
+
+	// deltas are negative, but we'll count up here, so subtract
+	stage_arrivals[in_stage] -= delta;
+
+	// see which, if any, stages are complete
+	while(in_stage < stages) {
+	  log_barrier.info() << "stage check " << in_stage
+			     << " " << stage_arrivals[in_stage]
+			     << " =?= " << stage_exp_arrivals[in_stage];
+	  if(stage_arrivals[in_stage] < stage_exp_arrivals[in_stage])
+	    break;
+
+	  assert(stage_arrivals[in_stage] == stage_exp_arrivals[in_stage]);
+
+	  int next_stage = in_stage + 1;
+	  if(next_stage < stages) {
+	    // send messages to peers in the next stage
+	    int stride = 1;
+	    for(int i = 0; i < next_stage; i++) stride *= strategy->radix;
+	    for(int i = 1; i < strategy->radix; i++) {
+	      int dest = (int)(gasnet_mynode()) - i * stride;
+	      if(dest < 0) dest += gasnet_nodes();
+	      to_send.push_back(AdjustMessage(dest, gasnet_mynode(),
+					      -stage_arrivals[in_stage],
+					      strategy->redop ? &stage_fold_data[strategy->redop->sizeof_rhs * in_stage] : 0,
+					      strategy->redop ? strategy->redop->sizeof_rhs : 0));
+	    }
+
+	    // update fold data for next stage
+	    if(strategy->redop) {
+	      if(stage_arrivals[next_stage] == 0) {
+		memcpy(&stage_fold_data[strategy->redop->sizeof_rhs * next_stage],
+		       &stage_fold_data[strategy->redop->sizeof_rhs * in_stage],
+		       strategy->redop->sizeof_rhs);
+	      } else {
+		strategy->redop->fold(&stage_fold_data[strategy->redop->sizeof_rhs * next_stage],
+				      &stage_fold_data[strategy->redop->sizeof_rhs * in_stage],
+				      1);
+	      }
+	    }
+
+	    stage_arrivals[next_stage] += stage_arrivals[in_stage];
+	    in_stage = next_stage;
+	  } else {
+	    // all done - update the unguarded delta and the caller will pick
+	    //  up any reduction data later
+	    unguarded_delta = -stage_arrivals[in_stage];
+	    break;
+	  }
+	}
+
+	return false;
+      } else {
+	assert((strategy == 0) || (strategy->target_node == gasnet_mynode()));
+	// simple case - apply delta directly
+	unguarded_delta += delta;
+	return true;
+      }
+    }
+
+    // if a non-null value is returned, it should be applied to the
+    //  barrier's final value before the Generation object is destryoed
+    const void *BarrierImpl::Generation::get_folded_reduce_value(void) const
+    {
+      if((stages > 0) && strategy->redop) {
+	return &stage_fold_data[(stages - 1) * strategy->redop->sizeof_rhs];
+      } else {
+	return 0;
+      }
+    }
 
     struct RemoteNotification {
       unsigned node;
       EventImpl::gen_t trigger_gen, previous_gen;
     };
+
+  void BarrierImpl::update_current_strategy(gen_t gen)
+  {
+    if((cur_strategy_gen_lo > gen) ||
+       (cur_strategy_gen_hi < gen)) {
+      // shouldn't happen unless we've been given at least one strategy
+      assert(!strategies.empty());
+      // to find the highest gen <= our gen, we need to ask for the
+      //  upper_bound (i.e. just past us) and back up
+      std::map<gen_t, BarrierStrategy *>::const_iterator it = strategies.upper_bound(gen);
+      if(it == strategies.begin()) {
+	// no match
+	cur_strategy_gen_lo = 0;
+	cur_strategy_gen_hi = it->first - 1;
+	cur_strategy = 0;
+      } else {
+	cur_strategy_gen_hi = it->first - 1;
+	--it;
+	cur_strategy_gen_lo = it->first;
+	cur_strategy = it->second;
+      }
+      if(cur_strategy->redop_id != 0) {
+	redop = get_runtime()->reduce_op_table[cur_strategy->redop_id];
+	assert(redop != 0);
+      }
+    }
+  }
 
     // used to adjust a barrier's arrival count either up or down
     // if delta > 0, timestamp is current time (on requesting node)
@@ -1899,29 +2165,54 @@ static void *bytedup(const void *data, size_t datalen)
       std::vector<RemoteNotification> remote_notifications;
       gen_t oldest_previous = 0;
       void *final_values_copy = 0;
-      gasnet_node_t migration_target = (gasnet_node_t) -1;
-      gasnet_node_t forward_to_node = (gasnet_node_t) -1;
-      gasnet_node_t inform_migration = (gasnet_node_t) -1;
+      std::vector<AdjustMessage> adjust_messages;
+      BarrierStrategy *updated_strategy = 0;
+      gen_t updated_strategy_gen = 0;
+      gasnet_node_t updated_strategy_dest = (gasnet_node_t) -1;
+
+      // TODO: if the barrier has a timestamp that came from another node,
+      //  send this directly to them to deal with
 
       do { // so we can use 'break' from the middle
 	AutoHSLLock a(mutex);
 
-	// ownership can change, so check it inside the lock
-	if(owner != gasnet_mynode()) {
-	  forward_to_node = owner;
+	// determine our strategy for handling this (if any)
+	update_current_strategy(barrier_gen);
+
+	// no strategy?  forward to owner untouched
+	if(cur_strategy == 0) {
+	  assert(owner != gasnet_mynode());
+
+	  log_barrier.debug() << "no strategy - forwarding arrival to owner " << owner;
+	  adjust_messages.push_back(AdjustMessage(owner, sender, delta,
+						  reduce_value,
+						  reduce_value_size));
 	  break;
-	} else {
-	  // if this message had to be forwarded to get here, tell the original sender we are the
-	  //  new owner
-	  if(forwarded && (sender != gasnet_mynode()))
-	    inform_migration = sender;
 	}
 
-	// sanity checks - is this a valid barrier?
-	//assert(generation < free_generation);
-	assert(base_arrival_count > 0);
+	// a strategy that has a specific (and not us) target should
+	//  also have stuff forwarded
+	if((cur_strategy->target_node >= 0) &&
+	   (cur_strategy->target_node != gasnet_mynode()) &&
+	   (cur_strategy->radix == 0)) {
+	  adjust_messages.push_back(AdjustMessage(cur_strategy->target_node,
+						  sender, delta,
+						  reduce_value,
+						  reduce_value_size));
+
+	  // if the sender isn't us, they should know about the strategy
+	  //  too
+	  if(sender != gasnet_mynode()) {
+	    updated_strategy = cur_strategy;
+	    updated_strategy_gen = cur_strategy_gen_lo;
+	    updated_strategy_dest = sender;
+	  }
+
+	  break;
+	}
 
 	// update whatever generation we're told to
+	bool apply_reduce_to_final;
 	{
 	  assert(barrier_gen > generation);
 	  Generation *g;
@@ -1929,12 +2220,14 @@ static void *bytedup(const void *data, size_t datalen)
 	  if(it != generations.end()) {
 	    g = it->second;
 	  } else {
-	    g = new Generation;
+	    g = new Generation(cur_strategy);
 	    generations[barrier_gen] = g;
 	    log_barrier.info() << "added tracker for barrier " << me << ", generation " << barrier_gen;
 	  }
 
-	  g->handle_adjustment(timestamp, delta);
+	  apply_reduce_to_final = g->handle_adjustment(sender, timestamp,
+						       delta, reduce_value,
+						       adjust_messages);
 	}
 
 	// if the update was to the next generation, it may cause one or more generations
@@ -1943,14 +2236,32 @@ static void *bytedup(const void *data, size_t datalen)
 	  std::map<gen_t, Generation *>::iterator it = generations.begin();
 	  while((it != generations.end()) &&
 		(it->first == (generation + 1)) &&
-		((base_arrival_count + it->second->unguarded_delta) == 0)) {
+		((cur_strategy->base_count + it->second->unguarded_delta) == 0)) {
 	    // keep the list of local waiters to wake up once we release the lock
 	    local_notifications.insert(local_notifications.end(), 
 				       it->second->local_waiters.begin(), it->second->local_waiters.end());
 	    trigger_gen = generation = it->first;
+	    const void *folded_value = it->second->get_folded_reduce_value();
+	    if(folded_value) {
+	      int rel_gen = it->first - first_generation;
+	      assert(rel_gen > 0);
+
+	      if((size_t)rel_gen > value_capacity) {
+		size_t new_capacity = rel_gen;
+		final_values = (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
+		while(value_capacity < new_capacity) {
+		  memcpy(final_values + (value_capacity * redop->sizeof_lhs), cur_strategy->initial_data.base(), redop->sizeof_lhs);
+		  value_capacity += 1;
+		}
+	      }
+
+	      redop->apply(final_values + ((rel_gen - 1) * redop->sizeof_lhs), folded_value, 1, true);
+	    }
 	    delete it->second;
 	    generations.erase(it);
 	    it = generations.begin();
+
+	    update_current_strategy(generation);
 	  }
 
 	  // if any triggers occurred, figure out which remote nodes need notifications
@@ -1993,13 +2304,20 @@ static void *bytedup(const void *data, size_t datalen)
           // don't migrate a barrier more than once though (i.e. only if it's on the creator node still)
 	  // also, do not migrate a barrier if we have any local involvement in future generations
 	  //  (either arrivals or waiters)
-	  // finally (hah!), do not migrate barriers using reduction ops
 	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
-	     generations.empty() && (redop == 0) &&
+	     generations.empty() &&
              (ID(me).barrier.creator_node == gasnet_mynode())) {
-	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
-	    migration_target = remote_notifications[0].node;
-	    owner = migration_target;
+	    gasnet_node_t migration_target = remote_notifications[0].node;
+	    ID id(me);
+	    id.barrier.generation = generation;
+	    Barrier b = id.convert<Barrier>();
+	    log_barrier.info() << "barrier migration: " << b << " -> " << migration_target;
+	    updated_strategy_gen = generation;
+	    updated_strategy = new BarrierStrategy(*cur_strategy);
+	    updated_strategy->target_node = migration_target;
+	    updated_strategy_dest = migration_target;
+	    add_strategy(generation, updated_strategy);
+
             // remember that we had up to date information up to this generation so that we don't try to
             //   subscribe to things we already know about
             gen_subscribed = generation;
@@ -2009,7 +2327,7 @@ static void *bytedup(const void *data, size_t datalen)
 
 	// do we have reduction data to apply?  we can do this even if the actual adjustment is
 	//  being held - no need to have lots of reduce values lying around
-	if(reduce_value_size > 0) {
+	if(apply_reduce_to_final && (reduce_value_size > 0)) {
 	  assert(redop != 0);
 	  assert(redop->sizeof_rhs == reduce_value_size);
 
@@ -2021,7 +2339,7 @@ static void *bytedup(const void *data, size_t datalen)
 	    size_t new_capacity = rel_gen;
 	    final_values = (char *)realloc(final_values, new_capacity * redop->sizeof_lhs);
 	    while(value_capacity < new_capacity) {
-	      memcpy(final_values + (value_capacity * redop->sizeof_lhs), initial_value, redop->sizeof_lhs);
+	      memcpy(final_values + (value_capacity * redop->sizeof_lhs), cur_strategy->initial_data.base(), redop->sizeof_lhs);
 	      value_capacity += 1;
 	    }
 	  }
@@ -2041,17 +2359,50 @@ static void *bytedup(const void *data, size_t datalen)
 	}
       } while(0);
 
-      if(forward_to_node != (gasnet_node_t) -1) {
+      if(!adjust_messages.empty()) {
 	Barrier b = make_barrier(barrier_gen, timestamp);
-	BarrierAdjustMessage::send_request(forward_to_node, b, delta, Event::NO_EVENT,
-					   sender, (sender != gasnet_mynode()),
-					   reduce_value, reduce_value_size);
-	return;
+	for(std::vector<AdjustMessage>::const_iterator it = adjust_messages.begin();
+	    it != adjust_messages.end();
+	    ++it) {
+	  log_barrier.info() << "forwarding barrier arrival: event=" << b
+			     << " delta=" << it->delta
+			     << " target=" << it->target
+			     << " sender=" << it->sender;
+	  BarrierAdjustMessage::send_request(it->target, b, 
+					     it->delta,
+					     Event::NO_EVENT,
+					     it->sender,
+					     (it->sender != gasnet_mynode()),
+					     it->value, it->len);
+	}
       }
 
-      if(inform_migration != (gasnet_node_t) -1) {
-	Barrier b = make_barrier(barrier_gen, timestamp);
-	BarrierMigrationMessage::send_request(inform_migration, b, gasnet_mynode());
+      // do a strategy update before notifications
+      if(updated_strategy) {
+	if(updated_strategy_dest == -1) {
+	  for(gasnet_node_t node = 0; node < gasnet_nodes(); node++) {
+	    if(node == gasnet_mynode()) continue;
+	    BarrierStrategyMessage::send_request(node,
+						 me.id,
+						 updated_strategy_gen,
+						 updated_strategy->radix,
+						 updated_strategy->redop_id,
+						 updated_strategy->base_count,
+						 updated_strategy->target_node,
+						 updated_strategy->initial_data.base(),
+						 updated_strategy->initial_data.size());
+	  }
+	} else {
+	  BarrierStrategyMessage::send_request(updated_strategy_dest,
+					       me.id,
+					       updated_strategy_gen,
+					       updated_strategy->radix,
+					       updated_strategy->redop_id,
+					       updated_strategy->base_count,
+					       updated_strategy->target_node,
+					       updated_strategy->initial_data.base(),
+					       updated_strategy->initial_data.size());
+	}
       }
 
       if(trigger_gen != 0) {
@@ -2080,7 +2431,8 @@ static void *bytedup(const void *data, size_t datalen)
 	    datalen = ((*it).trigger_gen - (*it).previous_gen) * redop->sizeof_lhs;
 	  }
 	  BarrierTriggerMessage::send_request((*it).node, me.id, (*it).trigger_gen, (*it).previous_gen,
-					      first_generation, redop_id, migration_target, base_arrival_count,
+					      first_generation, cur_strategy->redop_id,
+					      //migration_target, cur_strategy->base_count,
 					      data, datalen);
 	}
       }
@@ -2097,20 +2449,30 @@ static void *bytedup(const void *data, size_t datalen)
       // no need to take lock to check current generation
       if(needed_gen <= generation) return true;
 
-      // if we're not the owner, subscribe if we haven't already
-      if(owner != gasnet_mynode()) {
-	gen_t previous_subscription;
-	// take lock to avoid duplicate subscriptions
-	{
-	  AutoHSLLock a(mutex);
-	  previous_subscription = gen_subscribed;
-	  if(gen_subscribed < needed_gen)
-	    gen_subscribed = needed_gen;
-	}
+      // take the lock to see what the current strategy is and if we
+      //  need to subscribe
+      const BarrierStrategy *strat;
+      gen_t previous_subscription;
+      {
+	AutoHSLLock a(mutex);
 
-	if(previous_subscription < needed_gen) {
-	  log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen) << " (prev=" << previous_subscription << ")";
-	  BarrierSubscribeMessage::send_request(owner, me.id, needed_gen, gasnet_mynode(), false/*!forwarded*/);
+	update_current_strategy(needed_gen);
+	strat = cur_strategy; // safe to look at this after lock release
+
+	previous_subscription = gen_subscribed;
+	if(gen_subscribed < needed_gen)
+	  gen_subscribed = needed_gen;
+      }
+
+      if(previous_subscription < needed_gen) {
+	assert(strat || (owner != gasnet_mynode()));
+	// send a subscription unless we're the owner or it's distributed
+	if(!strat || ((strat->target_node != gasnet_mynode()) &&
+		      (strat->target_node != -1))) {
+	  gasnet_node_t dest = (strat ? strat->target_node : owner);
+
+	  log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen) << " dest=" << dest << " (prev=" << previous_subscription << ")";
+	  BarrierSubscribeMessage::send_request(dest, me.id, needed_gen, gasnet_mynode(), false/*!forwarded*/);
 	}
       }
 
@@ -2136,7 +2498,9 @@ static void *bytedup(const void *data, size_t datalen)
 	  if(it != generations.end()) {
 	    g = it->second;
 	  } else {
-	    g = new Generation;
+	    update_current_strategy(needed_gen);
+
+	    g = new Generation(cur_strategy);
 	    generations[needed_gen] = g;
 	    log_barrier.info() << "added tracker for barrier " << make_barrier(needed_gen);
 	  }
@@ -2175,24 +2539,30 @@ static void *bytedup(const void *data, size_t datalen)
       size_t final_values_size = 0;
       gasnet_node_t forward_to_node = (gasnet_node_t) -1;
       gasnet_node_t inform_migration = (gasnet_node_t) -1;
+      BarrierStrategy *updated_strategy = 0;
+      EventImpl::gen_t updated_strategy_gen = 0;
       
       do {
 	AutoHSLLock a(impl->mutex);
 
-	// first check - are we even the current owner?
-	if(impl->owner != gasnet_mynode()) {
-	  forward_to_node = impl->owner;
+	impl->update_current_strategy(args.subscribe_gen);
+
+	// if we're not the current owner, forward it to the target
+	//  and let the subscriber know the new strategy
+	assert(impl->cur_strategy != 0);
+	if(impl->cur_strategy->target_node != gasnet_mynode()) {
+	  // this does the right thing even if
+	  //   target_node == -1 (i.e. distributed)
+	  forward_to_node = impl->cur_strategy->target_node;
+	  updated_strategy = impl->cur_strategy;
+	  updated_strategy_gen = impl->cur_strategy_gen_lo;
 	  break;
-	} else {
-	  if(args.forwarded) {
-	    // our own request wrapped back around can be ignored - we've already added the local waiter
-	    if(args.subscriber == gasnet_mynode()) {
-	      break;
-	    } else {
-	      inform_migration = args.subscriber;
-	    }
-	  }
 	}
+
+	// next check - is this our own requested that got forwarded
+	//  back to us?  if so, drop it
+	if(args.subscriber == gasnet_mynode())
+	  break;
 
 	// make sure the subscription is for this "lifetime" of the barrier
 	assert(args.subscribe_gen > impl->first_generation);
@@ -2246,8 +2616,18 @@ static void *bytedup(const void *data, size_t datalen)
 					      args.subscriber, (args.subscriber != gasnet_mynode()));
       }
 
-      if(inform_migration != (gasnet_node_t) -1) {
-	BarrierMigrationMessage::send_request(inform_migration, b, gasnet_mynode());
+      if(updated_strategy) {
+	log_barrier.info() << "barrier strategy update: event=" << b
+			   << " subscriber=" << args.subscriber;
+	BarrierStrategyMessage::send_request(args.subscriber,
+					     args.barrier_id,
+					     updated_strategy_gen,
+					     updated_strategy->radix,
+					     updated_strategy->redop_id,
+					     updated_strategy->base_count,
+					     updated_strategy->target_node,
+					     updated_strategy->initial_data.base(),
+					     updated_strategy->initial_data.size());
       }
 
       // send trigger message outside of lock, if needed
@@ -2256,7 +2636,7 @@ static void *bytedup(const void *data, size_t datalen)
 			 args.barrier_id, previous_gen, trigger_gen);
 	BarrierTriggerMessage::send_request(args.subscriber, args.barrier_id, trigger_gen, previous_gen,
 					    impl->first_generation, impl->redop_id,
-					    (gasnet_node_t) -1 /*no migration*/, 0 /*dummy arrival count*/,
+					    //(gasnet_node_t) -1 /*no migration*/, 0 /*dummy arrival count*/,
 					    final_values_copy, final_values_size);
       }
 
@@ -2279,13 +2659,6 @@ static void *bytedup(const void *data, size_t datalen)
       std::vector<EventWaiter *> local_notifications;
       {
 	AutoHSLLock a(impl->mutex);
-
-	// handle migration of the barrier ownership (possibly to us)
-	if(args.migration_target != (gasnet_node_t) -1) {
-	  log_barrier.info() << "barrier " << b << " has migrated to " << args.migration_target;
-	  impl->owner = args.migration_target;
-	  impl->base_arrival_count = args.base_arrival_count;
-	}
 
 	// it's theoretically possible for multiple trigger messages to arrive out
 	//  of order, so check if this message triggers the oldest possible range
@@ -2379,24 +2752,84 @@ static void *bytedup(const void *data, size_t datalen)
       return true;
     }
 
-    /*static*/ void BarrierMigrationMessage::handle_request(RequestArgs args)
-    {
-      log_barrier.info() << "received barrier migration: barrier=" << args.barrier << " owner=" << args.current_owner;
-      BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
-      {
-	AutoHSLLock a(impl->mutex);
-	impl->owner = args.current_owner;
-      }
-    }
 
-    /*static*/ void BarrierMigrationMessage::send_request(gasnet_node_t target, Barrier barrier, gasnet_node_t owner)
-    {
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class BarrierStrategyMessage
+  //
+
+    struct RequestArgs : public BaseMedium {
+      ID::IDType barrier_id;
+      EventImpl::gen_t effective_gen;
+      ReductionOpID redop_id;
+      unsigned base_arrival_count;
+      int target_node;
+    };
+
+  /*static*/ void BarrierStrategyMessage::handle_request(RequestArgs args,
+							 const void *data,
+							 size_t datalen)
+  {
+    Barrier b = ID(args.barrier_id).convert<Barrier>();
+    BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
+
+    log_barrier.info() << "received strategy: id=" << b
+		       << " eff=" << args.effective_gen
+		       << " base=" << args.base_arrival_count
+		       << " tgt=" << args.target_node
+		       << " radix=" << args.radix
+		       << " redop=" << args.redop_id;
+
+    BarrierStrategy *strat = new BarrierStrategy(args.base_arrival_count,
+						 args.target_node,
+						 args.radix,
+						 args.redop_id,
+						 data,
+						 datalen);
+
+    // take the lock before calling add_strategy
+    AutoHSLLock al(impl->mutex);
+    impl->add_strategy(args.effective_gen, strat);
+  }
+
+  void BarrierImpl::add_strategy(gen_t new_gen,
+				 BarrierStrategy *new_strat)
+  {
+    strategies[new_gen] = new_strat;
+    if(cur_strategy_gen_lo == new_gen) {
+      // replace existing strategy, same upper bound
+      cur_strategy = new_strat;
+      redop_id = new_strat->redop_id;
+      redop = new_strat->redop;
+    }
+    if((cur_strategy_gen_lo < new_gen) &&
+       (cur_strategy_gen_hi >= new_gen)) {
+      // trim upper bound of existing cached strategy
+      cur_strategy_gen_hi = new_gen - 1;
+    }
+  }
+
+  /*static*/ void BarrierStrategyMessage::send_request(gasnet_node_t target,
+						       ID::IDType barrier_id,
+						       EventImpl::gen_t effective_gen,
+						       int radix,
+						       ReductionOpID redop_id,
+						       unsigned base_arrival_count,
+						       int target_node,
+						       const void *initial_value,
+						       size_t initial_size)
+  {
       RequestArgs args;
 
-      args.barrier = barrier;
-      args.current_owner = owner;
+      args.barrier_id = barrier_id;
+      args.effective_gen = effective_gen;
+      args.radix = radix;
+      args.redop_id = redop_id;
+      args.base_arrival_count = base_arrival_count;
+      args.target_node = target_node;
 
-      Message::request(target, args);
-    }
+      Message::request(target, args, initial_value, initial_size, PAYLOAD_KEEP);
+  }
+    
 
 }; // namespace Realm

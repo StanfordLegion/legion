@@ -786,7 +786,7 @@ namespace Realm {
       hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
       hcount += BarrierSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Subscribe AM");
       hcount += BarrierTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Trigger AM");
-      hcount += BarrierMigrationMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Migration AM");
+      hcount += BarrierStrategyMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Strategy AM");
       hcount += MetadataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Request AM");
       hcount += MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
       hcount += MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
