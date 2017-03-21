@@ -999,7 +999,7 @@ namespace Realm {
   inline void UserThreadTaskScheduler::do_user_thread_cleanup(void)
   {
     if(ThreadLocal::terminated_user_thread != 0) {
-      //delete ThreadLocal::terminated_user_thread;
+      delete ThreadLocal::terminated_user_thread;
       ThreadLocal::terminated_user_thread = 0;
     }
   }
