@@ -22,7 +22,7 @@ pushd timing
 
 for (( i = 0; i < SLURM_JOB_NUM_NODES; i++ )); do
     n=1
-    OMP_NUM_THREADS=36 srun --relative $i -n $(( n * 2 )) -N $n --output=timing.%N.log "$root_dir/circuit.spmd16" -npp 2500 -wpp 10000 -l 30 -p $(( n * 2 * 16 )) -ll:gsize 0 -ll:csize 8192 -ll:cpu 17 -ll:util 1 -ll:dma 2 -hl:sched -1 &
+    OMP_NUM_THREADS=36 srun --relative $i -n $(( n * 2 )) -N $n --output=timing.%N.log "$root_dir/circuit.spmd16" -npp 5000 -wpp 20000 -l 30 -p $(( n * 2 * 16 )) -ll:gsize 0 -ll:csize 30000 -ll:cpu 17 -ll:util 1 -ll:dma 2 -hl:sched -1 &
     if (( i % 128 == 127 )); then wait; fi
 done
 wait
@@ -38,7 +38,7 @@ pushd unfiltered
 for n in 128 64 32 16 8 4 2 1; do
     if [[ ! -f out_"$n"x2x16.log ]]; then
         echo "Running $n""x2x16..."
-        OMP_NUM_THREADS=36 srun -n $(( n * 2 )) -N $n "$root_dir/circuit.spmd16" -npp 2500 -wpp 10000 -l 100 -p $(( $n * 2 * 16 )) -ll:gsize 0 -ll:csize 8192 -ll:cpu 17 -ll:util 1 -ll:dma 2 -hl:sched -1 -hl:prof 1024 -level legion_prof=2 -logfile prof_"$n"x2x16_%.log | tee out_"$n"x2x16.log
+        OMP_NUM_THREADS=36 srun -n $(( n * 2 )) -N $n "$root_dir/circuit.spmd16" -npp 5000 -wpp 20000 -l 100 -p $(( $n * 2 * 16 )) -ll:gsize 0 -ll:csize 30000 -ll:cpu 17 -ll:util 1 -ll:dma 2 -hl:sched -1 -hl:prof 1024 -level legion_prof=2 -logfile prof_"$n"x2x16_%.log | tee out_"$n"x2x16.log
     fi
 done
 
@@ -50,7 +50,7 @@ pushd sorted
 for n in 128 64 32 16 8 4 2 1; do
     if [[ ! -f out_"$n"x2x16.log ]]; then
         echo "Running $n""x2x16..."
-        OMP_NUM_THREADS=36 srun --nodelist "$root_dir/timing/nodelist_$NODES.txt" -n $(( n * 2 )) -N $n "$root_dir/circuit.spmd16" -npp 2500 -wpp 10000 -l 100 -p $(( $n * 2 * 16 )) -ll:gsize 0 -ll:csize 8192 -ll:cpu 17 -ll:util 1 -ll:dma 2 -hl:sched -1 -hl:prof 1024 -level legion_prof=2 -logfile prof_"$n"x2x16_%.log | tee out_"$n"x2x16.log
+        OMP_NUM_THREADS=36 srun --nodelist "$root_dir/timing/nodelist_$NODES.txt" -n $(( n * 2 )) -N $n "$root_dir/circuit.spmd16" -npp 5000 -wpp 20000 -l 100 -p $(( $n * 2 * 16 )) -ll:gsize 0 -ll:csize 30000 -ll:cpu 17 -ll:util 1 -ll:dma 2 -hl:sched -1 -hl:prof 1024 -level legion_prof=2 -logfile prof_"$n"x2x16_%.log | tee out_"$n"x2x16.log
     fi
 done
 
