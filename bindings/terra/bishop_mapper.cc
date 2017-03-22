@@ -69,8 +69,12 @@ void BishopMapper::select_task_options(const MapperContext ctx,
   legion_task_options_t options_ = CObjectWrapper::wrap(output);
   legion_task_t task_ = CObjectWrapper::wrap_const(&task);
   if (impl.select_task_options)
+  {
     impl.select_task_options(mapper_state, runtime_, ctx_, task_, &options_);
-  output = CObjectWrapper::unwrap(options_);
+    output = CObjectWrapper::unwrap(options_);
+  }
+  else
+    DefaultMapper::select_task_options(ctx, task, output);
 }
 
 //------------------------------------------------------------------------------
@@ -91,6 +95,8 @@ void BishopMapper::slice_task(const MapperContext    ctx,
   bishop_mapper_impl_t& impl = get_mapper_impl(curr_state);
   if (impl.slice_task)
     impl.slice_task(mapper_state, runtime_, ctx_, task_, input_, output_);
+  else
+    DefaultMapper::slice_task(ctx, task, input, output);
 }
 
 //------------------------------------------------------------------------------
@@ -115,6 +121,8 @@ void BishopMapper::map_task(const MapperContext ctx,
   bishop_mapper_impl_t& impl = get_mapper_impl(curr_state);
   if (impl.map_task)
     impl.map_task(mapper_state, runtime_, ctx_, task_, input_, output_);
+  else
+    DefaultMapper::map_task(ctx, task, input, output);
 
   // TODO: this should be controlled from Bishop
   VariantInfo chosen = default_find_preferred_variant(task, ctx,
@@ -127,8 +135,7 @@ bishop_mapper_impl_t& BishopMapper::get_mapper_impl(bishop_matching_state_t st)
 //------------------------------------------------------------------------------
 {
 #ifdef DEBUG_LEGION
-  assert(st != 0);
-  assert(st > 0 && st < mapper_impls.size());
+  assert(st >= 0 && st < mapper_impls.size());
 #endif
   return mapper_impls[st];
 }
