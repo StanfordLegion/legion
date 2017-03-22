@@ -63,5 +63,4 @@ task toplevel()
   regentlib.assert(procs.list[2].id == proc.id, "test failed in toplevel")
 end
 
-bishoplib.register_bishop_mappers()
-regentlib.start(toplevel)
+regentlib.start(toplevel, bishoplib.make_entry())
