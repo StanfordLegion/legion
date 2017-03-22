@@ -477,7 +477,6 @@ local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_ta
       end
       state.trans = trans
     elseif not last_task_symbol then
-      assert(state == dfa.initial)
       local trans = {}
       for id, next_state in pairs(state.trans) do
         local sym = all_task_symbols[id]
