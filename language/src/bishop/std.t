@@ -121,7 +121,7 @@ function std.quote_binary_op(op, lhs, rhs)
   end
 end
 
-function std.register_bishop_mappers()
+function std.make_entry()
   if not rawget(_G, "__bishop_jit_mappers__") then
     log.warn(nil, "No mapper is given. Ignoring register request...")
     return
@@ -175,7 +175,7 @@ function std.register_bishop_mappers()
                               [mapper.mapper_init])
   end
 
-  register()
+  return register
 end
 
 return std
