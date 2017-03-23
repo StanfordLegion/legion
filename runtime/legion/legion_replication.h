@@ -247,7 +247,7 @@ namespace Legion {
     class ReplIndexFillOp : public IndexFillOp {
     public:
       ReplIndexFillOp(Runtime *rt);
-      ReplIndexFillOp(const ReplFillOp &rhs);
+      ReplIndexFillOp(const ReplIndexFillOp &rhs);
       virtual ~ReplIndexFillOp(void);
     public:
       ReplIndexFillOp& operator=(const ReplIndexFillOp &rhs);
@@ -275,7 +275,7 @@ namespace Legion {
     class ReplIndexCopyOp : public IndexCopyOp {
     public:
       ReplIndexCopyOp(Runtime *rt);
-      ReplIndexCopyOp(const ReplCopyOp &rhs);
+      ReplIndexCopyOp(const ReplIndexCopyOp &rhs);
       virtual ~ReplIndexCopyOp(void);
     public:
       ReplIndexCopyOp& operator=(const ReplIndexCopyOp &rhs);
