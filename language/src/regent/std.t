@@ -3506,6 +3506,7 @@ local reduction_types = terralib.newlist({
     float,
     double,
     int32,
+    int64,
 })
 
 std.reduction_op_init = {}

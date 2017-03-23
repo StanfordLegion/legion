@@ -3734,13 +3734,13 @@ class LogicalState(object):
         assert 0 in close.reqs
         close_req = close.reqs[0]
         for prev_op,prev_req in closed_users:
-            if op != prev_op and req.index != prev_req.index:
+            if op != prev_op or req.index != prev_req.index:
                 dep = MappingDependence(prev_op, close, prev_req.index, 
                                         close_req.index, TRUE_DEPENDENCE)
                 prev_op.add_outgoing(dep)
                 close.add_incoming(dep)
         for prev_op,prev_req in previous_deps:
-            if op != prev_op and req.index != prev_req.index:
+            if op != prev_op or req.index != prev_req.index:
                 dep = MappingDependence(prev_op, close, prev_req.index,
                                         close_req.index, TRUE_DEPENDENCE)
                 prev_op.add_outgoing(dep)
