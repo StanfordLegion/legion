@@ -3705,8 +3705,8 @@ function std.setup(main_task, extra_setup_thunk)
     function(task)
       local options = task:get_config_options()
 
-      local proc_type = c.LOC_PROC
-      if task:getcuda() then proc_type = c.TOC_PROC end
+      local proc_types = {c.LOC_PROC, c.IO_PROC}
+      if task:getcuda() then proc_types = {c.TOC_PROC} end
 
       local wrapped_task = make_task_wrapper(task:getdefinition())
 
@@ -3746,24 +3746,31 @@ function std.setup(main_task, extra_setup_thunk)
         end
       end
 
-      return quote
-        var execution_constraints = c.legion_execution_constraint_set_create()
-        c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, proc_type)
-        var [layout_constraints] = c.legion_task_layout_constraint_set_create()
-        [layout_constraint_actions]
-        var options = c.legion_task_config_options_t {
-          leaf = [ options.leaf and std.config["legion-leaf"] ],
-          inner = [ options.inner and std.config["legion-inner"] ],
-          idempotent = options.idempotent,
-        }
+      local registration_actions = terralib.newlist()
+      for _, proc_type in ipairs(proc_types) do
+        registration_actions:insert(quote
+          var execution_constraints = c.legion_execution_constraint_set_create()
+          c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, proc_type)
+          var [layout_constraints] = c.legion_task_layout_constraint_set_create()
+          [layout_constraint_actions]
+          var options = c.legion_task_config_options_t {
+            leaf = [ options.leaf and std.config["legion-leaf"] ],
+            inner = [ options.inner and std.config["legion-inner"] ],
+            idempotent = options.idempotent,
+          }
 
-        c.legion_runtime_preregister_task_variant_fnptr(
-          [task:gettaskid()],
-          [task:getname():concat(".")],
-          execution_constraints, layout_constraints, options,
-          [wrapped_task], nil, 0)
-        c.legion_execution_constraint_set_destroy(execution_constraints)
-        c.legion_task_layout_constraint_set_destroy(layout_constraints)
+          c.legion_runtime_preregister_task_variant_fnptr(
+            [task:gettaskid()],
+            [task:getname():concat(".")],
+            execution_constraints, layout_constraints, options,
+            [wrapped_task], nil, 0)
+          c.legion_execution_constraint_set_destroy(execution_constraints)
+          c.legion_task_layout_constraint_set_destroy(layout_constraints)
+        end)
+      end
+
+      return quote
+        [registration_actions]
       end
     end)
   local cuda_setup = quote end
