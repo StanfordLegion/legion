@@ -131,6 +131,10 @@ DECLARE_REDUCTION(register_reduction_plus_int32,
                   safe_reduce_plus_int32, safe_reduce_plus_int32_domain_point,
                   reduce_plus_int32, reduce_plus_int32_domain_point,
                   PlusOpInt, int, int, ADD, ADD, 0)
+DECLARE_REDUCTION(register_reduction_plus_int64,
+                  safe_reduce_plus_int64, safe_reduce_plus_int64_domain_point,
+                  reduce_plus_int64, reduce_plus_int64_domain_point,
+                  PlusOpLongLong, long long int, long long int, ADD, ADD, 0)
 
 DECLARE_REDUCTION(register_reduction_minus_float,
                   safe_reduce_minus_float, safe_reduce_minus_float_domain_point,
@@ -144,6 +148,10 @@ DECLARE_REDUCTION(register_reduction_minus_int32,
                   safe_reduce_minus_int32, safe_reduce_minus_int32_domain_point,
                   reduce_minus_int32, reduce_minus_int32_domain_point,
                   MinusOpInt, int, int, ADD, SUB, 0)
+DECLARE_REDUCTION(register_reduction_minus_int64,
+                  safe_reduce_minus_int64, safe_reduce_minus_int64_domain_point,
+                  reduce_minus_int64, reduce_minus_int64_domain_point,
+                  MinusOpLongLong, long long int, long long int, ADD, SUB, 0)
 
 DECLARE_REDUCTION(register_reduction_times_float,
                   safe_reduce_times_float, safe_reduce_times_float_domain_point,
@@ -157,6 +165,10 @@ DECLARE_REDUCTION(register_reduction_times_int32,
                   safe_reduce_times_int32, safe_reduce_times_int32_domain_point,
                   reduce_times_int32, reduce_times_int32_domain_point,
                   TimesOpInt, int, int, MUL, MUL, 1)
+DECLARE_REDUCTION(register_reduction_times_int64,
+                  safe_reduce_times_int64, safe_reduce_times_int64_domain_point,
+                  reduce_times_int64, reduce_times_int64_domain_point,
+                  TimesOpLongLong, long long int, long long int, MUL, MUL, 1)
 
 DECLARE_REDUCTION(register_reduction_divide_float,
                   safe_reduce_divide_float, safe_reduce_divide_float_domain_point,
@@ -170,6 +182,10 @@ DECLARE_REDUCTION(register_reduction_divide_int32,
                   safe_reduce_divide_int32, safe_reduce_divide_int32_domain_point,
                   reduce_divide_int32, reduce_divide_int32_domain_point,
                   DivideOpInt, int, int, DIV, MUL, 1)
+DECLARE_REDUCTION(register_reduction_divide_int64,
+                  safe_reduce_divide_int64, safe_reduce_divide_int64_domain_point,
+                  reduce_divide_int64, reduce_divide_int64_domain_point,
+                  DivideOpLongLong, long long int, long long int, DIV, MUL, 1)
 
 DECLARE_REDUCTION(register_reduction_max_float,
                   safe_reduce_max_float, safe_reduce_max_float_domain_point,
@@ -183,6 +199,10 @@ DECLARE_REDUCTION(register_reduction_max_int32,
                   safe_reduce_max_int32, safe_reduce_max_int32_domain_point,
                   reduce_max_int32, reduce_max_int32_domain_point,
                   MaxOpInt, int, int, max, max, INT_MIN)
+DECLARE_REDUCTION(register_reduction_max_int64,
+                  safe_reduce_max_int64, safe_reduce_max_int64_domain_point,
+                  reduce_max_int64, reduce_max_int64_domain_point,
+                  MaxOpLongLong, long long int, long long int, max, max, LLONG_MIN)
 
 DECLARE_REDUCTION(register_reduction_min_float,
                   safe_reduce_min_float, safe_reduce_min_float_domain_point,
@@ -196,4 +216,8 @@ DECLARE_REDUCTION(register_reduction_min_int32,
                   safe_reduce_min_int32, safe_reduce_min_int32_domain_point,
                   reduce_min_int32, reduce_min_int32_domain_point,
                   MinOpInt, int, int, min, min, INT_MAX)
+DECLARE_REDUCTION(register_reduction_min_int64,
+                  safe_reduce_min_int64, safe_reduce_min_int64_domain_point,
+                  reduce_min_int64, reduce_min_int64_domain_point,
+                  MinOpLongLong, long long int, long long int, min, min, LLONG_MAX)
 

@@ -159,7 +159,7 @@ end
 
 local function collect_symbols(rules, task_signatures)
   -- collect all symbol hashes to assign consistent numbers
-  local num_tasks = 0
+  local max_task_id = 0
   local all_task_ids = {}
   local num_constraints = 0
   local all_constraint_ids = {}
@@ -168,7 +168,9 @@ local function collect_symbols(rules, task_signatures)
 
   for _, sig in pairs(task_signatures) do
     all_task_ids[sig.task_id] = sig.task_id
-    num_tasks = num_tasks + 1
+    if max_task_id < sig.task_id then
+      max_task_id = sig.task_id
+    end
   end
 
   traverse_element(rules, function(elem)
@@ -182,16 +184,17 @@ local function collect_symbols(rules, task_signatures)
     end)
   end)
 
+  -- TODO: need more robust hashing to avoid unexpected collisions
   local all_ids = {}
   for hash, id in pairs(all_task_ids) do
     all_ids[hash] = id
   end
   for hash, id in pairs(all_constraint_ids) do
-    all_ids[hash] = id + num_tasks + 1 -- task symbol starts from 1
+    all_ids[hash] = id + max_task_id + 1
   end
   for hash, id in pairs(all_class_ids) do
     all_ids[hash] =
-      id + num_tasks + num_constraints + 1 -- task symbol starts from 1
+      id + max_task_id + num_constraints + 1
   end
 
   local all_symbols = {}
@@ -308,6 +311,8 @@ local function translate_to_regex(selectors, all_symbols, all_task_symbols, symb
         if #elem.constraints > 0 then
           elem.constraints:map(function(id)
             required[id] = true
+            -- If we hit this assertion, there's a collision in the hash values
+            assert(all_symbols[id]:is(regex.symbol.Constraint))
             constrained[all_symbols[id].constraint.field] = true
           end)
         end
@@ -472,7 +477,6 @@ local function prune_impossible_transitions(dfa, all_task_symbols, symbols_by_ta
       end
       state.trans = trans
     elseif not last_task_symbol then
-      assert(state == dfa.initial)
       local trans = {}
       for id, next_state in pairs(state.trans) do
         local sym = all_task_symbols[id]

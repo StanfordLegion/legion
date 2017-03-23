@@ -67,6 +67,5 @@ task toplevel()
   end
 end
 
-bishoplib.register_bishop_mappers()
-regentlib.start(toplevel)
+regentlib.start(toplevel, bishoplib.make_entry())
 

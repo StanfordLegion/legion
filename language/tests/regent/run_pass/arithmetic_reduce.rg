@@ -1,4 +1,4 @@
--- Copyright 2017 Stanford University, NVIDIA Corporation
+-- Copyright 2017 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -12,23 +12,28 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- region_name_invalid3.rg:25: unnamed task element cannot have a named region element
--- task region#r {
---    ^
-
 import "regent"
-import "bishop"
 
-mapper
-
-task region#r {
-  target : memories[kind=sysmem];
-}
-
+task f(x : int32, y : int32) : int32
+  var w = x
+  w += y
+  w *= 4
+  w -= 1
+  w /= 3
+  return w
 end
 
-task toplevel()
+task g(x : int64, y : int64) : int64
+  var w = x
+  w += y
+  w *= 4
+  w -= 1
+  w /= 3
+  return w
 end
 
-regentlib.start(toplevel, bishoplib.make_entry())
+task main()
+  regentlib.assert(f(5, 17) == 29, "test failed")
+  regentlib.assert(g(5, 17) == 29, "test failed")
+end
+regentlib.start(main)
