@@ -1335,15 +1335,19 @@ namespace LegionRuntime{
         NODE_BITS = 16,
         INDEX_BITS = 32
       };
-      XferDesQueue(int num_dma_threads, Realm::CoreReservationSet& crs)
+      XferDesQueue(int num_dma_threads, bool pinned, Realm::CoreReservationSet& crs)
       //: core_rsrv("DMA request queue", crs, Realm::CoreReservationParameters())
       {
-        Realm::CoreReservationParameters params;
-        params.set_num_cores(num_dma_threads);
-        params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
-        params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
-        params.set_ldst_usage(params.CORE_USAGE_SHARED);
-        core_rsrv = new Realm::CoreReservation("DMA threads", crs, params);
+        if (pinned) {
+          Realm::CoreReservationParameters params;
+          params.set_num_cores(num_dma_threads);
+          params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
+          params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
+          params.set_ldst_usage(params.CORE_USAGE_SHARED);
+          core_rsrv = new Realm::CoreReservation("DMA threads", crs, params);
+        } else {
+          core_rsrv = new Realm::CoreReservation("DMA threads", crs, Realm::CoreReservationParameters());
+        }
         pthread_mutex_init(&queues_lock, NULL);
         pthread_rwlock_init(&guid_lock, NULL);
         // reserve the first several guid
@@ -1539,7 +1543,7 @@ namespace LegionRuntime{
 #ifdef USE_CUDA
     void register_gpu_in_dma_systems(GPU* gpu);
 #endif
-    void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs);
+    void start_channel_manager(int count, bool pinned, int max_nr, Realm::CoreReservationSet& crs);
     void stop_channel_manager();
     template<unsigned DIM>
     void create_xfer_des(DmaRequest* _dma_request, gasnet_node_t _launch_node,

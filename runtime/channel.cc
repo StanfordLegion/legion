@@ -1546,9 +1546,10 @@ namespace LegionRuntime {
         dma_all_gpus.push_back(gpu);
       }
 #endif
-      void start_channel_manager(int count, int max_nr, Realm::CoreReservationSet& crs)
+      void start_channel_manager(int count, bool pinned, int max_nr,
+                                 Realm::CoreReservationSet& crs)
       {
-        xferDes_queue = new XferDesQueue(count, crs);
+        xferDes_queue = new XferDesQueue(count, pinned, crs);
         channel_manager = new ChannelManager;
         xferDes_queue->start_worker(count, max_nr, channel_manager);
       }

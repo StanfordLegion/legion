@@ -5172,11 +5172,12 @@ namespace LegionRuntime {
       dma_queue = 0;
     }
 
-    void start_dma_system(int count, int max_nr, Realm::CoreReservationSet& crs)
+    void start_dma_system(int count, bool pinned, int max_nr,
+                          Realm::CoreReservationSet& crs)
     {
       //log_dma.add_stream(&std::cerr, Logger::Category::LEVEL_DEBUG, false, false);
       aio_context = new AsyncFileIOContext(256);
-      start_channel_manager(count, max_nr, crs);
+      start_channel_manager(count, pinned, max_nr, crs);
       ib_req_queue = new PendingIBQueue();
     }
 
