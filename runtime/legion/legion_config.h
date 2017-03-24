@@ -586,6 +586,7 @@ typedef unsigned int legion_field_space_id_t;
 typedef unsigned int legion_generation_id_t;
 typedef unsigned int legion_type_handle;
 typedef unsigned int legion_projection_id_t;
+typedef unsigned int legion_sharding_id_t;
 typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;

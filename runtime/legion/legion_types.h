@@ -107,6 +107,7 @@ namespace Legion {
   template<typename T> struct ColoredPoints; 
   struct InputArgs;
   class ProjectionFunctor;
+  class ShardingFunctor;
   class Task;
   class Copy;
   class InlineMapping;
@@ -1542,6 +1543,7 @@ namespace Legion {
   typedef ::legion_generation_id_t GenerationID;
   typedef ::legion_type_handle TypeHandle;
   typedef ::legion_projection_id_t ProjectionID;
+  typedef ::legion_sharding_id_t ShardingID;
   typedef ::legion_region_tree_id_t RegionTreeID;
   typedef ::legion_distributed_id_t DistributedID;
   typedef ::legion_address_space_id_t AddressSpaceID;

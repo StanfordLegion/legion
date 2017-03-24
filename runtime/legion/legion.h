@@ -2766,6 +2766,29 @@ namespace Legion {
     };
 
     /**
+     * \class ShardingFunctor
+     * 
+     * A sharding functor is a object that is during control
+     * replication of a task to determine which points of an
+     * operation are owned by a given shard. Unlike projection
+     * functors, these functors are not given access to the
+     * operation being sharded. We provide access to the local
+     * processor on which this operation exists and the mapping
+     * of shards to processors. Legion will assume that this
+     * functor is functional so the same arguments passed to 
+     * functor will always result in the same operation.
+     */
+    class ShardingFunctor {
+    public:
+      ShardingFunctor(void);
+      ShardingFunctor(const ShardingFunctor &rhs);
+      virtual ~ShardingFunctor(void);
+    public:
+      virtual ShardID shard(const DomainPoint &point,
+          const std::map<ShardID,Processor> &shard_map) const = 0;
+    };
+
+    /**
      * \class Runtime
      * The Runtime class is the primary interface for
      * Legion.  Every task is given a reference to the runtime as
@@ -5675,6 +5698,23 @@ namespace Legion {
        */
       static void preregister_projection_functor(ProjectionID pid,
                                                  ProjectionFunctor *functor);
+      
+      /**
+       * Register a sharding functor for handling control replication
+       * queries about which shard owns which a given point in an 
+       * index space launch.
+       */
+      void register_sharding_functor(ShardingID sid,
+                                     ShardingFunctor *functor);
+
+      /**
+       * Register a sharding functor before the runtime has 
+       * started only. The sharding functor will be invoked to
+       * handle queries during control replication about which
+       * shard owns a given point in an index space launch.
+       */
+      static void preregister_sharding_functor(ShardingID sid,
+                                               ShardingFunctor *functor);
     public:
       //------------------------------------------------------------------------
       // Start-up Operations
