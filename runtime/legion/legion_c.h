@@ -1681,7 +1681,7 @@ extern "C" {
   /**
    * @see LegionRuntime::HighLevel::PhaseBarrier::alter_arrival_count()
    */
-  void
+  legion_phase_barrier_t
   legion_phase_barrier_alter_arrival_count(legion_runtime_t runtime,
                                            legion_context_t ctx,
                                            legion_phase_barrier_t handle,
@@ -1744,7 +1744,7 @@ extern "C" {
   /**
    * @see LegionRuntime::HighLevel::DynamicCollective::alter_arrival_count()
    */
-  void
+  legion_dynamic_collective_t
   legion_dynamic_collective_alter_arrival_count(
     legion_runtime_t runtime,
     legion_context_t ctx,
