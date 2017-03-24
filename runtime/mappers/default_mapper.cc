@@ -753,8 +753,8 @@ namespace Legion {
       // suitable for a given task
       ranking[0] = Processor::TOC_PROC;
       ranking[1] = Processor::PROC_SET;
-      ranking[2] = Processor::IO_PROC;
-      ranking[3] = Processor::LOC_PROC;
+      ranking[2] = Processor::LOC_PROC;
+      ranking[3] = Processor::IO_PROC;
     }
 
     //--------------------------------------------------------------------------
