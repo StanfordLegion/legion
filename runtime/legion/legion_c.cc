@@ -2934,7 +2934,12 @@ legion_phase_barrier_alter_arrival_count(legion_runtime_t runtime_,
 {
   PhaseBarrier handle = CObjectWrapper::unwrap(handle_);
 
-  handle.alter_arrival_count(delta); // This modifies handle.
+  if (delta >= 0) {
+    handle.alter_arrival_count(delta); // This modifies handle.
+  } else {
+    // FIXME: Use arrive because alter_arrival_count is broken when delta < 0
+    handle.arrive(-delta);
+  }
   return CObjectWrapper::wrap(handle);
 }
 
@@ -3029,7 +3034,17 @@ legion_dynamic_collective_alter_arrival_count(
 {
   DynamicCollective handle = CObjectWrapper::unwrap(handle_);
 
-  handle.alter_arrival_count(delta); // This modifies handle.
+  if (delta >= 0) {
+    handle.alter_arrival_count(delta); // This modifies handle.
+  } else {
+    // FIXME: Use arrive because alter_arrival_count is broken when delta < 0
+    const ReductionOp* redop = HighLevelRuntime::get_reduction_op(handle_.redop);
+    void *buffer = malloc(redop->sizeof_rhs);
+    assert(buffer != 0);
+    redop->init(buffer, 1);
+    handle.arrive(buffer, redop->sizeof_rhs, -delta);
+    free(buffer);
+  }
   return CObjectWrapper::wrap(handle);
 }
 
