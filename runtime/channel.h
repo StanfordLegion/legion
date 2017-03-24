@@ -1335,8 +1335,15 @@ namespace LegionRuntime{
         NODE_BITS = 16,
         INDEX_BITS = 32
       };
-      XferDesQueue(Realm::CoreReservationSet& crs)
-      : core_rsrv("DMA request queue", crs, Realm::CoreReservationParameters()) {
+      XferDesQueue(int num_dma_threads, Realm::CoreReservationSet& crs)
+      //: core_rsrv("DMA request queue", crs, Realm::CoreReservationParameters())
+      {
+        Realm::CoreReservationParameters params;
+        params.set_num_cores(num_dma_threads);
+        params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
+        params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
+        params.set_ldst_usage(params.CORE_USAGE_SHARED);
+        core_rsrv = new Realm::CoreReservation("DMA threads", crs, params);
         pthread_mutex_init(&queues_lock, NULL);
         pthread_rwlock_init(&guid_lock, NULL);
         // reserve the first several guid
@@ -1347,6 +1354,7 @@ namespace LegionRuntime{
       }
 
       ~XferDesQueue() {
+        delete core_rsrv;
         // clean up the priority queues
         pthread_mutex_lock(&queues_lock);
         std::map<Channel*, PriorityXferDesQueue*>::iterator it2;
@@ -1519,7 +1527,7 @@ namespace LegionRuntime{
       pthread_mutex_t queues_lock;
       pthread_rwlock_t guid_lock;
       XferDesID next_to_assign_idx;
-      Realm::CoreReservation core_rsrv;
+      Realm::CoreReservation* core_rsrv;
       int num_threads, num_memcpy_threads;
       DMAThread** dma_threads;
       MemcpyThread** memcpy_threads;
