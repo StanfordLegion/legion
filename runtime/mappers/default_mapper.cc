@@ -2082,7 +2082,7 @@ namespace Legion {
       // If the application requested that we use the exact region requested,
       // honor that
       if ((req.tag & DefaultMapper::EXACT_REGION) != 0)
-	return result;
+        return result;
 
       // Heuristically use the exact region if the target memory is either a GPU
       // framebuffer or a zero copy memory.
@@ -2093,13 +2093,13 @@ namespace Legion {
       // Simple heuristic here, if we are on a single node, we go all the
       // way to the root since the first-level partition is likely just
       // across processors in the node, however, if we are on multiple nodes
-      // we go to the region under the first-level partition since the 
-      // first partition is normally the one across all nodes
+      // we try to find the first level that effectively partitions the root
+      // into one subregion per node.
       if (total_nodes == 1)
       {
         while (runtime->has_parent_logical_partition(ctx, result))
         {
-          LogicalPartition parent = 
+          LogicalPartition parent =
             runtime->get_parent_logical_partition(ctx, result);
           result = runtime->get_parent_logical_region(ctx, parent);
         }
@@ -2107,20 +2107,42 @@ namespace Legion {
       }
       else
       {
-        // Find the region one-level down 
-        // (unless the application actually asked for the root region)
+        // Fall through if the application actually asked for the root
         if (!runtime->has_parent_logical_partition(ctx, result))
           return result;
-        LogicalPartition parent = 
-          runtime->get_parent_logical_partition(ctx, result);
-        LogicalRegion next = 
-          runtime->get_parent_logical_region(ctx, parent);
+
+        std::vector<LogicalRegion> path;
+        std::vector<size_t> volumes;
+
+        path.push_back(result);
+        volumes.push_back(runtime->get_index_space_domain(ctx,
+                                        result.get_index_space()).get_volume());
+
+        // Collect the size of subregion at each level
+        LogicalRegion next = result;
         while (runtime->has_parent_logical_partition(ctx, next))
         {
-          result = next;
-          parent = runtime->get_parent_logical_partition(ctx, next);
-          next = runtime->get_parent_logical_region(ctx, parent); 
+          LogicalPartition parent =
+            runtime->get_parent_logical_partition(ctx, next);
+          next = runtime->get_parent_logical_region(ctx, parent);
+          path.push_back(next);
+          volumes.push_back(
+            runtime->get_index_space_domain(ctx, next.get_index_space()).get_volume());
         }
+
+        // Acculumate the "effective" fanout at each level and
+        // stop the search once we have one subregion per node.
+        double effective_fanout = 1.0;
+        for (off_t idx = (off_t)path.size() - 2; idx >= 0; --idx)
+        {
+          effective_fanout *= (double)volumes[idx + 1] / volumes[idx];
+          if ((unsigned)effective_fanout >= total_nodes)
+            return path[idx];
+        }
+
+        // If we reached this point, the partitions were not meant to assign
+        // one subregion per node. So, stop pretending to be smart and
+        // just return the exact target.
         return result;
       }
     }
