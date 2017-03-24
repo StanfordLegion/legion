@@ -491,6 +491,7 @@ do
   end
 end
 
+__demand(__cuda)
 task block_task(rpn : region(node),
                 rsn : region(node),
                 rgn : region(node),
