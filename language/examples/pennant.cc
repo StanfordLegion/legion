@@ -1128,7 +1128,7 @@ void PennantMapper::pennant_create_copy_instance(MapperContext ctx,
   // ELLIOTT: Get the remote node here.
   Color index = runtime->get_logical_region_color(ctx, copy.src_requirements[idx].region);
 #if SPMD_RESERVE_SHARD_PROC
-  size_t sysmem_index = index / (std::max(sysmem_local_procs.begin()->second.size() - 1, 1));
+  size_t sysmem_index = index / (std::max(sysmem_local_procs.begin()->second.size() - 1, (size_t)1));
 #else
   size_t sysmem_index = index / sysmem_local_procs.begin()->second.size();
 #endif
