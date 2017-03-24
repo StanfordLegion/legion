@@ -985,6 +985,12 @@ public:
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+  virtual LogicalRegion default_policy_select_instance_region(
+                                    MapperContext ctx, Memory target_memory,
+                                    const RegionRequirement &req,
+                                    const LayoutConstraintSet &constraints,
+                                    bool force_new_instances,
+                                    bool meets_constraints);
   virtual void map_copy(const MapperContext ctx,
                         const Copy &copy,
                         const MapCopyInput &input,
@@ -1052,6 +1058,16 @@ void PennantMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+}
+
+LogicalRegion PennantMapper::default_policy_select_instance_region(
+                                MapperContext ctx, Memory target_memory,
+                                const RegionRequirement &req,
+                                const LayoutConstraintSet &layout_constraints,
+                                bool force_new_instances,
+                                bool meets_constraints)
+{
+  return req.region;
 }
 
 void PennantMapper::map_copy(const MapperContext ctx,
