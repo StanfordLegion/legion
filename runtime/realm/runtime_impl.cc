@@ -696,6 +696,7 @@ namespace Realm {
       bool show_reservations = false;
       // are hyperthreads considered to share a physical core
       bool hyperthread_sharing = true;
+      bool unpin_dma_threads = false;
 
       CommandLineParser cp;
       cp.add_option_int("-ll:gsize", gasnet_mem_size_in_mb)
@@ -704,6 +705,7 @@ namespace Realm {
 	.add_option_int("-ll:dsize", disk_mem_size_in_mb)
 	.add_option_int("-ll:stacksize", stack_size_in_mb)
 	.add_option_int("-ll:dma", dma_worker_threads)
+        .add_option_bool("-ll:unpin_dma", unpin_dma_threads)
 	.add_option_int("-ll:amsg", active_msg_worker_threads)
 	.add_option_int("-ll:ahandlers", active_msg_handler_threads)
 	.add_option_int("-ll:dummy_rsrv_ok", dummy_reservation_ok)
@@ -1030,7 +1032,8 @@ namespace Realm {
       
       // start dma system at the very ending of initialization
       // since we need list of local gpus to create channels
-      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads, 100
+      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads,
+                                                !unpin_dma_threads, 100
                                                 ,*core_reservations);
 
       // now that we've created all the processors/etc., we can try to come up with core
