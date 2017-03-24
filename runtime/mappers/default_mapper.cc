@@ -338,9 +338,21 @@ namespace Legion {
       {
         case 0:
           {
-            // Top-level task, we should just stay here      
-            assert(info.proc_kind == local_kind);
-            return local_proc;
+            // Top-level task: try to stay in place, otherwise choose
+            // a suitable local processor.
+            if (info.proc_kind == local_kind)
+              return local_proc;
+            switch (info.proc_kind)
+            {
+              case Processor::LOC_PROC:
+                return default_get_next_local_cpu();
+              case Processor::TOC_PROC:
+                return default_get_next_local_gpu();
+              case Processor::IO_PROC:
+                return default_get_next_local_io();
+              default: // make warnings go away
+                break;
+            }
           }
         case 1:
           {
@@ -741,8 +753,8 @@ namespace Legion {
       // suitable for a given task
       ranking[0] = Processor::TOC_PROC;
       ranking[1] = Processor::PROC_SET;
-      ranking[2] = Processor::IO_PROC;
-      ranking[3] = Processor::LOC_PROC;
+      ranking[2] = Processor::LOC_PROC;
+      ranking[3] = Processor::IO_PROC;
     }
 
     //--------------------------------------------------------------------------

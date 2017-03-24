@@ -16,11 +16,12 @@
 -- Bishop Type Checking
 
 local ast = require("bishop/ast")
+local automata = require("bishop/automata")
+local data = require("common/data")
 local log = require("bishop/log")
 local std = require("bishop/std")
 local symbol_table = require("regent/symbol_table")
 local regent_std = require("regent/std")
-local automata = require("bishop/automata")
 
 local type_check = {}
 
@@ -487,9 +488,9 @@ function type_check.rule(type_env, rule)
     end
   end
 
-  for idx = 1, #rule.selectors do
+  return rule.selectors:map(function(selector)
     local local_type_env = type_env:new_local_scope()
-    local selector = type_check.selector(local_type_env, rule.selectors[idx])
+    local selector = type_check.selector(local_type_env, selector)
     local properties =
       rule.properties:map(
         std.curry2(type_check.property, rule_type, local_type_env))
@@ -499,7 +500,7 @@ function type_check.rule(type_env, rule)
       properties = properties,
       position = rule.position,
     }
-  end
+  end)
 end
 
 function type_check.assignment(type_env, assignment)
@@ -522,9 +523,9 @@ function type_check.mapper(mapper)
     return type_check.assignment(type_env, assignment)
   end)
 
-  local rules = mapper.rules:map(function(rule)
+  local rules = data.flatmap(function(rule)
     return type_check.rule(type_env, rule)
-  end)
+  end, mapper.rules)
 
   return ast.typed.Mapper {
     rules = rules,
