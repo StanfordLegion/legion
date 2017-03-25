@@ -1962,6 +1962,12 @@ namespace Legion {
       void send_field_alloc_notification(AddressSpaceID target,Serializer &rez);
       void send_field_space_top_alloc(AddressSpaceID target, Serializer &rez);
       void send_field_free(AddressSpaceID target, Serializer &rez);
+      void send_local_field_alloc_request(AddressSpaceID target, 
+                                          Serializer &rez);
+      void send_local_field_alloc_response(AddressSpaceID target,
+                                           Serializer &rez);
+      void send_local_field_free(AddressSpaceID target, Serializer &rez);
+      void send_local_field_update(AddressSpaceID target, Serializer &rez);
       void send_top_level_region_request(AddressSpaceID target,Serializer &rez);
       void send_top_level_region_return(AddressSpaceID target, Serializer &rez); 
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
@@ -2112,6 +2118,11 @@ namespace Legion {
       void handle_field_space_top_alloc(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_field_free(Deserializer &derez, AddressSpaceID source);
+      void handle_local_field_alloc_request(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_local_field_alloc_response(Deserializer &derez);
+      void handle_local_field_free(Deserializer &derez);
+      void handle_local_field_update(Deserializer &derez);
       void handle_top_level_region_request(Deserializer &derez,
                                            AddressSpaceID source);
       void handle_top_level_region_return(Deserializer &derez);
@@ -2863,6 +2874,7 @@ namespace Legion {
       static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned gc_epoch_size;
+      static unsigned max_local_fields;
       static bool runtime_started;
       static bool runtime_backgrounded;
       static bool runtime_warnings;

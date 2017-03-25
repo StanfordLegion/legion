@@ -2123,6 +2123,18 @@ namespace Legion {
       assert(tree_context.exists());
       runtime->forest->check_context_state(tree_context);
 #endif
+      // If we have an owner, clone our local fields from its context
+      if (owner != NULL)
+      {
+        TaskContext *owner_ctx = owner_task->get_context();
+#ifdef DEBUG_LEGION
+        InnerContext *parent_ctx = dynamic_cast<InnerContext*>(owner_ctx);
+        assert(parent_ctx != NULL);
+#else
+        InnerContext *parent_ctx = static_cast<InnerContext*>(owner_ctx);
+#endif
+        parent_ctx->clone_local_fields(local_fields);
+      }
       if (!remote_context)
         runtime->register_local_context(context_uid, this);
     }
@@ -2169,6 +2181,26 @@ namespace Legion {
       {
         valid_wait_event = false;
         Runtime::trigger_event(window_wait);
+      }
+      // No need for the lock here since we're being cleaned up
+      if (!local_fields.empty())
+      {
+        for (std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator 
+              it = local_fields.begin(); it != local_fields.end(); it++)
+        {
+          const std::vector<LocalFieldInfo> &infos = it->second;
+          std::vector<FieldID> to_free;
+          std::vector<unsigned> indexes;
+          for (unsigned idx = 0; idx < infos.size(); idx++)
+          {
+            if (infos[idx].ancestor)
+              continue;
+            to_free.push_back(infos[idx].fid); 
+            indexes.push_back(infos[idx].index);
+          }
+          if (!to_free.empty())
+            runtime->forest->free_local_fields(it->first, to_free, indexes);
+        }
       }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
@@ -2394,6 +2426,17 @@ namespace Legion {
       }
       rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
+      // Finally pack the local field infos
+      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+      rez.serialize<size_t>(local_fields.size());
+      for (std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator 
+            it = local_fields.begin(); it != local_fields.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize<size_t>(it->second.size());
+        for (unsigned idx = 0; idx < it->second.size(); idx++)
+          rez.serialize(it->second[idx]);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3673,18 +3716,80 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_field_creation(space.id, fid, field_size);
 
-      forest->allocate_field(space, field_size, fid, serdez_id);
-      register_field_creation(space, fid, local);
-      // If we're local issue a task to reclaim to field when we're done
+      std::set<RtEvent> done_events;
       if (local)
       {
-        ReclaimLocalFieldArgs args;
-        args.handle = space;
-        args.fid = fid;
-        RtEvent reclaim_pre = 
-          Runtime::protect_event(owner_task->get_completion_event());
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                         owner_task, reclaim_pre);
+        // See if we've exceeded our local field allocations 
+        // for this field space
+        std::vector<LocalFieldInfo> &infos = local_fields[space];
+        if (infos.size() == Runtime::max_local_fields)
+        {
+          log_run.error("Exceeded maximum number of local fields in "
+                        "context of task %s (UID %lld). The maximum "
+                        "is currently set to %d, but can be modified "
+                        "with the -lg:local flag.", get_task_name(),
+                        get_unique_id(), Runtime::max_local_fields);
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_MAX_FIELD_OVERFLOW);
+        }
+        std::set<unsigned> current_indexes;
+        for (std::vector<LocalFieldInfo>::const_iterator it = 
+              infos.begin(); it != infos.end(); it++)
+          current_indexes.insert(it->index);
+        std::vector<FieldID> fields(1, fid);
+        std::vector<size_t> sizes(1, field_size);
+        std::vector<unsigned> new_indexes;
+        if (!forest->allocate_local_fields(space, fields, sizes, serdez_id, 
+                                           current_indexes, new_indexes))
+        {
+          log_run.error("Unable to allocate local field in context of "
+                        "task %s (UID %lld) due to local field size "
+                        "fragmentation. This situation can be improved "
+                        "by increasing the maximum number of permitted "
+                        "local fields in a context with the -lg:local "
+                        "flag.", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_MAX_FIELD_OVERFLOW);
+        }
+#ifdef DEBUG_LEGION
+        assert(new_indexes.size() == 1);
+#endif
+        // Only need the lock here when modifying since all writes
+        // to this data structure are serialized
+        AutoLock ctx_lock(context_lock);
+        infos.push_back(LocalFieldInfo(fid, field_size, serdez_id, 
+                                       new_indexes[0], false));
+        // Have to send notifications to any remote nodes
+        for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          RtUserEvent done_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(it->second);
+            rez.serialize<size_t>(1); // field space count
+            rez.serialize(space);
+            rez.serialize<size_t>(1); // field count
+            rez.serialize(infos.back());
+            rez.serialize(done_event);
+          }
+          runtime->send_local_field_update(it->first, rez);
+          done_events.insert(done_event);
+        }
+      }
+      else
+        forest->allocate_field(space, field_size, fid, serdez_id);
+      register_field_creation(space, fid, local);
+      if (!done_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(done_events);
+        if (!wait_on.has_triggered())
+          wait_on.wait();
       }
       return fid;
     }
@@ -3729,20 +3834,81 @@ namespace Legion {
           LegionSpy::log_field_creation(space.id, 
                                         resulting_fields[idx], sizes[idx]);
       }
-      forest->allocate_fields(space, sizes, resulting_fields, serdez_id);
-      register_field_creations(space, local, resulting_fields);
+      std::set<RtEvent> done_events;
       if (local)
       {
-        ReclaimLocalFieldArgs args;
-        args.handle = space;
-        RtEvent reclaim_pre = 
-          Runtime::protect_event(owner_task->get_completion_event());
-        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+        // See if we've exceeded our local field allocations 
+        // for this field space
+        std::vector<LocalFieldInfo> &infos = local_fields[space];
+        if ((infos.size() + sizes.size()) > Runtime::max_local_fields)
         {
-          args.fid = resulting_fields[idx];
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                           owner_task, reclaim_pre);
+          log_run.error("Exceeded maximum number of local fields in "
+                        "context of task %s (UID %lld). The maximum "
+                        "is currently set to %d, but can be modified "
+                        "with the -lg:local flag.", get_task_name(),
+                        get_unique_id(), Runtime::max_local_fields);
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_MAX_FIELD_OVERFLOW);
         }
+        std::set<unsigned> current_indexes;
+        for (std::vector<LocalFieldInfo>::const_iterator it = 
+              infos.begin(); it != infos.end(); it++)
+          current_indexes.insert(it->index);
+        std::vector<unsigned> new_indexes;
+        if (!forest->allocate_local_fields(space, resulting_fields, sizes, 
+                                  serdez_id, current_indexes, new_indexes))
+        {
+          log_run.error("Unable to allocate local field in context of "
+                        "task %s (UID %lld) due to local field size "
+                        "fragmentation. This situation can be improved "
+                        "by increasing the maximum number of permitted "
+                        "local fields in a context with the -lg:local "
+                        "flag.", get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_MAX_FIELD_OVERFLOW);
+        }
+#ifdef DEBUG_LEGION
+        assert(new_indexes.size() == resulting_fields.size());
+#endif
+        // Only need the lock here when writing since we know all writes
+        // are serialized and we only need to worry about interfering readers
+        AutoLock ctx_lock(context_lock);
+        const unsigned offset = infos.size();
+        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+          infos.push_back(LocalFieldInfo(resulting_fields[idx], 
+                     sizes[idx], serdez_id, new_indexes[idx], false));
+        // Have to send notifications to any remote nodes 
+        for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+        {
+          RtUserEvent done_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(it->second);
+            rez.serialize<size_t>(1); // field space count
+            rez.serialize(space);
+            rez.serialize<size_t>(resulting_fields.size()); // field count
+            for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+              rez.serialize(infos[offset+idx]);
+            rez.serialize(done_event);
+          }
+          runtime->send_local_field_update(it->first, rez);
+          done_events.insert(done_event);
+        }
+      }
+      else
+        forest->allocate_fields(space, sizes, resulting_fields, serdez_id);
+      register_field_creations(space, local, resulting_fields);
+      if (!done_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(done_events);
+        if (!wait_on.has_triggered())
+          wait_on.wait();
       }
     }
 
@@ -6464,6 +6630,31 @@ namespace Legion {
       }
       return variant_impl;
     }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::clone_local_fields(
+           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(child_local.empty());
+#endif
+      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+      if (local_fields.empty())
+        return;
+      for (std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator
+            fit = local_fields.begin(); fit != local_fields.end(); fit++)
+      {
+        std::vector<LocalFieldInfo> &child = child_local[fit->first];
+        child.resize(fit->second.size());
+        for (unsigned idx = 0; idx < local_fields.size(); idx++)
+        {
+          LocalFieldInfo &field = child[idx];
+          field = fit->second[idx];
+          field.ancestor = true; // mark that this is an ancestor field
+        }
+      }
+    }
     
     /////////////////////////////////////////////////////////////
     // Top Level Context 
@@ -6729,6 +6920,27 @@ namespace Legion {
     RemoteContext::~RemoteContext(void)
     //--------------------------------------------------------------------------
     {
+      if (!local_fields.empty())
+      {
+        // If we have any local fields then tell field space that
+        // we can remove them and then clear them so that the base
+        // InnerContext destructor doesn't try to deallocate them
+        for (std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator
+              it = local_fields.begin(); it != local_fields.end(); it++)
+        {
+          const std::vector<LocalFieldInfo> &infos = it->second;
+          std::vector<FieldID> to_remove;
+          for (unsigned idx = 0; idx < infos.size(); idx++)
+          {
+            if (infos[idx].ancestor)
+              continue;
+            to_remove.push_back(infos[idx].fid);
+          }
+          if (!to_remove.empty())
+            runtime->forest->remove_local_fields(it->first, to_remove);
+        }
+        local_fields.clear();
+      }
       // Invalidate our context if necessary before deactivating
       // the wrapper as it will release the context
       if (!top_level_context)
@@ -6958,12 +7170,68 @@ namespace Legion {
       }
       derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);
+      // Unpack any local fields that we have
+      unpack_local_field_update(derez);
+      
       // See if we can find our parent task, if not don't worry about it
       // DO NOT CHANGE THIS UNLESS YOU THINK REALLY HARD ABOUT VIRTUAL 
       // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
       parent_ctx = runtime->find_context(parent_context_uid, true/*can fail*/);
       if (parent_ctx != NULL)
         remote_task.parent_task = parent_ctx->get_task();
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::unpack_local_field_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_field_spaces;
+      derez.deserialize(num_field_spaces);
+      if (num_field_spaces == 0)
+        return;
+      for (unsigned fidx = 0; fidx < num_field_spaces; fidx++)
+      {
+        FieldSpace handle;
+        derez.deserialize(handle);
+        size_t num_local;
+        derez.deserialize(num_local); 
+        std::vector<FieldID> fields(num_local);
+        std::vector<size_t> field_sizes(num_local);
+        std::vector<CustomSerdezID> serdez_ids(num_local);
+        std::vector<unsigned> indexes(num_local);
+        {
+          // Take the lock for updating this data structure
+          AutoLock ctx_lock(context_lock);
+          std::vector<LocalFieldInfo> &infos = local_fields[fidx];
+          infos.resize(num_local);
+          for (unsigned idx = 0; idx < num_local; idx++)
+          {
+            LocalFieldInfo &info = infos[idx];
+            derez.deserialize(info);
+            // Update data structures for notifying the field space
+            fields[idx] = info.fid;
+            field_sizes[idx] = info.size;
+            serdez_ids[idx] = info.serdez;
+            indexes[idx] = info.index;
+          }
+        }
+        runtime->forest->update_local_fields(handle, fields, field_sizes,
+                                             serdez_ids, indexes);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_local_field_update(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RemoteContext *context;
+      derez.deserialize(context);
+      context->unpack_local_field_update(derez);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
