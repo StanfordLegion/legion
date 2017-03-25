@@ -505,6 +505,9 @@ namespace LegionRuntime {
   };
 };
 
+// Include template definitions
+#include "default_mapper.inl"
+
 #endif // __DEFAULT_MAPPER_H__
 
 // EOF

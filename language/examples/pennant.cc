@@ -985,9 +985,23 @@ public:
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+  virtual LogicalRegion default_policy_select_instance_region(
+                                    MapperContext ctx, Memory target_memory,
+                                    const RegionRequirement &req,
+                                    const LayoutConstraintSet &constraints,
+                                    bool force_new_instances,
+                                    bool meets_constraints);
+  virtual void map_copy(const MapperContext ctx,
+                        const Copy &copy,
+                        const MapCopyInput &input,
+                        MapCopyOutput &output);
+  template<bool IS_SRC>
+  void pennant_create_copy_instance(MapperContext ctx, const Copy &copy,
+                                    const RegionRequirement &req, unsigned index,
+                                    std::vector<PhysicalInstance> &instances);
 private:
   // std::vector<Processor>& procs_list;
-  // std::vector<Memory>& sysmems_list;
+  std::vector<Memory>& sysmems_list;
   std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
   std::map<Processor, Memory>& proc_sysmems;
   // std::map<Processor, Memory>& proc_regmems;
@@ -1002,7 +1016,7 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
                              std::map<Processor, Memory>* _proc_regmems)
   : DefaultMapper(rt, machine, local, mapper_name),
     // procs_list(*_procs_list),
-    // sysmems_list(*_sysmems_list),
+    sysmems_list(*_sysmems_list),
     sysmem_local_procs(*_sysmem_local_procs),
     proc_sysmems(*_proc_sysmems)// ,
     // proc_regmems(*_proc_regmems)
@@ -1044,6 +1058,137 @@ void PennantMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+}
+
+LogicalRegion PennantMapper::default_policy_select_instance_region(
+                                MapperContext ctx, Memory target_memory,
+                                const RegionRequirement &req,
+                                const LayoutConstraintSet &layout_constraints,
+                                bool force_new_instances,
+                                bool meets_constraints)
+{
+  return req.region;
+}
+
+//--------------------------------------------------------------------------
+template<bool IS_SRC>
+void PennantMapper::pennant_create_copy_instance(MapperContext ctx,
+                     const Copy &copy, const RegionRequirement &req,
+                     unsigned idx, std::vector<PhysicalInstance> &instances)
+//--------------------------------------------------------------------------
+{
+  // This method is identical to the default version except that it
+  // chooses an intelligent memory based on the destination of the
+  // copy.
+
+  // See if we have all the fields covered
+  std::set<FieldID> missing_fields = req.privilege_fields;
+  for (std::vector<PhysicalInstance>::const_iterator it =
+        instances.begin(); it != instances.end(); it++)
+  {
+    it->remove_space_fields(missing_fields);
+    if (missing_fields.empty())
+      break;
+  }
+  if (missing_fields.empty())
+    return;
+  // If we still have fields, we need to make an instance
+  // We clearly need to take a guess, let's see if we can find
+  // one of our instances to use.
+
+  // ELLIOTT: Get the remote node here.
+  Color index = runtime->get_logical_region_color(ctx, copy.src_requirements[idx].region);
+#if SPMD_RESERVE_SHARD_PROC
+  size_t sysmem_index = index / (std::max(sysmem_local_procs.begin()->second.size() - 1, 1));
+#else
+  size_t sysmem_index = index / sysmem_local_procs.begin()->second.size();
+#endif
+  assert(sysmem_index < sysmems_list.size());
+  Memory target_memory = sysmems_list[sysmem_index];
+  // Memory target_memory = default_policy_select_target_memory(ctx,
+  //                          procs_list[index % procs_list.size()]);
+  log_pennant.spew("Building instance for copy of a region with index %u to be in memory %llx",
+                      index, target_memory.id);
+  bool force_new_instances = false;
+  LayoutConstraintID our_layout_id =
+   default_policy_select_layout_constraints(ctx, target_memory,
+                                            req, COPY_MAPPING,
+                                            true/*needs check*/,
+                                            force_new_instances);
+  LayoutConstraintSet creation_constraints =
+              runtime->find_layout_constraints(ctx, our_layout_id);
+  creation_constraints.add_constraint(
+      FieldConstraint(missing_fields,
+                      false/*contig*/, false/*inorder*/));
+  instances.resize(instances.size() + 1);
+  if (!default_make_instance(ctx, target_memory,
+        creation_constraints, instances.back(),
+        COPY_MAPPING, force_new_instances, true/*meets*/, req))
+  {
+    // If we failed to make it that is bad
+    log_pennant.error("Pennant mapper failed allocation for "
+                   "%s region requirement %d of explicit "
+                   "region-to-region copy operation in task %s "
+                   "(ID %lld) in memory " IDFMT " for processor "
+                   IDFMT ". This means the working set of your "
+                   "application is too big for the allotted "
+                   "capacity of the given memory under the default "
+                   "mapper's mapping scheme. You have three "
+                   "choices: ask Realm to allocate more memory, "
+                   "write a custom mapper to better manage working "
+                   "sets, or find a bigger machine. Good luck!",
+                   IS_SRC ? "source" : "destination", idx,
+                   copy.parent_task->get_task_name(),
+                   copy.parent_task->get_unique_id(),
+		       target_memory.id,
+		       copy.parent_task->current_proc.id);
+    assert(false);
+  }
+}
+
+void PennantMapper::map_copy(const MapperContext ctx,
+                             const Copy &copy,
+                             const MapCopyInput &input,
+                             MapCopyOutput &output)
+{
+  log_pennant.spew("Pennant mapper map_copy");
+  for (unsigned idx = 0; idx < copy.src_requirements.size(); idx++)
+  {
+    // Use a virtual instance for the source unless source is
+    // restricted or we'd applying a reduction.
+    output.src_instances[idx].clear();
+    if (copy.src_requirements[idx].is_restricted()) {
+      // If it's restricted, just take the instance. This will only
+      // happen inside the shard task.
+      output.src_instances[idx] = input.src_instances[idx];
+      if (!output.src_instances[idx].empty())
+        runtime->acquire_and_filter_instances(ctx,
+                                output.src_instances[idx]);
+    } else if (copy.dst_requirements[idx].privilege == REDUCE) {
+      // Use the default here. This will place the instance on the
+      // current node.
+      default_create_copy_instance<true/*is src*/>(ctx, copy,
+                copy.src_requirements[idx], idx, output.src_instances[idx]);
+    } else {
+      output.src_instances[idx].push_back(
+        PhysicalInstance::get_virtual_instance());
+    }
+
+    // Place the destination instance on the remote node.
+    output.dst_instances[idx].clear();
+    if (!copy.dst_requirements[idx].is_restricted()) {
+      // Call a customized method to create an instance on the desired node.
+      pennant_create_copy_instance<false/*is src*/>(ctx, copy,
+        copy.dst_requirements[idx], idx, output.dst_instances[idx]);
+    } else {
+      // If it's restricted, just take the instance. This will only
+      // happen inside the shard task.
+      output.dst_instances[idx] = input.dst_instances[idx];
+      if (!output.dst_instances[idx].empty())
+        runtime->acquire_and_filter_instances(ctx,
+                                output.dst_instances[idx]);
+    }
+  }
 }
 
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)

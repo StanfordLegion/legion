@@ -65,7 +65,7 @@ namespace Legion {
     public:
       typedef IndexPartitionID LHS;
       typedef IndexPartitionID RHS;
-      static const IndexPartitionID identity = 0;
+      static const IndexPartitionID identity;
 
       template<bool EXCLUSIVE>
       static inline void apply(LHS &lhs, RHS rhs)
@@ -135,7 +135,7 @@ namespace Legion {
     public:
       typedef RegionTreeID LHS;
       typedef RegionTreeID RHS;
-      static const RegionTreeID identity = 0;
+      static const RegionTreeID identity;
 
       template<bool EXCLUSIVE>
       static inline void apply(LHS &lhs, RHS rhs)
@@ -170,7 +170,7 @@ namespace Legion {
     public:
       typedef FieldID LHS;
       typedef FieldID RHS;
-      static const FieldID identity = 0;
+      static const FieldID identity;
 
       template<bool EXCLUSIVE>
       static inline void apply(LHS &lhs, RHS rhs)

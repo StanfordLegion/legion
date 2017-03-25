@@ -5374,10 +5374,16 @@ namespace Legion {
       assert(!is_owner); // should only be called on remote managers
 #endif
       AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      sanity_check();
+#endif
       // This invalidates our local fields
       remote_valid_fields -= invalid_mask;
       filter_version_info(invalid_mask, current_version_infos);
       filter_version_info(invalid_mask, previous_version_infos);
+#ifdef DEBUG_LEGION
+      sanity_check();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5410,6 +5416,8 @@ namespace Legion {
             for (std::vector<VersionState*>::const_iterator it = 
                   to_remove.begin(); it != to_remove.end(); it++)
               vit->second.erase(*it);
+            if (vit->second.empty())
+              to_delete.push_back(vit->first);
           }
         }
       }
@@ -5774,6 +5782,9 @@ namespace Legion {
       // Do most of this in ready only mode
       {
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        sanity_check();
+#endif
         LegionMap<VersionState*,FieldMask>::aligned send_infos;
         // Do the current infos first
         find_send_infos(current_version_infos, request_mask, send_infos);
@@ -5850,6 +5861,9 @@ namespace Legion {
       // Take our lock and apply our updates
       {
         AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+        sanity_check();
+#endif
         merge_send_infos(current_version_infos, current_update);
         merge_send_infos(previous_version_infos, previous_update);
         // Update the remote valid fields
@@ -5857,6 +5871,7 @@ namespace Legion {
         // Remove our outstanding request
 #ifdef DEBUG_LEGION
         assert(outstanding_requests.find(done) != outstanding_requests.end());
+        sanity_check();
 #endif
         outstanding_requests.erase(done);
       }

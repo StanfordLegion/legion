@@ -5769,7 +5769,7 @@ namespace Legion {
        *              runtime.  Default value is 4K which should guarantee
        *              medium sized active messages on Infiniband clusters.
        * ---------------------
-       *  Dependence Analysis
+       *  Configuration Flags 
        * ---------------------
        * -lg:no_dyn   Disable dynamic disjointness tests when the runtime
        *              has been compiled with macro DYNAMIC_TESTS defined
@@ -5796,6 +5796,8 @@ namespace Legion {
        *              checks on mapper calls regardless of the 
        *              optimization level. (Default: true in debug mode,
        *              false in release mode.)
+       * -lg:local <int> Specify the maximum number of local fields
+       *              permitted in any field space within a context.
        * ---------------------
        *  Resiliency
        * ---------------------

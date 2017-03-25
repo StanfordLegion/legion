@@ -875,6 +875,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::allocate_local_fields(FieldSpace handle,
+                                      const std::vector<FieldID> &fields,
+                                      const std::vector<size_t> &sizes,
+                                      CustomSerdezID serdez_id, 
+                                      const std::set<unsigned> &current_indexes,
+                                            std::vector<unsigned> &new_indexes)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      return node->allocate_local_fields(fields, sizes, serdez_id,
+                                         current_indexes, new_indexes);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::free_local_fields(FieldSpace handle,
+                                           const std::vector<FieldID> &to_free,
+                                           const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      node->free_local_fields(to_free, indexes);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::update_local_fields(FieldSpace handle,
+                                  const std::vector<FieldID> &fields,
+                                  const std::vector<size_t> &sizes,
+                                  const std::vector<CustomSerdezID> &serdez_ids,
+                                  const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      node->update_local_fields(fields, sizes, serdez_ids, indexes);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_local_fields(FieldSpace handle,
+                                          const std::vector<FieldID> &to_remove)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode *node = get_node(handle);
+      node->remove_local_fields(to_remove);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::get_all_regions(FieldSpace handle,
                                            std::set<LogicalRegion> &regions)
     //--------------------------------------------------------------------------
@@ -6139,7 +6184,10 @@ namespace Legion {
     {
       this->node_lock = Reservation::create_reservation();
       if (is_owner)
+      {
         this->available_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        local_field_infos.resize(Runtime::max_local_fields);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6153,7 +6201,10 @@ namespace Legion {
     {
       this->node_lock = Reservation::create_reservation();
       if (is_owner)
+      {
         this->available_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        local_field_infos.resize(Runtime::max_local_fields);
+      }
       size_t num_fields;
       derez.deserialize(num_fields);
       for (unsigned idx = 0; idx < num_fields; idx++)
@@ -6896,9 +6947,15 @@ namespace Legion {
       {
         // We're the owner so do the field allocation
         AutoLock n_lock(node_lock);
+        if (fields.find(fid) != fields.end())
+        {
+          log_field.error("Illegal duplicate field ID %d used by the "
+                          "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
-        assert(fields.find(fid) == fields.end());
+          assert(false);
 #endif
+          exit(ERROR_DUPLICATE_FIELD_ID);
+        }
         // Find an index in which to allocate this field  
         int result = allocate_index();
         if (result < 0)
@@ -6983,9 +7040,15 @@ namespace Legion {
         for (unsigned idx = 0; idx < fids.size(); idx++)
         {
           FieldID fid = fids[idx];
+          if (fields.find(fid) != fields.end())
+          {
+            log_field.error("Illegal duplicate field ID %d used by the "
+                            "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
-          assert(fields.find(fid) == fields.end());
+            assert(false);
 #endif
+            exit(ERROR_DUPLICATE_FIELD_ID);
+          }
           // Find an index in which to allocate this field  
           int result = allocate_index();
           if (result < 0)
@@ -7140,6 +7203,159 @@ namespace Legion {
         {
           context->runtime->send_field_free(*it, rez);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool FieldSpaceNode::allocate_local_fields(
+                                            const std::vector<FieldID> &fids,
+                                            const std::vector<size_t> &sizes,
+                                            CustomSerdezID serdez_id,
+                                            const std::set<unsigned> &indexes,
+                                            std::vector<unsigned> &new_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(fids.size() == sizes.size());
+      assert(new_indexes.empty());
+#endif
+      if (!is_owner)
+      {
+        // If we're not the owner, send a message to the owner
+        // to do the local field allocation
+        RtUserEvent allocated_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize(allocated_event);
+          rez.serialize(serdez_id);
+          rez.serialize<size_t>(fids.size());
+          for (unsigned idx = 0; idx < fids.size(); idx++)
+          {
+            rez.serialize(fids[idx]);
+            rez.serialize(sizes[idx]);
+          }
+          rez.serialize<size_t>(indexes.size());
+          for (std::set<unsigned>::const_iterator it = indexes.begin();
+                it != indexes.end(); it++)
+            rez.serialize(*it);
+          rez.serialize(&new_indexes);
+        }
+        context->runtime->send_local_field_alloc_request(owner, rez);
+        // Wait for the result
+        if (!allocated_event.has_triggered())
+          allocated_event.wait();
+        if (new_indexes.empty())
+          return false;
+        // When we wake up then fill in the field information
+        AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(new_indexes.size() == fids.size());
+#endif
+        for (unsigned idx = 0; idx < fids.size(); idx++)
+        {
+          FieldID fid = fids[idx];
+          fields[fid] = FieldInfo(sizes[idx], new_indexes[idx], serdez_id);
+        }
+      }
+      else
+      {
+        // We're the owner so do the field allocation
+        AutoLock n_lock(node_lock);
+        if (!allocate_local_indexes(sizes, indexes, new_indexes))
+          return false;
+        for (unsigned idx = 0; idx < fids.size(); idx++)
+        {
+          FieldID fid = fids[idx];
+          if (fields.find(fid) != fields.end())
+          {
+            log_field.error("Illegal duplicate field ID %d used by the "
+                            "application in field space %d", fid, handle.id);
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_DUPLICATE_FIELD_ID);
+          }
+          fields[fid] = FieldInfo(sizes[idx], new_indexes[idx], serdez_id);
+        }
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::free_local_fields(const std::vector<FieldID> &to_free,
+                                           const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(to_free.size() == indexes.size());
+#endif
+      if (!is_owner)
+      {
+        // Send a message to the owner to do the free of the fields
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(handle);
+          rez.serialize<size_t>(to_free.size());
+          for (unsigned idx = 0; idx < to_free.size(); idx++)
+          {
+            rez.serialize(to_free[idx]);
+            rez.serialize(indexes[idx]);
+          }
+        }
+        context->runtime->send_local_field_free(owner, rez);
+      }
+      else
+      {
+        // Do the local free
+        AutoLock n_lock(node_lock); 
+        for (unsigned idx = 0; idx < to_free.size(); idx++)
+        {
+          std::map<FieldID,FieldInfo>::iterator finder = 
+            fields.find(to_free[idx]);
+#ifdef DEBUG_LEGION
+          assert(finder != fields.end());
+#endif
+          finder->second.destroyed = true;  
+        }
+        // Now free the indexes
+        free_local_indexes(indexes);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::update_local_fields(const std::vector<FieldID> &fids,
+                                  const std::vector<size_t> &sizes,
+                                  const std::vector<CustomSerdezID> &serdez_ids,
+                                  const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(fids.size() == sizes.size());
+      assert(fids.size() == serdez_ids.size());
+      assert(fids.size() == indexes.size());
+#endif
+      AutoLock n_lock(node_lock);
+      for (unsigned idx = 0; idx < fields.size(); idx++)
+        fields[fids[idx]] = FieldInfo(sizes[idx], indexes[idx],serdez_ids[idx]);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::remove_local_fields(
+                                          const std::vector<FieldID> &to_remove)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      for (unsigned idx = 0; idx < to_remove.size(); idx++)
+      {
+        std::map<FieldID,FieldInfo>::iterator finder = 
+          fields.find(to_remove[idx]);
+#ifdef DEBUG_LEGION
+        assert(finder != fields.end());
+#endif
+        finder->second.destroyed = true;  
       }
     }
 
@@ -7554,6 +7770,99 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_local_alloc_request(
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldSpace handle;
+      derez.deserialize(handle);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      CustomSerdezID serdez_id;
+      derez.deserialize(serdez_id);
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      std::vector<FieldID> fields(num_fields);
+      std::vector<size_t> sizes(num_fields);
+      for (unsigned idx = 0; idx < num_fields; idx++)
+      {
+        derez.deserialize(fields[idx]);
+        derez.deserialize(sizes[idx]);
+      }
+      size_t num_indexes;
+      derez.deserialize(num_indexes);
+      std::set<unsigned> current_indexes;
+      for (unsigned idx = 0; idx < num_indexes; idx++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        current_indexes.insert(index);
+      }
+      std::vector<unsigned> *destination;
+      derez.deserialize(destination);
+
+      FieldSpaceNode *node = forest->get_node(handle);
+      std::vector<unsigned> new_indexes(num_fields);
+      if (node->allocate_local_fields(fields, sizes, serdez_id,
+                                      current_indexes, new_indexes))
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(destination);
+          rez.serialize<size_t>(new_indexes.size());
+          for (unsigned idx = 0; idx < new_indexes.size(); idx++)
+            rez.serialize(new_indexes[idx]);
+          rez.serialize(done_event);
+        }
+        forest->runtime->send_local_field_alloc_response(source, rez);
+      }
+      else // if we failed we can just trigger the event
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_local_alloc_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::vector<unsigned> *destination;
+      derez.deserialize(destination);
+      size_t num_indexes;
+      derez.deserialize(num_indexes);
+      destination->resize(num_indexes);
+      for (unsigned idx = 0; idx < num_indexes; idx++)
+        derez.deserialize((*destination)[idx]);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void FieldSpaceNode::handle_local_free(RegionTreeForest *forest,
+                                                      Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      FieldSpace handle;
+      derez.deserialize(handle);
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      std::vector<FieldID> fields(num_fields);
+      std::vector<unsigned> indexes(num_fields);
+      for (unsigned idx = 0; idx < num_fields; idx++)
+      {
+        derez.deserialize(fields[idx]);
+        derez.deserialize(indexes[idx]);
+      }
+
+      FieldSpaceNode *node = forest->get_node(handle);
+      node->free_local_fields(fields, indexes);
+    }
+
+    //--------------------------------------------------------------------------
     InstanceManager* FieldSpaceNode::create_file_instance(
                                          const std::set<FieldID> &create_fields, 
                                          RegionNode *node, AttachOp *attach_op)
@@ -7911,7 +8220,12 @@ namespace Legion {
 #endif
       int result = available_indexes.find_first_set();
       if (result >= 0)
+      {
+        // If we have slots for local fields then we can't use those
+        if (result >= int(MAX_FIELDS - Runtime::max_local_fields))
+          return -1;
         available_indexes.unset_bit(result);
+      }
       return result;
     }
 
@@ -7962,6 +8276,93 @@ namespace Legion {
             to_delete.begin(); it != to_delete.end(); it++)
       {
         layouts.erase(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool FieldSpaceNode::allocate_local_indexes(
+                                      const std::vector<size_t> &sizes,
+                                      const std::set<unsigned> &current_indexes,
+                                            std::vector<unsigned> &new_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      new_indexes.resize(sizes.size());
+      // Iterate over the different fields to allocate and try to find
+      // an index for them in our list of local fields
+      for (unsigned fidx = 0; fidx < sizes.size(); fidx++)
+      {
+        const size_t field_size = sizes[fidx];
+        int chosen_index = -1;
+        unsigned global_idx = MAX_FIELDS - Runtime::max_local_fields;
+        for (unsigned local_idx = 0; 
+              local_idx < local_field_infos.size(); local_idx++, global_idx++)
+        {
+          // If it's already been allocated in this context then
+          // we can't use it
+          if (current_indexes.find(global_idx) != current_indexes.end())
+            continue;
+          LocalFieldInfo &info = local_field_infos[local_idx];
+          // Check if the current local field index is used
+          if (info.count > 0)
+          {
+            // Already in use, check to see if the field sizes are the same
+            if (info.size == field_size)
+            {
+              // Same size so we can use it
+              info.count++;
+              chosen_index = global_idx;
+              break;
+            }
+            // Else different field size means we can't reuse it
+          }
+          else
+          {
+            // Not in use, so we can assign the size and make
+            // ourselves the first user
+            info.size = field_size;
+            info.count = 1;
+            chosen_index = global_idx;
+            break;
+          }
+        }
+        // If we didn't pick a valid index then we failed
+        if (chosen_index < 0)
+          return false;
+        // Save the result
+        new_indexes[fidx] = chosen_index;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::free_local_indexes(
+                                           const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      for (unsigned idx = 0; idx < indexes.size(); idx++)
+      {
+        // Translate back to a local field index
+#ifdef DEBUG_LEGION
+        assert(indexes[idx] >= (MAX_FIELDS - Runtime::max_local_fields));
+#endif
+        const unsigned local_index = 
+          indexes[idx] - (MAX_FIELDS - Runtime::max_local_fields);
+#ifdef DEBUG_LEGION
+        assert(local_index < local_field_infos.size());
+#endif
+        LocalFieldInfo &info = local_field_infos[local_index];
+#ifdef DEBUG_LEGION
+        assert(info.count > 0);
+#endif
+        info.count--; // decrement the count, if it is zero we can clear it
+        if (info.count == 0)
+          info.size = 0;
       }
     }
 
