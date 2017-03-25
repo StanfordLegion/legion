@@ -202,6 +202,24 @@ namespace Legion {
                            const std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id);
       void free_fields(FieldSpace handle, const std::vector<FieldID> &to_free);
+    public:
+      bool allocate_local_fields(FieldSpace handle, 
+                                 const std::vector<FieldID> &resulting_fields,
+                                 const std::vector<size_t> &sizes,
+                                 CustomSerdezID serdez_id,
+                                 const std::set<unsigned> &allocated_indexes,
+                                 std::vector<unsigned> &new_indexes);
+      void free_local_fields(FieldSpace handle,
+                             const std::vector<FieldID> &to_free,
+                             const std::vector<unsigned> &indexes);
+      void update_local_fields(FieldSpace handle,
+                               const std::vector<FieldID> &fields,
+                               const std::vector<size_t> &sizes,
+                               const std::vector<CustomSerdezID> &serdez_ids,
+                               const std::vector<unsigned> &indexes);
+      void remove_local_fields(FieldSpace handle,
+                               const std::vector<FieldID> &to_remove);
+    public:
       void get_all_fields(FieldSpace handle, std::set<FieldID> &fields);
       void get_all_regions(FieldSpace handle, std::set<LogicalRegion> &regions);
       size_t get_field_size(FieldSpace handle, FieldID fid);
@@ -1068,6 +1086,16 @@ namespace Legion {
         CustomSerdezID serdez_id;
         bool destroyed;
       };
+      struct LocalFieldInfo {
+      public:
+        LocalFieldInfo(void)
+          : size(0), count(0) { }
+        LocalFieldInfo(size_t s)
+          : size(s), count(0) { }
+      public:
+        size_t size;
+        unsigned count;
+      };
       struct FindTargetsFunctor {
       public:
         FindTargetsFunctor(std::deque<AddressSpaceID> &t)
@@ -1155,6 +1183,19 @@ namespace Legion {
       void free_field(FieldID fid, AddressSpaceID source);
       void free_fields(const std::vector<FieldID> &to_free,
                        AddressSpaceID source);
+    public:
+      bool allocate_local_fields(const std::vector<FieldID> &fields,
+                                 const std::vector<size_t> &sizes,
+                                 CustomSerdezID serdez_id,
+                                 const std::set<unsigned> &indexes,
+                                 std::vector<unsigned> &new_indexes);
+      void free_local_fields(const std::vector<FieldID> &to_free,
+                             const std::vector<unsigned> &indexes);
+      void update_local_fields(const std::vector<FieldID> &fields,
+                               const std::vector<size_t> &sizes,
+                               const std::vector<CustomSerdezID> &serdez_ids,
+                               const std::vector<unsigned> &indexes);
+      void remove_local_fields(const std::vector<FieldID> &to_removes);
     protected:
       void process_alloc_notification(Deserializer &derez);
     public:
@@ -1220,6 +1261,12 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_field_free(RegionTreeForest *forest,
                                     Deserializer &derez, AddressSpaceID source);
+      static void handle_local_alloc_request(RegionTreeForest *forest,
+                                             Deserializer &derez,
+                                             AddressSpaceID source);
+      static void handle_local_alloc_response(Deserializer &derez);
+      static void handle_local_free(RegionTreeForest *forest,
+                                    Deserializer &derez);
     public:
       // Help with debug printing
       char* to_string(const FieldMask &mask) const;
@@ -1230,6 +1277,12 @@ namespace Legion {
       // when calling these methods
       int allocate_index(void);
       void free_index(unsigned index);
+    protected:
+      bool allocate_local_indexes(
+            const std::vector<size_t> &sizes,
+            const std::set<unsigned> &current_indexes,
+                  std::vector<unsigned> &new_indexes);
+      void free_local_indexes(const std::vector<unsigned> &indexes);
     public:
       const FieldSpace handle;
       const bool is_owner;
@@ -1254,6 +1307,9 @@ namespace Legion {
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
       LegionMap<std::pair<FieldID,SemanticTag>,SemanticInfo>::aligned 
                                                     semantic_field_info;
+    private:
+      // Local field information
+      std::vector<LocalFieldInfo> local_field_infos;
     };
  
     /**

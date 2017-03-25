@@ -5355,6 +5355,27 @@ namespace Legion {
               runtime->handle_field_free(derez, remote_address_space);
               break;
             }
+          case SEND_LOCAL_FIELD_ALLOC_REQUEST:
+            {
+              runtime->handle_local_field_alloc_request(derez, 
+                                                        remote_address_space);
+              break;
+            }
+          case SEND_LOCAL_FIELD_ALLOC_RESPONSE:
+            {
+              runtime->handle_local_field_alloc_response(derez);
+              break;
+            }
+          case SEND_LOCAL_FIELD_FREE:
+            {
+              runtime->handle_local_field_free(derez);
+              break;
+            }
+          case SEND_LOCAL_FIELD_UPDATE:
+            {
+              runtime->handle_local_field_update(derez);
+              break;
+            }
           case SEND_TOP_LEVEL_REGION_REQUEST:
             {
               runtime->handle_top_level_region_request(derez, 
@@ -13070,6 +13091,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_local_field_alloc_request(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LOCAL_FIELD_ALLOC_REQUEST,
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_local_field_alloc_response(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LOCAL_FIELD_ALLOC_RESPONSE,
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_local_field_free(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LOCAL_FIELD_FREE,
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_local_field_update(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_LOCAL_FIELD_UPDATE,
+                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_top_level_region_request(AddressSpaceID target,
                                                 Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14082,6 +14137,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode::handle_field_free(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_local_field_alloc_request(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_local_alloc_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_local_field_alloc_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_local_alloc_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_local_field_free(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      FieldSpaceNode::handle_local_free(forest, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_local_field_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_local_field_update(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -17974,6 +18058,8 @@ namespace Legion {
                                       DEFAULT_MAX_MESSAGE_SIZE;
     /*static*/ unsigned Runtime::gc_epoch_size = 
                                       DEFAULT_GC_EPOCH_SIZE;
+    /*static*/ unsigned Runtime::max_local_fields = 
+                                      DEFAULT_LOCAL_FIELDS;
     /*static*/ bool Runtime::runtime_started = false;
     /*static*/ bool Runtime::runtime_backgrounded = false;
     /*static*/ bool Runtime::runtime_warnings = false;
@@ -18100,6 +18186,7 @@ namespace Legion {
         superscalar_width = DEFAULT_SUPERSCALAR_WIDTH;
         max_message_size = DEFAULT_MAX_MESSAGE_SIZE;
         gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
+        max_local_fields = DEFAULT_LOCAL_FIELDS;
         program_order_execution = false;
         num_profiling_nodes = 0;
         legion_collective_radix = LEGION_COLLECTIVE_RADIX;
@@ -18134,6 +18221,7 @@ namespace Legion {
           INT_ARG("-lg:width", superscalar_width);
           INT_ARG("-lg:message",max_message_size);
           INT_ARG("-lg:epoch", gc_epoch_size);
+          INT_ARG("-lg:local", max_local_fields);
           if (!strcmp(argv[i],"-lg:no_dyn"))
             dynamic_independence_tests = false;
           BOOL_ARG("-lg:spy",legion_spy_enabled);
@@ -18233,6 +18321,7 @@ namespace Legion {
 #undef BOOL_ARG
 #ifdef DEBUG_LEGION
         assert(initial_task_window_hysteresis <= 100);
+        assert(max_local_fields <= MAX_FIELDS);
 #endif
       }
       if (legion_spy_enabled)
@@ -19274,14 +19363,6 @@ namespace Legion {
             deferred_commit_args->proxy_this->commit_operation(
                 deferred_commit_args->deactivate);
             break;
-          }
-        case LG_RECLAIM_LOCAL_FIELD_ID:
-          {
-            const TaskContext::ReclaimLocalFieldArgs *rargs = 
-              (const TaskContext::ReclaimLocalFieldArgs*)args;
-            Runtime::get_runtime(p)->finalize_field_destroy(rargs->handle,
-                                                            rargs->fid);
-            break; 
           }
         case LG_DEFERRED_COLLECT_ID:
           {

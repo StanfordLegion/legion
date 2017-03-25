@@ -801,70 +801,76 @@ namespace Legion {
     bool FieldConstraint::conflicts(const FieldConstraint &other) const
     //--------------------------------------------------------------------------
     {
-      // The only way for us to conflict is if we want fields to be inorder
-      // and the other one wants them also to be inorder but a different order
-      if (inorder && other.inorder)
+      // If they need inorder and we're not that is bad
+      if (!inorder && other.inorder)
+        return true;
+      // If they need contiguous and we're not that is bad
+      if (!contiguous && other.contiguous)
+        return true;
+      if (other.field_set.empty())
+        return false;
+      // See if they need us to be inorder
+      if (other.inorder)
       {
-        // Both inorder, see if our fields come in the same order 
-        // Do this different if they both are contigous or not
-        if (contiguous && other.contiguous)
+        // See if they need us to be contiguous
+        if (other.contiguous)
         {
-          int previous_idx = -1;
-          for (std::vector<FieldID>::const_iterator it = field_set.begin();
-                it != field_set.end(); it++)
-          {
-            int next_idx = -1;
-            for (unsigned idx = 0; idx < other.field_set.size(); idx++)
-            {
-              if ((*it) == other.field_set[idx])
-              {
-                next_idx = idx;
-                break;
-              }
-            }
-            if (next_idx >= 0)
-            {
-              // This field was in the other set, see if it was in a good place
-              if (previous_idx >= 0)
-              {
-                if ((next_idx) != (previous_idx+1))
-                  return true; // conflict!
-              }
-              // Record the previous idx and keep going
-              previous_idx = next_idx;
-            }
-            else if (previous_idx >= 0)
-              return true; // fields are not contiguous
-          }
+          // We must have their fields inorder and contiguous
+          unsigned our_index = 0;
+          for (/*nothing*/; our_index < field_set.size(); our_index++)
+            if (field_set[our_index] == other.field_set[0])
+              break;
+          // If it doesn't have enough space that is bad
+          if ((our_index + other.field_set.size()) > field_set.size())
+              return true;
+          for (unsigned other_idx = 0; 
+                other_idx < other.field_set.size(); other_idx++, our_index++)
+            if (field_set[our_index] != other.field_set[other_idx])
+              return true;
         }
         else
         {
-          int previous_idx = -1;
-          for (std::vector<FieldID>::const_iterator it = field_set.begin();
-                it != field_set.end(); it++)
+          // We must have their fields inorder but not contiguous
+          unsigned other_index = 0;
+          for (unsigned idx = 0; field_set.size(); idx++)
           {
-            int next_idx = -1;
-            for (unsigned idx = 0; idx < other.field_set.size(); idx++)
+            if (other.field_set[other_index] == field_set[idx])
             {
-              if ((*it) == other.field_set[idx])
-              {
-                next_idx = idx;
+              other_index++;
+              if (other_index == other.field_set.size())
                 break;
-              }
-            }
-            // Only care if we found it
-            if (next_idx >= 0)
-            {
-              // This field was in the other set, see if it was in a good place
-              if (previous_idx >= 0)
-              {
-                if (next_idx < previous_idx)
-                  return true; // conflict!
-              }
-              // Record the previous idx and keep going
-              previous_idx = next_idx;
             }
           }
+          return (other_index < other.field_set.size());
+        }
+      }
+      else
+      {
+        // See if they need us to be contiguous
+        if (other.contiguous)
+        {
+          // We have to have their fields contiguous but not in order
+          // Find a start index   
+          std::set<FieldID> other_fields(other.field_set.begin(),
+                                         other.field_set.end());
+          unsigned our_index = 0;
+          for (/*nothing*/; our_index < field_set.size(); our_index++)
+            if (other_fields.find(field_set[our_index]) != other_fields.end())
+              break;
+          // If it doesn't have enough space that is bad
+          if ((our_index + other_fields.size()) > field_set.size())
+              return true;
+          for ( /*nothing*/; our_index < other_fields.size(); our_index++)
+            if (other_fields.find(field_set[our_index]) == other_fields.end())
+              return true;
+        }
+        else
+        {
+          // We just have to have their fields in any order
+          std::set<FieldID> our_fields(field_set.begin(), field_set.end());
+          for (unsigned idx = 0; idx < other.field_set.size(); idx++)
+            if (our_fields.find(other.field_set[idx]) == our_fields.end())
+              return true;
         }
       }
       return false;  

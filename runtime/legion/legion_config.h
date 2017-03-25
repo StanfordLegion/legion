@@ -77,6 +77,10 @@
 #ifndef MAX_APPLICATION_MAPPER_ID
 #define MAX_APPLICATION_MAPPER_ID       (1<<20)
 #endif
+// Default number of local fields per field space
+#ifndef DEFAULT_LOCAL_FIELDS
+#define DEFAULT_LOCAL_FIELDS            4
+#endif
 // Default number of mapper slots
 #ifndef DEFAULT_MAPPER_SLOTS
 #define DEFAULT_MAPPER_SLOTS            8

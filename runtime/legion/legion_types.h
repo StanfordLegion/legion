@@ -248,7 +248,6 @@ namespace Legion {
       LG_DEFERRED_EXECUTE_ID,
       LG_DEFERRED_COMPLETE_ID,
       LG_DEFERRED_COMMIT_ID,
-      LG_RECLAIM_LOCAL_FIELD_ID,
       LG_DEFERRED_COLLECT_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
@@ -344,7 +343,6 @@ namespace Legion {
         "Deferred Execute",                                       \
         "Deferred Complete",                                      \
         "Deferred Commit",                                        \
-        "Reclaim Local Field",                                    \
         "Garbage Collection",                                     \
         "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \
@@ -570,6 +568,10 @@ namespace Legion {
       SEND_FIELD_ALLOC_NOTIFICATION,
       SEND_FIELD_SPACE_TOP_ALLOC,
       SEND_FIELD_FREE,
+      SEND_LOCAL_FIELD_ALLOC_REQUEST,
+      SEND_LOCAL_FIELD_ALLOC_RESPONSE,
+      SEND_LOCAL_FIELD_FREE,
+      SEND_LOCAL_FIELD_UPDATE,
       SEND_TOP_LEVEL_REGION_REQUEST,
       SEND_TOP_LEVEL_REGION_RETURN,
       SEND_LOGICAL_REGION_NODE,
@@ -691,6 +693,10 @@ namespace Legion {
         "Send Field Alloc Notification",                              \
         "Send Field Space Top Alloc",                                 \
         "Send Field Free",                                            \
+        "Send Local Field Alloc Request",                             \
+        "Send Local Field Alloc Response",                            \
+        "Send Local Field Free",                                      \
+        "Send Local Field Update",                                    \
         "Send Top Level Region Request",                              \
         "Send Top Level Region Return",                               \
         "Send Logical Region Node",                                   \
