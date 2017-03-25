@@ -4246,7 +4246,12 @@ namespace Legion {
       else
       {
         // Not remote
-        early_map_task();
+        // If we're doing a must epoch launch then we don't
+        // need to early map any regions because any interfering
+        // regions that would be handled by this will be handled
+        // by the map_must_epoch call
+        if (must_epoch == NULL)
+          early_map_task();
         if (is_locally_mapped())
         {
           if (is_sliced())
