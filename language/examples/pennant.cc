@@ -979,6 +979,9 @@ public:
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
+  virtual void default_policy_rank_processor_kinds(
+                                    MapperContext ctx, const Task &task,
+                                    std::vector<Processor::Kind> &ranking);
   virtual Processor default_policy_select_initial_processor(
                                     MapperContext ctx, const Task &task);
   virtual void default_policy_select_target_processors(
@@ -1023,6 +1026,32 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
 {
 }
 
+void PennantMapper::default_policy_rank_processor_kinds(MapperContext ctx,
+                        const Task &task, std::vector<Processor::Kind> &ranking)
+{
+#define SPMD_SHARD_USE_IO_PROC 1
+#if SPMD_SHARD_USE_IO_PROC
+  const char* task_name = task.get_task_name();
+  const char* prefix = "shard_";
+  if (strncmp(task_name, prefix, strlen(prefix)) == 0) {
+    // Put shard tasks on IO processors.
+    ranking.resize(4);
+    ranking[0] = Processor::TOC_PROC;
+    ranking[1] = Processor::PROC_SET;
+    ranking[2] = Processor::IO_PROC;
+    ranking[3] = Processor::LOC_PROC;
+  } else {
+#endif
+    ranking.resize(4);
+    ranking[0] = Processor::TOC_PROC;
+    ranking[1] = Processor::PROC_SET;
+    ranking[2] = Processor::LOC_PROC;
+    ranking[3] = Processor::IO_PROC;
+#if SPMD_SHARD_USE_IO_PROC
+  }
+#endif
+}
+
 Processor PennantMapper::default_policy_select_initial_processor(
                                     MapperContext ctx, const Task &task)
 {
@@ -1036,7 +1065,7 @@ Processor PennantMapper::default_policy_select_initial_processor(
       std::vector<Processor> &local_procs =
         sysmem_local_procs[proc_sysmems[local_proc]];
       if (local_procs.size() > 1) {
-#define SPMD_RESERVE_SHARD_PROC 1
+#define SPMD_RESERVE_SHARD_PROC 0
 #if SPMD_RESERVE_SHARD_PROC
         return local_procs[(index % (local_procs.size() - 1)) + 1];
 #else
@@ -1206,7 +1235,8 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
 
   for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
     Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
-    if (affinity.p.kind() == Processor::LOC_PROC) {
+    if (affinity.p.kind() == Processor::LOC_PROC ||
+        affinity.p.kind() == Processor::IO_PROC) {
       if (affinity.m.kind() == Memory::SYSTEM_MEM) {
         (*proc_sysmems)[affinity.p] = affinity.m;
         if (proc_regmems->find(affinity.p) == proc_regmems->end())
@@ -1219,8 +1249,10 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
 
   for (std::map<Processor, Memory>::iterator it = proc_sysmems->begin();
        it != proc_sysmems->end(); ++it) {
-    procs_list->push_back(it->first);
-    (*sysmem_local_procs)[it->second].push_back(it->first);
+    if (it->first.kind() == Processor::LOC_PROC) {
+      procs_list->push_back(it->first);
+      (*sysmem_local_procs)[it->second].push_back(it->first);
+    }
   }
 
   for (std::map<Memory, std::vector<Processor> >::iterator it =
