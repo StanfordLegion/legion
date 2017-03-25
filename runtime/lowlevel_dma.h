@@ -119,7 +119,7 @@ namespace LegionRuntime {
     extern void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs);
     extern void stop_dma_worker_threads(void);
 
-    extern void start_dma_system(int count, int max_nr, Realm::CoreReservationSet& crs);
+    extern void start_dma_system(int count, bool pinned, int max_nr, Realm::CoreReservationSet& crs);
 
     extern void stop_dma_system(void);
     extern void create_builtin_dma_channels(Realm::RuntimeImpl *r);

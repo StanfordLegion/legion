@@ -4484,7 +4484,9 @@ class VerificationState(object):
             else:
                 assert req.is_read_only()
                 # Just have to add ourselves to the list of valid instances
-                self.valid_instances.add(inst)
+                # Only do this if we had valid data to begin with
+                if self.is_initialized():
+                    self.valid_instances.add(inst)
         # Finally perform our registrations
         if perform_registration and not self.perform_verification_registration(op, 
                                                         req, inst, perform_checks):
@@ -4517,7 +4519,6 @@ class VerificationState(object):
         if perform_checks:
             # Special case for the first access with uninitialized state
             if not self.is_initialized():
-                self.reset()
                 return True
             traverser = VerificationTraverser(self, self.depth, self.field, req, inst, 
                          op, req, self.version_number, self.version_number, error_str)
