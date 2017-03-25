@@ -5531,9 +5531,9 @@ namespace Legion {
             for (std::vector<VersionState*>::const_iterator it = 
                   to_remove.begin(); it != to_remove.end(); it++)
               vit->second.erase(*it);
+            if (vit->second.empty())
+              to_delete.push_back(vit->first);
           }
-          if (vit->second.empty())
-            to_delete.push_back(vit->first);
         }
       }
       if (!to_delete.empty())
