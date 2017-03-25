@@ -1054,51 +1054,6 @@ void PennantMapper::default_policy_select_target_processors(
   target_procs.push_back(task.target_proc);
 }
 
-void PennantMapper::map_copy(const MapperContext ctx,
-                             const Copy &copy,
-                             const MapCopyInput &input,
-                             MapCopyOutput &output)
-{
-  log_pennant.spew("Pennant mapper map_copy");
-  for (unsigned idx = 0; idx < copy.src_requirements.size(); idx++)
-  {
-    // Use a virtual instance for the source unless source is
-    // restricted or we'd applying a reduction.
-    output.src_instances[idx].clear();
-    if (copy.src_requirements[idx].is_restricted()) {
-      // If it's restricted, just take the instance. This will only
-      // happen inside the shard task.
-      output.src_instances[idx] = input.src_instances[idx];
-      if (!output.src_instances[idx].empty())
-        runtime->acquire_and_filter_instances(ctx,
-                                output.src_instances[idx]);
-    } else if (copy.dst_requirements[idx].privilege == REDUCE) {
-      // Use the default here. This will place the instance on the
-      // current node.
-      default_create_copy_instance<true/*is src*/>(ctx, copy,
-                copy.src_requirements[idx], idx, output.src_instances[idx]);
-    } else {
-      output.src_instances[idx].push_back(
-        PhysicalInstance::get_virtual_instance());
-    }
-
-    // Place the destination instance on the remote node.
-    output.dst_instances[idx].clear();
-    if (!copy.dst_requirements[idx].is_restricted()) {
-      // Call a customized method to create an instance on the desired node.
-      pennant_create_copy_instance<false/*is src*/>(ctx, copy,
-        copy.dst_requirements[idx], idx, output.dst_instances[idx]);
-    } else {
-      // If it's restricted, just take the instance. This will only
-      // happen inside the shard task.
-      output.dst_instances[idx] = input.dst_instances[idx];
-      if (!output.dst_instances[idx].empty())
-        runtime->acquire_and_filter_instances(ctx,
-                                output.dst_instances[idx]);
-    }
-  }
-}
-
 //--------------------------------------------------------------------------
 template<bool IS_SRC>
 void PennantMapper::pennant_create_copy_instance(MapperContext ctx,
@@ -1172,6 +1127,51 @@ void PennantMapper::pennant_create_copy_instance(MapperContext ctx,
 		       target_memory.id,
 		       copy.parent_task->current_proc.id);
     assert(false);
+  }
+}
+
+void PennantMapper::map_copy(const MapperContext ctx,
+                             const Copy &copy,
+                             const MapCopyInput &input,
+                             MapCopyOutput &output)
+{
+  log_pennant.spew("Pennant mapper map_copy");
+  for (unsigned idx = 0; idx < copy.src_requirements.size(); idx++)
+  {
+    // Use a virtual instance for the source unless source is
+    // restricted or we'd applying a reduction.
+    output.src_instances[idx].clear();
+    if (copy.src_requirements[idx].is_restricted()) {
+      // If it's restricted, just take the instance. This will only
+      // happen inside the shard task.
+      output.src_instances[idx] = input.src_instances[idx];
+      if (!output.src_instances[idx].empty())
+        runtime->acquire_and_filter_instances(ctx,
+                                output.src_instances[idx]);
+    } else if (copy.dst_requirements[idx].privilege == REDUCE) {
+      // Use the default here. This will place the instance on the
+      // current node.
+      default_create_copy_instance<true/*is src*/>(ctx, copy,
+                copy.src_requirements[idx], idx, output.src_instances[idx]);
+    } else {
+      output.src_instances[idx].push_back(
+        PhysicalInstance::get_virtual_instance());
+    }
+
+    // Place the destination instance on the remote node.
+    output.dst_instances[idx].clear();
+    if (!copy.dst_requirements[idx].is_restricted()) {
+      // Call a customized method to create an instance on the desired node.
+      pennant_create_copy_instance<false/*is src*/>(ctx, copy,
+        copy.dst_requirements[idx], idx, output.dst_instances[idx]);
+    } else {
+      // If it's restricted, just take the instance. This will only
+      // happen inside the shard task.
+      output.dst_instances[idx] = input.dst_instances[idx];
+      if (!output.dst_instances[idx].empty())
+        runtime->acquire_and_filter_instances(ctx,
+                                output.dst_instances[idx]);
+    }
   }
 }
 
