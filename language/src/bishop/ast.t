@@ -114,10 +114,12 @@ function ast_node:__call(fields_to_update)
     values[f] = self[f]
   end
   for f, v in pairs(fields_to_update) do
-    if values[f] == nil then
-      error(tostring(ctor) .. " does not require argument '" .. f .. "'", 2)
+    if f ~= "unparse" and f ~= "node_type" then
+      if values[f] == nil then
+        error(tostring(ctor) .. " does not require argument '" .. f .. "'", 2)
+      end
+      values[f] = v
     end
-    values[f] = v
   end
   return ctor(values)
 end

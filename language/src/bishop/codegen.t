@@ -370,7 +370,7 @@ local function merge_region_properties(rules, signature)
   for idx = 1, num_reqs do
     local properties = {}
     for key, value in pairs(default_region_properties) do
-      properties[key] = value
+      properties[key] = value(value)
     end
     if regent_std.is_reduction_op(signature.reqs[idx].privilege) then
       properties.create.value = "demand"
@@ -386,7 +386,7 @@ local function merge_region_properties(rules, signature)
       end)
       if matched then
         for _, property in pairs(rules[ridx].properties) do
-          properties[property.field] = property.value
+          properties[property.field] = property.value(property.value)
         end
       end
     end
