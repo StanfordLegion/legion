@@ -10556,7 +10556,7 @@ namespace Legion {
       if (result >= 0)
       {
         // If we have slots for local fields then we can't use those
-        if (result >= (MAX_FIELDS - Runtime::max_local_fields))
+        if (result >= int(MAX_FIELDS - Runtime::max_local_fields))
           return -1;
         available_indexes.unset_bit(result);
       }
