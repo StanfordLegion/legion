@@ -7351,7 +7351,7 @@ namespace Legion {
       assert(fids.size() == indexes.size());
 #endif
       AutoLock n_lock(node_lock);
-      for (unsigned idx = 0; idx < fields.size(); idx++)
+      for (unsigned idx = 0; idx < fids.size(); idx++)
         fields[fids[idx]] = FieldInfo(sizes[idx], indexes[idx],serdez_ids[idx]);
     }
 
@@ -7816,7 +7816,7 @@ namespace Legion {
       derez.deserialize(destination);
 
       FieldSpaceNode *node = forest->get_node(handle);
-      std::vector<unsigned> new_indexes(num_fields);
+      std::vector<unsigned> new_indexes;
       if (node->allocate_local_fields(fields, sizes, serdez_id,
                                       current_indexes, new_indexes))
       {

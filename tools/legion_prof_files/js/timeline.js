@@ -187,7 +187,7 @@ function getLineColor(elem) {
     "(CPU)": "steelblue",
     "(GPU)": "olivedrab",
     "(Utility)": "crimson",
-    "(I/O)": "orangered"
+    "(IO)": "orangered"
   };
   return colorMap[kind];
 }
@@ -312,6 +312,9 @@ function drawLoaderIcon() {
       dur: "0.5s",
       repeatCount: "indefinite"
     });
+    state.loaderSvg.select("g").attr("visibility", "hidden");
+    state.loaderSvg.attr("width", "0px")
+                   .attr("height", "0px");
 }
 
 function showLoaderIcon() {
