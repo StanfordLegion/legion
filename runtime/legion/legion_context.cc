@@ -7203,7 +7203,7 @@ namespace Legion {
         {
           // Take the lock for updating this data structure
           AutoLock ctx_lock(context_lock);
-          std::vector<LocalFieldInfo> &infos = local_fields[fidx];
+          std::vector<LocalFieldInfo> &infos = local_fields[handle];
           infos.resize(num_local);
           for (unsigned idx = 0; idx < num_local; idx++)
           {
