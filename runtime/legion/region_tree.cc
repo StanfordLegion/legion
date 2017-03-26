@@ -9672,7 +9672,7 @@ namespace Legion {
       assert(fids.size() == indexes.size());
 #endif
       AutoLock n_lock(node_lock);
-      for (unsigned idx = 0; idx < fields.size(); idx++)
+      for (unsigned idx = 0; idx < fids.size(); idx++)
         fields[fids[idx]] = FieldInfo(sizes[idx], indexes[idx],serdez_ids[idx]);
     }
 
