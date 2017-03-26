@@ -8383,6 +8383,89 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Cyclic Sharding Functor
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CyclicShardingFunctor::CyclicShardingFunctor(void)
+      : ShardingFunctor()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CyclicShardingFunctor::CyclicShardingFunctor(
+                                               const CyclicShardingFunctor &rhs)
+      : ShardingFunctor()
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CyclicShardingFunctor::~CyclicShardingFunctor(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CyclicShardingFunctor& CyclicShardingFunctor::operator=(
+                                               const CyclicShardingFunctor &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM>
+    size_t CyclicShardingFunctor::linearize_point(
+                                  const Realm::ZIndexSpace<DIM,coord_t> &is,
+                                  const Realm::ZPoint<DIM,coord_t> &point) const
+    //--------------------------------------------------------------------------
+    {
+      Realm::AffineLinearizedIndexSpace<DIM,coord_t> linearizer(is);
+      return linearizer.linearize(point);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID CyclicShardingFunctor::shard(const DomainPoint &point,
+                                         const Domain &full_space,
+                                         const ShardID max_shard) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(point.get_dim() == full_space.get_dim());
+#endif
+      switch (point.get_dim())
+      {
+        case 1:
+          {
+            const Realm::ZIndexSpace<1,coord_t> is = full_space;  
+            const Realm::ZPoint<1,coord_t> p1 = point;
+            return (linearize_point<1>(is, p1) % (max_shard+1));
+          }
+        case 2:
+          {
+            const Realm::ZIndexSpace<2,coord_t> is = full_space;  
+            const Realm::ZPoint<2,coord_t> p2 = point;
+            return (linearize_point<2>(is, p2) % (max_shard+1));
+          }
+        case 3:
+          {
+            const Realm::ZIndexSpace<3,coord_t> is = full_space;  
+            const Realm::ZPoint<3,coord_t> p3 = point;
+            return (linearize_point<3>(is, p3) % (max_shard+1));
+          }
+        default:
+          assert(false);
+      }
+      return 0;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
 

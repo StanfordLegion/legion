@@ -1374,6 +1374,10 @@ namespace Legion {
     public:
       CyclicShardingFunctor& operator=(const CyclicShardingFunctor &rhs);
     public:
+      template<int DIM>
+      size_t linearize_point(const Realm::ZIndexSpace<DIM,coord_t> &is,
+                              const Realm::ZPoint<DIM,coord_t> &point) const;
+    public:
       virtual ShardID shard(const DomainPoint &point,
                             const Domain &full_space,
                             const ShardID max_shard) const;
