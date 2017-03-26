@@ -10137,7 +10137,7 @@ namespace Legion {
       derez.deserialize(destination);
 
       FieldSpaceNode *node = forest->get_node(handle);
-      std::vector<unsigned> new_indexes(num_fields);
+      std::vector<unsigned> new_indexes;
       if (node->allocate_local_fields(fields, sizes, serdez_id,
                                       current_indexes, new_indexes))
       {
