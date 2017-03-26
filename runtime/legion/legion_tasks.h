@@ -1178,7 +1178,7 @@ namespace Legion {
      * reductions, and exchanges of information between the 
      * variaous shard tasks.
      */
-    class ShardManager {
+    class ShardManager : public Mapper::SelectShardingFunctorInput {
     public:
       struct ShardManagerCloneArgs :
         public LgTaskArgs<ShardManagerCloneArgs> {
@@ -1284,7 +1284,8 @@ namespace Legion {
       SingleTask *const original_task;
     protected:
       Reservation                      manager_lock;
-      std::map<ShardID,Processor>      shard_mapping;
+      // Inheritted from Mapper::SelectShardingFunctorInput
+      // std::map<ShardID,Processor>   shard_mapping;
       std::vector<AddressSpaceID>      address_spaces;
       std::vector<ShardTask*>          local_shards;
     protected:

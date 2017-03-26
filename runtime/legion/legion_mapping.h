@@ -640,6 +640,32 @@ namespace Legion {
                                     const Task&              task,
                                     const TaskProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the task being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * task. The mapper must return the same sharding functor for all
+       * copies of the task. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      struct SelectShardingFunctorInput {
+        std::map<ShardID,Processor>             shard_mapping;
+      };
+      struct SelectShardingFunctorOutput {
+        ShardingID                              chosen_functor;
+      };
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Task&                        task,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
     public: // Inline mapping
       /**
        * ----------------------------------------------------------------------
@@ -875,6 +901,26 @@ namespace Legion {
                                     const Copy&              copy,
                                     const CopyProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the copy being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * copy. The mapper must return the same sharding functor for all
+       * instances of the copy. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Copy&                        copy,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
     public: // Close operations
       /**
        * ----------------------------------------------------------------------
@@ -986,6 +1032,26 @@ namespace Legion {
                                     const Close&              close,
                                     const CloseProfilingInfo& input)  = 0;
       //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the close being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * close. The mapper must return the same sharding functor for all
+       * instances of the close. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Close&                       close,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
     public: // Acquire operations
       /**
        * ----------------------------------------------------------------------
@@ -1039,6 +1105,26 @@ namespace Legion {
       virtual void report_profiling(const MapperContext         ctx,
                                     const Acquire&              acquire,
                                     const AcquireProfilingInfo& input) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the acquire being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * acquire . The mapper must return the same sharding functor for all
+       * instances of the acquire. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Acquire&                     acquire,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
       //------------------------------------------------------------------------
     public: // Release operations 
       /**
@@ -1151,6 +1237,26 @@ namespace Legion {
       virtual void report_profiling(const MapperContext         ctx,
                                     const Release&              release,
                                     const ReleaseProfilingInfo& input)  = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the release being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * release. The mapper must return the same sharding functor for all
+       * instances of the release. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Release&                     release,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
       //------------------------------------------------------------------------
     public: // Partition Operations
       /**
@@ -1291,6 +1397,26 @@ namespace Legion {
       virtual void report_profiling(const MapperContext              ctx,
                                     const Partition&                 partition,
                                     const PartitionProfilingInfo&    input) = 0;
+      //------------------------------------------------------------------------
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the partition being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the point(s) of the
+       * partition. The mapper must return the same sharding functor for all
+       * instances of the partition. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Partition&                   partition,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
       //------------------------------------------------------------------------
     public: // Single Task Context 
       /**

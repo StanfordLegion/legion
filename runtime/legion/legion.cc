@@ -5622,6 +5622,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::register_sharding_functor(ShardingID sid, 
+                                            ShardingFunctor *func)
+    //--------------------------------------------------------------------------
+    {
+      runtime->register_sharding_functor(sid, func);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_sharding_functor(ShardingID sid,
+                                                          ShardingFunctor *func)
+    //--------------------------------------------------------------------------
+    {
+      Internal::Runtime::preregister_sharding_functor(sid, func);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::attach_semantic_information(TaskID task_id, SemanticTag tag,
                                    const void *buffer, size_t size, bool is_mut)
     //--------------------------------------------------------------------------

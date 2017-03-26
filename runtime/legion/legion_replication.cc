@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "legion_context.h"
 #include "legion_replication.h"
 
 namespace Legion {
@@ -62,6 +63,42 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Do the mapper call to get the sharding function to use
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id); 
+      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
+      Mapper::SelectShardingFunctorOutput output;
+      output.chosen_functor = 0;
+      mapper->invoke_task_select_sharding_functor(this, input, &output);
+#if 0
+      // Get the sharding function implementation to use from our context
+      ShardingFunctorManager *functor = 
+        repl_ctx->shard_manager->find_sharding_functor(output.chosen_functor); 
+      // Figure out whether this shard owns this point
+      ShardID owner_shard = functor->find_owner(index_point); 
+      // If we own it we go on the queue, otherwise we complete early
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+        // We don't own it, so we can pretend like we
+        // mapped and executed this task already
+        complete_mapping();
+        complete_execution();
+      }
+      else // We own it, so it goes on the ready queue
+        enqueue_ready_operation(); 
+#endif
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Index Task 
     /////////////////////////////////////////////////////////////
@@ -95,6 +132,20 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the mapper call to get the sharding function to use
+
+      // Get the sharding function implementation from our context
+
+      // Compute the local index space of points for this shard
+
+      // If it's empty we're done, otherwise we go back on the queue
+
     }
 
     /////////////////////////////////////////////////////////////

@@ -2781,11 +2781,11 @@ namespace Legion {
     class ShardingFunctor {
     public:
       ShardingFunctor(void);
-      ShardingFunctor(const ShardingFunctor &rhs);
       virtual ~ShardingFunctor(void);
     public:
       virtual ShardID shard(const DomainPoint &point,
-          const std::map<ShardID,Processor> &shard_map) const = 0;
+                            const Domain &full_space,
+                            const ShardID max_shard/*inclusive*/) const = 0;
     };
 
     /**

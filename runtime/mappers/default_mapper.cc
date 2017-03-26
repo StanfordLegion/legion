@@ -2298,6 +2298,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Task&                        task,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_sharding_functor for Task in %s",
+                      get_mapper_name());
+      output.chosen_functor = 0; // use the default functor
+    }
+
+    //--------------------------------------------------------------------------
     void DefaultMapper::map_inline(const MapperContext        ctx,
                                    const InlineMapping&       inline_op,
                                    const MapInlineInput&      input,
@@ -2544,6 +2557,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Copy&                        copy,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_sharding_functor for Copy in %s",
+                      get_mapper_name());
+      output.chosen_functor = 0; // use the default functor
+    }
+
+    //--------------------------------------------------------------------------
     void DefaultMapper::map_close(const MapperContext       ctx,
                                   const Close&              close,
                                   const MapCloseInput&      input,
@@ -2643,6 +2669,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Close&                       close,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_sharding_functor for Close in %s",
+                      get_mapper_name());
+      output.chosen_functor = 0; // use the default functor
+    }
+
+    //--------------------------------------------------------------------------
     void DefaultMapper::map_acquire(const MapperContext         ctx,
                                     const Acquire&              acquire,
                                     const MapAcquireInput&      input,
@@ -2674,6 +2713,19 @@ namespace Legion {
                       get_mapper_name());
       // We don't ask for any task profiling right now so assert if we see this
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Acquire&                     acquire,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_sharding_functor for Acquire in %s",
+                      get_mapper_name());
+      output.chosen_functor = 0; // use the default functor
     }
 
     //--------------------------------------------------------------------------
@@ -2734,6 +2786,19 @@ namespace Legion {
                       get_mapper_name());
       // We don't ask for any task profiling right now so assert if we see this
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Release&                     release,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_sharding_functor for Release in %s",
+                      get_mapper_name());
+      output.chosen_functor = 0; // use the default functor
     }
 
     //--------------------------------------------------------------------------
@@ -2855,6 +2920,19 @@ namespace Legion {
                       get_mapper_name());
       // We don't ask for any task profiling right now so assert if we see this
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Partition&                   partition,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_sharding_functor for Partition in %s",
+                      get_mapper_name());
+      output.chosen_functor = 0; // use the default functor
     }
 
     //--------------------------------------------------------------------------

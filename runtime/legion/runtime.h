@@ -1362,6 +1362,24 @@ namespace Legion {
     }; 
 
     /**
+     * \class CyclicShardingFunctor
+     * The cyclic sharding functor just round-robins the points
+     * onto the available set of shards
+     */
+    class CyclicShardingFunctor : public ShardingFunctor {
+    public:
+      CyclicShardingFunctor(void);
+      CyclicShardingFunctor(const CyclicShardingFunctor &rhs);
+      virtual ~CyclicShardingFunctor(void);
+    public:
+      CyclicShardingFunctor& operator=(const CyclicShardingFunctor &rhs);
+    public:
+      virtual ShardID shard(const DomainPoint &point,
+                            const Domain &full_space,
+                            const ShardID max_shard) const;
+    };
+
+    /**
      * \class Runtime 
      * This is the actual implementation of the Legion runtime functionality
      * that implements the underlying interface for the Runtime 
@@ -1455,6 +1473,7 @@ namespace Legion {
       void register_static_variants(void);
       void register_static_constraints(void);
       void register_static_projections(void);
+      void register_static_sharding_functors(void);
       void initialize_legion_prof(void);
       void initialize_mappers(void);
       void launch_top_level_task(Processor target);
@@ -1831,6 +1850,13 @@ namespace Legion {
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
       ProjectionFunction* find_projection_function(ProjectionID pid);
+    public:
+      void register_sharding_functor(ShardingID sid,
+                                     ShardingFunctor *func,
+                                     bool need_zero_check = true);
+      static void preregister_sharding_functor(ShardingID sid,
+                                     ShardingFunctor *func);
+      ShardingFunctor* find_sharding_functor(ShardingID sid);
     public:
       void attach_semantic_information(TaskID task_id, SemanticTag,
                                    const void *buffer, size_t size, 
@@ -2727,6 +2753,9 @@ namespace Legion {
       Reservation projection_lock;
       std::map<ProjectionID,ProjectionFunction*> projection_functions;
     protected:
+      Reservation sharding_lock;
+      std::map<ShardingID,ShardingFunctor*> sharding_functors;
+    protected:
       Reservation group_lock;
       LegionMap<uint64_t,LegionDeque<ProcessorGroupInfo>::aligned,
                 PROCESSOR_GROUP_ALLOC>::tracked processor_groups;
@@ -2932,6 +2961,8 @@ namespace Legion {
                                 get_pending_constraint_table(void);
       static std::map<ProjectionID,ProjectionFunctor*>&
                                 get_pending_projection_table(void);
+      static std::map<ShardingID,ShardingFunctor*>&
+                                get_pending_sharding_table(void);
       static TaskID& get_current_static_task_id(void);
       static TaskID generate_static_task_id(void);
       static VariantID preregister_variant(

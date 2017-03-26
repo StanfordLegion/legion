@@ -119,6 +119,11 @@ namespace Legion {
                                         Mapper::TaskProfilingInfo *input,
                                         bool first_invocation = true,
                                         MappingCallInfo *info = NULL);
+      void invoke_task_select_sharding_functor(TaskOp *task,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation = true,
+                              MappingCallInfo *info = NULL);
     public: // Inline mapper calls
       void invoke_map_inline(MapOp *op, Mapper::MapInlineInput *input,
                              Mapper::MapInlineOutput *output, 
@@ -161,6 +166,11 @@ namespace Legion {
                                         Mapper::CopyProfilingInfo *input,
                                         bool first_invocation = true,
                                         MappingCallInfo *info = NULL);
+      void invoke_copy_select_sharding_functor(CopyOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation = true,
+                              MappingCallInfo *info = NULL);
     public: // Close mapper calls
       void invoke_map_close(CloseOp *op,
                             Mapper::MapCloseInput *input,
@@ -181,6 +191,11 @@ namespace Legion {
                                          Mapper::CloseProfilingInfo *input,
                                          bool first_invocation = true,
                                          MappingCallInfo *info = NULL);
+      void invoke_close_select_sharding_functor(CloseOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation = true,
+                              MappingCallInfo *info = NULL);
     public: // Acquire mapper calls
       void invoke_map_acquire(AcquireOp *op,
                               Mapper::MapAcquireInput *input,
@@ -195,6 +210,11 @@ namespace Legion {
                                            Mapper::AcquireProfilingInfo *input,
                                            bool first_invocation = true,
                                            MappingCallInfo *info = NULL);
+      void invoke_acquire_select_sharding_functor(AcquireOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation = true,
+                              MappingCallInfo *info = NULL);
     public: // Release mapper calls
       void invoke_map_release(ReleaseOp *op,
                               Mapper::MapReleaseInput *input,
@@ -219,6 +239,11 @@ namespace Legion {
                                            Mapper::ReleaseProfilingInfo *input,
                                            bool first_invocation = true,
                                            MappingCallInfo *info = NULL);
+      void invoke_release_select_sharding_functor(ReleaseOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation = true,
+                              MappingCallInfo *info = NULL);
     public: // Partition mapper calls
       void invoke_select_partition_projection(DependentPartitionOp *op,
                           Mapper::SelectPartitionProjectionInput *input,
@@ -244,6 +269,11 @@ namespace Legion {
                           Mapper::PartitionProfilingInfo *input,
                           bool first_invocation = true,
                           MappingCallInfo *info = NULL);
+      void invoke_partition_select_sharding_functor(DependentPartitionOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation = true,
+                              MappingCallInfo *info = NULL);
     public: // Task execution mapper calls
       void invoke_configure_context(TaskOp *task,
                                     Mapper::ContextConfigOutput *output,

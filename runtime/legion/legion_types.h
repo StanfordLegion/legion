@@ -461,6 +461,7 @@ namespace Legion {
       TASK_CREATE_TEMPORARY_CALL,
       TASK_SPECULATE_CALL,
       TASK_REPORT_PROFILING_CALL,
+      TASK_SELECT_SHARDING_FUNCTOR_CALL,
       MAP_INLINE_CALL,
       INLINE_SELECT_SOURCES_CALL,
       INLINE_CREATE_TEMPORARY_CALL,
@@ -470,23 +471,28 @@ namespace Legion {
       COPY_CREATE_TEMPORARY_CALL,
       COPY_SPECULATE_CALL,
       COPY_REPORT_PROFILING_CALL,
+      COPY_SELECT_SHARDING_FUNCTOR_CALL,
       MAP_CLOSE_CALL,
       CLOSE_SELECT_SOURCES_CALL,
       CLOSE_CREATE_TEMPORARY_CALL,
       CLOSE_REPORT_PROFILING_CALL,
+      CLOSE_SELECT_SHARDING_FUNCTOR_CALL,
       MAP_ACQUIRE_CALL,
       ACQUIRE_SPECULATE_CALL,
       ACQUIRE_REPORT_PROFILING_CALL,
+      ACQUIRE_SELECT_SHARDING_FUNCTOR_CALL,
       MAP_RELEASE_CALL,
       RELEASE_SELECT_SOURCES_CALL,
       RELEASE_CREATE_TEMPORARY_CALL,
       RELEASE_SPECULATE_CALL,
       RELEASE_REPORT_PROFILING_CALL,
+      RELEASE_SELECT_SHARDING_FUNCTOR_CALL,
       SELECT_PARTITION_PROJECTION_CALL,
       MAP_PARTITION_CALL,
       PARTITION_SELECT_SOURCES_CALL,
       PARTITION_CREATE_TEMPORARY_CALL,
       PARTITION_REPORT_PROFILING_CALL,
+      PARTITION_SELECT_SHARDING_FUNCTOR_CALL,
       CONFIGURE_CONTEXT_CALL,
       SELECT_TUNABLE_VALUE_CALL,
       MAP_MUST_EPOCH_CALL,
@@ -513,6 +519,7 @@ namespace Legion {
       "create task temporary",                      \
       "speculate (for task)",                       \
       "report profiling (for task)",                \
+      "select sharding functor (for task)",         \
       "map_inline",                                 \
       "select_inline_sources",                      \
       "inline create temporary",                    \
@@ -522,23 +529,28 @@ namespace Legion {
       "copy create temporary",                      \
       "speculate (for copy)",                       \
       "report_profiling (for copy)",                \
+      "select sharding functor (for copy)",         \
       "map_close",                                  \
       "select_close_sources",                       \
       "close create temporary",                     \
       "report_profiling (for close)",               \
+      "select sharding functor (for close)",        \
       "map_acquire",                                \
       "speculate (for acquire)",                    \
       "report_profiling (for acquire)",             \
+      "select sharding functor (for acquire)",      \
       "map_release",                                \
       "select_release_sources",                     \
       "release create temporary",                   \
       "speculate (for release)",                    \
       "report_profiling (for release)",             \
+      "select sharding functor (for release)",      \
       "select partition projection",                \
       "map_partition",                              \
       "select_partition_sources",                   \
       "partition create temporary",                 \
       "report_profiling (for partition)",           \
+      "select sharding functor (for partition)",    \
       "configure_context",                          \
       "select_tunable_value",                       \
       "map_must_epoch",                             \

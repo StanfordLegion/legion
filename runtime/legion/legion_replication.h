@@ -209,6 +209,8 @@ namespace Legion {
       virtual ~ReplIndividualTask(void);
     public:
       ReplIndividualTask& operator=(const ReplIndividualTask &rhs);
+    public:
+      virtual void trigger_ready(void);
     };
 
     /**
@@ -223,6 +225,8 @@ namespace Legion {
       virtual ~ReplIndexTask(void);
     public:
       ReplIndexTask& operator=(const ReplIndexTask &rhs);
+    public:
+      virtual void trigger_ready(void);
     };
 
     /**

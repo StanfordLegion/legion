@@ -333,6 +333,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_task_select_sharding_functor(TaskOp *task,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(TASK_SELECT_SHARDING_FUNCTOR_CALL,
+                            NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_task_select_sharding_functor>
+              continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *task, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_map_inline(MapOp *op, 
                                           Mapper::MapInlineInput *input,
                                           Mapper::MapInlineOutput *output, 
@@ -569,6 +595,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_copy_select_sharding_functor(CopyOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(COPY_SELECT_SHARDING_FUNCTOR_CALL,
+                            NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CopyOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_copy_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_map_close(CloseOp *op,
                                          Mapper::MapCloseInput *input,
                                          Mapper::MapCloseOutput *output,
@@ -674,6 +726,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_close_select_sharding_functor(CloseOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(CLOSE_SELECT_SHARDING_FUNCTOR_CALL,
+                            NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<CloseOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_close_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_map_acquire(AcquireOp *op,
                                            Mapper::MapAcquireInput *input,
                                            Mapper::MapAcquireOutput *output,
@@ -746,6 +824,32 @@ namespace Legion {
         }
       }
       mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_acquire_select_sharding_functor(AcquireOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(ACQUIRE_SELECT_SHARDING_FUNCTOR_CALL,
+                            NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<AcquireOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_acquire_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -875,6 +979,32 @@ namespace Legion {
         }
       }
       mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_release_select_sharding_functor(ReleaseOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(RELEASE_SELECT_SHARDING_FUNCTOR_CALL,
+                            NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<ReleaseOp, Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_release_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 
@@ -1013,6 +1143,34 @@ namespace Legion {
         }
       }
       mapper->report_profiling(info, *op, *input);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_partition_select_sharding_functor(
+                              DependentPartitionOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(PARTITION_SELECT_SHARDING_FUNCTOR_CALL,
+                            NULL, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<DependentPartitionOp, 
+            Mapper::SelectShardingFunctorInput,
+            Mapper::SelectShardingFunctorOutput,
+            &MapperManager::invoke_partition_select_sharding_functor>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_sharding_functor(info, *op, *input, *output);
       finish_mapper_call(info);
     }
 

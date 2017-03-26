@@ -8424,6 +8424,7 @@ namespace Legion {
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         projection_lock(Reservation::create_reservation()),
+        sharding_lock(Reservation::create_reservation()),
         group_lock(Reservation::create_reservation()),
         processor_mapping_lock(Reservation::create_reservation()),
         distributed_id_lock(Reservation::create_reservation()),
@@ -8627,6 +8628,13 @@ namespace Legion {
         delete it->second;
       } 
       projection_functions.clear();
+      for (std::map<ShardingID,ShardingFunctor*>::iterator it = 
+            sharding_functors.begin(); it != 
+            sharding_functors.end(); it++)
+      {
+        delete it->second;
+      }
+      sharding_functors.clear();
       for (std::deque<IndividualTask*>::const_iterator it = 
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
@@ -9020,6 +9028,8 @@ namespace Legion {
       memory_managers.clear();
       projection_lock.destroy_reservation();
       projection_lock = Reservation::NO_RESERVATION;
+      sharding_lock.destroy_reservation();
+      sharding_lock = Reservation::NO_RESERVATION;
       group_lock.destroy_reservation();
       group_lock = Reservation::NO_RESERVATION;
       processor_mapping_lock.destroy_reservation();
@@ -9125,6 +9135,20 @@ namespace Legion {
       }
       register_projection_functor(0, 
           new IdentityProjectionFunctor(this->external), false/*need check*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_static_sharding_functors(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ShardingID,ShardingFunctor*> &pending_sharding_functors = 
+        get_pending_sharding_table();
+      for (std::map<ShardingID,ShardingFunctor*>::const_iterator it = 
+            pending_sharding_functors.begin(); it !=
+            pending_sharding_functors.end(); it++)
+        register_sharding_functor(it->first, it->second);
+      register_sharding_functor(0,
+          new CyclicShardingFunctor(), false/*need check*/);
     }
 
     //--------------------------------------------------------------------------
@@ -11857,7 +11881,7 @@ namespace Legion {
     {
       if (need_zero_check && (pid == 0))
       {
-        log_run.error("ERROR: ProjectionID zero is reserved.\n");
+        log_run.error("ERROR: ProjectionID zero is reserved.");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -11865,14 +11889,12 @@ namespace Legion {
       }
       ProjectionFunction *function = new ProjectionFunction(pid, functor);
       AutoLock p_lock(projection_lock);
-      // No need for a lock because these all need to be reserved at
-      // registration time before the runtime starts up
       std::map<ProjectionID,ProjectionFunction*>::
         const_iterator finder = projection_functions.find(pid);
       if (finder != projection_functions.end())
       {
         log_run.error("ERROR: ProjectionID %d has already been used in "
-                                    "the region projection table\n", pid);
+                      "the region projection table.", pid);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -11939,6 +11961,73 @@ namespace Legion {
         exit(ERROR_INVALID_PROJECTION_ID);
       }
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::register_sharding_functor(ShardingID sid,
+                                            ShardingFunctor *functor,
+                                            bool need_zero_check)
+    //--------------------------------------------------------------------------
+    {
+      if (need_zero_check && (sid == 0))
+      {
+        log_run.error("ERROR: ShardingID zero is reserved.");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_SHARDING_ID);
+      }
+      AutoLock s_lock(sharding_lock);
+      std::map<ShardingID,ShardingFunctor*>::const_iterator finder = 
+        sharding_functors.find(sid);
+      if (finder != sharding_functors.end())
+      {
+        log_run.error("ERROR: ShardingID %d has already been used by another "
+                      "sharding functor.", sid);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUPLICATE_SHARDING_ID);
+      }
+      sharding_functors[sid] = functor;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::preregister_sharding_functor(ShardingID sid,
+                                                       ShardingFunctor *functor)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'preregister_sharding_functor' after "
+                      "the runtime has started!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      if (sid == 0)
+      {
+        log_run.error("ERROR: ShardingID zero is reserved.");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_SHARDING_ID);
+      }
+      std::map<ShardingID,ShardingFunctor*> &pending_sharding_functors = 
+        get_pending_sharding_table();
+      std::map<ShardID,ShardingFunctor*>::const_iterator finder = 
+        pending_sharding_functors.find(sid);
+      if (finder != pending_sharding_functors.end())
+      {
+        log_run.error("ERROR: ShardingID %d has already been used by another "
+                      "sharding functor.", sid);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUPLICATE_SHARDING_ID);
+      }
+      pending_sharding_functors[sid] = functor;
     }
 
     //--------------------------------------------------------------------------
@@ -19184,6 +19273,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ std::map<ShardingID,ShardingFunctor*>&
+                                       Runtime::get_pending_sharding_table(void)
+    //--------------------------------------------------------------------------
+    {
+      static std::map<ShardingID,ShardingFunctor*> pending_sharding_table;
+      return pending_sharding_table;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ TaskID& Runtime::get_current_static_task_id(void)
     //--------------------------------------------------------------------------
     {
@@ -19628,6 +19726,7 @@ namespace Legion {
       local_rt->register_static_variants();
       local_rt->register_static_constraints();
       local_rt->register_static_projections();
+      local_rt->register_static_sharding_functors();
       // Initialize our one virtual manager, do this after we register
       // the static constraints so we get a valid layout constraint ID
       VirtualManager::initialize_virtual_instance(local_rt, 
