@@ -66,7 +66,7 @@ processor_kinds = {
     1 : 'GPU',
     2 : 'CPU',
     3 : 'Utility',
-    4 : 'I/O',
+    4 : 'IO',
 }
 
 # Make sure this is up to date with lowlevel.h
@@ -2532,7 +2532,13 @@ class State(object):
                             for tp in timepoints]
 
             max_count = len(timepoints)
-            statistics = self.calculate_statistics_data(sorted(itertools.chain(*utilizations)), max_count)
+            statistics = None
+            if max_count == 0:
+                print("WARNING: node " + str(tp_group) + " has no prof events. Is this what you expected?")
+                statistics = list()
+            else:
+                statistics = self.calculate_statistics_data(sorted(itertools.chain(*utilizations)), max_count)
+
             stats_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_stats.tsv")
             with open(stats_tsv_filename, "w") as stats_tsv_file:
                 stats_tsv_file.write("time\tcount\n")
