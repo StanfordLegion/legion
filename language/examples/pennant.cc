@@ -988,6 +988,8 @@ public:
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+  virtual Memory default_policy_select_target_memory(MapperContext ctx,
+                                    Processor target_proc);
   virtual LogicalRegion default_policy_select_instance_region(
                                     MapperContext ctx, Memory target_memory,
                                     const RegionRequirement &req,
@@ -1087,6 +1089,12 @@ void PennantMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+}
+
+Memory PennantMapper::default_policy_select_target_memory(MapperContext ctx,
+                                                          Processor target_proc)
+{
+  return proc_sysmems[target_proc];
 }
 
 LogicalRegion PennantMapper::default_policy_select_instance_region(
