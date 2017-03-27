@@ -1384,6 +1384,27 @@ namespace Legion {
     };
 
     /**
+     * \class ShardingFunction
+     * The sharding function class wraps a sharding functor and will
+     * cache results for queries so that we don't need to constantly
+     * be inverting the results of the sharding functor.
+     */
+    class ShardingFunction {
+    public:
+      ShardingFunction(ShardingFunctor *functor, ShardID max_shard);
+      ShardingFunction(const ShardingFunction &rhs);
+      virtual ~ShardingFunction(void);
+    public:
+      ShardingFunction& operator=(const ShardingFunction &rhs);
+    public:
+      ShardID find_owner(const DomainPoint &point, const Domain &full_space);
+      const Domain& find_shard_domain(ShardID shard, const Domain &full_space);
+    public:
+      ShardingFunctor *const functor;
+      const ShardID max_shard;
+    };
+
+    /**
      * \class Runtime 
      * This is the actual implementation of the Legion runtime functionality
      * that implements the underlying interface for the Runtime 

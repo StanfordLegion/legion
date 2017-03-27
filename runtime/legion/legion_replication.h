@@ -241,6 +241,8 @@ namespace Legion {
       virtual ~ReplFillOp(void);
     public:
       ReplFillOp& operator=(const ReplFillOp &rhs);
+    public:
+      virtual void trigger_ready(void);
     };
 
     /**
@@ -255,6 +257,8 @@ namespace Legion {
       virtual ~ReplIndexFillOp(void);
     public:
       ReplIndexFillOp& operator=(const ReplIndexFillOp &rhs);
+    public:
+      virtual void trigger_ready(void);
     };
 
     /**
@@ -269,6 +273,8 @@ namespace Legion {
       virtual ~ReplCopyOp(void);
     public:
       ReplCopyOp& operator=(const ReplCopyOp &rhs);
+    public:
+      virtual void trigger_ready(void);
     };
 
     /**
@@ -283,6 +289,8 @@ namespace Legion {
       virtual ~ReplIndexCopyOp(void);
     public:
       ReplIndexCopyOp& operator=(const ReplIndexCopyOp &rhs);
+    public:
+      virtual void trigger_ready(void);
     };
 
     /**
@@ -297,6 +305,8 @@ namespace Legion {
       virtual ~ReplDeletionOp(void);
     public:
       ReplDeletionOp& operator=(const ReplDeletionOp &rhs);
+    public:
+      virtual void trigger_ready(void);
     };
 
     /**
@@ -353,6 +363,8 @@ namespace Legion {
       virtual ~ReplTimingOp(void);
     public:
       ReplTimingOp& operator=(const ReplTimingOp &rhs);
+    public:
+      virtual void trigger_ready(void);
     };
 
   }; // namespace Internal

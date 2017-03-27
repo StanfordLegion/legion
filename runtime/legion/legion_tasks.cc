@@ -9365,6 +9365,9 @@ namespace Legion {
         barrier_receiving_stage(-1)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(total_shards > 0);
+#endif
       runtime->register_shard_manager(repl_id, this);
       if (owner_space == runtime->address_space)
       {
@@ -10247,6 +10250,33 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->process_barrier_exchange(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction* ShardManager::find_sharding_function(ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if it is in the cache
+      {
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
+          sharding_functions.find(sid);
+        if (finder != sharding_functions.end())
+          return finder->second;
+      }
+      // Get the functor from the runtime
+      ShardingFunctor *functor = runtime->find_sharding_functor(sid);
+      // Retake the lock
+      AutoLock m_lock(manager_lock);
+      // See if we lost the race
+      std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
+        sharding_functions.find(sid);
+      if (finder != sharding_functions.end())
+        return finder->second;
+      ShardingFunction *result = new ShardingFunction(functor, total_shards-1);
+      // Save the result for the future
+      sharding_functions[sid] = result;
+      return result;
     }
 
   }; // namespace Internal 

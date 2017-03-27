@@ -379,6 +379,7 @@ typedef enum legion_error_t {
   ERROR_DYNAMIC_TYPE_MISMATCH = 165,
   ERROR_RESERVED_SHARDING_ID = 166,
   ERROR_DUPLICATE_SHARDING_ID = 167,
+  ERROR_INVALID_SHARDING_ID = 168,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

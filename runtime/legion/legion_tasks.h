@@ -1276,6 +1276,8 @@ namespace Legion {
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_barrier_exchange(Deserializer &derez, Runtime *rt);
     public:
+      ShardingFunction* find_sharding_function(ShardingID sid);
+    public:
       Runtime *const runtime;
       const ControlReplicationID repl_id;
       const size_t total_shards;
@@ -1324,6 +1326,8 @@ namespace Legion {
       RtBarrier field_space_allocator_barrier;
       RtBarrier field_allocator_barrier;
       RtBarrier logical_region_allocator_barrier;
+    protected:
+      std::map<ShardingID,ShardingFunction*> sharding_functions;
     };
 
   }; // namespace Internal 

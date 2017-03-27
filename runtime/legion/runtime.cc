@@ -8466,6 +8466,49 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Sharding Function 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardingFunction::ShardingFunction(ShardingFunctor *func, ShardID max)
+      : functor(func), max_shard(max)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction::ShardingFunction(const ShardingFunction &rhs)
+      : functor(NULL), max_shard(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction::~ShardingFunction(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction& ShardingFunction::operator=(const ShardingFunction &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShardingFunction::find_owner(const DomainPoint &point,
+                                         const Domain &full_space)
+    //--------------------------------------------------------------------------
+    {
+      return functor->shard(point, full_space, max_shard);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Legion Runtime 
     /////////////////////////////////////////////////////////////
 
@@ -12035,9 +12078,8 @@ namespace Legion {
         const_iterator finder = projection_functions.find(pid);
       if (finder == projection_functions.end())
       {
-        log_run.warning("Unable to find registered region projection "
-                              "ID %d. Please upgrade to using projection "
-                              "functors!", pid);
+        log_run.error("Unable to find registered region projection ID %d. "
+                      "Please upgrade to using projection functors!", pid);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -12111,6 +12153,24 @@ namespace Legion {
         exit(ERROR_DUPLICATE_SHARDING_ID);
       }
       pending_sharding_functors[sid] = functor;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunctor* Runtime::find_sharding_functor(ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock s_lock(sharding_lock,1,false/*exclusive*/);
+      std::map<ShardingID,ShardingFunctor*>::const_iterator finder = 
+        sharding_functors.find(sid);
+      if (finder == sharding_functors.end())
+      {
+        log_run.error("Unable to find registered sharding functor ID %d.", sid);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_SHARDING_ID);
+      }
+      return finder->second;
     }
 
     //--------------------------------------------------------------------------

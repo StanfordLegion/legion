@@ -80,12 +80,11 @@ namespace Legion {
       Mapper::SelectShardingFunctorOutput output;
       output.chosen_functor = 0;
       mapper->invoke_task_select_sharding_functor(this, input, &output);
-#if 0
       // Get the sharding function implementation to use from our context
-      ShardingFunctorManager *functor = 
-        repl_ctx->shard_manager->find_sharding_functor(output.chosen_functor); 
+      ShardingFunction *function = 
+        repl_ctx->shard_manager->find_sharding_function(output.chosen_functor);
       // Figure out whether this shard owns this point
-      ShardID owner_shard = functor->find_owner(index_point); 
+      ShardID owner_shard = function->find_owner(index_point, index_domain); 
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -96,7 +95,6 @@ namespace Legion {
       }
       else // We own it, so it goes on the ready queue
         enqueue_ready_operation(); 
-#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -138,14 +136,36 @@ namespace Legion {
     void ReplIndexTask::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
       // Do the mapper call to get the sharding function to use
-
-      // Get the sharding function implementation from our context
-
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id); 
+      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
+      Mapper::SelectShardingFunctorOutput output;
+      output.chosen_functor = 0;
+      mapper->invoke_task_select_sharding_functor(this, input, &output);
+      // Get the sharding function implementation to use from our context
+      ShardingFunction *function = 
+        repl_ctx->shard_manager->find_sharding_function(output.chosen_functor);
       // Compute the local index space of points for this shard
-
+      const Domain &local_domain = 
+        function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
+                                    index_domain);
+      index_domain = local_domain;
       // If it's empty we're done, otherwise we go back on the queue
-
+      if (local_domain.get_volume() == 0)
+      {
+        // We have no local points, so we can just trigger
+        complete_mapping();
+        complete_execution();
+      }
+      else // We have valid points, so it goes on the ready queue
+        enqueue_ready_operation();
     }
 
     /////////////////////////////////////////////////////////////
@@ -183,6 +203,33 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void ReplFillOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Get the sharding function implementation to use from our context
+      ShardingFunction *function = 
+        repl_ctx->shard_manager->find_sharding_function(0/*default functor*/);
+      // Figure out whether this shard owns this point
+      ShardID owner_shard = function->find_owner(index_point, index_domain); 
+      // If we own it we go on the queue, otherwise we complete early
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+        // We don't own it, so we can pretend like we
+        // mapped and executed this task already
+        complete_mapping();
+        complete_execution();
+      }
+      else // We own it, so do the normal thing
+        FillOp::trigger_ready();
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Index Fill Op 
     /////////////////////////////////////////////////////////////
@@ -216,6 +263,35 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexFillOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Get the sharding function implementation to use from our context
+      ShardingFunction *function = 
+        repl_ctx->shard_manager->find_sharding_function(0/*default functor*/);
+      // Compute the local index space of points for this shard
+      const Domain &local_domain = 
+        function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
+                                    index_domain);
+      index_domain = local_domain;
+      // If it's empty we're done, otherwise we go back on the queue
+      if (local_domain.get_volume() == 0)
+      {
+        // We have no local points, so we can just trigger
+        complete_mapping();
+        complete_execution();
+      }
+      else // We have valid points, so it goes on the ready queue
+        IndexFillOp::trigger_ready();
     }
 
     /////////////////////////////////////////////////////////////
@@ -253,6 +329,41 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void ReplCopyOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Do the mapper call to get the sharding function to use
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(
+            parent_ctx->get_executing_processor(), map_id); 
+      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
+      Mapper::SelectShardingFunctorOutput output;
+      output.chosen_functor = 0;
+      mapper->invoke_copy_select_sharding_functor(this, input, &output);
+      // Get the sharding function implementation to use from our context
+      ShardingFunction *function = 
+        repl_ctx->shard_manager->find_sharding_function(output.chosen_functor);
+      // Figure out whether this shard owns this point
+      ShardID owner_shard = function->find_owner(index_point, index_domain); 
+      // If we own it we go on the queue, otherwise we complete early
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+        // We don't own it, so we can pretend like we
+        // mapped and executed this task already
+        complete_mapping();
+        complete_execution();
+      }
+      else // We own it, so do the base call
+        CopyOp::trigger_ready();
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Index Copy Op 
     /////////////////////////////////////////////////////////////
@@ -288,6 +399,43 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void ReplIndexCopyOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Do the mapper call to get the sharding function to use
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(
+            parent_ctx->get_executing_processor(), map_id); 
+      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
+      Mapper::SelectShardingFunctorOutput output;
+      output.chosen_functor = 0;
+      mapper->invoke_copy_select_sharding_functor(this, input, &output);
+      // Get the sharding function implementation to use from our context
+      ShardingFunction *function = 
+        repl_ctx->shard_manager->find_sharding_function(output.chosen_functor);
+      // Compute the local index space of points for this shard
+      const Domain &local_domain = 
+        function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
+                                    index_domain);
+      index_domain = local_domain;
+      // If it's empty we're done, otherwise we go back on the queue
+      if (local_domain.get_volume() == 0)
+      {
+        // We have no local points, so we can just trigger
+        complete_mapping();
+        complete_execution();
+      }
+      else // If we have any valid points do the base call
+        IndexCopyOp::trigger_ready();
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Deletion Op 
     /////////////////////////////////////////////////////////////
@@ -321,6 +469,28 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDeletionOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Shard 0 will hold all the deletions
+      if (repl_ctx->owner_shard->shard_id == 0)
+      {
+        // We don't own it, so we can pretend like we
+        // mapped and executed this task already
+        complete_mapping();
+        complete_execution();
+      }
+      else // We own it, so enqueue it
+        enqueue_ready_operation();
     }
 
     /////////////////////////////////////////////////////////////
@@ -465,6 +635,28 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTimingOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Shard 0 will handle the timing operation
+      if (repl_ctx->owner_shard->shard_id == 0)
+      {
+        // We don't own it, so we can pretend like we
+        // mapped and executed this task already
+        complete_mapping();
+        complete_execution();
+      }
+      else // We own it, so do the normal thing
+        Operation::trigger_ready();
     }
 
   }; // namespace Internal

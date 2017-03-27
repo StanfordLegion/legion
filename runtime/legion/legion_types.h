@@ -1214,6 +1214,7 @@ namespace Legion {
     class LayoutConstraints;
     class GeneratorImpl;
     class ProjectionFunction;
+    class ShardingFunction;
     class Runtime;
 
     // legion_ops.h
@@ -1405,6 +1406,24 @@ namespace Legion {
     class ConcurrentManager;
     typedef Mapping::MapperEvent MapperEvent;
     typedef Mapping::ProfilingMeasurementID ProfilingMeasurementID;
+
+    // legion_replication.h
+    class IndexSpaceReduction;
+    class IndexPartitionReduction;
+    class FieldSpaceReduction;
+    class LogicalRegionReduction;
+    class FieldReduction;
+    class ReplIndividualTask;
+    class ReplIndexTask;
+    class ReplFillOp;
+    class ReplIndexFillOp;
+    class ReplCopyOp;
+    class ReplIndexCopyOp;
+    class ReplDeletionOp;
+    class ReplPendingPartitionOp;
+    class ReplDependentPartitionOp;
+    class ReplMustEpochOp;
+    class ReplTimingOp;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
