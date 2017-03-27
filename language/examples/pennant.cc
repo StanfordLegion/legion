@@ -1029,7 +1029,7 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
 void PennantMapper::default_policy_rank_processor_kinds(MapperContext ctx,
                         const Task &task, std::vector<Processor::Kind> &ranking)
 {
-#define SPMD_SHARD_USE_IO_PROC 1
+#define SPMD_SHARD_USE_IO_PROC 0
 #if SPMD_SHARD_USE_IO_PROC
   const char* task_name = task.get_task_name();
   const char* prefix = "shard_";
@@ -1065,7 +1065,7 @@ Processor PennantMapper::default_policy_select_initial_processor(
       std::vector<Processor> &local_procs =
         sysmem_local_procs[proc_sysmems[local_proc]];
       if (local_procs.size() > 1) {
-#define SPMD_RESERVE_SHARD_PROC 0
+#define SPMD_RESERVE_SHARD_PROC 1
 #if SPMD_RESERVE_SHARD_PROC
         return local_procs[(index % (local_procs.size() - 1)) + 1];
 #else
