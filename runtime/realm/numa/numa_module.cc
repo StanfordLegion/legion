@@ -121,7 +121,7 @@ namespace Realm {
       }
 
       // if neither NUMA memory nor cpus was requested, there's no point
-      if((m->cfg_numa_mem_size_in_mb == 0) && (m->cfg_num_numa_cpus == 0)) {
+      if((m->cfg_numa_mem_size_in_mb == 0) && (m->cfg_numa_nocpu_mem_size_in_mb == 0) && (m->cfg_num_numa_cpus == 0)) {
 	log_numa.debug() << "no NUMA memory or cpus requested";
 	delete m;
 	return 0;
