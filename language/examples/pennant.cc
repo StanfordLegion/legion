@@ -1065,7 +1065,7 @@ Processor PennantMapper::default_policy_select_initial_processor(
       std::vector<Processor> &local_procs =
         sysmem_local_procs[proc_sysmems[local_proc]];
       if (local_procs.size() > 1) {
-#define SPMD_RESERVE_SHARD_PROC 1
+#define SPMD_RESERVE_SHARD_PROC 0
 #if SPMD_RESERVE_SHARD_PROC
         return local_procs[(index % (local_procs.size() - 1)) + 1];
 #else
