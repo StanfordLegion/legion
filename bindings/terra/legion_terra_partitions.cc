@@ -176,7 +176,8 @@ public:
 #undef NEW_OPAQUE_WRAPPER
 };
 
-static inline legion_terra_index_space_list_list_t
+#if 0
+static legion_terra_index_space_list_list_t
 create_list_list(legion_terra_index_space_list_t lhs_, size_t size1, size_t size2)
 {
   legion_terra_index_space_list_list_t result;
@@ -193,6 +194,7 @@ create_list_list(legion_terra_index_space_list_t lhs_, size_t size1, size_t size
   }
   return result;
 }
+#endif
 
 static inline legion_terra_index_space_list_list_t
 create_list_list(std::vector<IndexSpace> &spaces,
