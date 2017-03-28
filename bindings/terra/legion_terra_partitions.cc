@@ -194,7 +194,7 @@ create_list_list(legion_terra_index_space_list_t lhs_, size_t size1, size_t size
   return result;
 }
 
-static legion_terra_index_space_list_list_t
+static inline legion_terra_index_space_list_list_t
 create_list_list(std::vector<IndexSpace> &spaces,
                  std::map<IndexSpace, std::vector<IndexSpace> > &product)
 {
