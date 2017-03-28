@@ -4151,35 +4151,11 @@ function codegen.expr_list_cross_product(cx, node)
   actions = quote
     [actions]
 
-    var lhs_list : c.legion_terra_index_space_list_t
-    lhs_list.space.tid = 0
-    lhs_list.space.id = 0
-    lhs_list.count = [lhs.value].__size
-    lhs_list.subspaces = [&c.legion_index_space_t](
-      c.malloc(
-        terralib.sizeof([c.legion_index_space_t]) * [lhs.value].__size))
-    regentlib.assert(lhs_list.subspaces ~= nil, "malloc failed in list_cross_product")
-    for i = 0, [lhs.value].__size do
-      lhs_list.subspaces[i] = [lhs_type:data(lhs.value)][i].impl.index_space
-    end
+    var lhs_ : &c.legion_terra_logical_region_list_t =
+      [&c.legion_terra_logical_region_list_t]([&opaque](&[lhs.value]))
+    var rhs_ : &c.legion_terra_logical_region_list_t =
+      [&c.legion_terra_logical_region_list_t]([&opaque](&[rhs.value]))
 
-    var rhs_list : c.legion_terra_index_space_list_t
-    rhs_list.space.tid = 0
-    rhs_list.space.id = 0
-    rhs_list.count = [rhs.value].__size
-    rhs_list.subspaces = [&c.legion_index_space_t](
-      c.malloc(
-        terralib.sizeof([c.legion_index_space_t]) * [rhs.value].__size))
-    regentlib.assert(rhs_list.subspaces ~= nil, "malloc failed in list_cross_product")
-    for i = 0, [rhs.value].__size do
-      rhs_list.subspaces[i] = [rhs_type:data(rhs.value)][i].impl.index_space
-    end
-
-    var product = [cross_product_create](
-      [cx.runtime], [cx.context], [lhs_list], [rhs_list])
-
-    regentlib.assert(product.count == [lhs.value].__size,
-                     "size mismatch in list_cross_product")
     var data = c.malloc(
       terralib.sizeof([expr_type.element_type]) * [lhs.value].__size)
     regentlib.assert(data ~= nil, "malloc failed in list_cross_product")
@@ -4187,51 +4163,21 @@ function codegen.expr_list_cross_product(cx, node)
       __size = [lhs.value].__size,
       __data = data,
     }
-
     for i = 0, [lhs.value].__size do
-      regentlib.assert([rhs.value].__size == product.sublists[i].count,
-                       "size mismatch in list_cross_product")
-
-      var subsize = 0
-      for j = 0, [rhs.value].__size do
-        var is = product.sublists[i].subspaces[j]
-        if is.id > 0 then
-          subsize = subsize + 1
-        end
-      end
-
-      -- Allocate sublist.
       var subdata = c.malloc(
-        terralib.sizeof([expr_type.element_type.element_type]) * subsize)
+        terralib.sizeof([expr_type.element_type.element_type]) * [rhs.value].__size)
       regentlib.assert(subdata ~= nil, "malloc failed in list_cross_product")
       [expr_type:data(result)][i] = [expr_type.element_type] {
-        __size = subsize,
+        __size = 0, -- will be set to a meaningful value inside the C library
         __data = subdata,
       }
-
-      -- Fill sublist.
-      var subslot = 0
-      for j = 0, [rhs.value].__size do
-        var is = product.sublists[i].subspaces[j]
-        if is.id > 0 then
-          regentlib.assert(subslot < subsize, "index mismatch in list_cross_product")
-          [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslot] =
-            [expr_type.element_type.element_type] {
-              impl = c.legion_logical_region_t {
-                tree_id = [rhs_type:data(rhs.value)][j].impl.tree_id,
-                index_space = is,
-                field_space = [rhs_type:data(rhs.value)][j].impl.field_space,
-              }
-            }
-          subslot = subslot + 1
-        end
-      end
-      regentlib.assert(subslot == subsize, "underflow in list_cross_product")
     end
 
-    c.legion_terra_index_space_list_list_destroy(product)
-    c.free(lhs_list.subspaces)
-    c.free(rhs_list.subspaces)
+    var result_ : &c.legion_terra_logical_region_list_list_t =
+      [&c.legion_terra_logical_region_list_list_t]([&opaque](&[result]))
+
+    var product = [cross_product_create](
+      [cx.runtime], [cx.context], lhs_, rhs_, result_)
   end
 
   return values.value(
