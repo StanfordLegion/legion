@@ -235,7 +235,8 @@ namespace Legion {
       REDOP_FS_REDUCTION    = REDOP_IP_REDUCTION + 1,
       REDOP_LG_REDUCTION    = REDOP_FS_REDUCTION + 1,
       REDOP_FID_REDUCTION   = REDOP_LG_REDUCTION + 1,
-      REDOP_ID_AVAILABLE    = REDOP_FID_REDUCTION + 1,
+      REDOP_SID_REDUCTION   = REDOP_FID_REDUCTION + 1,
+      REDOP_ID_AVAILABLE    = REDOP_SID_REDUCTION + 1,
     };
 
     // Runtime task numbering 
@@ -493,6 +494,7 @@ namespace Legion {
       PARTITION_CREATE_TEMPORARY_CALL,
       PARTITION_REPORT_PROFILING_CALL,
       PARTITION_SELECT_SHARDING_FUNCTOR_CALL,
+      FILL_SELECT_SHARDING_FUNCTOR_CALL,
       CONFIGURE_CONTEXT_CALL,
       SELECT_TUNABLE_VALUE_CALL,
       MAP_MUST_EPOCH_CALL,
@@ -551,6 +553,7 @@ namespace Legion {
       "partition create temporary",                 \
       "report_profiling (for partition)",           \
       "select sharding functor (for partition)",    \
+      "select sharding functor (for fill)",         \
       "configure_context",                          \
       "select_tunable_value",                       \
       "map_must_epoch",                             \
@@ -1259,7 +1262,7 @@ namespace Legion {
     // legion_control.h
     class ReplIndividualTask;
     class ReplIndexTask;
-    class ReplFillOp;
+    // No need for ReplFillOp
     class ReplIndexFillOp;
     class ReplCopyOp;
     class ReplIndexCopyOp;

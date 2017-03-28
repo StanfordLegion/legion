@@ -1418,6 +1418,26 @@ namespace Legion {
                                  const SelectShardingFunctorInput&  input,
                                        SelectShardingFunctorOutput& output) = 0;
       //------------------------------------------------------------------------
+    public: // Fill Operations
+      /**
+       * ----------------------------------------------------------------------
+       *  Select Sharding Functor 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked whenever the enclosing parent
+       * task for the fill being launched has been control replicated
+       * and it's up to the mapper for this task to pick a sharding
+       * functor to determine which shard will own the points of the
+       * fill. The mapper must return the same sharding functor for all
+       * instances of the fill. The runtime will verify this in debug mode
+       * but not in release mode.
+       */
+      //------------------------------------------------------------------------
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output) = 0;
+      //------------------------------------------------------------------------
     public: // Single Task Context 
       /**
        * ----------------------------------------------------------------------

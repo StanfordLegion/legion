@@ -1255,7 +1255,7 @@ namespace Legion {
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual void remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
-      virtual void fill_fields(const FillLauncher &launcher);
+      // Single fill ops are the same as normal inner context
       virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
       virtual void issue_copy(const IndexCopyLauncher &launcher);

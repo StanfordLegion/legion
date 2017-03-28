@@ -86,7 +86,7 @@ namespace Legion {
       parent_ctx = NULL;
       need_completion_trigger = true;
       mapped_event = Runtime::create_rt_user_event();
-      replicate_mapped_event = RtEvent::NO_RT_EVENT;
+      replicate_mapped_barrier = RtBarrier::NO_RT_BARRIER;
       resolved_event = Runtime::create_rt_user_event();
       completion_event = Runtime::create_ap_user_event();
       if (Runtime::resilient_mode)
@@ -231,13 +231,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_replicate_mapped_event(RtEvent replicate_mapped)
+    void Operation::set_replicate_mapped_barrier(RtBarrier replicate_barrier)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!replicate_mapped_event.exists());
+      assert(!replicate_mapped_barrier.exists());
 #endif
-      replicate_mapped_event = replicate_mapped;
+      replicate_mapped_barrier = replicate_barrier;
     }
 
     //--------------------------------------------------------------------------
@@ -1092,8 +1092,8 @@ namespace Legion {
             outgoing[op] = op_gen;
             // Record that the operation has a mapping dependence
             // on us as long as we haven't mapped
-            if (replicate_mapped_event.exists() && !shard_only_dependence)
-              tracker->add_mapping_dependence(replicate_mapped_event);
+            if (replicate_mapped_barrier.exists() && !shard_only_dependence)
+              tracker->add_mapping_dependence(replicate_mapped_barrier);
             else
               tracker->add_mapping_dependence(mapped_event);
             tracker->add_resolution_dependence(resolved_event);
@@ -4734,6 +4734,13 @@ namespace Legion {
     void IndexCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_index_copy();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::activate_index_copy(void)
+    //--------------------------------------------------------------------------
+    {
       activate_copy();
       index_domain = Domain::NO_DOMAIN;
       launch_space = IndexSpace::NO_SPACE;
@@ -4745,6 +4752,15 @@ namespace Legion {
     void IndexCopyOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_index_copy(); 
+      // Return this operation to the runtime
+      runtime->free_index_copy_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::deactivate_index_copy(void)
+    //--------------------------------------------------------------------------
+    {
       deactivate_copy();
       src_projection_infos.clear();
       dst_projection_infos.clear();
@@ -4754,8 +4770,6 @@ namespace Legion {
         (*it)->deactivate();
       points.clear();
       commit_preconditions.clear();
-      // Return this operation to the runtime
-      runtime->free_index_copy_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -5804,6 +5818,13 @@ namespace Legion {
     void DeletionOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_deletion();
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionOp::activate_deletion(void)
+    //--------------------------------------------------------------------------
+    {
       activate_operation();
     }
 
@@ -5811,11 +5832,18 @@ namespace Legion {
     void DeletionOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_deletion(); 
+      // Return this to the available deletion ops on the queue
+      runtime->free_deletion_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionOp::deactivate_deletion(void)
+    //--------------------------------------------------------------------------
+    {
       deactivate_operation();
       free_fields.clear();
       parent_req_indexes.clear();
-      // Return this to the available deletion ops on the queue
-      runtime->free_deletion_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -13385,6 +13413,13 @@ namespace Legion {
     void IndexFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_index_fill(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::activate_index_fill(void)
+    //--------------------------------------------------------------------------
+    {
       activate_fill();
       index_domain = Domain::NO_DOMAIN;
       launch_space = IndexSpace::NO_SPACE;
@@ -13396,6 +13431,15 @@ namespace Legion {
     void IndexFillOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_index_fill(); 
+      // Return the operation to the runtime
+      runtime->free_index_fill_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::deactivate_index_fill(void)
+    //--------------------------------------------------------------------------
+    {
       deactivate_fill();
       projection_info.clear();
       // We can deactivate our point operations
@@ -13403,8 +13447,6 @@ namespace Legion {
             it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
-      // Return the operation to the runtime
-      runtime->free_index_fill_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -14572,6 +14614,13 @@ namespace Legion {
     void TimingOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_timing();
+    }
+
+    //--------------------------------------------------------------------------
+    void TimingOp::activate_timing(void)
+    //--------------------------------------------------------------------------
+    {
       activate_operation(); 
     }
 
@@ -14579,10 +14628,17 @@ namespace Legion {
     void TimingOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_timing(); 
+      runtime->free_timing_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void TimingOp::deactivate_timing(void)
+    //--------------------------------------------------------------------------
+    {
       deactivate_operation();
       preconditions.clear();
       result = Future();
-      runtime->free_timing_op(this);
     }
 
     //--------------------------------------------------------------------------

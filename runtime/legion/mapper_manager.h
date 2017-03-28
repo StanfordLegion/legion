@@ -274,6 +274,12 @@ namespace Legion {
                               Mapper::SelectShardingFunctorOutput *output,
                               bool first_invocation = true,
                               MappingCallInfo *info = NULL);
+    public: // Fill mapper calls
+      void invoke_fill_select_sharding_functor(FillOp *op,
+                              Mapper::SelectShardingFunctorInput *input,
+                              Mapper::SelectShardingFunctorOutput *output,
+                              bool first_invocation = true,
+                              MappingCallInfo *info = NULL);
     public: // Task execution mapper calls
       void invoke_configure_context(TaskOp *task,
                                     Mapper::ContextConfigOutput *output,

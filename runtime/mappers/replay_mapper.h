@@ -321,6 +321,12 @@ namespace Legion {
                                  const Partition&                   partition,
                                  const SelectShardingFunctorInput&  input,
                                        SelectShardingFunctorOutput& output);
+    public: // Fill mapper calls
+      virtual void select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output);
     public: // Task execution mapping calls
       virtual void configure_context(const MapperContext         ctx,
                                      const Task&                 task,

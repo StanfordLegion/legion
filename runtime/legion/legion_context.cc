@@ -8239,42 +8239,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::fill_fields(const FillLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      ReplFillOp *fill_op = runtime->get_available_repl_fill_op(true);
-#ifdef DEBUG_LEGION
-      fill_op->initialize(this, launcher, Runtime::check_privileges);
-      if (owner_shard->shard_id == 0)
-        log_run.debug("Registering a fill operation in task %s (ID %lld)",
-                       get_task_name(), get_unique_id());
-#else
-      fill_op->initialize(this, launcher, false/*check privileges*/);
-#endif
-      // Check to see if we need to do any unmappings and remappings
-      // before we can issue this copy operation
-      std::vector<PhysicalRegion> unmapped_regions;
-      if (!Runtime::unsafe_launch)
-        find_conflicting_regions(fill_op, unmapped_regions);
-      if (!unmapped_regions.empty())
-      {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
-              "physical regions around fill_fields call in task %s (UID %lld).",
-              get_task_name(), get_unique_id());
-        // Unmap any regions which are conflicting
-        for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-          unmapped_regions[idx].impl->unmap_region();
-      }
-      // Issue the copy operation
-      runtime->add_to_dependence_queue(this, executing_processor, fill_op);
-      // Remap any regions which we unmapped
-      if (!unmapped_regions.empty())
-        remap_unmapped_regions(current_trace, unmapped_regions);
-    }
-
-    //--------------------------------------------------------------------------
     void ReplicateContext::fill_fields(const IndexFillLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -8524,10 +8488,9 @@ namespace Legion {
       if (next_ap_bar_index == application_barriers.size())
         next_ap_bar_index = 0;
       // Set the replicate mapped event
-      op->set_replicate_mapped_event(map_barrier);
-      // Arrive on the barrier 
-      Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
-                                    op->get_mapped_event());
+      op->set_replicate_mapped_barrier(map_barrier);
+      // Don't arrive now, it's up to operations to arrive themselves
+      // (most likely in the prepipeline stage after picking their ShardingID)
       // Advance the barrier for the next operation 
       Runtime::advance_barrier(map_barrier);
       return op_index;
@@ -8544,7 +8507,7 @@ namespace Legion {
       if (next_int_bar_index == internal_barriers.size())
         next_int_bar_index = 0;
       // Set the replicate mapped event
-      op->set_replicate_mapped_event(map_barrier);
+      op->set_replicate_mapped_barrier(map_barrier);
       // Arrive on the barrier 
       Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
                                     op->get_mapped_event());

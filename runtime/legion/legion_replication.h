@@ -197,6 +197,43 @@ namespace Legion {
       }
     };
 
+#ifdef DEBUG_LEGION
+    /**
+     * \class ShardingReduction
+     * A class for performing reductions of ShardingIDs
+     * down to a single ShardingID. This is used in debug
+     * mode to determine if the mappers across all shards
+     * chose the same sharding ID for a given operation.
+     * This is only used in debug mode
+     */
+    class ShardingReduction {
+    public:
+      typedef ShardingID LHS;
+      typedef ShardingID RHS;
+      static const ShardingID identity;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+#ifdef DEBUG_LEGION
+        assert((lhs < UINT_MAX) || (rhs < UINT_MAX));
+#endif
+        if (lhs == UINT_MAX)
+          lhs = rhs;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+#ifdef DEBUG_LEGION
+        assert((rhs1 < UINT_MAX) || (rhs2 < UINT_MAX));
+#endif
+        if (rhs1 == UINT_MAX)
+          rhs1 = rhs2;
+      }
+    };
+#endif
+
     /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
@@ -210,7 +247,13 @@ namespace Legion {
     public:
       ReplIndividualTask& operator=(const ReplIndividualTask &rhs);
     public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
     };
 
     /**
@@ -226,23 +269,13 @@ namespace Legion {
     public:
       ReplIndexTask& operator=(const ReplIndexTask &rhs);
     public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-    };
-
-    /**
-     * \class ReplFillOp
-     * A fill operation that is aware that it is being
-     * executed in a control replication context.
-     */
-    class ReplFillOp : public FillOp {
-    public:
-      ReplFillOp(Runtime *rt);
-      ReplFillOp(const ReplFillOp &rhs);
-      virtual ~ReplFillOp(void);
-    public:
-      ReplFillOp& operator=(const ReplFillOp &rhs);
-    public:
-      virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
     };
 
     /**
@@ -258,7 +291,14 @@ namespace Legion {
     public:
       ReplIndexFillOp& operator=(const ReplIndexFillOp &rhs);
     public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
+      MapperManager *mapper;
     };
 
     /**
@@ -274,7 +314,13 @@ namespace Legion {
     public:
       ReplCopyOp& operator=(const ReplCopyOp &rhs);
     public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
     };
 
     /**
@@ -290,7 +336,13 @@ namespace Legion {
     public:
       ReplIndexCopyOp& operator=(const ReplIndexCopyOp &rhs);
     public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
     };
 
     /**
@@ -305,6 +357,9 @@ namespace Legion {
       virtual ~ReplDeletionOp(void);
     public:
       ReplDeletionOp& operator=(const ReplDeletionOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
     public:
       virtual void trigger_ready(void);
     };
@@ -363,6 +418,9 @@ namespace Legion {
       virtual ~ReplTimingOp(void);
     public:
       ReplTimingOp& operator=(const ReplTimingOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
     public:
       virtual void trigger_ready(void);
     };

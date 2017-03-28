@@ -609,6 +609,9 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+    protected:
+      void activate_individual_task(void);
+      void deactivate_individual_task(void);
     public:
       Future initialize_task(TaskContext *ctx,
                              const TaskLauncher &launcher, 
@@ -875,6 +878,9 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+    protected:
+      void activate_index_task(void);
+      void deactivate_index_task(void);
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);

@@ -746,6 +746,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplayMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      assert(false); // TODO
+    }
+
+    //--------------------------------------------------------------------------
     void ReplayMapper::configure_context(const MapperContext         ctx,
                                          const Task&                 task,
                                                ContextConfigOutput&  output)

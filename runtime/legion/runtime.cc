@@ -9053,13 +9053,6 @@ namespace Legion {
         legion_delete(*it);
       }
       available_repl_index_tasks.clear();
-      for (std::deque<ReplFillOp*>::const_iterator it = 
-            available_repl_fill_ops.begin(); it !=
-            available_repl_fill_ops.end(); it++)
-      {
-        legion_delete(*it);
-      }
-      available_repl_fill_ops.clear();
       for (std::deque<ReplIndexFillOp*>::const_iterator it = 
             available_repl_index_fill_ops.begin(); it !=
             available_repl_index_fill_ops.end(); it++)
@@ -12094,7 +12087,16 @@ namespace Legion {
                                             bool need_zero_check)
     //--------------------------------------------------------------------------
     {
-      if (need_zero_check && (sid == 0))
+      if (sid == UINT_MAX)
+      {
+        log_run.error("ERROR: %d (UINT_MAX) is a reserved sharding ID.", 
+                        UINT_MAX);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_SHARDING_ID);
+      }
+      else if (need_zero_check && (sid == 0))
       {
         log_run.error("ERROR: ShardingID zero is reserved.");
 #ifdef DEBUG_LEGION
@@ -12131,7 +12133,16 @@ namespace Legion {
 #endif
         exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
       }
-      if (sid == 0)
+      if (sid == UINT_MAX)
+      {
+        log_run.error("ERROR: %d (UINT_MAX) is a reserved sharding ID.", 
+                        UINT_MAX);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_RESERVED_SHARDING_ID);
+      }
+      else if (sid == 0)
       {
         log_run.error("ERROR: ShardingID zero is reserved.");
 #ifdef DEBUG_LEGION
@@ -16844,24 +16855,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplFillOp* Runtime::get_available_repl_fill_op(bool need_cont, 
-                                                    bool has_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (need_cont)
-      {
-#ifdef DEBUG_LEGION
-        assert(!has_lock);
-#endif
-        GetAvailableContinuation<ReplFillOp*,
-                      &Runtime::get_available_repl_fill_op>
-                        continuation(this, fill_op_lock);
-        return continuation.get_result();
-      }
-      return get_available(fill_op_lock, available_repl_fill_ops, has_lock);
-    }
-
-    //--------------------------------------------------------------------------
     ReplIndexFillOp* Runtime::get_available_repl_index_fill_op(bool need_cont, 
                                                                bool has_lock)
     //--------------------------------------------------------------------------
@@ -17349,14 +17342,6 @@ namespace Legion {
     {
       AutoLock i_lock(index_task_lock);
       release_operation<false>(available_repl_index_tasks, task);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_repl_fill_op(ReplFillOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock f_lock(fill_op_lock);
-      release_operation<false>(available_repl_fill_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -18746,6 +18731,10 @@ namespace Legion {
                                                       LogicalRegionReduction>();
         red_table[REDOP_FID_REDUCTION] = 
           Realm::ReductionOpUntyped::create_reduction_op<FieldReduction>();
+#ifdef DEBUG_LEGION
+        red_table[REDOP_SID_REDUCTION] = 
+          Realm::ReductionOpUntyped::create_reduction_op<ShardingReduction>();
+#endif
 	for(ReductionOpTable::const_iterator it = red_table.begin();
 	    it != red_table.end();
 	    it++)

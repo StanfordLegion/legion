@@ -239,7 +239,7 @@ namespace Legion {
       void set_trace(LegionTrace *trace, bool is_tracing,
                      const std::vector<StaticDependence> *dependences);
       void set_must_epoch(MustEpochOp *epoch, bool do_registration);
-      void set_replicate_mapped_event(RtEvent replicate_mapped);
+      void set_replicate_mapped_barrier(RtBarrier replicate_mapped);
     public:
       // Localize a region requirement to its parent context
       // This means that region == parent and the
@@ -525,10 +525,10 @@ namespace Legion {
       TaskContext *parent_ctx;
       // The mapped event for this operation
       RtUserEvent mapped_event;
-      // The replicate mapped event for indicating when all instances 
+      // The replicate mapped barrier for indicating when all instances 
       // of this operation have been mapped across all shards
       // during a control replication execution
-      RtEvent replicate_mapped_event;
+      RtBarrier replicate_mapped_barrier;
       // The resolved event for this operation
       RtUserEvent resolved_event;
       // The event for when any children this operation has are mapped
@@ -879,7 +879,10 @@ namespace Legion {
                       bool check_privileges);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(void); 
+    protected:
+      void activate_index_copy(void);
+      void deactivate_index_copy(void);
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
@@ -1061,6 +1064,9 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+    protected:
+      void activate_deletion(void);
+      void deactivate_deletion(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -2557,6 +2563,9 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+    protected:
+      void activate_index_fill(void);
+      void deactivate_index_fill(void);
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
@@ -2722,6 +2731,9 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+    protected:
+      void activate_timing(void);
+      void deactivate_timing(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);

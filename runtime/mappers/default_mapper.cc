@@ -2936,6 +2936,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DefaultMapper::select_sharding_functor(
+                                 const MapperContext                ctx,
+                                 const Fill&                        fill,
+                                 const SelectShardingFunctorInput&  input,
+                                       SelectShardingFunctorOutput& output)
+    //--------------------------------------------------------------------------
+    {
+      log_mapper.spew("Default select_sharding_functor for Fill in %s",
+                      get_mapper_name());
+      output.chosen_functor = 0; // use the default functor
+    }
+
+    //--------------------------------------------------------------------------
     void DefaultMapper::configure_context(const MapperContext         ctx,
                                           const Task&                 task,
                                                 ContextConfigOutput&  output)

@@ -4708,6 +4708,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, ACTIVATE_INDIVIDUAL_CALL);
+      activate_individual_task(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::activate_individual_task(void)
+    //--------------------------------------------------------------------------
+    {
       activate_single();
       future_store = NULL;
       future_size = 0;
@@ -4727,6 +4734,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, DEACTIVATE_INDIVIDUAL_CALL);
+      deactivate_individual_task(); 
+      runtime->free_individual_task(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::deactivate_individual_task(void)
+    //--------------------------------------------------------------------------
+    {
       deactivate_single();
       if (future_store != NULL)
       {
@@ -4751,7 +4766,6 @@ namespace Legion {
         release_acquired_instances(acquired_instances); 
       acquired_instances.clear();
       restrict_postconditions.clear();
-      runtime->free_individual_task(this);
     }
 
     //--------------------------------------------------------------------------
@@ -6734,6 +6748,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_ACTIVATE_CALL);
+      activate_index_task(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::activate_index_task(void)
+    //--------------------------------------------------------------------------
+    {
       activate_multi();
       reduction_op = NULL;
       serdez_redop_fns = NULL;
@@ -6752,6 +6773,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
+      deactivate_index_task(); 
+      runtime->free_index_task(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::deactivate_index_task(void)
+    //--------------------------------------------------------------------------
+    {
       deactivate_multi();
       privilege_paths.clear();
       if (!locally_mapped_slices.empty())
@@ -6775,7 +6804,6 @@ namespace Legion {
       assert(acquired_instances.empty());
 #endif
       acquired_instances.clear();
-      runtime->free_index_task(this);
     }
 
     //--------------------------------------------------------------------------
@@ -9743,8 +9771,17 @@ namespace Legion {
         internal_barrier_infos.resize(num_local_barriers);
         const unsigned num_shards = shard_mapping.size();
         for (unsigned idx = 0; idx < num_local_barriers; idx++)
+#ifdef DEBUG_LEGION
+          // In debug mode we give a reduction to the application barriers
+          // so that we can check that they all used the same ShardingID
+          application_barrier_infos[idx] = BarrierInfo(address_space_index, idx,
+              RtBarrier(Realm::Barrier::create_barrier(num_shards, 
+                  REDOP_SID_REDUCTION, &ShardingReduction::identity,
+                  sizeof(ShardingReduction::identity))));
+#else
           application_barrier_infos[idx] = BarrierInfo(address_space_index, idx,
               RtBarrier(Realm::Barrier::create_barrier(num_shards)));
+#endif
         for (unsigned idx = 0; idx < num_local_barriers; idx++)
           internal_barrier_infos[idx] = BarrierInfo(address_space_index, idx,
               RtBarrier(Realm::Barrier::create_barrier(num_shards)));
