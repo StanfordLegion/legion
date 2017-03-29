@@ -1850,9 +1850,12 @@ namespace Legion {
           rez.serialize(stage);
           AutoLock r_lock(reservation,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
-          if (stage >= 0)
-            assert((stage * Runtime::legion_collective_radix) <= 
-                                          int(forward_mapping.size()));
+          {
+            size_t expected_size = 1;
+            for (int idx = 0; idx < stage; idx++)
+              expected_size *= Runtime::legion_collective_radix;
+            assert(expected_size <= forward_mapping.size());
+          }
 #endif
           rez.serialize<size_t>(forward_mapping.size());
           for (std::map<int,AddressSpace>::const_iterator it = 
