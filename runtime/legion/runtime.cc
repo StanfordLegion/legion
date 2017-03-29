@@ -1767,7 +1767,9 @@ namespace Legion {
       if (runtime->total_address_spaces > 1)
         done_event = Runtime::create_rt_user_event();
       // Add ourselves to the set before any exchanges start
+#ifdef DEBUG_LEGION
       assert(Runtime::mpi_rank >= 0);
+#endif
       forward_mapping[Runtime::mpi_rank] = runtime->address_space;
     }
     
@@ -1825,7 +1827,9 @@ namespace Legion {
         // Wait for our done event to be ready
         done_event.wait();
       }
+#ifdef DEBUG_LEGION
       assert(forward_mapping.size() == runtime->total_address_spaces);
+#endif
       // Reverse the mapping
       for (std::map<int,AddressSpace>::const_iterator it = 
             forward_mapping.begin(); it != forward_mapping.end(); it++)
@@ -1836,6 +1840,8 @@ namespace Legion {
     void MPIRankTable::send_stage(int stage) const
     //--------------------------------------------------------------------------
     {
+      // We might also need to send additional stages after this
+      int max_stage = stage;
       Serializer rez;
       {
         RezCheck z(rez);
@@ -1853,40 +1859,76 @@ namespace Legion {
           rez.serialize(it->first);
           rez.serialize(it->second);
         }
-      }
-      if (stage == -1)
-      {
-        if (participating)
+        if (stage >= 0)
         {
-          // Send back to the nodes that are not participating
-          AddressSpaceID target = runtime->address_space +
-            Runtime::legion_collective_participating_spaces;
+          // Check to see if all the stages up to and including
+          // this one are done to ensure that stages are done in order
+          for (unsigned idx = stage; 
+                idx < stage_notifications.size(); idx++, max_stage++)
+          {
+            // See if we have to handle the extra of extra message from
+            // non-participating nodes
+            if ((idx == 0) && 
+                ((int(runtime->address_space) < 
+                  int(runtime->total_address_spaces -
+                      Runtime::legion_collective_participating_spaces)))) 
+            {
 #ifdef DEBUG_LEGION
-          assert(target < runtime->total_address_spaces);
+              assert(stage_notifications[0] <= 
+                      (Runtime::legion_collective_radix+1));
 #endif
-          runtime->send_mpi_rank_exchange(target, rez);
+              if (stage_notifications[0] < (Runtime::legion_collective_radix+1))
+                break;
+            }
+            else 
+            {
+#ifdef DEBUG_LEGION
+              assert(stage_notifications[idx] <= 
+                      Runtime::legion_collective_radix);
+#endif
+              if (stage_notifications[idx] < Runtime::legion_collective_radix)
+                break;
+            }
+          }
+        }
+      }
+      // Send all the stages up to max stage
+      for (/*nothing*/; stage <= max_stage; stage++)
+      {
+        if (stage == -1)
+        {
+          if (participating)
+          {
+            // Send back to the nodes that are not participating
+            AddressSpaceID target = runtime->address_space +
+              Runtime::legion_collective_participating_spaces;
+#ifdef DEBUG_LEGION
+            assert(target < runtime->total_address_spaces);
+#endif
+            runtime->send_mpi_rank_exchange(target, rez);
+          }
+          else
+          {
+            // Sent to a node that is participating
+            AddressSpaceID target = runtime->address_space % 
+              Runtime::legion_collective_participating_spaces;
+            runtime->send_mpi_rank_exchange(target, rez);
+          }
         }
         else
         {
-          // Sent to a node that is participating
-          AddressSpaceID target = runtime->address_space % 
-            Runtime::legion_collective_participating_spaces;
-          runtime->send_mpi_rank_exchange(target, rez);
-        }
-      }
-      else
-      {
 #ifdef DEBUG_LEGION
-        assert(stage >= 0);
+          assert(stage >= 0);
 #endif
-        for (int r = 1; r < Runtime::legion_collective_radix; r++)
-        {
-          AddressSpaceID target = runtime->address_space ^
-            (r << (stage * Runtime::legion_collective_log_radix));
+          for (int r = 1; r < Runtime::legion_collective_radix; r++)
+          {
+            AddressSpaceID target = runtime->address_space ^
+              (r << (stage * Runtime::legion_collective_log_radix));
 #ifdef DEBUG_LEGION
-          assert(int(target) < Runtime::legion_collective_participating_spaces);
+            assert(int(target) < Runtime::legion_collective_participating_spaces);
 #endif
-          runtime->send_mpi_rank_exchange(target, rez);
+            runtime->send_mpi_rank_exchange(target, rez);
+          }
         }
       }
     }
@@ -1953,10 +1995,12 @@ namespace Legion {
         derez.deserialize(rank);
 	unsigned space;
 	derez.deserialize(space);
+#ifdef DEBUG_LEGION
 	// Duplicates are possible because later messages aren't "held", but
 	// they should be exact matches
 	assert ((forward_mapping.count(rank) == 0) ||
 		(forward_mapping[rank] == space));
+#endif
 	forward_mapping[rank] = space;
       }
       // A stage -1 message is counted as part of stage 0 (if it exists
@@ -1994,7 +2038,7 @@ namespace Legion {
             assert(stage_notifications[idx] <= 
                     Runtime::legion_collective_radix);
 #endif
-            if(stage_notifications[idx] < Runtime::legion_collective_radix)
+            if (stage_notifications[idx] < Runtime::legion_collective_radix)
               return false;
           }
         }
