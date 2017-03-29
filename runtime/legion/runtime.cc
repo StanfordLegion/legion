@@ -1980,8 +1980,10 @@ namespace Legion {
               ((int(runtime->address_space) < 
                 int(runtime->total_address_spaces -
                     Runtime::legion_collective_participating_spaces)))) 
+          {
             if (stage_notifications[0] < Runtime::legion_collective_radix+1)
               return false;
+          }
           else if(stage_notifications[stage] < Runtime::legion_collective_radix)
             return false;
         }
