@@ -1866,21 +1866,10 @@ namespace Legion {
           for (unsigned idx = stage+1; 
                 idx < stage_notifications.size(); idx++, max_stage++)
           {
-            // See if we have to handle the extra of extra message from
-            // non-participating nodes
-            if ((idx == 0) && 
-                ((int(runtime->address_space) < 
-                  int(runtime->total_address_spaces -
-                      Runtime::legion_collective_participating_spaces)))) 
-            {
-              if (stage_notifications[0] < (Runtime::legion_collective_radix+1))
-                break;
-            }
-            else 
-            {
-              if (stage_notifications[idx] < Runtime::legion_collective_radix)
-                break;
-            }
+            // Already know that idx is > 0 so no need to handle 
+            // the special case of weird stage 0 arrivals
+            if (stage_notifications[idx] < Runtime::legion_collective_radix)
+              break;
           }
         }
       }
@@ -2008,9 +1997,9 @@ namespace Legion {
             ((int(runtime->address_space) < 
               int(runtime->total_address_spaces -
                   Runtime::legion_collective_participating_spaces)))) 
-          assert(stage_notifications[0] <= Runtime::legion_collective_radix+1);
+          assert(stage_notifications[0] < Runtime::legion_collective_radix+1);
         else
-          assert(stage_notifications[stage]<=Runtime::legion_collective_radix);
+          assert(stage_notifications[stage] < Runtime::legion_collective_radix);
 #endif
         stage_notifications[stage]++;
         // Check to see if all the stages up to and including
