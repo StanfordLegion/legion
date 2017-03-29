@@ -1873,19 +1873,11 @@ namespace Legion {
                   int(runtime->total_address_spaces -
                       Runtime::legion_collective_participating_spaces)))) 
             {
-#ifdef DEBUG_LEGION
-              assert(stage_notifications[0] <= 
-                      (Runtime::legion_collective_radix+1));
-#endif
               if (stage_notifications[0] < (Runtime::legion_collective_radix+1))
                 break;
             }
             else 
             {
-#ifdef DEBUG_LEGION
-              assert(stage_notifications[idx] <= 
-                      Runtime::legion_collective_radix);
-#endif
               if (stage_notifications[idx] < Runtime::legion_collective_radix)
                 break;
             }
@@ -2012,6 +2004,13 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
 	assert(stage < int(stage_notifications.size()));
+        if ((stage == 0) && 
+            ((int(runtime->address_space) < 
+              int(runtime->total_address_spaces -
+                  Runtime::legion_collective_participating_spaces)))) 
+          assert(stage_notifications[0] <= Runtime::legion_collective_radix+1);
+        else
+          assert(stage_notifications[stage]<=Runtime::legion_collective_radix);
 #endif
         stage_notifications[stage]++;
         // Check to see if all the stages up to and including
@@ -2025,19 +2024,11 @@ namespace Legion {
                 int(runtime->total_address_spaces -
                     Runtime::legion_collective_participating_spaces)))) 
           {
-#ifdef DEBUG_LEGION
-            assert(stage_notifications[0] <= 
-                    (Runtime::legion_collective_radix+1));
-#endif
             if (stage_notifications[0] < (Runtime::legion_collective_radix+1))
               return false;
           }
           else 
           {
-#ifdef DEBUG_LEGION
-            assert(stage_notifications[idx] <= 
-                    Runtime::legion_collective_radix);
-#endif
             if (stage_notifications[idx] < Runtime::legion_collective_radix)
               return false;
           }
