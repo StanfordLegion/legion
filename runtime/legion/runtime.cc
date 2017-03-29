@@ -1841,6 +1841,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(stage);
         AutoLock r_lock(reservation,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        if (stage >= 0)
+          assert((stage * Runtime::legion_collective_radix) <= 
+                                        forward_mapping.size());
+#endif
         rez.serialize<size_t>(forward_mapping.size());
         for (std::map<int,AddressSpace>::const_iterator it = 
               forward_mapping.begin(); it != forward_mapping.end(); it++)
@@ -1965,6 +1970,13 @@ namespace Legion {
 	assert(stage < int(stage_notifications.size()));
 #endif
         stage_notifications[stage]++;
+        // See if we have to handle the extra of extra message from
+        // non-participating nodes
+        if ((stage == 0) && 
+            ((int(runtime->address_space) < int(runtime->total_address_spaces - 
+                  Runtime::legion_collective_participating_spaces))))
+          return (stage_notifications[stage] == 
+                    (Runtime::legion_collective_radix+1));
         if (stage_notifications[stage] == (Runtime::legion_collective_radix))
           return true;
       }
