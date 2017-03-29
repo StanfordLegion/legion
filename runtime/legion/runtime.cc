@@ -1863,7 +1863,7 @@ namespace Legion {
           }
           // Check to see if the next stage is ready and we need
           // to send it after this one
-          if (stage >= 0 && ((stage+1) < stage_notifications.size()) &&
+          if (((stage+1) < int(stage_notifications.size())) &&
              (stage_notifications[stage+1] == Runtime::legion_collective_radix))
             send_next = true;
           else
@@ -1986,35 +1986,14 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
 	assert(stage < int(stage_notifications.size()));
-        if ((stage == 0) && 
-            ((int(runtime->address_space) < 
-              int(runtime->total_address_spaces -
-                  Runtime::legion_collective_participating_spaces)))) 
-          assert(stage_notifications[0] < Runtime::legion_collective_radix+1);
-        else
-          assert(stage_notifications[stage] < Runtime::legion_collective_radix);
+        assert(stage_notifications[stage] < Runtime::legion_collective_radix);
 #endif
         stage_notifications[stage]++;
         // Check to see if all the stages up to and including
         // this one are done to ensure that stages are done in order
         for (int idx = 0; idx <= stage; idx++)
-        {
-          // See if we have to handle the extra of extra message from
-          // non-participating nodes
-          if ((idx == 0) && 
-              ((int(runtime->address_space) < 
-                int(runtime->total_address_spaces -
-                    Runtime::legion_collective_participating_spaces)))) 
-          {
-            if (stage_notifications[0] < (Runtime::legion_collective_radix+1))
-              return false;
-          }
-          else 
-          {
-            if (stage_notifications[idx] < Runtime::legion_collective_radix)
-              return false;
-          }
-        }
+          if (stage_notifications[idx] < Runtime::legion_collective_radix)
+            return false;
         return true;
       }
       return false;
