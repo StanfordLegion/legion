@@ -1863,7 +1863,7 @@ namespace Legion {
         {
           // Check to see if all the stages up to and including
           // this one are done to ensure that stages are done in order
-          for (unsigned idx = stage; 
+          for (unsigned idx = stage+1; 
                 idx < stage_notifications.size(); idx++, max_stage++)
           {
             // See if we have to handle the extra of extra message from
