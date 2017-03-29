@@ -1853,6 +1853,7 @@ namespace Legion {
       {
         if (participating)
         {
+          // Send back to the nodes that are not participating
           AddressSpaceID target = runtime->address_space +
             Runtime::legion_collective_participating_spaces;
 #ifdef DEBUG_LEGION
@@ -1862,6 +1863,7 @@ namespace Legion {
         }
         else
         {
+          // Sent to a node that is participating
           AddressSpaceID target = runtime->address_space % 
             Runtime::legion_collective_participating_spaces;
           runtime->send_mpi_rank_exchange(target, rez);
@@ -1897,10 +1899,16 @@ namespace Legion {
       bool send_next = unpack_exchange(stage, derez);
       if (stage == -1)
       {
-        if (participating)
-          send_stage(0);
-        else
+        if (!participating)
+        {
+#ifdef DEBUG_LEGION
+          assert(forward_mapping.size() == runtime->total_address_spaces);
+#endif
           Runtime::trigger_event(done_event);
+          return;
+        }
+        else
+          send_stage(0);
       }
       // send_next may be true even for stage -1 if it arrives after all the
       //  stage 0 messages
@@ -1909,6 +1917,9 @@ namespace Legion {
 	stage = (stage == -1) ? 1 : stage + 1;
 	if (stage == Runtime::legion_collective_stages)
         {
+#ifdef DEBUG_LEGION
+          assert(forward_mapping.size() == runtime->total_address_spaces);
+#endif
 	  // We are done
 	  Runtime::trigger_event(done_event);
 	  // See if we have to send a message back to a
@@ -19947,13 +19958,9 @@ namespace Legion {
       // Now we have it log 2
       int log_nodes = 
         MultiplyDeBruijnBitPosition[(uint32_t)(node_copy * 0x07C4ACDDU) >> 27];
-      legion_collective_stages = log_nodes / legion_collective_log_radix;;
+      legion_collective_stages = (log_nodes - legion_collective_log_radix) + 1;
       legion_collective_participating_spaces = 
-        (1 << (legion_collective_stages * legion_collective_log_radix));
-#ifdef DEBUG_LEGION
-      assert(
-       (legion_collective_participating_spaces % legion_collective_radix) == 0);
-#endif
+        legion_collective_stages * legion_collective_log_radix;
     }
 
     //--------------------------------------------------------------------------
