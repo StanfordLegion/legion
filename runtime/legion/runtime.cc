@@ -20034,9 +20034,12 @@ namespace Legion {
       // Now we have it log 2
       int log_nodes = 
         MultiplyDeBruijnBitPosition[(uint32_t)(node_copy * 0x07C4ACDDU) >> 27];
-      legion_collective_stages = (log_nodes - legion_collective_log_radix) + 1;
+#ifdef DEBUG_LEGION
+      assert((log_nodes % legion_collective_log_radix) == 0);
+#endif
+      legion_collective_stages = log_nodes / legion_collective_log_radix;
       legion_collective_participating_spaces = 
-        legion_collective_stages * legion_collective_radix;
+        1 << (legion_collective_stages * legion_collective_log_radix);
     }
 
     //--------------------------------------------------------------------------
