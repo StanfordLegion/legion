@@ -1844,7 +1844,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (stage >= 0)
           assert((stage * Runtime::legion_collective_radix) <= 
-                                        forward_mapping.size());
+                                        int(forward_mapping.size()));
 #endif
         rez.serialize<size_t>(forward_mapping.size());
         for (std::map<int,AddressSpace>::const_iterator it = 
