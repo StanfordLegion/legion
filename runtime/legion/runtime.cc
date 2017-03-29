@@ -1840,42 +1840,35 @@ namespace Legion {
     void MPIRankTable::send_stage(int stage) const
     //--------------------------------------------------------------------------
     {
-      // We might also need to send additional stages after this
-      int max_stage = stage;
-      Serializer rez;
+      bool send_next = false;
+      // Send this stage plus any later stages that have triggered
+      do 
       {
-        RezCheck z(rez);
-        rez.serialize(stage);
-        AutoLock r_lock(reservation,1,false/*exclusive*/);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(stage);
+          AutoLock r_lock(reservation,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
-        if (stage >= 0)
-          assert((stage * Runtime::legion_collective_radix) <= 
-                                        int(forward_mapping.size()));
+          if (stage >= 0)
+            assert((stage * Runtime::legion_collective_radix) <= 
+                                          int(forward_mapping.size()));
 #endif
-        rez.serialize<size_t>(forward_mapping.size());
-        for (std::map<int,AddressSpace>::const_iterator it = 
-              forward_mapping.begin(); it != forward_mapping.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-        if (stage >= 0)
-        {
-          // Check to see if all the stages up to and including
-          // this one are done to ensure that stages are done in order
-          for (unsigned idx = stage+1; 
-                idx < stage_notifications.size(); idx++, max_stage++)
+          rez.serialize<size_t>(forward_mapping.size());
+          for (std::map<int,AddressSpace>::const_iterator it = 
+                forward_mapping.begin(); it != forward_mapping.end(); it++)
           {
-            // Already know that idx is > 0 so no need to handle 
-            // the special case of weird stage 0 arrivals
-            if (stage_notifications[idx] < Runtime::legion_collective_radix)
-              break;
+            rez.serialize(it->first);
+            rez.serialize(it->second);
           }
+          // Check to see if the next stage is ready and we need
+          // to send it after this one
+          if (stage >= 0 && ((stage+1) < stage_notifications.size()) &&
+             (stage_notifications[stage+1] == Runtime::legion_collective_radix))
+            send_next = true;
+          else
+            send_next = false;
         }
-      }
-      // Send all the stages up to max stage
-      for (/*nothing*/; stage <= max_stage; stage++)
-      {
         if (stage == -1)
         {
           if (participating)
@@ -1911,7 +1904,7 @@ namespace Legion {
             runtime->send_mpi_rank_exchange(target, rez);
           }
         }
-      }
+      } while (send_next);
     }
 
     //--------------------------------------------------------------------------
