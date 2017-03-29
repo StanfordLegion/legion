@@ -1981,11 +1981,22 @@ namespace Legion {
                 int(runtime->total_address_spaces -
                     Runtime::legion_collective_participating_spaces)))) 
           {
-            if (stage_notifications[0] < Runtime::legion_collective_radix+1)
+#ifdef DEBUG_LEGION
+            assert(stage_notifications[0] <= 
+                    (Runtime::legion_collective_radix+1));
+#endif
+            if (stage_notifications[0] < (Runtime::legion_collective_radix+1))
               return false;
           }
-          else if(stage_notifications[stage] < Runtime::legion_collective_radix)
-            return false;
+          else 
+          {
+#ifdef DEBUG_LEGION
+            assert(stage_notifications[idx] <= 
+                    Runtime::legion_collective_radix);
+#endif
+            if(stage_notifications[idx] < Runtime::legion_collective_radix)
+              return false;
+          }
         }
         return true;
       }
