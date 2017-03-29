@@ -1970,15 +1970,22 @@ namespace Legion {
 	assert(stage < int(stage_notifications.size()));
 #endif
         stage_notifications[stage]++;
-        // See if we have to handle the extra of extra message from
-        // non-participating nodes
-        if ((stage == 0) && 
-            ((int(runtime->address_space) < int(runtime->total_address_spaces - 
-                  Runtime::legion_collective_participating_spaces))))
-          return (stage_notifications[stage] == 
-                    (Runtime::legion_collective_radix+1));
-        if (stage_notifications[stage] == (Runtime::legion_collective_radix))
-          return true;
+        // Check to see if all the stages up to and including
+        // this one are done
+        for (int idx = 0; idx <= stage; idx++)
+        {
+          // See if we have to handle the extra of extra message from
+          // non-participating nodes
+          if ((idx == 0) && 
+              ((int(runtime->address_space) < 
+                int(runtime->total_address_spaces -
+                    Runtime::legion_collective_participating_spaces))) && 
+              (stage_notifications[0] < Runtime::legion_collective_radix+1))
+            return false;
+          if (stage_notifications[stage] < Runtime::legion_collective_radix)
+            return false;
+        }
+        return true;
       }
       return false;
     }
