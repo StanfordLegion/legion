@@ -1971,7 +1971,7 @@ namespace Legion {
 #endif
         stage_notifications[stage]++;
         // Check to see if all the stages up to and including
-        // this one are done
+        // this one are done to ensure that stages are done in order
         for (int idx = 0; idx <= stage; idx++)
         {
           // See if we have to handle the extra of extra message from
@@ -19978,7 +19978,7 @@ namespace Legion {
       uint32_t radix_copy = legion_collective_radix;
       for (int i = 0; i < 5; i++)
         radix_copy |= radix_copy >> (1 << i);
-      int legion_collective_log_radix = 
+      legion_collective_log_radix = 
         MultiplyDeBruijnBitPosition[(uint32_t)(radix_copy * 0x07C4ACDDU) >> 27];
       if (legion_collective_radix != (1 << legion_collective_log_radix))
         legion_collective_radix = (1 << legion_collective_log_radix);
