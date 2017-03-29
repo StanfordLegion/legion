@@ -1899,11 +1899,14 @@ namespace Legion {
             AddressSpaceID target = runtime->address_space ^
               (r << (stage * Runtime::legion_collective_log_radix));
 #ifdef DEBUG_LEGION
-            assert(int(target) < Runtime::legion_collective_participating_spaces);
+            assert(int(target) < 
+                    Runtime::legion_collective_participating_spaces);
 #endif
             runtime->send_mpi_rank_exchange(target, rez);
           }
         }
+        // Increment the stage for the next iteration
+        stage++;
       } while (send_next);
     }
 
