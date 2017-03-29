@@ -24,3 +24,6 @@ endif()
 
 add_executable(global_vars global_vars.cc)
 target_link_libraries(global_vars Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME global_vars COMMAND $<TARGET_FILE:global_vars>) 
+endif()

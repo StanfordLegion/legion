@@ -24,3 +24,6 @@ endif()
 
 add_executable(ghost ghost.cc)
 target_link_libraries(ghost Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME ghost COMMAND $<TARGET_FILE:ghost> -ll:cpu 4) 
+endif()
