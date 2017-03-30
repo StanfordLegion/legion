@@ -1842,22 +1842,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Send this stage plus any later stages that have triggered
-      for (int stage = start_stage; 
-            stage < Runtime::legion_collective_stages; stage++)
+      bool send_next = true;
+      for (int stage = start_stage; send_next &&
+            (stage < Runtime::legion_collective_stages); stage++)
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(stage);
           AutoLock r_lock(reservation);
-          // First check to see if we should send this stage
-          if (stage >= 0)
-          {
-            if (sent_stages[stage] || 
-                (stage_notifications[stage] < Runtime::legion_collective_radix))
-              break;
-            sent_stages[stage] = true; // we're going to send it
-          }
 #ifdef DEBUG_LEGION
           {
             size_t expected_size = 1;
@@ -1873,6 +1866,13 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
+          // Then check to see if we should send the next stage
+          if ((stage >= 0) && ((stage+1) < sent_stages.size()) &&
+                !sent_stages[stage+1] && 
+             (stage_notifications[stage+1] == Runtime::legion_collective_radix))
+            sent_stages[stage+1] = true; // indicate that we will send next
+          else
+            send_next = false;
         }
         if (stage == -1)
         {
