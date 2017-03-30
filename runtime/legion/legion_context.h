@@ -1298,6 +1298,7 @@ namespace Legion {
     protected:
       RtBarrier index_space_allocator_barrier;
       RtBarrier index_partition_allocator_barrier;
+      RtBarrier color_partition_allocator_barrier;
       RtBarrier field_space_allocator_barrier;
       RtBarrier field_allocator_barrier;
       RtBarrier logical_region_allocator_barrier;

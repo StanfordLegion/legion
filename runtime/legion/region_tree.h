@@ -92,6 +92,16 @@ namespace Legion {
                                        PartitionKind part_kind,
                                        ApEvent partition_ready,
              ApUserEvent instantiate = ApUserEvent::NO_AP_USER_EVENT);
+      // For control replication contexts
+      RtEvent create_pending_partition_shard(bool owner_shard,
+                                             IndexPartition pid,
+                                             IndexSpace parent,
+                                             IndexSpace color_space,
+                                             LegionColor &partition_color,
+                                             PartitionKind part_kind,
+                                             ApEvent partition_ready,
+              ApUserEvent instantiate = ApUserEvent::NO_AP_USER_EVENT,
+              ShardID local_shard = 0, size_t total_shards = 0);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source);

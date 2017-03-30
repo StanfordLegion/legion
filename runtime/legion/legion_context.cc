@@ -6819,8 +6819,11 @@ namespace Legion {
       AutoRuntimeCall call(this);  
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       LegionColor partition_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
+      else
+        color_generated = true;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
@@ -6834,12 +6837,21 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Have to do our registration before broadcasting
-        forest->create_pending_partition(pid, parent, color_space,
-                                         partition_color, DISJOINT_KIND,
-                                         term_event);
+        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                         color_space, partition_color, 
+                                         DISJOINT_KIND, term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(partition_color != INVALID_COLOR); // we should have an ID
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+              1/*count*/, RtEvent::NO_RT_EVENT, &partition_color, 
+              sizeof(partition_color));
+        }
       }
       else
       {
@@ -6847,17 +6859,36 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        // If we need a color then we can get that too
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result = 
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&partition_color,
+                sizeof(partition_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(partition_color != INVALID_COLOR);
+#endif
+        }
         // Do our registration
-        forest->create_pending_partition(pid, parent, color_space,
-                                         partition_color, DISJOINT_KIND,
-                                         term_event);
+        forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
+                                         color_space, partition_color, 
+                                         DISJOINT_KIND, term_event);
       }
       part_op->initialize_equal_partition(this, pid, granularity);
       // Now we can add the operation to the queue
@@ -6868,6 +6899,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
@@ -6901,8 +6934,11 @@ namespace Legion {
       }
 #endif
       LegionColor partition_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
+      else
+        color_generated = true;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
@@ -6931,11 +6967,21 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, parent, color_space, 
-                                         partition_color, kind, term_event);
+        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                         color_space, partition_color, 
+                                         kind, term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(partition_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+              1/*count*/, RtEvent::NO_RT_EVENT, &partition_color,
+              sizeof(partition_color));
+        }
       }
       else
       {
@@ -6943,16 +6989,35 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif         
+            color_partition_allocator_barrier.get_result(&partition_color,
+                sizeof(partition_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(partition_color != INVALID_COLOR);
+#endif
+        }
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, parent, color_space, 
-                                         partition_color, kind, term_event);
+        forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
+                                         color_space, partition_color, 
+                                         kind, term_event);
       }
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
@@ -6963,6 +7028,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
@@ -6996,8 +7063,11 @@ namespace Legion {
       }
 #endif
       LegionColor partition_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
+      else
+        color_generated = true;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
@@ -7025,11 +7095,21 @@ namespace Legion {
                         parent.id, get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, parent, color_space, 
-                                         partition_color, kind, term_event);
+        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                         color_space, partition_color, 
+                                         kind, term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(partition_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+              1/*count*/, RtEvent::NO_RT_EVENT, &partition_color,
+              sizeof(partition_color));
+        }
       }
       else
       {
@@ -7037,16 +7117,35 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&partition_color,
+                sizeof(partition_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(partition_color != INVALID_COLOR);
+#endif
+        }
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, parent, color_space, 
-                                         partition_color, kind, term_event);
+        forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
+                                         color_space, partition_color, 
+                                         kind, term_event);
       }
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
@@ -7057,6 +7156,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
@@ -7093,8 +7194,11 @@ namespace Legion {
       }
 #endif
       LegionColor partition_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         partition_color = color;
+      else
+        color_generated = true;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
@@ -7116,11 +7220,21 @@ namespace Legion {
                         parent.id, get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, parent, color_space, 
-                                         partition_color, kind, term_event);
+        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                         color_space, partition_color, 
+                                         kind, term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(partition_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+              1/*count*/, RtEvent::NO_RT_EVENT, &partition_color,
+              sizeof(partition_color));
+        }
       }
       else
       {
@@ -7128,16 +7242,35 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&partition_color,
+                sizeof(partition_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(partition_color != INVALID_COLOR);
+#endif
+        }
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, parent, color_space, 
-                                         partition_color, kind, term_event);
+        forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
+                                         color_space, partition_color, 
+                                         kind, term_event);
       }
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
@@ -7148,6 +7281,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
@@ -7204,8 +7339,11 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       LegionColor part_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         part_color = color; 
+      else
+        color_generated = true;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
@@ -7219,11 +7357,20 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, parent, color_space,
-                                         part_color, part_kind, term_event);
+        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                         color_space, part_color, 
+                                         part_kind, term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(part_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+             1/*count*/, RtEvent::NO_RT_EVENT, &part_color, sizeof(part_color));
+        }
       }
       else
       {
@@ -7231,16 +7378,35 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&part_color, 
+                sizeof(part_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(part_color != INVALID_COLOR);
+#endif
+        }
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, parent, color_space,
-                                         part_color, part_kind, term_event);
+        forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
+                                         color_space, part_color, 
+                                         part_kind, term_event);
       }
       part_op->initialize_restricted_partition(this, pid, transform, 
                                 transform_size, extent, extent_size);
@@ -7253,6 +7419,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
@@ -7270,8 +7438,11 @@ namespace Legion {
       AutoRuntimeCall call(this);
       IndexSpace parent = handle.get_index_space();  
       LegionColor part_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
+      else
+        color_generated = true;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
@@ -7286,11 +7457,20 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition 
-        forest->create_pending_partition(pid, parent, color_space, part_color,
+        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                         color_space, part_color,
                                          DISJOINT_KIND, term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(part_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+             1/*count*/, RtEvent::NO_RT_EVENT, &part_color, sizeof(part_color));
+        }
       }
       else
       {
@@ -7298,15 +7478,34 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&part_color, 
+                sizeof(part_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(part_color != INVALID_COLOR);
+#endif
+        }
         // Tell the region tree forest about this partition 
-        forest->create_pending_partition(pid, parent, color_space, part_color,
+        forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
+                                         color_space, part_color,
                                          DISJOINT_KIND, term_event);
       }
       part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
@@ -7334,6 +7533,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
@@ -7353,8 +7554,11 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);  
       LegionColor part_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
+      else
+        color_generated = true;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
@@ -7369,11 +7573,20 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, handle, color_space, part_color,
+        forest->create_pending_partition_shard(true/*owner*/, pid, handle, 
+                                         color_space, part_color,
                                          part_kind, term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(part_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+             1/*count*/, RtEvent::NO_RT_EVENT, &part_color, sizeof(part_color));
+        }
       }
       else
       {
@@ -7381,15 +7594,34 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&part_color,
+                sizeof(part_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(part_color != INVALID_COLOR);
+#endif
+        }
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, handle, color_space, part_color,
+        forest->create_pending_partition_shard(false/*owner*/, pid, handle, 
+                                         color_space, part_color,
                                          part_kind, term_event);
       }
       part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
@@ -7417,6 +7649,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
@@ -7436,8 +7670,11 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);  
       LegionColor part_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
+      else
+        color_generated = true;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
@@ -7452,11 +7689,20 @@ namespace Legion {
                         "(ID %lld)", get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, handle, color_space, part_color,
+        forest->create_pending_partition_shard(true/*owner*/, pid, handle,
+                                         color_space, part_color,
                                          part_kind, term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(part_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+             1/*count*/, RtEvent::NO_RT_EVENT, &part_color, sizeof(part_color));
+        }
       }
       else
       {
@@ -7464,15 +7710,34 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&part_color, 
+                sizeof(part_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(part_color != INVALID_COLOR);
+#endif
+        }
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, handle, color_space, part_color,
+        forest->create_pending_partition_shard(false/*owner*/, pid, handle, 
+                                         color_space, part_color,
                                          part_kind, term_event);
       }
       part_op->initialize_by_image_range(this, pid, projection, parent, 
@@ -7501,6 +7766,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
@@ -7519,8 +7786,11 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);  
       LegionColor part_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
+      else
+        color_generated = true;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
@@ -7543,12 +7813,21 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, handle.get_index_space(), 
+        forest->create_pending_partition_shard(true/*owner*/, pid, 
+                                         handle.get_index_space(), 
                                          color_space, part_color, part_kind,
                                          term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(part_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+             1/*count*/, RtEvent::NO_RT_EVENT, &part_color, sizeof(part_color));
+        }
       }
       else
       {
@@ -7556,15 +7835,34 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&part_kind, 
+                sizeof(part_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(part_color != INVALID_COLOR);
+#endif
+        }
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, handle.get_index_space(), 
+        forest->create_pending_partition_shard(false/*owner*/, pid, 
+                                         handle.get_index_space(), 
                                          color_space, part_color, part_kind,
                                          term_event);
       }
@@ -7594,6 +7892,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
@@ -7612,8 +7912,11 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);  
       LegionColor part_color = INVALID_COLOR;
+      bool color_generated = false;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
+      else
+        color_generated = true;
       // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
@@ -7628,12 +7931,21 @@ namespace Legion {
                         "(ID %lld)", get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, handle.get_index_space(), 
+        forest->create_pending_partition_shard(true/*owner*/, pid, 
+                                         handle.get_index_space(), 
                                          color_space, part_color, part_kind,
                                          term_event);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(part_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+             1/*count*/, RtEvent::NO_RT_EVENT, &part_color, sizeof(part_color));
+        }
       }
       else
       {
@@ -7641,15 +7953,34 @@ namespace Legion {
         if (!index_partition_allocator_barrier.has_triggered())
           index_partition_allocator_barrier.wait();
 #ifdef DEBUG_LEGION
+#ifndef NDEBUG
         bool result =  
+#endif
 #endif
           index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
 #ifdef DEBUG_LEGION
         assert(result);
         assert(pid.exists());
 #endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&part_color,
+                sizeof(part_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(part_color != INVALID_COLOR);
+#endif
+        }
         // Tell the region tree forest about this partition
-        forest->create_pending_partition(pid, handle.get_index_space(), 
+        forest->create_pending_partition_shard(false/*owner*/, pid, 
+                                         handle.get_index_space(), 
                                          color_space, part_color, part_kind,
                                          term_event);
       }
@@ -7679,6 +8010,8 @@ namespace Legion {
         index_space_allocator_shard = 0;
       // Advance the barrier to the next generation
       Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
 
