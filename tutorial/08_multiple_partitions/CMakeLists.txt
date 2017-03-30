@@ -24,3 +24,6 @@ endif()
 
 add_executable(multiple_partitions multiple_partitions.cc)
 target_link_libraries(multiple_partitions Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME multiple_partitions COMMAND $<TARGET_FILE:multiple_partitions>) 
+endif()

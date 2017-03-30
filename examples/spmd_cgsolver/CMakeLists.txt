@@ -28,3 +28,6 @@ add_executable(spmd_cgsolver
   cgtasks.h   cgtasks.cc
 )
 target_link_libraries(spmd_cgsolver Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME spmd_cgsolver COMMAND $<TARGET_FILE:spmd_cgsolver>) 
+endif()

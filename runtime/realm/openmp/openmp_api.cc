@@ -93,6 +93,13 @@ namespace Realm {
       }
       delete work;
     }
+
+    void GOMP_parallel(void (*fnptr)(void *data), void *data, unsigned nthreads, unsigned int flags)
+    {
+      GOMP_parallel_start(fnptr, data, nthreads);
+      fnptr(data);
+      GOMP_parallel_end();
+    }
   };
 #endif
 

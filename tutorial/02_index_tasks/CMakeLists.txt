@@ -24,3 +24,6 @@ endif()
 
 add_executable(index_tasks index_tasks.cc)
 target_link_libraries(index_tasks Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME index_tasks COMMAND $<TARGET_FILE:index_tasks>) 
+endif()

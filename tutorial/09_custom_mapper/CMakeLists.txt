@@ -24,3 +24,6 @@ endif()
 
 add_executable(custom_mapper custom_mapper.cc)
 target_link_libraries(custom_mapper Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME custom_mapper COMMAND $<TARGET_FILE:custom_mapper>) 
+endif()
