@@ -1912,6 +1912,10 @@ namespace Legion {
     bool MPIRankTable::send_ready_stages(void) 
     //--------------------------------------------------------------------------
     {
+      // We're not participating, so once we recieve any messages
+      // then we know we've got all our data
+      if (!participating)
+        return true;
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
       for (int stage = 0; stage < Runtime::legion_collective_stages; stage++)
