@@ -1982,13 +1982,18 @@ namespace Legion {
       assert(participating || (stage == -1));
 #endif
       unpack_exchange(stage, derez);
-      if ((stage == -1) && !participating)
+      if (stage == -1)
       {
+        if (!participating)
+        {
 #ifdef DEBUG_LEGION
-        assert(forward_mapping.size() == runtime->total_address_spaces);
+          assert(forward_mapping.size() == runtime->total_address_spaces);
 #endif
-        Runtime::trigger_event(done_event);
-        return;
+          Runtime::trigger_event(done_event);
+          return;
+        }
+        else
+          send_explicit_stage(0); // we can now send our stage 0
       }
       const bool all_stages_done = send_ready_stages();
       if (all_stages_done)
