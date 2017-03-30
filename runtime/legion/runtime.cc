@@ -1855,7 +1855,7 @@ namespace Legion {
         }
         if (stage >= 0)
         {
-          assert(stage < sent_stages.size());
+          assert(stage < int(sent_stages.size()));
           assert(!sent_stages[stage]);
         }
 #endif
@@ -1962,8 +1962,10 @@ namespace Legion {
           runtime->send_mpi_rank_exchange(target, rez);
         }
       }
-      // If we make it here, then we sent the last stage so we're done
-      return true;
+      // If we make it here, then we sent the last stage, check to see
+      // if we've seen all the notifications for it
+      AutoLock r_lock(reservation,1,false/*exclusive*/);
+      return (stage_notifications.back() == Runtime::legion_collective_radix);
     }
 
     //--------------------------------------------------------------------------
