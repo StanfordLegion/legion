@@ -446,8 +446,9 @@ namespace Legion {
       void perform_rank_exchange(void);
       void handle_mpi_rank_exchange(Deserializer &derez);
     protected:
-      bool send_stages(int start_stage);
-      bool unpack_exchange(int stage, Deserializer &derez);
+      void send_explicit_stage(int stage);
+      bool send_ready_stages(void);
+      void unpack_exchange(int stage, Deserializer &derez);
     public:
       Runtime *const runtime;
       const bool participating;
