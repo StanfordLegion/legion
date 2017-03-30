@@ -1838,11 +1838,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPIRankTable::send_stages(int start_stage) 
+    bool MPIRankTable::send_stages(int start_stage) 
     //--------------------------------------------------------------------------
     {
       // Send this stage plus any later stages that have triggered
       bool send_next = true;
+      bool all_stages_sent = false;
       for (int stage = start_stage; send_next &&
             (stage < Runtime::legion_collective_stages); stage++)
       {
@@ -1867,12 +1868,17 @@ namespace Legion {
             rez.serialize(it->second);
           }
           // Then check to see if we should send the next stage
-          if ((stage >= 0) && ((stage+1) < sent_stages.size()) &&
+          if ((stage >= 0) && ((stage+1) < int(sent_stages.size())) &&
                 !sent_stages[stage+1] && 
              (stage_notifications[stage+1] == Runtime::legion_collective_radix))
             sent_stages[stage+1] = true; // indicate that we will send next
           else
+          {
             send_next = false;
+            // All the stages are sent if the stage we're about to
+            // send is one less than the collective stages
+            all_stages_sent = (stage == (Runtime::legion_collective_stages-1));
+          }
         }
         if (stage == -1)
         {
@@ -1913,6 +1919,7 @@ namespace Legion {
           }
         }
       }
+      return all_stages_sent;
     }
 
     //--------------------------------------------------------------------------
@@ -1944,7 +1951,8 @@ namespace Legion {
       if (send_next)
       {
 	stage = (stage == -1) ? 1 : stage + 1;
-	if (stage == Runtime::legion_collective_stages)
+        const bool all_stages_done = send_stages(stage);
+        if (all_stages_done)
         {
 #ifdef DEBUG_LEGION
           assert(forward_mapping.size() == runtime->total_address_spaces);
@@ -1959,8 +1967,6 @@ namespace Legion {
                 Runtime::legion_collective_participating_spaces)))
 	    send_stages(-1);
 	}
-	else // Send the next stage
-	  send_stages(stage);
       }
     }
 
