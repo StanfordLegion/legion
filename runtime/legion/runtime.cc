@@ -1912,10 +1912,9 @@ namespace Legion {
     bool MPIRankTable::send_ready_stages(void) 
     //--------------------------------------------------------------------------
     {
-      // We're not participating, so once we recieve any messages
-      // then we know we've got all our data
-      if (!participating)
-        return true;
+#ifdef DEBUG_LEGION
+      assert(participating);
+#endif
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
       for (int stage = 0; stage < Runtime::legion_collective_stages; stage++)
@@ -1991,9 +1990,6 @@ namespace Legion {
         Runtime::trigger_event(done_event);
         return;
       }
-      // send_next may be true even for stage -1 if it arrives after all the
-      //  stage 0 messages
-      stage = (stage == -1) ? 1 : stage + 1;
       const bool all_stages_done = send_ready_stages();
       if (all_stages_done)
       {
