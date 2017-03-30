@@ -1895,15 +1895,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(stage >= 0);
 #endif
-        for (int r = 1; r < Runtime::legion_collective_radix; r++)
+        if (stage == (Runtime::legion_collective_stages-1))
         {
-          AddressSpaceID target = runtime->address_space ^
-            (r << (stage * Runtime::legion_collective_log_radix));
+          for (int r = 1; r < Runtime::legion_collective_last_radix; r++)
+          {
+            AddressSpaceID target = runtime->address_space ^
+              (r << (stage * Runtime::legion_collective_log_radix));
 #ifdef DEBUG_LEGION
-          assert(int(target) < 
-                  Runtime::legion_collective_participating_spaces);
+            assert(int(target) < 
+                    Runtime::legion_collective_participating_spaces);
 #endif
-          runtime->send_mpi_rank_exchange(target, rez);
+            runtime->send_mpi_rank_exchange(target, rez);
+          }
+        }
+        else
+        {
+          for (int r = 1; r < Runtime::legion_collective_radix; r++)
+          {
+            AddressSpaceID target = runtime->address_space ^
+              (r << (stage * Runtime::legion_collective_log_radix));
+#ifdef DEBUG_LEGION
+            assert(int(target) < 
+                    Runtime::legion_collective_participating_spaces);
+#endif
+            runtime->send_mpi_rank_exchange(target, rez);
+          }
         }
       }
     }
@@ -1954,21 +1970,38 @@ namespace Legion {
           }
         }
         // Now we can do the send
-        for (int r = 1; r < Runtime::legion_collective_radix; r++)
+        if (stage == (Runtime::legion_collective_stages-1))
         {
-          AddressSpaceID target = runtime->address_space ^
-            (r << (stage * Runtime::legion_collective_log_radix));
+          for (int r = 1; r < Runtime::legion_collective_last_radix; r++)
+          {
+            AddressSpaceID target = runtime->address_space ^
+              (r << (stage * Runtime::legion_collective_log_radix));
 #ifdef DEBUG_LEGION
-          assert(int(target) < 
-                  Runtime::legion_collective_participating_spaces);
+            assert(int(target) < 
+                    Runtime::legion_collective_participating_spaces);
 #endif
-          runtime->send_mpi_rank_exchange(target, rez);
+            runtime->send_mpi_rank_exchange(target, rez);
+          }
+        }
+        else
+        {
+          for (int r = 1; r < Runtime::legion_collective_radix; r++)
+          {
+            AddressSpaceID target = runtime->address_space ^
+              (r << (stage * Runtime::legion_collective_log_radix));
+#ifdef DEBUG_LEGION
+            assert(int(target) < 
+                    Runtime::legion_collective_participating_spaces);
+#endif
+            runtime->send_mpi_rank_exchange(target, rez);
+          }
         }
       }
       // If we make it here, then we sent the last stage, check to see
       // if we've seen all the notifications for it
       AutoLock r_lock(reservation,1,false/*exclusive*/);
-      return (stage_notifications.back() == Runtime::legion_collective_radix);
+      return (stage_notifications.back() == 
+                Runtime::legion_collective_last_radix);
     }
 
     //--------------------------------------------------------------------------
@@ -2043,7 +2076,12 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
 	assert(stage < int(stage_notifications.size()));
-        assert(stage_notifications[stage] < Runtime::legion_collective_radix);
+        if (stage < (Runtime::legion_collective_stages-1))
+          assert(stage_notifications[stage] < 
+                  Runtime::legion_collective_radix);
+        else
+          assert(stage_notifications[stage] < 
+                  Runtime::legion_collective_last_radix);
 #endif
         stage_notifications[stage]++;
       }
@@ -18172,6 +18210,9 @@ namespace Legion {
     /*static*/ int Runtime::legion_collective_log_radix = 0;
     /*static*/ int Runtime::legion_collective_stages = 0;
     /*static*/ int Runtime::legion_collective_participating_spaces = 0;
+    /*static*/ int Runtime::legion_collective_last_radix = 
+                                     LEGION_COLLECTIVE_RADIX;
+    /*static*/ int Runtime::legion_collective_last_log_radix = 0;
     /*static*/ int Runtime::mpi_rank = -1;
     /*static*/ MPIRankTable* Runtime::mpi_rank_table = NULL;
     /*static*/ std::vector<MPILegionHandshake>* 
@@ -18282,6 +18323,8 @@ namespace Legion {
         legion_collective_log_radix = 0;
         legion_collective_stages = 0;
         legion_collective_participating_spaces = 0;
+        legion_collective_last_radix = LEGION_COLLECTIVE_RADIX;
+        legion_collective_last_log_radix = 0;
 #ifdef DEBUG_LEGION
         logging_region_tree_state = false;
         verbose_logging = false;
@@ -20039,9 +20082,27 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert((log_nodes % legion_collective_log_radix) == 0);
 #endif
-      legion_collective_stages = log_nodes / legion_collective_log_radix;
-      legion_collective_participating_spaces = 
-        1 << (legion_collective_stages * legion_collective_log_radix);
+      // Stages round up in case of incomplete stages
+      legion_collective_stages = (log_nodes + 
+          legion_collective_log_radix - 1) / legion_collective_log_radix;
+      int log_remainder = log_nodes % legion_collective_log_radix;
+      if (log_remainder > 0)
+      {
+        // We have an incomplete last stage
+        legion_collective_last_radix = 1 << log_remainder;
+        legion_collective_last_log_radix = log_remainder;
+        // Now we can compute the number of participating stages
+        legion_collective_participating_spaces = 
+          1 << ((legion_collective_stages - 1) * legion_collective_log_radix +
+                 legion_collective_last_log_radix);
+      }
+      else
+      {
+        legion_collective_last_radix = legion_collective_radix;
+        legion_collective_last_log_radix = legion_collective_log_radix;
+        legion_collective_participating_spaces = 
+          1 << (legion_collective_stages * legion_collective_log_radix);
+      }
     }
 
     //--------------------------------------------------------------------------

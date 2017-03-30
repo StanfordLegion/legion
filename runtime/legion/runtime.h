@@ -2896,6 +2896,8 @@ namespace Legion {
       static int legion_collective_log_radix;
       static int legion_collective_stages;
       static int legion_collective_participating_spaces;
+      static int legion_collective_last_radix;
+      static int legion_collective_last_log_radix;
       // MPI Interoperability
       static int mpi_rank;
       static MPIRankTable *mpi_rank_table;
