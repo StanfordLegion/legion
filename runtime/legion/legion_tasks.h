@@ -1316,6 +1316,8 @@ namespace Legion {
       int collective_stages;
       int collective_participating_spaces;
       bool collective_participant;
+      int collective_last_radix;
+      int collective_last_log_radix;
     protected:
       // Barrier exchange data structures
       RtUserEvent                             barriers_exchanged;

@@ -24,3 +24,6 @@ endif()
 
 add_executable(partitioning partitioning.cc)
 target_link_libraries(partitioning Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME partitioning COMMAND $<TARGET_FILE:partitioning>) 
+endif()

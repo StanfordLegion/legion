@@ -23,10 +23,6 @@ matrix:
   exclude:
     - os: osx
       compiler: gcc
-    - os: osx
-      env: CC_FLAGS="-std=c++98" DEBUG=0 TEST_LEGION_CXX=0 TEST_REALM=0
-    - os: osx
-      env: CC_FLAGS="-std=c++98 -DLEGION_SPY" DEBUG=1 USE_SPY=1 TEST_LEGION_CXX=0 TEST_REALM=0
 # blacklist some branches
 branches:
   only:
@@ -45,8 +41,9 @@ before_install:
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
-      brew install pypy llvm
-      export LLVM_CONFIG="$(find "$(brew --prefix)"/Cellar/llvm/*/bin/llvm-config -print -quit)"
+      brew install pypy llvm@3.9
+      export CLANG="$(brew --prefix)/opt/llvm@3.9/bin/clang"
+      export LLVM_CONFIG="$(brew --prefix)/opt/llvm@3.9/bin/llvm-config"
     fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "g++" ]]; then export CXX="g++-4.9" CC="gcc-4.9"; fi
   - if [[ "$(uname)" = "Linux" && "$CXX" = "clang++" ]]; then export CXX="clang++-3.5" CC="clang-3.5"; fi

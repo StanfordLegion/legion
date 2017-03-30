@@ -24,3 +24,6 @@ endif()
 
 add_executable(dynamic_registration dynamic_registration.cc)
 target_link_libraries(dynamic_registration Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME dynamic_registration COMMAND $<TARGET_FILE:dynamic_registration>) 
+endif()

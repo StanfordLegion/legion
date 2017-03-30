@@ -9390,6 +9390,7 @@ namespace Legion {
         trigger_local_commit(0), trigger_remote_commit(0), 
         remote_constituents(0), first_future(true), 
         collective_radix(Runtime::legion_collective_radix), 
+        collective_last_radix(Runtime::legion_collective_last_radix),
         barrier_receiving_stage(-1)
     //--------------------------------------------------------------------------
     {
@@ -9485,7 +9486,9 @@ namespace Legion {
                                     collective_radix,
                                     collective_log_radix,
                                     collective_stages,
-                                    collective_participating_spaces);
+                                    collective_participating_spaces,
+                                    collective_last_radix,
+                                    collective_last_log_radix);
       barrier_exchange_notifications.resize(collective_stages, 1);
       // Make our local shards
       create_shards();
@@ -9541,7 +9544,9 @@ namespace Legion {
                                     collective_radix,
                                     collective_log_radix,
                                     collective_stages,
-                                    collective_participating_spaces);
+                                    collective_participating_spaces,
+                                    collective_last_radix,
+                                    collective_last_log_radix);
       barrier_exchange_notifications.resize(collective_stages, 1);
       // Unpack our first shard here
       create_shards();

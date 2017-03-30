@@ -169,7 +169,8 @@ public:
 #undef NEW_OPAQUE_WRAPPER
 };
 
-static inline legion_terra_index_space_list_list_t
+#if 0
+static legion_terra_index_space_list_list_t
 create_list_list(legion_terra_index_space_list_t lhs_, size_t size1, size_t size2)
 {
   legion_terra_index_space_list_list_t result;
@@ -186,8 +187,9 @@ create_list_list(legion_terra_index_space_list_t lhs_, size_t size1, size_t size
   }
   return result;
 }
+#endif
 
-static legion_terra_index_space_list_list_t
+static inline legion_terra_index_space_list_list_t
 create_list_list(std::vector<IndexSpace> &spaces,
                  std::map<IndexSpace, std::vector<IndexSpace> > &product)
 {
@@ -724,7 +726,9 @@ create_cross_product_tree(HighLevelRuntime *runtime,
                           bool lhs_disjoint,
                           const std::vector<IndexSpace> &rhs,
                           bool rhs_disjoint,
-                          legion_terra_index_space_list_list_t &result)
+                          legion_terra_logical_region_list_t *lhs_,
+                          legion_terra_logical_region_list_t *rhs_,
+                          legion_terra_logical_region_list_list_t *result_)
 {
   assert(lhs_disjoint);
   std::vector<std::pair<ptr_t, ptr_t> > lhs_bounds;
@@ -793,10 +797,20 @@ create_cross_product_tree(HighLevelRuntime *runtime,
         }
       }
       if (intersects) {
-        if (flip)
-          assign_list_list(result, rhs_idx, lhs_idx, CObjectWrapper::wrap(lh_space));
-        else
-          assign_list_list(result, lhs_idx, rhs_idx, CObjectWrapper::wrap(rh_space));
+        if (flip) {
+          legion_terra_logical_region_list_t& sublist = result_->sublists[rhs_idx];
+          size_t idx = sublist.count++;
+          sublist.subregions[idx].index_space = CObjectWrapper::wrap(lh_space);
+          sublist.subregions[idx].field_space = lhs_->subregions[lhs_idx].field_space;
+          sublist.subregions[idx].tree_id = lhs_->subregions[lhs_idx].tree_id;
+        }
+        else {
+          legion_terra_logical_region_list_t& sublist = result_->sublists[lhs_idx];
+          size_t idx = sublist.count++;
+          sublist.subregions[idx].index_space = CObjectWrapper::wrap(rh_space);
+          sublist.subregions[idx].field_space = rhs_->subregions[rhs_idx].field_space;
+          sublist.subregions[idx].tree_id = rhs_->subregions[rhs_idx].tree_id;
+        }
       }
     }
     potentially_overlap.clear();
@@ -834,7 +848,8 @@ create_cross_product_shallow_structured_spec(
     Context ctx,
     const std::vector<IndexSpace> &lhs,
     const std::vector<IndexSpace> &rhs,
-    legion_terra_index_space_list_list_t &result)
+    legion_terra_logical_region_list_t *rhs_,
+    legion_terra_logical_region_list_list_t *result_)
 {
   assert(DIM > 0); // Should be structured.
 
@@ -854,7 +869,11 @@ create_cross_product_shallow_structured_spec(
         for (size_t j = block_j; j < block_j_max; j++) {
           Rect<DIM> rh_rect = rh_rects[j];
           if (lh_rect.overlaps(rh_rect)) {
-            assign_list_list(result, i, j, CObjectWrapper::wrap(rhs[j]));
+            legion_terra_logical_region_list_t& sublist = result_->sublists[i];
+            size_t idx = sublist.count++;
+            sublist.subregions[idx].index_space = CObjectWrapper::wrap(rhs[j]);
+            sublist.subregions[idx].field_space = rhs_->subregions[j].field_space;
+            sublist.subregions[idx].tree_id = rhs_->subregions[j].tree_id;
           }
         }
       }
@@ -870,7 +889,8 @@ create_cross_product_shallow_structured(HighLevelRuntime *runtime,
                                         Context ctx,
                                         const std::vector<IndexSpace> &lhs,
                                         const std::vector<IndexSpace> &rhs,
-                                        legion_terra_index_space_list_list_t &result)
+                                        legion_terra_logical_region_list_t *rhs_,
+                                        legion_terra_logical_region_list_list_t *result_)
 {
   if (lhs.empty() || rhs.empty()) return;
 
@@ -881,19 +901,19 @@ create_cross_product_shallow_structured(HighLevelRuntime *runtime,
     case 1:
       {
         create_cross_product_shallow_structured_spec<1>(
-            runtime, ctx, lhs, rhs, result);
+            runtime, ctx, lhs, rhs, rhs_, result_);
         break;
       }
     case 2:
       {
         create_cross_product_shallow_structured_spec<2>(
-            runtime, ctx, lhs, rhs, result);
+            runtime, ctx, lhs, rhs, rhs_, result_);
         break;
       }
     case 3:
       {
         create_cross_product_shallow_structured_spec<3>(
-            runtime, ctx, lhs, rhs, result);
+            runtime, ctx, lhs, rhs, rhs_, result_);
         break;
       }
     default:
@@ -910,17 +930,18 @@ create_cross_product_shallow_unstructured(HighLevelRuntime *runtime,
                                           bool lhs_disjoint,
                                           const std::vector<IndexSpace> &rhs,
                                           bool rhs_disjoint,
-                                          legion_terra_index_space_list_list_t &result)
-                                          //std::map<IndexSpace, std::vector<IndexSpace> > &result)
+                                          legion_terra_logical_region_list_t *lhs_,
+                                          legion_terra_logical_region_list_t *rhs_,
+                                          legion_terra_logical_region_list_list_t *result_)
 {
   if (lhs_disjoint)
   {
-    create_cross_product_tree(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, result);
+    create_cross_product_tree(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, lhs_, rhs_, result_);
     return;
   }
   else if (rhs_disjoint)
   {
-    create_cross_product_tree(runtime, ctx, !flip, rhs, rhs_disjoint, lhs, lhs_disjoint, result);
+    create_cross_product_tree(runtime, ctx, !flip, rhs, rhs_disjoint, lhs, lhs_disjoint, rhs_, lhs_, result_);
     return;
   }
 
@@ -959,8 +980,20 @@ create_cross_product_shallow_unstructured(HighLevelRuntime *runtime,
         }
       }
       if (intersects) {
-        if (flip) assign_list_list(result, j, i, CObjectWrapper::wrap(lh_space));
-        else assign_list_list(result, i, j, CObjectWrapper::wrap(rh_space));
+        if (flip) {
+          legion_terra_logical_region_list_t& sublist = result_->sublists[j];
+          size_t idx = sublist.count++;
+          sublist.subregions[idx].index_space = CObjectWrapper::wrap(lh_space);
+          sublist.subregions[idx].field_space = lhs_->subregions[i].field_space;
+          sublist.subregions[idx].tree_id = lhs_->subregions[i].tree_id;
+        }
+        else {
+          legion_terra_logical_region_list_t& sublist = result_->sublists[i];
+          size_t idx = sublist.count++;
+          sublist.subregions[idx].index_space = CObjectWrapper::wrap(rh_space);
+          sublist.subregions[idx].field_space = rhs_->subregions[j].field_space;
+          sublist.subregions[idx].tree_id = rhs_->subregions[j].tree_id;
+        }
       }
     }
   }
@@ -1059,19 +1092,15 @@ unwrap_list(legion_terra_index_space_list_t list,
   return CObjectWrapper::unwrap(list.space);
 }
 
-static legion_terra_index_space_list_t
-wrap_list(IndexSpace root, std::vector<IndexSpace> &subspaces)
+static void
+unwrap_list(legion_terra_logical_region_list_t *list,
+            std::vector<IndexSpace> &subspaces)
 {
-  legion_terra_index_space_list_t result;
-  result.space = CObjectWrapper::wrap(root);
-  result.count = subspaces.size();
-  result.subspaces = (legion_index_space_t *)
-    malloc(sizeof(legion_index_space_t) * subspaces.size());
-  assert(result.subspaces);
-  for (size_t i = 0; i < subspaces.size(); i++) {
-    result.subspaces[i] = CObjectWrapper::wrap(subspaces[i]);
+  subspaces.reserve(list->count);
+  for (size_t i = 0; i < list->count; i++) {
+    subspaces.push_back(
+      CObjectWrapper::unwrap(list->subregions[i]).get_index_space());
   }
-  return result;
 }
 
 static void
@@ -1086,23 +1115,30 @@ unwrap_list_list(legion_terra_index_space_list_list_t list,
   }
 }
 
-static legion_terra_index_space_list_list_t
-wrap_list_list(std::vector<IndexSpace> &spaces,
-               std::map<IndexSpace, std::vector<IndexSpace> > &product)
+static void
+wrap_list_list(std::vector<IndexSpace> &lhs,
+               legion_terra_logical_region_list_t *rhs_,
+               std::map<IndexSpace, std::vector<IndexSpace> > &product,
+               legion_terra_logical_region_list_list_t *result)
 {
-  //unsigned long long ts_start = Realm::Clock::current_time_in_microseconds();
-  legion_terra_index_space_list_list_t result;
-  result.count = spaces.size();
-  result.sublists = (legion_terra_index_space_list_t *)
-    malloc(sizeof(legion_terra_index_space_list_t) * spaces.size());
-  for (size_t i = 0; i < spaces.size(); i++) {
-    IndexSpace space = spaces[i];
+  assert(result->count == lhs.size());
+  for (size_t i = 0; i < lhs.size(); i++) {
+    IndexSpace space = lhs[i];
     assert(product.count(space));
-    result.sublists[i] = wrap_list(space, product[space]);
+    std::vector<IndexSpace> &subspaces = product[space];
+
+    legion_terra_logical_region_list_t& sublist = result->sublists[i];
+
+    for (size_t j = 0; j < subspaces.size(); j++) {
+      if (subspaces[j].exists()) {
+        legion_index_space_t subspace = CObjectWrapper::wrap(subspaces[j]);
+        size_t idx = sublist.count++;
+        sublist.subregions[idx].index_space = subspace;
+        sublist.subregions[idx].field_space = rhs_->subregions[j].field_space;
+        sublist.subregions[idx].tree_id = rhs_->subregions[j].tree_id;
+      }
+    }
   }
-  //unsigned long long ts_stop = Realm::Clock::current_time_in_microseconds();
-  //fprintf(stderr, "wrap: %ld us\n", ts_stop - ts_start);
-  return result;
 }
 
 static IndexPartition
@@ -1114,12 +1150,13 @@ partition_from_list(HighLevelRuntime *runtime, Context ctx,
   return runtime->get_parent_index_partition(ctx, subspaces[0]);
 }
 
-legion_terra_index_space_list_list_t
+void
 legion_terra_index_cross_product_create_list(
   legion_runtime_t runtime_,
   legion_context_t ctx_,
-  legion_terra_index_space_list_t lhs_,
-  legion_terra_index_space_list_t rhs_)
+  legion_terra_logical_region_list_t *lhs_,
+  legion_terra_logical_region_list_t *rhs_,
+  legion_terra_logical_region_list_list_t *result_)
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1155,15 +1192,16 @@ legion_terra_index_cross_product_create_list(
     }
   }
 
-  return wrap_list_list(lhs, product);
+  wrap_list_list(lhs, rhs_, product, result_);
 }
 
-legion_terra_index_space_list_list_t
+void
 legion_terra_index_cross_product_create_list_shallow(
   legion_runtime_t runtime_,
   legion_context_t ctx_,
-  legion_terra_index_space_list_t lhs_,
-  legion_terra_index_space_list_t rhs_)
+  legion_terra_logical_region_list_t *lhs_,
+  legion_terra_logical_region_list_t *rhs_,
+  legion_terra_logical_region_list_list_t *result_)
 {
   HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
@@ -1172,15 +1210,14 @@ legion_terra_index_cross_product_create_list_shallow(
   std::vector<IndexSpace> rhs;
   unwrap_list(rhs_, rhs);
 
-  legion_terra_index_space_list_list_t result =
-    create_list_list(lhs_, lhs.size(), rhs.size());
+  for (size_t i = 0; i < result_->count; ++i) result_->sublists[i].count = 0;
 
   IndexPartition lhs_part = partition_from_list(runtime, ctx, lhs);
   IndexPartition rhs_part = partition_from_list(runtime, ctx, rhs);
   if ((lhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, lhs_part))
       || (rhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, rhs_part))) {
       // Structured index spaces.
-    create_cross_product_shallow_structured(runtime, ctx, lhs, rhs, result);
+    create_cross_product_shallow_structured(runtime, ctx, lhs, rhs, rhs_, result_);
   } else { // Unstructured index spaces.
     bool lhs_disjoint = runtime->is_index_partition_disjoint(ctx, lhs_part);
     bool rhs_disjoint = runtime->is_index_partition_disjoint(ctx, rhs_part);
@@ -1191,13 +1228,11 @@ legion_terra_index_cross_product_create_list_shallow(
     }
 
     if (flip) {
-      create_cross_product_shallow_unstructured(runtime, ctx, flip, rhs, rhs_disjoint, lhs, lhs_disjoint, result);
+      create_cross_product_shallow_unstructured(runtime, ctx, flip, rhs, rhs_disjoint, lhs, lhs_disjoint, rhs_, lhs_, result_);
     } else {
-      create_cross_product_shallow_unstructured(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, result);
+      create_cross_product_shallow_unstructured(runtime, ctx, flip, lhs, lhs_disjoint, rhs, rhs_disjoint, lhs_, rhs_, result_);
     }
   }
-
-  return result;
 }
 
 // "Completes" a shallow cross product between lists of structured index spaces.
