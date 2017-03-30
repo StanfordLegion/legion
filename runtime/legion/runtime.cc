@@ -1756,6 +1756,7 @@ namespace Legion {
       if (participating)
       {
         stage_notifications.resize(Runtime::legion_collective_stages, 1);
+        sent_stages.resize(Runtime::legion_collective_stages, false);
 	// Special case: if we expect a stage -1 message from a non-participating
 	//  space, we'll count that as part of stage 0
 	if ((Runtime::legion_collective_stages > 0) &&
@@ -1816,13 +1817,13 @@ namespace Legion {
                 Runtime::legion_collective_participating_spaces) ||
               (runtime->address_space >= (runtime->total_address_spaces -
                 Runtime::legion_collective_participating_spaces)))
-            send_stage(0);
+            send_stages(0);
         }
         else
         {
           // We are not a participating node
           // so we just have to send notification to one node
-          send_stage(-1);
+          send_stages(-1);
         }
         // Wait for our done event to be ready
         done_event.wait();
@@ -1837,18 +1838,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MPIRankTable::send_stage(int stage) const
+    void MPIRankTable::send_stages(int start_stage) 
     //--------------------------------------------------------------------------
     {
-      bool send_next = false;
       // Send this stage plus any later stages that have triggered
-      do 
+      for (int stage = start_stage; 
+            stage < Runtime::legion_collective_stages; stage++)
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(stage);
-          AutoLock r_lock(reservation,1,false/*exclusive*/);
+          AutoLock r_lock(reservation);
+          // First check to see if we should send this stage
+          if (stage >= 0)
+          {
+            if (sent_stages[stage] || 
+                (stage_notifications[stage] < Runtime::legion_collective_radix))
+              break;
+            sent_stages[stage] = true; // we're going to send it
+          }
 #ifdef DEBUG_LEGION
           {
             size_t expected_size = 1;
@@ -1864,13 +1873,6 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
-          // Check to see if the next stage is ready and we need
-          // to send it after this one
-          if (((stage+1) < int(stage_notifications.size())) &&
-             (stage_notifications[stage+1] == Runtime::legion_collective_radix))
-            send_next = true;
-          else
-            send_next = false;
         }
         if (stage == -1)
         {
@@ -1891,6 +1893,8 @@ namespace Legion {
               Runtime::legion_collective_participating_spaces;
             runtime->send_mpi_rank_exchange(target, rez);
           }
+          // Stage -1 doesn't iterate
+          break;
         }
         else
         {
@@ -1908,9 +1912,7 @@ namespace Legion {
             runtime->send_mpi_rank_exchange(target, rez);
           }
         }
-        // Increment the stage for the next iteration
-        stage++;
-      } while (send_next);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1935,7 +1937,7 @@ namespace Legion {
           return;
         }
         else
-          send_stage(0);
+          send_stages(0);
       }
       // send_next may be true even for stage -1 if it arrives after all the
       //  stage 0 messages
@@ -1955,10 +1957,10 @@ namespace Legion {
 	       Runtime::legion_collective_participating_spaces) &&
               (int(runtime->address_space) < int(runtime->total_address_spaces -
                 Runtime::legion_collective_participating_spaces)))
-	    send_stage(-1);
+	    send_stages(-1);
 	}
 	else // Send the next stage
-	  send_stage(stage);
+	  send_stages(stage);
       }
     }
 
