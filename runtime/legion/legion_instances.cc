@@ -833,13 +833,13 @@ namespace Legion {
           case 0:
             {
               // For now just check to make sure we have space
-              const size_t space_size = instance_domain.get_index_space().
-                                          get_valid_mask().get_num_elmts();
+              const Realm::ElementMask &space_mask =
+                instance_domain.get_index_space().get_valid_mask();
               for (unsigned idx = 0; idx < to_check.size(); idx++)
               {
-                const size_t other_size = to_check[idx].get_index_space().
-                                          get_valid_mask().get_num_elmts();
-                if (space_size < other_size)
+                Realm::ElementMask diff = 
+                  to_check[idx].get_index_space().get_valid_mask() - space_mask;
+                if (diff.pop_count() > 0)
                   return false;
               }
               break;
