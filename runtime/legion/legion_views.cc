@@ -4706,7 +4706,8 @@ namespace Legion {
           if (!overlap)
             continue;
           // Skip any nodes that don't even intersect, they don't matter
-          if (!it->first->logical_node->intersects_with(dst->logical_node))
+          if (!it->first->logical_node->intersects_with(dst->logical_node,
+                                                        false/*computes*/))
             continue;
           children_to_traverse[it->first] = overlap;
           FieldMask dom_overlap = overlap & dominate_capture;
@@ -4762,7 +4763,8 @@ namespace Legion {
           if (!overlap)
             continue;
           // Skip any nodes that don't even intersect, they don't matter
-          if (!it->first->logical_node->intersects_with(dst->logical_node))
+          if (!it->first->logical_node->intersects_with(dst->logical_node,
+                                                        false/*computes*/))
             continue;
           children_to_traverse[it->first] = overlap;
         }
