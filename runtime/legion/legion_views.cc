@@ -4730,6 +4730,27 @@ namespace Legion {
           dominate_capture |= single_dominated;
         }
       }
+      else if ((dst->logical_node->get_parent() == logical_node) &&
+                !logical_node->is_region() &&
+                logical_node->as_partition_node()->row_source->is_disjoint())
+      {
+        // If we're at a partition node and the destination is one of our
+        // children and we know the partition is disjoint then we just
+        // have to look for the destination node in the set of a 
+        // composite nodes
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+        {
+          if (it->first->logical_node != dst->logical_node)
+            continue;
+          // Once we find the node we can break out no matter what
+          const FieldMask overlap = it->second & copy_mask;
+          if (!overlap)
+            break;
+          children_to_traverse[it->first] = overlap;
+          break;
+        }
+      }
       else
       {
         // There are no remaining dominate fields, so we just need to 
