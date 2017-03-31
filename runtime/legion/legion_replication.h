@@ -93,6 +93,41 @@ namespace Legion {
     };
 
     /**
+     * \class ColorReduction
+     * A class for performing reductions of legion colors
+     */
+    class ColorReduction {
+    public:
+      typedef LegionColor LHS;
+      typedef LegionColor RHS;
+      static const LegionColor identity;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+#ifdef DEBUG_LEGION
+        assert(((lhs != INVALID_COLOR) && (rhs == INVALID_COLOR)) ||
+               ((lhs == INVALID_COLOR) && (rhs != INVALID_COLOR)) ||
+               ((lhs != INVALID_COLOR) && (lhs == rhs)));
+#endif
+        if (rhs != INVALID_COLOR)
+          lhs = rhs;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+#ifdef DEBUG_LEGION
+        assert(((rhs1 != INVALID_COLOR) && (rhs2 == INVALID_COLOR)) ||
+               ((rhs1 == INVALID_COLOR) && (rhs2 != INVALID_COLOR)) ||
+               ((rhs1 != INVALID_COLOR) && (rhs1 == rhs2)));
+#endif
+        if (rhs2 != INVALID_COLOR)
+          rhs1 = rhs2;
+      }
+    };
+
+    /**
      * \class FieldSpaceReduction
      * A class for performing reductions of field spaces
      */

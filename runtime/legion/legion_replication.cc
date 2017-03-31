@@ -23,6 +23,7 @@ namespace Legion {
 
     const IndexSpace IndexSpaceReduction::identity = IndexSpace::NO_SPACE;
     const IndexPartitionID IndexPartitionReduction::identity = 0;
+    const LegionColor ColorReduction::identity = INVALID_COLOR;
     const FieldSpace FieldSpaceReduction::identity = FieldSpace::NO_SPACE;
     const FieldID FieldReduction::identity = 0;
     const RegionTreeID LogicalRegionReduction::identity = 0;

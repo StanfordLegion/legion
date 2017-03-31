@@ -18854,6 +18854,8 @@ namespace Legion {
         red_table[REDOP_IP_REDUCTION] = 
           Realm::ReductionOpUntyped::create_reduction_op<
                                                      IndexPartitionReduction>();
+        red_table[REDOP_COLOR_REDUCTION] = 
+          Realm::ReductionOpUntyped::create_reduction_op<ColorReduction>();
         red_table[REDOP_FS_REDUCTION] =
           Realm::ReductionOpUntyped::create_reduction_op<FieldSpaceReduction>();
         red_table[REDOP_LG_REDUCTION] = 

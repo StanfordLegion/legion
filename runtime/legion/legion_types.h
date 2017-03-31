@@ -232,7 +232,8 @@ namespace Legion {
     enum {
       REDOP_IS_REDUCTION    = MAX_APPLICATION_REDUCTION_ID,
       REDOP_IP_REDUCTION    = REDOP_IS_REDUCTION + 1,
-      REDOP_FS_REDUCTION    = REDOP_IP_REDUCTION + 1,
+      REDOP_COLOR_REDUCTION = REDOP_IP_REDUCTION + 1,
+      REDOP_FS_REDUCTION    = REDOP_COLOR_REDUCTION + 1,
       REDOP_LG_REDUCTION    = REDOP_FS_REDUCTION + 1,
       REDOP_FID_REDUCTION   = REDOP_LG_REDUCTION + 1,
       REDOP_SID_REDUCTION   = REDOP_FID_REDUCTION + 1,
@@ -1413,6 +1414,7 @@ namespace Legion {
     // legion_replication.h
     class IndexSpaceReduction;
     class IndexPartitionReduction;
+    class ColorReduction;
     class FieldSpaceReduction;
     class LogicalRegionReduction;
     class FieldReduction;
