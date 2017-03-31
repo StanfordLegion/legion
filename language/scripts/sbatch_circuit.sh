@@ -8,8 +8,7 @@ root_dir="$PWD"
 
 export LD_LIBRARY_PATH="$PWD"
 
-export GASNET_NETWORKDEPTH=64
-export GASNET_NETWORKDEPTH_TOTAL=384
+export REALM_BACKTRACE=1
 
 if [[ ! -d spmd10 ]]; then mkdir spmd10; fi
 pushd spmd10
