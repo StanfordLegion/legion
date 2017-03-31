@@ -79,6 +79,11 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
+  if(getenv("OMP_SAXPY_THREADS"))
+    blas_thread_count = atoi(getenv("OMP_SAXPY_THREADS"));
+  if(getenv("OMP_SAXPY_SERIAL"))
+    blas_do_parallel = false;
+
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/,

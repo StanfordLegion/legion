@@ -18,6 +18,10 @@
 using namespace LegionRuntime::Arrays;
 using namespace LegionRuntime::Accessor;
 
+// global configuration variables
+int blas_thread_count = 0;
+bool blas_do_parallel = true;
+
 // single-precision float
 
 /*extern*/ BlasTaskImplementations<float> blas_impl_s;
@@ -36,7 +40,7 @@ void BlasTaskImplementations<float>::axpy_task_cpu(const Task *task,
   RegionAccessor<AccessorType::Affine<1>, float> fa_x = regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<float>().convert<AccessorType::Affine<1> >();
   RegionAccessor<AccessorType::Affine<1>, float> fa_y = regions[1].get_field_accessor(task->regions[1].instance_fields[0]).typeify<float>().convert<AccessorType::Affine<1> >();
 
-#pragma omp parallel for
+#pragma omp parallel for if(blas_do_parallel)
   for(int i = bounds.lo[0]; i <= bounds.hi[0]; i++)
     fa_y[i] += alpha * fa_x[i];
 }
@@ -54,7 +58,7 @@ float BlasTaskImplementations<float>::dot_task_cpu(const Task *task,
   RegionAccessor<AccessorType::Affine<1>, float> fa_y = regions[1].get_field_accessor(task->regions[1].instance_fields[0]).typeify<float>().convert<AccessorType::Affine<1> >();
 
   float acc = 0;
-#pragma omp parallel for reduction(+:acc)
+#pragma omp parallel for reduction(+:acc) if(blas_do_parallel)
   for(int i = bounds.lo[0]; i <= bounds.hi[0]; i++)
     acc += fa_x[i] * fa_y[i];
   return acc;
