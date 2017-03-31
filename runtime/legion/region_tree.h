@@ -1674,7 +1674,8 @@ namespace Legion {
       virtual const Domain& get_domain(ApEvent &precondition) const = 0;
       virtual const Domain& get_domain_no_wait(void) const = 0;
       virtual bool is_complete(void) = 0;
-      virtual bool intersects_with(RegionTreeNode *other) = 0;
+      virtual bool intersects_with(RegionTreeNode *other, 
+                                   bool compute = true) = 0;
       virtual bool dominates(RegionTreeNode *other) = 0;
     public:
       virtual size_t get_num_children(void) const = 0;
@@ -1817,7 +1818,8 @@ namespace Legion {
       virtual const Domain& get_domain(ApEvent &precondition) const;
       virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other);
+      virtual bool intersects_with(RegionTreeNode *other,
+                                   bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
       virtual void send_node(AddressSpaceID target);
@@ -2019,7 +2021,8 @@ namespace Legion {
       virtual const Domain& get_domain(ApEvent &precondition) const;
       virtual const Domain& get_domain_no_wait(void) const;
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other);
+      virtual bool intersects_with(RegionTreeNode *other,
+                                   bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
       virtual void send_node(AddressSpaceID target);

@@ -6257,6 +6257,25 @@ namespace Legion {
             (!compute || finder->second.intersections_valid))
           return finder->second.has_intersects;
       }
+      if (!compute)
+      {
+        // If we just need the boolean result, do a quick test to
+        // see if we do dominate it without needing the answer
+        IndexSpaceNode *temp = other;
+        while (temp->depth >= depth)
+        {
+          if (temp == this)
+          {
+            AutoLock n_lock(node_lock);
+            intersections[other] = IntersectInfo(true/*result*/);
+            return true;
+          }
+          if (temp->parent == NULL)
+            break;
+          temp = temp->parent->parent;
+        }
+        // Otherwise we fall through and do the expensive test
+      }
       std::set<Domain> intersect;
       bool result;
       if (component_domains.empty())
@@ -6318,6 +6337,23 @@ namespace Legion {
         if ((finder != intersections.end()) &&
             (!compute || finder->second.intersections_valid))
           return finder->second.has_intersects;
+      }
+      if (!compute)
+      {
+        // Before we do something expensive, let's do an easy test
+        // just by walking the region tree
+        IndexPartNode *temp = other;
+        while ((temp != NULL) && (temp->parent->depth >= depth))
+        {
+          if (temp->parent == this)
+          {
+            AutoLock n_lock(node_lock);
+            intersections[other] = IntersectInfo(true/*result*/);
+            return true;
+          }
+          temp = temp->parent->parent;
+        }
+        // Otherwise we fall through and do the expensive test
       }
       // Build up the set of domains for the partition
       std::set<Domain> other_domains, intersect;
@@ -6465,6 +6501,22 @@ namespace Legion {
         if (finder != dominators.end())
           return finder->second;
       }
+      // Before we do something expensive, let's do an easy test
+      // just by walking the region tree
+      IndexSpaceNode *temp = other;
+      while (temp->depth >= depth)
+      {
+        if (temp == this)
+        {
+          AutoLock n_lock(node_lock);
+          dominators[other] = true;
+          return true;
+        }
+        if (temp->parent == NULL)
+          break;
+        temp = temp->parent->parent;
+      }
+      // Otherwise we fall through and do the expensive test
       bool result;
       if (component_domains.empty())
       {
@@ -6511,6 +6563,20 @@ namespace Legion {
         if (finder != dominators.end())
           return finder->second;
       }
+      // Before we do something expensive, let's do an easy test
+      // just by walking the region tree
+      IndexPartNode *temp = other;
+      while ((temp != NULL) && (temp->parent->depth >= depth))
+      {
+        if (temp->parent == this)
+        {
+          AutoLock n_lock(node_lock);
+          dominators[other] = true;
+          return true;
+        }
+        temp = temp->parent->parent;
+      }
+      // Otherwise we fall through and do the expensive test
       bool result;
       std::set<Domain> other_doms;
       other->get_subspace_domains(other_doms);
@@ -8019,6 +8085,23 @@ namespace Legion {
             (!compute || finder->second.intersections_valid))
           return finder->second.has_intersects;
       }
+      if (!compute)
+      {
+        // Before we do something expensive, let's do an easy test
+        // just by walking the region tree
+        IndexSpaceNode *temp = other;
+        while ((temp->parent != NULL) && (temp->parent->depth >= depth))
+        {
+          if (temp->parent == this)
+          {
+            AutoLock n_lock(node_lock);
+            intersections[other] = IntersectInfo(true/*result*/);
+            return true;
+          }
+          temp = temp->parent->parent;
+        }
+        // Otherwise fall through and do the expensive test
+      }
       std::set<Domain> local_domains, intersect;
       bool result;
       get_subspace_domains(local_domains);
@@ -8068,6 +8151,22 @@ namespace Legion {
         if ((finder != intersections.end()) &&
             (!compute || finder->second.intersections_valid))
           return finder->second.has_intersects;
+      }
+      if (!compute)
+      {
+        // Before we do an expensive test, let's do an easy test
+        // just by walking the region tree
+        IndexPartNode *temp = other;
+        while ((temp != NULL) && (temp->depth >= depth))
+        {
+          if (temp == this)
+          {
+            AutoLock n_lock(node_lock);
+            intersections[other] = IntersectInfo(true/*result*/);
+            return true;
+          }
+          temp = temp->parent->parent;
+        }
       }
       std::set<Domain> local_domains, other_domains, intersect;
       get_subspace_domains(local_domains);
@@ -8178,6 +8277,20 @@ namespace Legion {
         if (finder != dominators.end())
           return finder->second;
       }
+      // Before we do something expensive, let's do an easy test
+      // just by walking the region tree
+      IndexSpaceNode *temp = other;
+      while ((temp->parent != NULL) && (temp->parent->depth >= depth))
+      {
+        if (temp->parent == this)
+        {
+          AutoLock n_lock(node_lock);
+          dominators[other] = true;
+          return true;
+        }
+        temp = temp->parent->parent;
+      }
+      // Otherwise fall through and do the expensive test
       std::set<Domain> local;
       get_subspace_domains(local);
       bool result;
@@ -8208,6 +8321,20 @@ namespace Legion {
         if (finder != dominators.end())
           return finder->second;
       }
+      // Before we do an expensive test, let's do an easy test
+      // just by walking the region tree
+      IndexPartNode *temp = other;
+      while ((temp != NULL) && (temp->depth >= depth))
+      {
+        if (temp == this)
+        {
+          AutoLock n_lock(node_lock);
+          dominators[other] = true;
+          return true;
+        }
+        temp = temp->parent->parent;
+      }
+      // Otherwise we fall through and do the expensive test
       std::set<Domain> local, other_doms;
       get_subspace_domains(local);
       other->get_subspace_domains(other_doms);
@@ -15873,17 +16000,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::intersects_with(RegionTreeNode *other)
+    bool RegionNode::intersects_with(RegionTreeNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       if (other == this)
         return true;
       if (other->is_region())
         return row_source->intersects_with(
-                  other->as_region_node()->row_source);
+                  other->as_region_node()->row_source, compute);
       else
         return row_source->intersects_with(
-                  other->as_partition_node()->row_source);
+                  other->as_partition_node()->row_source, compute);
     }
 
     //--------------------------------------------------------------------------
@@ -17663,17 +17790,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::intersects_with(RegionTreeNode *other)
+    bool PartitionNode::intersects_with(RegionTreeNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       if (other == this)
         return true;
       if (other->is_region())
         return row_source->intersects_with(
-                    other->as_region_node()->row_source);
+                    other->as_region_node()->row_source, compute);
       else
         return row_source->intersects_with(
-                    other->as_partition_node()->row_source);
+                    other->as_partition_node()->row_source, compute);
     }
 
     //--------------------------------------------------------------------------
