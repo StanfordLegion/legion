@@ -967,6 +967,8 @@ void generate_mesh_raw(
 /// Mapper
 ///
 
+#define SPMD_SHARD_USE_IO_PROC 1
+
 static LegionRuntime::Logger::Category log_pennant("pennant");
 
 class PennantMapper : public DefaultMapper
@@ -977,6 +979,7 @@ public:
                 std::vector<Processor>* procs_list,
                 std::vector<Memory>* sysmems_list,
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
+                std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs,
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
   virtual void default_policy_rank_processor_kinds(
@@ -1000,6 +1003,9 @@ public:
                         const Copy &copy,
                         const MapCopyInput &input,
                         MapCopyOutput &output);
+  virtual void map_must_epoch(const MapperContext           ctx,
+                              const MapMustEpochInput&      input,
+                                    MapMustEpochOutput&     output);
   template<bool IS_SRC>
   void pennant_create_copy_instance(MapperContext ctx, const Copy &copy,
                                     const RegionRequirement &req, unsigned index,
@@ -1008,6 +1014,7 @@ private:
   // std::vector<Processor>& procs_list;
   std::vector<Memory>& sysmems_list;
   std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
+  std::map<Memory, std::vector<Processor> >& sysmem_local_io_procs;
   std::map<Processor, Memory>& proc_sysmems;
   // std::map<Processor, Memory>& proc_regmems;
 };
@@ -1017,12 +1024,14 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
                              std::vector<Processor>* _procs_list,
                              std::vector<Memory>* _sysmems_list,
                              std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
+                             std::map<Memory, std::vector<Processor> >* _sysmem_local_io_procs,
                              std::map<Processor, Memory>* _proc_sysmems,
                              std::map<Processor, Memory>* _proc_regmems)
   : DefaultMapper(rt, machine, local, mapper_name),
     // procs_list(*_procs_list),
     sysmems_list(*_sysmems_list),
     sysmem_local_procs(*_sysmem_local_procs),
+    sysmem_local_io_procs(*_sysmem_local_io_procs),
     proc_sysmems(*_proc_sysmems)// ,
     // proc_regmems(*_proc_regmems)
 {
@@ -1031,7 +1040,6 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
 void PennantMapper::default_policy_rank_processor_kinds(MapperContext ctx,
                         const Task &task, std::vector<Processor::Kind> &ranking)
 {
-#define SPMD_SHARD_USE_IO_PROC 1
 #if SPMD_SHARD_USE_IO_PROC
   const char* task_name = task.get_task_name();
   const char* prefix = "shard_";
@@ -1227,12 +1235,66 @@ void PennantMapper::map_copy(const MapperContext ctx,
     }
   }
 }
+void PennantMapper::map_must_epoch(const MapperContext           ctx,
+                                   const MapMustEpochInput&      input,
+                                         MapMustEpochOutput&     output)
+{
+  size_t num_nodes = sysmems_list.size();
+  size_t num_tasks = input.tasks.size();
+  size_t num_shards_per_node =
+    num_nodes < input.tasks.size() ? (num_tasks + num_nodes - 1) / num_nodes : 1;
+  std::map<const Task*, size_t> task_indices;
+  for (size_t idx = 0; idx < num_tasks; ++idx) {
+    size_t node_idx = idx / num_shards_per_node;
+    size_t proc_idx = idx % num_shards_per_node;
+#if SPMD_SHARD_USE_IO_PROC
+    output.task_processors[idx] = sysmem_local_io_procs[sysmems_list[node_idx]][proc_idx];
+#else
+    output.task_processors[idx] = sysmem_local_procs[sysmems_list[node_idx]][proc_idx];
+#endif
+
+    task_indices[input.tasks[idx]] = node_idx;
+  }
+
+  for (size_t idx = 0; idx < input.constraints.size(); ++idx) {
+    const MappingConstraint& constraint = input.constraints[idx];
+    int owner_id = -1;
+
+    for (unsigned i = 0; i < constraint.constrained_tasks.size(); ++i) {
+      const RegionRequirement& req =
+        constraint.constrained_tasks[i]->regions[
+          constraint.requirement_indexes[i]];
+      if (req.is_no_access()) continue;
+      assert(owner_id == -1);
+      owner_id = static_cast<int>(i);
+    }
+    assert(owner_id != -1);
+
+    const Task* task = constraint.constrained_tasks[owner_id];
+    const RegionRequirement& req =
+      task->regions[constraint.requirement_indexes[owner_id]];
+    Memory target_memory = sysmems_list[task_indices[task]];
+    LayoutConstraintSet layout_constraints;
+    layout_constraints.add_constraint(
+      FieldConstraint(req.privilege_fields, false /*!contiguous*/));
+
+    PhysicalInstance inst;
+    bool created;
+    bool ok = runtime->find_or_create_physical_instance(ctx, target_memory,
+        layout_constraints, std::vector<LogicalRegion>(1, req.region),
+        inst, created, true /*acquire*/);
+    assert(ok);
+    output.constraint_mappings[idx].push_back(inst);
+  }
+}
 
 static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
 {
   std::vector<Processor>* procs_list = new std::vector<Processor>();
   std::vector<Memory>* sysmems_list = new std::vector<Memory>();
   std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
+    new std::map<Memory, std::vector<Processor> >();
+  std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs =
     new std::map<Memory, std::vector<Processor> >();
   std::map<Processor, Memory>* proc_sysmems = new std::map<Processor, Memory>();
   std::map<Processor, Memory>* proc_regmems = new std::map<Processor, Memory>();
@@ -1261,6 +1323,9 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
       procs_list->push_back(it->first);
       (*sysmem_local_procs)[it->second].push_back(it->first);
     }
+    else if (it->first.kind() == Processor::IO_PROC) {
+      (*sysmem_local_io_procs)[it->second].push_back(it->first);
+    }
   }
 
   for (std::map<Memory, std::vector<Processor> >::iterator it =
@@ -1275,6 +1340,7 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
                                               procs_list,
                                               sysmems_list,
                                               sysmem_local_procs,
+                                              sysmem_local_io_procs,
                                               proc_sysmems,
                                               proc_regmems);
     runtime->replace_default_mapper(mapper, *it);
