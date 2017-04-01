@@ -926,6 +926,10 @@ if os.getenv('SAVEOBJ') == '1' then
       new_flags:insert(flag)
     end
     new_flags:insert("-lugni")
+    for flag in os.getenv('CRAY_UDREG_POST_LINK_OPTS'):gmatch("%S+") do
+      new_flags:insert(flag)
+    end
+    new_flags:insert("-ludreg")
     link_flags = new_flags
   end
 
