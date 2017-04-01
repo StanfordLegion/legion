@@ -287,6 +287,7 @@ class Processor(object):
         self.tasks = list()
         self.max_levels = 0
         self.time_points = list()
+        self.util_time_points = list()
 
     def get_short_text(self):
         return self.kind + " Proc " + str(self.proc_in_node)
@@ -311,10 +312,21 @@ class Processor(object):
         self.tasks.append(call)
 
     def sort_time_range(self):
-        time_points = list()
         for task in self.tasks:
             self.time_points.append(TimePoint(task.start, task, True))
             self.time_points.append(TimePoint(task.stop, task, False))
+
+            self.util_time_points.append(TimePoint(task.start, task, True))
+            self.util_time_points.append(TimePoint(task.stop, task, False))
+            if isinstance(task, HasWaiters):
+                # wait intervals don't count for the util graph
+                for wait_interval in task.wait_intervals:
+                    self.util_time_points.append(TimePoint(wait_interval.start, 
+                                                           task, False))
+                    self.util_time_points.append(TimePoint(wait_interval.end, 
+                                                           task, True))
+
+        self.util_time_points.sort(key=lambda p: p.time_key)
         self.time_points.sort(key=lambda p: p.time_key)
         free_levels = set()
         for point in self.time_points:
@@ -2241,9 +2253,9 @@ class State(object):
                 for node in groups:
                     group = node + " (" + proc.kind + ")"
                     if group not in timepoints_dict:
-                        timepoints_dict[group] = [proc.time_points]
+                        timepoints_dict[group] = [proc.util_time_points]
                     else:
-                        timepoints_dict[group].append(proc.time_points)
+                        timepoints_dict[group].append(proc.util_time_points)
 
     def group_node_proc_timepoints(self, timepoints_dict):
         for proc in self.processors.itervalues():
@@ -2277,7 +2289,7 @@ class State(object):
         self.group_node_proc_kind_timepoints(timepoints_dict)
 
         # add in the all group
-        timepoints_dict["all"] = [proc.time_points 
+        timepoints_dict["all"] = [proc.util_time_points 
                                     for proc in self.processors.values()
                                     if len(proc.tasks) > 0]
 
