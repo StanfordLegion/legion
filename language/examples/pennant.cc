@@ -979,7 +979,9 @@ public:
                 std::vector<Processor>* procs_list,
                 std::vector<Memory>* sysmems_list,
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
+#if SPMD_SHARD_USE_IO_PROC
                 std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs,
+#endif
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
   virtual void default_policy_rank_processor_kinds(
@@ -1012,7 +1014,9 @@ private:
   // std::vector<Processor>& procs_list;
   std::vector<Memory>& sysmems_list;
   std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
+#if SPMD_SHARD_USE_IO_PROC
   std::map<Memory, std::vector<Processor> >& sysmem_local_io_procs;
+#endif
   std::map<Processor, Memory>& proc_sysmems;
   // std::map<Processor, Memory>& proc_regmems;
 };
@@ -1022,14 +1026,18 @@ PennantMapper::PennantMapper(MapperRuntime *rt, Machine machine, Processor local
                              std::vector<Processor>* _procs_list,
                              std::vector<Memory>* _sysmems_list,
                              std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
+#if SPMD_SHARD_USE_IO_PROC
                              std::map<Memory, std::vector<Processor> >* _sysmem_local_io_procs,
+#endif
                              std::map<Processor, Memory>* _proc_sysmems,
                              std::map<Processor, Memory>* _proc_regmems)
   : DefaultMapper(rt, machine, local, mapper_name),
     // procs_list(*_procs_list),
     sysmems_list(*_sysmems_list),
     sysmem_local_procs(*_sysmem_local_procs),
+#if SPMD_SHARD_USE_IO_PROC
     sysmem_local_io_procs(*_sysmem_local_io_procs),
+#endif
     proc_sysmems(*_proc_sysmems)// ,
     // proc_regmems(*_proc_regmems)
 {
@@ -1286,8 +1294,10 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
   std::vector<Memory>* sysmems_list = new std::vector<Memory>();
   std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
     new std::map<Memory, std::vector<Processor> >();
+#if SPMD_SHARD_USE_IO_PROC
   std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs =
     new std::map<Memory, std::vector<Processor> >();
+#endif
   std::map<Processor, Memory>* proc_sysmems = new std::map<Processor, Memory>();
   std::map<Processor, Memory>* proc_regmems = new std::map<Processor, Memory>();
 
@@ -1315,9 +1325,11 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
       procs_list->push_back(it->first);
       (*sysmem_local_procs)[it->second].push_back(it->first);
     }
+#if SPMD_SHARD_USE_IO_PROC
     else if (it->first.kind() == Processor::IO_PROC) {
       (*sysmem_local_io_procs)[it->second].push_back(it->first);
     }
+#endif
   }
 
   for (std::map<Memory, std::vector<Processor> >::iterator it =
@@ -1332,7 +1344,9 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
                                               procs_list,
                                               sysmems_list,
                                               sysmem_local_procs,
+#if SPMD_SHARD_USE_IO_PROC
                                               sysmem_local_io_procs,
+#endif
                                               proc_sysmems,
                                               proc_regmems);
     runtime->replace_default_mapper(mapper, *it);
