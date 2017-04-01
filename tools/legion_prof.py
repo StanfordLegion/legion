@@ -1371,6 +1371,10 @@ class RuntimeCall(Base, TimeRange, HasNoDependencies):
         HasNoDependencies.__init__(self)
         self.kind = kind
 
+    def get_color(self):
+        assert self.kind.color is not None
+        return self.kind.color
+
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 start = self.start,
@@ -2169,7 +2173,7 @@ class State(object):
                 return potential_dir
             i += 1
 
-    def calculate_statistics_data(self, timepoints, max_count, num_points=100000):
+    def calculate_utilization_data(self, timepoints, max_count, num_points=100000):
         # we assume that the timepoints are sorted before this step
 
         # loop through all the timepoints. Get the earliest. If it's first,
@@ -2178,7 +2182,7 @@ class State(object):
 
         # times = list()
         # counts = list()
-        statistics = list()
+        utilization = list()
         count = 0
         last_time = 0
         increment = 1.0 / float(max_count)
@@ -2188,17 +2192,17 @@ class State(object):
             else:
                 count -= increment
             if point.time != last_time:
-                statistics.append((point.time, count))
+                utilization.append((point.time, count))
             last_time = point.time
-        return statistics
+        return utilization
 
-        # CODE BELOW USES A BASIC FILTER IN CASE THE SIZE OF THE STATISTICS
+        # CODE BELOW USES A BASIC FILTER IN CASE THE SIZE OF THE UTILIZATION
         # IS TOO LARGE
 
-        # # we want to limit to num_points points in the statistics, so only get
+        # # we want to limit to num_points points in the utilization, so only get
         # # every nth element
         # n = max(1, int(len(times) / num_points))
-        # statistics = []
+        # utilization = []
         # # FIXME: get correct count average
         # for i in range(0, len(times),n):
         #     sub_times = times[i:i+n]
@@ -2206,8 +2210,8 @@ class State(object):
         #     num_elems = float(len(sub_times))
         #     avg_time = float(sum(sub_times)) / num_elems
         #     avg_count = float(sum(sub_counts)) / num_elems
-        #     statistics.append((avg_time, avg_count))
-        # return statistics
+        #     utilization.append((avg_time, avg_count))
+        # return utilization
 
     # utilization is 1 for a processor when some event is on the
     # processor
@@ -2263,8 +2267,8 @@ class State(object):
             return sorted(nodes.keys())
 
 
-    def emit_statistics_tsv(self, output_dirname):
-        print("emitting statistics")
+    def emit_utilization_tsv(self, output_dirname):
+        print("emitting utilization")
 
         # this is a map from node ids to a list of timepoints in that node
         timepoints_dict = {}
@@ -2289,7 +2293,7 @@ class State(object):
                 if group in timepoints_dict:
                     stats_structure[node].append(group)
 
-        json_file_name = os.path.join(output_dirname, "json", "stats.json")
+        json_file_name = os.path.join(output_dirname, "json", "utils.json")
 
         with open(json_file_name, "w") as json_file:
             # json.dump(timepoints_dict.keys(), json_file)
@@ -2302,19 +2306,19 @@ class State(object):
                             for tp in timepoints]
 
             max_count = len(timepoints)
-            statistics = None
+            utilization = None
             if max_count == 0:
                 print("WARNING: node " + str(tp_group) + " has no prof events. Is this what you expected?")
-                statistics = list()
+                utilization = list()
             else:
-                statistics = self.calculate_statistics_data(sorted(itertools.chain(*utilizations)), max_count)
+                utilization = self.calculate_utilization_data(sorted(itertools.chain(*utilizations)), max_count)
 
-            stats_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_stats.tsv")
-            with open(stats_tsv_filename, "w") as stats_tsv_file:
-                stats_tsv_file.write("time\tcount\n")
-                stats_tsv_file.write("0.00\t0.00\n") # initial point
-                for stat_point in statistics:
-                    stats_tsv_file.write("%.2f\t%.2f\n" % stat_point)
+            util_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_util.tsv")
+            with open(util_tsv_filename, "w") as util_tsv_file:
+                util_tsv_file.write("time\tcount\n")
+                util_tsv_file.write("0.00\t0.00\n") # initial point
+                for util_point in utilization:
+                    util_tsv_file.write("%.2f\t%.2f\n" % util_point)
 
     def simplify_op(self, op_dependencies, op_existence_map, transitive_map, op_path, _dir):
         cur_op_id = op_path[-1]
@@ -2609,7 +2613,7 @@ class State(object):
                                 (repr(memory), memory.get_short_text(), tsv, levels))
         processor_tsv_file.close()
 
-        num_stats = self.emit_statistics_tsv(output_dirname)
+        num_utils = self.emit_utilization_tsv(output_dirname)
         stats_levels = 4
 
         scale_data = {

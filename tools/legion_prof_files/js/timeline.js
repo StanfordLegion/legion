@@ -6,8 +6,8 @@ var constants = {
   margin_top: 50,
   min_feature_width: 3,
   min_gap_width: 1,
-  stats_height: 100,
-  stats_levels: 4,
+  util_height: 100,
+  util_levels: 4,
   elem_separation: 2,
   line_colors: ["limegreen", "crimson", "goldenrod", "sienna", "orangered",
                 "palevioletred", "olivedrab", "cornflowerblue"]
@@ -17,12 +17,12 @@ var op_dependencies = {};
 var base_map = {};
 var prof_uid_map = {};
 
-// Contains the children for each stats file
-var stats_files = {};
+// Contains the children for each util file
+var util_files = {};
 
 var state = {};
 var mouseX = 0;
-var statsline = d3.svg.line()
+var utilline = d3.svg.line()
     .interpolate("step-after")
     .x(function(d) { return state.x(+d.time); })
     .y(function(d) { return state.y(+d.count); });
@@ -192,17 +192,17 @@ function getLineColor(elem) {
   return colorMap[kind];
 }
 
-function drawStats() {
+function drawUtil() {
   // TODO: Add to state
   var windowStart = $("#timeline").scrollLeft();
   var windowEnd = windowStart + $("#timeline").width();
   var start_time = convertToTime(state, windowStart);
   var end_time = convertToTime(state, windowEnd);
-  var filteredStatsData = [];
+  var filteredUtilData = [];
   for (var i = 0; i < state.flattenedLayoutData.length; i++) {
     var elem = state.flattenedLayoutData[i];
-    if (elem.type == "stats" && elem.enabled && elem.loaded && elem.visible) {
-      filteredStatsData.push(filterStatsData(elem));
+    if (elem.type == "util" && elem.enabled && elem.loaded && elem.visible) {
+      filteredUtilData.push(filterUtilData(elem));
     }
   }
 
@@ -210,11 +210,11 @@ function drawStats() {
   state.x.domain([0, end_time]);
   state.timelineSvg.selectAll("path").remove();
   var paths = state.timelineSvg.selectAll("path")
-    .data(filteredStatsData);
+    .data(filteredUtilData);
 
   paths.enter().append("path")
     .attr("class", "line")
-    .attr("d", function (d) { return statsline(d.data); })
+    .attr("d", function (d) { return utilline(d.data); })
     .attr("base_y", lineLevelCalculator)
     .attr("transform",
       function(d) {
@@ -414,23 +414,23 @@ function flattenLayout() {
   state.layoutData.forEach(appendElem);
 }
 
-function getProcessors(stats_name) {
+function getProcessors(util_name) {
   // returns processors for a given node
-  var stats_regex = /(node )?(\d+) \((\w+)\)/;
-  var stats_match = stats_regex.exec(stats_name);
+  var util_regex = /(node )?(\d+) \((\w+)\)/;
+  var util_match = util_regex.exec(util_name);
   var matched_procs = [];
 
-  if (stats_match) {
-    var stats_node_id = parseInt(stats_match[2], 10);
-    var stats_proc_type = stats_match[3];
+  if (util_match) {
+    var util_node_id = parseInt(util_match[2], 10);
+    var util_proc_type = util_match[3];
     state.processors.forEach(function(proc) {
       var proc_regex = /(\w+) Processor 0x1d([a-fA-f0-9]{4})/;
       var proc_match = proc_regex.exec(proc.full_text);
       if (proc_match) {
         var proc_type = proc_match[1];
         var proc_node_id = parseInt(proc_match[2], 16);
-        if ((proc_node_id == stats_node_id)   &&
-            (proc_type    == stats_proc_type)) {
+        if ((proc_node_id == util_node_id)   &&
+            (proc_type    == util_proc_type)) {
           matched_procs.push(proc);
         }
       }
@@ -466,18 +466,18 @@ function getElement(depth, text, full_text, type, num_levels, loader,
   // invisible and unloaded. They will be loaded in when expanded
   if (children != undefined) {
     children.forEach(function(child) {
-      var stats_name = "node " + child;
-      var child_element = getElement(depth + 1, stats_name, undefined, 
-                                     "stats", num_levels, loader,
-                                     "tsv/" + child + "_stats.tsv",
-                                     element, stats_files[child], true, false);
+      var util_name = "node " + child;
+      var child_element = getElement(depth + 1, util_name, undefined, 
+                                     "util", num_levels, loader,
+                                     "tsv/" + child + "_util.tsv",
+                                     element, util_files[child], true, false);
       element.children.push(child_element);
     });
   }
 
-  // Stats graphs will have processors as their children as well.
-  if (type == "stats") {
-    // get the children for the stats view 
+  // Util graphs will have processors as their children as well.
+  if (type == "util") {
+    // get the children for the util view 
     var proc_children = getProcessors(text); 
     proc_children.forEach(function(proc_child) {
       var child_element = getElement(depth + 1, proc_child.text,
@@ -495,19 +495,19 @@ function getElement(depth, text, full_text, type, num_levels, loader,
 
 function calculateLayout() {
 
-  // First element in the layout will be the all_stats. All first-level
+  // First element in the layout will be the all_util. All first-level
   // elements will start off not enabled, and will be uncollapsed later
   // programmatically
-  var num_nodes = Object.keys(stats_files).length;
+  var num_nodes = Object.keys(util_files).length;
   if (num_nodes > 1) {
-    var proc_kinds = stats_files["all"];
+    var proc_kinds = util_files["all"];
     proc_kinds.forEach(function(kind) {
       var tokens = kind.split(" ");
-      var stats_name = "all nodes " + tokens[1];
-      var kind_element = getElement(0, stats_name, undefined, "stats", 
-                                     constants.stats_levels, load_stats,
-                                     "tsv/" + kind + "_stats.tsv",
-                                     undefined, stats_files[kind], false, true);
+      var util_name = "all nodes " + tokens[1];
+      var kind_element = getElement(0, util_name, undefined, "util", 
+                                     constants.util_levels, load_util,
+                                     "tsv/" + kind + "_util.tsv",
+                                     undefined, util_files[kind], false, true);
       state.layoutData.push(kind_element);
     });
   }
@@ -521,14 +521,14 @@ function calculateLayout() {
       var node_id = parseInt(proc_match[1], 16);
       if (!(node_id in seen_nodes)) {
         seen_nodes[node_id] = 1;
-        var proc_kinds = stats_files[node_id];
+        var proc_kinds = util_files[node_id];
 
         proc_kinds.forEach(function(kind) {
-          var stats_name = "node " + kind;
-          var kind_element = getElement(0, stats_name, undefined, "stats", 
-                                         constants.stats_levels, load_stats,
-                                         "tsv/" + kind + "_stats.tsv",
-                                         undefined, stats_files[kind],
+          var util_name = "node " + kind;
+          var kind_element = getElement(0, util_name, undefined, "util", 
+                                         constants.util_levels, load_util,
+                                         "tsv/" + kind + "_util.tsv",
+                                         undefined, util_files[kind],
                                          false, true);
           state.layoutData.push(kind_element);
         });
@@ -684,7 +684,7 @@ function drawTimeline() {
     })
     .on("mousedown", timelineEventMouseDown);
 
-  drawStats();
+  drawUtil();
   timeline.on("mouseover", mouseOver);
   timeline.exit().remove();
   hideLoaderIcon();
@@ -842,7 +842,7 @@ function lineLevelCalculator(timelineElement) {
   return constants.margin_top + level * state.thickness;
 };
 
-function statsLevelCalculator(timelineElement) {
+function utilLevelCalculator(timelineElement) {
   var level = timelineElement.base;
   if (timelineElement.enabled) {
     level += timelineElement.num_levels;
@@ -1225,8 +1225,8 @@ function recalculateHeight() {
   // adjust the height based on the new thickness and max level
   state.height = constants.margin_top + constants.margin_bottom +
                  (state.thickness * constants.max_level);
-  var stats_height = constants.stats_levels * state.thickness;
-  state.y = d3.scale.linear().range([stats_height, 0]);
+  var util_height = constants.util_levels * state.thickness;
+  state.y = d3.scale.linear().range([util_height, 0]);
   state.y.domain([0, 1]);
 
   d3.select("#processors").select("svg").remove();
@@ -1491,12 +1491,12 @@ function initTimelineElements() {
       }, 100);
   });
   if (!state.collapseAll) {
-    // initially load in all the cpu processors and the "all stats"
-    var stats_regex = /node/;
+    // initially load in all the cpu processors and the "all util"
+    var util_regex = /node/;
     for (var i = 0; i < state.flattenedLayoutData.length; i++) {
       var timelineElement = state.flattenedLayoutData[i];
-      if (timelineElement.type == "stats" && 
-          stats_regex.exec(timelineElement.text) &&
+      if (timelineElement.type == "util" && 
+          util_regex.exec(timelineElement.text) &&
           timelineElement.depth == 0) {
         collapseHandler(timelineElement, i);
       }
@@ -1578,8 +1578,8 @@ function getMinElement(arr, mapF) {
     return minElement;
 }
 
-function filterStatsData(timelineElem) {
-  var data = state.statsData[timelineElem.tsv]; // TODO: attach to object
+function filterUtilData(timelineElem) {
+  var data = state.utilData[timelineElem.tsv]; // TODO: attach to object
   var windowStart = $("#timeline").scrollLeft();
   var windowEnd = windowStart + $("#timeline").width();
   var start_time = convertToTime(state, windowStart - 100);
@@ -1683,18 +1683,18 @@ function mousemove(timelineElem) {
 }
 
 // Get the data
-function load_stats(elem) {
-  var stats_file = elem.tsv;
+function load_util(elem) {
+  var util_file = elem.tsv;
 
   // exit early if we already loaded it
-  if(state.statsData[stats_file]) {
+  if(state.utilData[util_file]) {
     elem.loaded = true;
     hideLoaderIcon();
     redraw();
     return;
   }
 
-  d3.tsv(stats_file,
+  d3.tsv(util_file,
     function(d) {
         return {
           time:  +d.time,
@@ -1702,7 +1702,7 @@ function load_stats(elem) {
         };
     },
     function(error, data) {
-      state.statsData[stats_file] = data;
+      state.utilData[util_file] = data;
       elem.loaded = true;
       hideLoaderIcon();
       redraw();
@@ -1729,7 +1729,7 @@ function initializeState() {
 
   state.profilingData = {};
   state.processorData = {};
-  state.statsData = [];
+  state.utilData = [];
 
   state.operations = {};
   state.thickness = 20; //Math.max(state.height / constants.max_level, 20);
@@ -1742,7 +1742,7 @@ function initializeState() {
 
   // TODO: change this
   state.x = d3.scale.linear().range([0, state.width]);
-  state.y = d3.scale.linear().range([constants.stats_levels * state.thickness, 0]);
+  state.y = d3.scale.linear().range([constants.util_levels * state.thickness, 0]);
   state.y.domain([0, 1]);
 
   setKeyHandler(defaultKeydown);
@@ -1761,22 +1761,22 @@ function initializeState() {
   load_data();
 }
 
-function load_stats_json(callback) {
-  $.getJSON("json/stats.json", function(json) {
-    stats_files = json;
+function load_util_json(callback) {
+  $.getJSON("json/utils.json", function(json) {
+    util_files = json;
     callback();
   });
 }
 
 // Loads constants such as max_level, start/end time, and number of levels
-// of a stats view
+// of a util view
 function load_scale_json(callback) {
   $.getJSON("json/scale.json", function(json) {
     // add the read-in constants
     $.each(json, function(key, val) {
       constants[key] = val;
     });
-    load_stats_json(callback);
+    load_util_json(callback);
   });
 }
 
