@@ -654,7 +654,7 @@ class StatObject(object):
         self.total_execution_time = defaultdict(int)
         self.all_calls = defaultdict(list)
         self.max_call = defaultdict(int)
-        self.min_call = defaultdict(int)
+        self.min_call = defaultdict(lambda: sys.maxsize)
 
     def get_total_execution_time(self):
         total_execution_time = 0
