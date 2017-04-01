@@ -357,11 +357,6 @@ function getMouseOver() {
     if ((d.in.length != 0) || (d.out.length != 0)) {
       d3.select(this).style("cursor", "pointer")
     }
-
-    if ((d.in.length != 0) || (d.out.length != 0)) {
-      d3.select(this).style("cursor", "pointer")
-    }
-
     // descTexts is an array of Texts we will store in the desc view
     var descTexts = [];
     var total = d.end - d.start;
