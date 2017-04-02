@@ -500,10 +500,12 @@ namespace Legion {
       }
       if (get_owner_space() == context->runtime->address_space)
         realm_index_space.destroy();
-      for (typename std::map<IndexTreeNode*,
-                             Realm::ZIndexSpace<DIM,T> >::iterator it =
+      for (typename std::map<IndexTreeNode*,IntersectInfo>::iterator it =
             intersections.begin(); it != intersections.end(); it++)
-        it->second.destroy();
+      {
+        if (it->second.has_intersection && it->second.intersection_valid)
+          it->second.intersection.destroy();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -694,7 +696,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::intersects_with(IndexSpaceNode *rhs)
+    bool IndexSpaceNodeT<DIM,T>::intersects_with(IndexSpaceNode *rhs, 
+                                                 bool compute)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -704,14 +707,36 @@ namespace Legion {
         return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-          const_iterator finder = intersections.find(rhs);
-        if (finder != intersections.end())
-          return !finder->second.empty();
+        typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator 
+          finder = intersections.find(rhs);
+        // Only return the value if we either didn't want to compute
+        // or we already have valid intersections
+        if ((finder != intersections.end()) && 
+            (!compute || finder->second.intersection_valid))
+          return finder->second.has_intersection;
       }
-      Realm::ZIndexSpace<DIM,T> rhs_space, intersection;
       IndexSpaceNodeT<DIM,T> *rhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
+      if (!compute)
+      {
+        // If we just need the boolean result, do a quick test to
+        // see if we do dominate it without needing the answer
+        IndexSpaceNode *temp = rhs;
+        while (temp->depth >= depth)
+        {
+          if (temp == this)
+          {
+            AutoLock n_lock(node_lock);
+            intersections[rhs] = IntersectInfo(true/*result*/);
+            return true;
+          }
+          if (temp->parent == NULL)
+            break;
+          temp = temp->parent->parent;
+        }
+        // Otherwise we fall through and do the expensive test
+      }
+      Realm::ZIndexSpace<DIM,T> rhs_space, intersection;
       rhs_node->get_realm_index_space(rhs_space);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
@@ -725,16 +750,26 @@ namespace Legion {
         ready.wait();
       bool result = !intersection.empty();
       AutoLock n_lock(node_lock);
-      if (intersections.find(rhs) == intersections.end())
-        intersections[rhs] = intersection;
+      if (result)
+      {
+        typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder =
+          intersections.find(rhs);
+        // Check to make sure we didn't lose the race
+        if ((finder == intersections.end()) || 
+            (compute && !finder->second.intersection_valid))
+          intersections[rhs] = IntersectInfo(intersection);
+        else
+          intersection.destroy(); // clean up resources if we didn't save it
+      }
       else
-        intersection.destroy();
+        intersections[rhs] = IntersectInfo(false/*result*/);
       return result;
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::intersects_with(IndexPartNode *rhs)
+    bool IndexSpaceNodeT<DIM,T>::intersects_with(IndexPartNode *rhs, 
+                                                 bool compute)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -742,14 +777,34 @@ namespace Legion {
 #endif
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-          const_iterator finder = intersections.find(rhs);
-        if (finder != intersections.end())
-          return !finder->second.empty();
+        typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator 
+          finder = intersections.find(rhs);
+        // Only return the value if we know we are valid and we didn't
+        // want to compute anything or we already did compute it
+        if ((finder != intersections.end()) &&
+            (!compute || finder->second.intersection_valid))
+          return finder->second.has_intersection;
       }
-      Realm::ZIndexSpace<DIM,T> rhs_space, intersection;
       IndexPartNodeT<DIM,T> *rhs_node = 
         static_cast<IndexPartNodeT<DIM,T>*>(rhs);
+      if (!compute)
+      {
+        // Before we do something expensive, let's do an easy test
+        // just by walking the region tree
+        IndexPartNode *temp = rhs;
+        while ((temp != NULL) && (temp->parent->depth >= depth))
+        {
+          if (temp->parent == this)
+          {
+            AutoLock n_lock(node_lock);
+            intersections[rhs] = IntersectInfo(true/*result*/);
+            return true;
+          }
+          temp = temp->parent->parent;
+        }
+        // Otherwise we fall through and do the expensive test
+      }
+      Realm::ZIndexSpace<DIM,T> rhs_space, intersection;
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
@@ -762,10 +817,19 @@ namespace Legion {
         ready.wait();
       bool result = !intersection.empty();
       AutoLock n_lock(node_lock);
-      if (intersections.find(rhs) == intersections.end())
-        intersections[rhs] = intersection;
+      if (result)
+      {
+        // Check to make sure we didn't lose the race
+        typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder =
+          intersections.find(rhs);
+        if ((finder == intersections.end()) ||
+            (compute && !finder->second.intersection_valid))
+          intersections[rhs] = IntersectInfo(intersection);
+        else
+          intersection.destroy();
+      }
       else
-        intersection.destroy();
+        intersections[rhs] = IntersectInfo(false/*result*/);
       return result;
     }
 
@@ -786,9 +850,26 @@ namespace Legion {
         if (finder != dominators.end())
           return finder->second;
       }
-      Realm::ZIndexSpace<DIM,T> rhs_space, difference;
       IndexSpaceNodeT<DIM,T> *rhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
+      // Before we do something expensive, let's do an easy test
+      // just by walking the region tree
+      IndexSpaceNode *temp = rhs; 
+      while (temp->depth >= depth)
+      {
+        if (temp == this)
+        {
+          AutoLock n_lock(node_lock);
+          dominators[rhs] = true;
+          return true;
+        }
+        if (temp->parent == NULL)
+          break;
+        temp = temp->parent->parent;
+      }
+      // Otherwise we fall through and do the expensive test
+      Realm::ZIndexSpace<DIM,T> rhs_space, difference;
+      
       rhs_node->get_realm_index_space(rhs_space);
       bool result = false;
       if (!realm_index_space.dense() || 
@@ -829,9 +910,23 @@ namespace Legion {
         if (finder != dominators.end())
           return finder->second;
       }
-      Realm::ZIndexSpace<DIM,T> rhs_space, difference;
       IndexPartNodeT<DIM,T> *rhs_node = 
         static_cast<IndexPartNodeT<DIM,T>*>(rhs);
+      // Before we do something expensive, let's do an easy test
+      // just by walking the region tree
+      IndexPartNode *temp = rhs_node; 
+      while ((temp != NULL) && (temp->parent->depth >= depth))
+      {
+        if (temp->parent == this)
+        {
+          AutoLock n_lock(node_lock);
+          dominators[rhs] = true;
+          return true;
+        }
+        temp = temp->parent->parent;
+      }
+      // Otherwise we fall through and do the expensive test
+      Realm::ZIndexSpace<DIM,T> rhs_space, difference;
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
       bool result = false;
       if (!realm_index_space.dense() || !rhs_precondition.has_triggered())
@@ -2045,12 +2140,12 @@ namespace Legion {
           if (intersects_with(intersect_node))
           {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-              const_iterator finder = intersections.find(intersect_node);
+            typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator 
+              finder = intersections.find(intersect_node);
 #ifdef DEBUG_LEGION
             assert(finder != intersections.end());
 #endif
-            intersection = finder->second;
+            intersection = finder->second.intersection;
           }
 #ifdef DEBUG_LEGION
           else
@@ -2063,12 +2158,12 @@ namespace Legion {
           if (intersects_with(intersect_node))
           {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-              const_iterator finder = intersections.find(intersect_node);
+            typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator 
+              finder = intersections.find(intersect_node);
 #ifdef DEBUG_LEGION
             assert(finder != intersections.end());
 #endif
-            intersection = finder->second;
+            intersection = finder->second.intersection;
           }
 #ifdef DEBUG_LEGION
           else
@@ -2140,12 +2235,12 @@ namespace Legion {
           if (intersects_with(intersect_node))
           {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-              const_iterator finder = intersections.find(intersect_node);
+            typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator 
+              finder = intersections.find(intersect_node);
 #ifdef DEBUG_LEGION
             assert(finder != intersections.end());
 #endif
-            intersection = finder->second;
+            intersection = finder->second.intersection;
           }
 #ifdef DEBUG_LEGION
           else
@@ -2158,12 +2253,12 @@ namespace Legion {
           if (intersects_with(intersect_node))
           {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-              const_iterator finder = intersections.find(intersect_node);
+            typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator 
+              finder = intersections.find(intersect_node);
 #ifdef DEBUG_LEGION
             assert(finder != intersections.end());
 #endif
-            intersection = finder->second;
+            intersection = finder->second.intersection;
           }
 #ifdef DEBUG_LEGION
           else
@@ -2389,7 +2484,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexPartNodeT<DIM,T>::intersects_with(IndexSpaceNode *rhs)
+    bool IndexPartNodeT<DIM,T>::intersects_with(IndexSpaceNode *rhs, 
+                                                bool compute)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2397,15 +2493,33 @@ namespace Legion {
 #endif
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-          const_iterator finder = intersections.find(rhs);
-        if (finder != intersections.end())
-          return !finder->second.empty();
+        typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator 
+          finder = intersections.find(rhs);
+        if ((finder != intersections.end()) &&
+            (!compute || finder->second.intersection_valid))
+          return finder->second.has_intersection;
+      }
+      IndexSpaceNodeT<DIM,T> *rhs_node = 
+        static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
+      if (!compute)
+      {
+        // Before we do something expensive, let's do an easy test
+        // just by walking the region tree
+        IndexSpaceNode *temp = rhs;
+        while ((temp->parent != NULL) && (temp->parent->depth >= depth))
+        {
+          if (temp->parent == this)
+          {
+            AutoLock n_lock(node_lock);
+            intersections[rhs] = IntersectInfo(true/*result*/);
+            return true;
+          }
+          temp = temp->parent->parent;
+        }
+        // Otherwise fall through and do the expensive test
       }
       Realm::ZIndexSpace<DIM,T> lhs_space, rhs_space, intersection;
       ApEvent union_precondition = get_union_index_space(lhs_space);
-      IndexSpaceNodeT<DIM,T> *rhs_node = 
-        static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
       rhs_node->get_realm_index_space(rhs_space);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
@@ -2419,16 +2533,25 @@ namespace Legion {
         ready.wait();
       bool result = !intersection.empty();
       AutoLock n_lock(node_lock);
-      if (intersections.find(rhs) == intersections.end())
-        intersections[rhs] = intersection;
+      if (result)
+      {
+        // Check to make sure we didn't lose the race
+        typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder =
+          intersections.find(rhs);
+        if ((finder == intersections.end()) ||
+            (compute && !finder->second.intersection_valid))
+          intersections[rhs] = IntersectInfo(intersection);
+        else
+          intersection.destroy();
+      }
       else
-        intersection.destroy();
+        intersections[rhs] = IntersectInfo(false/*result*/);
       return result;
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexPartNodeT<DIM,T>::intersects_with(IndexPartNode *rhs)
+    bool IndexPartNodeT<DIM,T>::intersects_with(IndexPartNode *rhs,bool compute)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2438,15 +2561,34 @@ namespace Legion {
         return true;
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-          const_iterator finder = intersections.find(rhs);
-        if (finder != intersections.end())
-          return !finder->second.empty();
+        typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator 
+          finder = intersections.find(rhs);
+        // Only return the value if we know we are valid and we didn't
+        // want to compute anything or we already did compute it
+        if ((finder != intersections.end()) &&
+            (!compute || finder->second.intersection_valid))
+          return finder->second.has_intersection;
+      }
+      IndexPartNodeT<DIM,T> *rhs_node = 
+        static_cast<IndexPartNodeT<DIM,T>*>(rhs);
+      if (!compute)
+      {
+        // Before we do an expensive test, let's do an easy test
+        // just by walking the region tree
+        IndexPartNode *temp = rhs;
+        while ((temp != NULL) && (temp->depth >= depth))
+        {
+          if (temp == this)
+          {
+            AutoLock n_lock(node_lock);
+            intersections[rhs] = IntersectInfo(true/*result*/);
+            return true;
+          }
+          temp = temp->parent->parent;
+        }
       }
       Realm::ZIndexSpace<DIM,T> lhs_space, rhs_space, intersection;
       ApEvent union_precondition = get_union_index_space(lhs_space);
-      IndexPartNodeT<DIM,T> *rhs_node = 
-        static_cast<IndexPartNodeT<DIM,T>*>(rhs);
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
@@ -2459,10 +2601,19 @@ namespace Legion {
         ready.wait();
       bool result = !intersection.empty();
       AutoLock n_lock(node_lock);
-      if (intersections.find(rhs) == intersections.end())
-        intersections[rhs] = intersection;
+      if (result)
+      {
+        // Check to make sure we didn't lose the race
+        typename std::map<IndexTreeNode*,IntersectInfo>::const_iterator finder =
+          intersections.find(rhs);
+        if ((finder == intersections.end()) ||
+            (compute && !finder->second.intersection_valid))
+          intersections[rhs] = IntersectInfo(intersection);
+        else
+          intersection.destroy();
+      }
       else
-        intersection.destroy();
+        intersections[rhs] = IntersectInfo(false/*result*/);
       return result;
     }
 
@@ -2481,10 +2632,24 @@ namespace Legion {
         if (finder != dominators.end())
           return finder->second;
       }
-      Realm::ZIndexSpace<DIM,T> union_space, rhs_space, difference;
-      ApEvent union_precondition = get_union_index_space(union_space);
       IndexSpaceNodeT<DIM,T> *rhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(rhs);
+      // Before we do something expensive, let's do an easy test
+      // just by walking the region tree
+      IndexSpaceNode *temp = rhs;
+      while ((temp->parent != NULL) && (temp->parent->depth >= depth))
+      {
+        if (temp->parent == this)
+        {
+          AutoLock n_lock(node_lock);
+          dominators[rhs] = true;
+          return true;
+        }
+        temp = temp->parent->parent;
+      }
+      // Otherwise fall through and do the expensive test
+      Realm::ZIndexSpace<DIM,T> union_space, rhs_space, difference;
+      ApEvent union_precondition = get_union_index_space(union_space);
       rhs_node->get_realm_index_space(rhs_space);
       bool result = false;
       if (!union_precondition.has_triggered() || !union_space.dense() ||
@@ -2527,10 +2692,24 @@ namespace Legion {
         if (finder != dominators.end())
           return finder->second;
       }
-      Realm::ZIndexSpace<DIM,T> union_space, rhs_space, difference;
-      ApEvent union_precondition = get_union_index_space(union_space);
       IndexPartNodeT<DIM,T> *rhs_node = 
         static_cast<IndexPartNodeT<DIM,T>*>(rhs);
+      // Before we do an expensive test, let's do an easy test
+      // just by walking the region tree
+      IndexPartNode *temp = rhs;
+      while ((temp != NULL) && (temp->depth >= depth))
+      {
+        if (temp == this)
+        {
+          AutoLock n_lock(node_lock);
+          dominators[rhs] = true;
+          return true;
+        }
+        temp = temp->parent->parent;
+      }
+      // Otherwise we fall through and do the expensive test
+      Realm::ZIndexSpace<DIM,T> union_space, rhs_space, difference;
+      ApEvent union_precondition = get_union_index_space(union_space);
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
       bool result = false;
       if (!union_precondition.has_triggered() || !union_space.dense() ||
@@ -2647,9 +2826,10 @@ namespace Legion {
       }
       if (has_union_space && !partition_union_space.empty())
         partition_union_space.destroy();
-      for (typename std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> >::
-           iterator it = intersections.begin(); it != intersections.end(); it++)
-        it->second.destroy();
+      for (typename std::map<IndexTreeNode*,IntersectInfo>::iterator it = 
+            intersections.begin(); it != intersections.end(); it++)
+        if (it->second.has_intersection && it->second.intersection_valid)
+          it->second.intersection.destroy();
     }
 
   }; // namespace Internal
