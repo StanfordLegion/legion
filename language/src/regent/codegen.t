@@ -4151,6 +4151,8 @@ function codegen.expr_list_cross_product(cx, node)
   actions = quote
     [actions]
 
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
+
     var lhs_ : &c.legion_terra_logical_region_list_t =
       [&c.legion_terra_logical_region_list_t]([&opaque](&[lhs.value]))
     var rhs_ : &c.legion_terra_logical_region_list_t =
@@ -4178,6 +4180,8 @@ function codegen.expr_list_cross_product(cx, node)
 
     var product = [cross_product_create](
       [cx.runtime], [cx.context], lhs_, rhs_, result_)
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: list_cross_product_shallow %e\n", stop - start)
   end
 
   return values.value(
@@ -4213,6 +4217,8 @@ function codegen.expr_list_cross_product_complete(cx, node)
 
   actions = quote
     [actions]
+
+    var start : double = c.legion_get_current_time_in_micros()/double(1e6)
 
     regentlib.assert([product.value].__size == [lhs.value].__size,
                      "size mismatch in list_cross_product 1")
@@ -4294,6 +4300,9 @@ function codegen.expr_list_cross_product_complete(cx, node)
     c.legion_terra_index_space_list_list_destroy(complete_product)
     c.free(lhs_list.subspaces)
     -- c.free(rhs_list.subspaces)
+
+    var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
+    c.printf("codegen: list_cross_product_complete %e\n", stop - start)
   end
 
   return values.value(
