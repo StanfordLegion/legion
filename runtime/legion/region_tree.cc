@@ -13355,17 +13355,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::intersects_with(RegionTreeNode *other)
+    bool RegionNode::intersects_with(RegionTreeNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       if (other == this)
         return true;
       if (other->is_region())
         return row_source->intersects_with(
-                  other->as_region_node()->row_source);
+                  other->as_region_node()->row_source, compute);
       else
         return row_source->intersects_with(
-                  other->as_partition_node()->row_source);
+                  other->as_partition_node()->row_source, compute);
     }
 
     //--------------------------------------------------------------------------
@@ -15041,17 +15041,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::intersects_with(RegionTreeNode *other)
+    bool PartitionNode::intersects_with(RegionTreeNode *other, bool compute)
     //--------------------------------------------------------------------------
     {
       if (other == this)
         return true;
       if (other->is_region())
         return row_source->intersects_with(
-                    other->as_region_node()->row_source);
+                    other->as_region_node()->row_source, compute);
       else
         return row_source->intersects_with(
-                    other->as_partition_node()->row_source);
+                    other->as_partition_node()->row_source, compute);
     }
 
     //--------------------------------------------------------------------------

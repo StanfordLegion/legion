@@ -817,8 +817,8 @@ namespace Legion {
       virtual Domain get_color_space_domain(void) const = 0;
       virtual DomainPoint get_domain_point_color(void) const = 0;
     public:
-      virtual bool intersects_with(IndexSpaceNode *rhs) = 0;
-      virtual bool intersects_with(IndexPartNode *rhs) = 0;
+      virtual bool intersects_with(IndexSpaceNode *rhs,bool compute = true) = 0;
+      virtual bool intersects_with(IndexPartNode *rhs, bool compute = true) = 0;
       virtual bool dominates(IndexSpaceNode *rhs) = 0;
       virtual bool dominates(IndexPartNode *rhs) = 0;
     public:
@@ -935,6 +935,21 @@ namespace Legion {
     template<int DIM, typename T>
     class IndexSpaceNodeT : public IndexSpaceNode { 
     public:
+      struct IntersectInfo {
+      public:
+        IntersectInfo(void)
+          : has_intersection(false), intersection_valid(false) { }
+        IntersectInfo(bool has)
+          : has_intersection(has), intersection_valid(!has) { }
+        IntersectInfo(const Realm::ZIndexSpace<DIM,T> &is)
+          : intersection(is), has_intersection(true), 
+            intersection_valid(true) { }
+      public:
+        Realm::ZIndexSpace<DIM,T> intersection;
+        bool has_intersection;
+        bool intersection_valid;
+      };
+    public:
       IndexSpaceNodeT(RegionTreeForest *ctx, IndexSpace handle,
                       IndexPartNode *parent, LegionColor color, 
                       const Realm::ZIndexSpace<DIM,T> *realm_is,
@@ -985,8 +1000,8 @@ namespace Legion {
       virtual Domain get_color_space_domain(void) const;
       virtual DomainPoint get_domain_point_color(void) const;
     public:
-      virtual bool intersects_with(IndexSpaceNode *rhs);
-      virtual bool intersects_with(IndexPartNode *rhs);
+      virtual bool intersects_with(IndexSpaceNode *rhs, bool compute = true);
+      virtual bool intersects_with(IndexPartNode *rhs, bool compute = true);
       virtual bool dominates(IndexSpaceNode *rhs);
       virtual bool dominates(IndexPartNode *rhs);
     public:
@@ -1121,7 +1136,7 @@ namespace Legion {
     protected:
       Realm::ZIndexSpace<DIM,T> realm_index_space;
     protected:
-      std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> > intersections;
+      std::map<IndexTreeNode*,IntersectInfo> intersections;
     protected: // linearization meta-data, computed on demand
       Realm::ZPoint<DIM,ptrdiff_t> strides;
       size_t offset;
@@ -1341,7 +1356,7 @@ namespace Legion {
       public:
         const IndexPartition handle;
         Runtime *const runtime;
-      };
+      }; 
     public:
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
@@ -1414,8 +1429,10 @@ namespace Legion {
       ApEvent create_by_restriction(const void *transform, const void *extent);
     public:
       virtual bool compute_complete(void) = 0;
-      virtual bool intersects_with(IndexSpaceNode *other) = 0; 
-      virtual bool intersects_with(IndexPartNode *other) = 0; 
+      virtual bool intersects_with(IndexSpaceNode *other, 
+                                   bool compute = true) = 0;
+      virtual bool intersects_with(IndexPartNode *other,
+                                   bool compute = true) = 0; 
       virtual bool dominates(IndexSpaceNode *other) = 0;
       virtual bool dominates(IndexPartNode *other) = 0;
       virtual void destroy_node(AddressSpaceID source) = 0;
@@ -1471,6 +1488,21 @@ namespace Legion {
     template<int DIM, typename T>
     class IndexPartNodeT : public IndexPartNode {
     public:
+      struct IntersectInfo {
+      public:
+        IntersectInfo(void)
+          : has_intersection(false), intersection_valid(false) { }
+        IntersectInfo(bool has)
+          : has_intersection(has), intersection_valid(!has) { }
+        IntersectInfo(const Realm::ZIndexSpace<DIM,T> &is)
+          : intersection(is), has_intersection(true), 
+            intersection_valid(true) { }
+      public:
+        Realm::ZIndexSpace<DIM,T> intersection;
+        bool has_intersection;
+        bool intersection_valid;
+      };
+    public:
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, bool disjoint,
@@ -1487,8 +1519,8 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       virtual bool compute_complete(void);
-      virtual bool intersects_with(IndexSpaceNode *other); 
-      virtual bool intersects_with(IndexPartNode *other); 
+      virtual bool intersects_with(IndexSpaceNode *other, bool compute = true);
+      virtual bool intersects_with(IndexPartNode *other, bool compute = true);
       virtual bool dominates(IndexSpaceNode *other);
       virtual bool dominates(IndexPartNode *other);
       virtual void destroy_node(AddressSpaceID source);
@@ -1499,7 +1531,7 @@ namespace Legion {
       ApEvent partition_union_ready;
       bool has_union_space;
     protected:
-      std::map<IndexTreeNode*,Realm::ZIndexSpace<DIM,T> > intersections;
+      std::map<IndexTreeNode*,IntersectInfo> intersections;
     };
 
     /**
@@ -2147,7 +2179,8 @@ namespace Legion {
                                          const LegionColor c2) = 0;
       virtual bool are_all_children_disjoint(void) = 0;
       virtual bool is_complete(void) = 0;
-      virtual bool intersects_with(RegionTreeNode *other) = 0;
+      virtual bool intersects_with(RegionTreeNode *other, 
+                                   bool compute = true) = 0;
       virtual bool dominates(RegionTreeNode *other) = 0;
     public:
       virtual size_t get_num_children(void) const = 0;
@@ -2287,7 +2320,7 @@ namespace Legion {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other);
+      virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
       virtual void send_node(AddressSpaceID target);
@@ -2482,7 +2515,7 @@ namespace Legion {
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
       virtual bool is_complete(void);
-      virtual bool intersects_with(RegionTreeNode *other);
+      virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
       virtual void send_node(AddressSpaceID target);

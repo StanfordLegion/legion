@@ -20,6 +20,9 @@
 
 using namespace Legion;
 
+extern int blas_thread_count;
+extern bool blas_do_parallel;
+
 template <typename T>
 class BlasArrayRef {
 public:
