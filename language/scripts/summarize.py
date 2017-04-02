@@ -4,7 +4,16 @@ from __future__ import print_function
 import argparse, sys
 
 def parse(text):
-    return [int(x.replace('t: ', '')) for x in text.split('\n') if x.startswith('t: ')]
+    lines = text.split('\n')
+    result = []
+    for i, line in zip(xrange(1, len(lines)+1), lines):
+        try:
+            if line.startswith('t: '):
+                result.append(int(line.replace('t: ', '')))
+        except ValueError:
+            raise Exception('parse error at line %s' % i)
+    return result
+    # return [int(x.replace('t: ', '')) for x in zip(xrange(len(lines)), lines) if x.startswith('t: ')]
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
