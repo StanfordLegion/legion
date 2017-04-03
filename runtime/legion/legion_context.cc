@@ -6545,6 +6545,8 @@ namespace Legion {
         manager->get_field_allocator_barrier();
       logical_region_allocator_barrier = 
         manager->get_logical_region_allocator_barrier();
+      timing_measurement_barrier = 
+        manager->get_timing_measurement_barrier();
       // Configure our collective settings
       configure_collective_settings(manager->total_shards, owner->shard_id,
           shard_collective_radix, shard_collective_log_radix,
@@ -8822,7 +8824,10 @@ namespace Legion {
 #endif
       ReplTimingOp *timing_op = runtime->get_available_repl_timing_op(true);
       Future result = timing_op->initialize(this, launcher);
+      timing_op->set_timing_barrier(timing_measurement_barrier);
       runtime->add_to_dependence_queue(this, executing_processor, timing_op);
+      // Advance the barrier
+      Runtime::advance_barrier(timing_measurement_barrier);
       return result;
     }
 

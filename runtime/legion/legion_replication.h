@@ -232,6 +232,41 @@ namespace Legion {
       }
     };
 
+    /**
+     * \class TimingReduction
+     * A class for reducing a broadcast of timing measurements
+     */
+    class TimingReduction {
+    public:
+      typedef long long LHS;
+      typedef long long RHS;
+      static const long long identity;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+#ifdef DEBUG_LEGION
+        assert(((lhs != 0) && (rhs == 0)) ||
+               ((lhs == 0) && (rhs != 0)) ||
+               ((lhs != 0) && (lhs == rhs)));
+#endif
+        if (rhs != 0)
+          lhs = rhs;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+#ifdef DEBUG_LEGION
+        assert(((rhs1 != 0) && (rhs2 == 0)) ||
+               ((rhs1 == 0) && (rhs2 != 0)) ||
+               ((rhs1 != 0) && (rhs1 == rhs2)));
+#endif
+        if (rhs2 != 0)
+          rhs1 = rhs2;
+      }
+    };
+
 #ifdef DEBUG_LEGION
     /**
      * \class ShardingReduction
@@ -457,7 +492,12 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
+    public:
+      inline void set_timing_barrier(RtBarrier bar) { timing_barrier = bar; }
+    protected:
+      RtBarrier timing_barrier;
     }; 
 
     /**
@@ -515,6 +555,8 @@ namespace Legion {
         { return field_allocator_barrier; }
       inline RtBarrier get_logical_region_allocator_barrier(void) const
         { return logical_region_allocator_barrier; }
+      inline RtBarrier get_timing_measurement_barrier(void) const
+        { return timing_measurement_barrier; }
     public:
       void launch(const std::vector<AddressSpaceID> &spaces,
                   const std::map<ShardID,Processor> &shard_mapping);
@@ -584,6 +626,7 @@ namespace Legion {
       RtBarrier field_space_allocator_barrier;
       RtBarrier field_allocator_barrier;
       RtBarrier logical_region_allocator_barrier;
+      RtBarrier timing_measurement_barrier;
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     };

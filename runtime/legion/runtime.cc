@@ -18871,6 +18871,8 @@ namespace Legion {
                                                       LogicalRegionReduction>();
         red_table[REDOP_FID_REDUCTION] = 
           Realm::ReductionOpUntyped::create_reduction_op<FieldReduction>();
+        red_table[REDOP_TIMING_REDUCTION] = 
+          Realm::ReductionOpUntyped::create_reduction_op<TimingReduction>();
 #ifdef DEBUG_LEGION
         red_table[REDOP_SID_REDUCTION] = 
           Realm::ReductionOpUntyped::create_reduction_op<ShardingReduction>();

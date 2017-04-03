@@ -27,6 +27,7 @@ namespace Legion {
     const FieldSpace FieldSpaceReduction::identity = FieldSpace::NO_SPACE;
     const FieldID FieldReduction::identity = 0;
     const RegionTreeID LogicalRegionReduction::identity = 0;
+    const long long TimingReduction::identity = 0;
 #ifdef DEBUG_LEGION
     const ShardingID ShardingReduction::identity = UINT_MAX;
 #endif
@@ -958,7 +959,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplTimingOp::trigger_ready(void)
+    void ReplTimingOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -968,16 +969,80 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Shard 0 will handle the timing operation
-      if (repl_ctx->owner_shard->shard_id == 0)
+      if (repl_ctx->owner_shard->shard_id > 0)
       {
-        // We don't own it, so we can pretend like we
-        // mapped and executed this timing op already
         complete_mapping();
-        complete_execution();
+        // Trigger this when the timing barrier is done
+        DeferredExecuteArgs args;
+        args.proxy_this = this;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+                                         this, timing_barrier);
       }
-      else // We own it, so do the normal thing
-        Operation::trigger_ready();
+      else // Shard 0 does the normal timing operation
+        Operation::trigger_mapping();
     } 
+
+    //--------------------------------------------------------------------------
+    void ReplTimingOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+ #ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Shard 0 will handle the timing operation
+      if (repl_ctx->owner_shard->shard_id > 0)     
+      {
+        long long value;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        bool valid = 
+#endif
+#endif
+          replicate_mapped_barrier.get_result(&value, sizeof(value));
+#ifdef DEBUG_LEGION
+        assert(valid);
+#endif
+        result.impl->set_result(&value, sizeof(value), false);
+      }
+      else
+      {
+        // Perform the measurement and then arrive on the barrier
+        // with the result to broadcast it to the other shards
+        switch (measurement)
+        {
+          case MEASURE_SECONDS:
+            {
+              double value = Realm::Clock::current_time();
+              result.impl->set_result(&value, sizeof(value), false);
+              Runtime::phase_barrier_arrive(timing_barrier, 1/*count*/,
+                  RtEvent::NO_RT_EVENT, &value, sizeof(value));
+              break;
+            }
+          case MEASURE_MICRO_SECONDS:
+            {
+              long long value = Realm::Clock::current_time_in_microseconds();
+              result.impl->set_result(&value, sizeof(value), false);
+              Runtime::phase_barrier_arrive(timing_barrier, 1/*count*/,
+                  RtEvent::NO_RT_EVENT, &value, sizeof(value));
+              break;
+            }
+          case MEASURE_NANO_SECONDS:
+            {
+              long long value = Realm::Clock::current_time_in_nanoseconds();
+              result.impl->set_result(&value, sizeof(value), false);
+              Runtime::phase_barrier_arrive(timing_barrier, 1/*count*/,
+                  RtEvent::NO_RT_EVENT, &value, sizeof(value));
+              break;
+            }
+          default:
+            assert(false); // should never get here
+        }
+      }
+      complete_execution();
+    }
 
     /////////////////////////////////////////////////////////////
     // Shard Manager 
@@ -1027,6 +1092,10 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
                 REDOP_LG_REDUCTION, &LogicalRegionReduction::identity,
                 sizeof(LogicalRegionReduction::identity)));
+        timing_measurement_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
+                REDOP_TIMING_REDUCTION, &TimingReduction::identity,
+                sizeof(TimingReduction::identity)));
       }
     }
 
@@ -1063,6 +1132,7 @@ namespace Legion {
         field_space_allocator_barrier.destroy_barrier();
         field_allocator_barrier.destroy_barrier();
         logical_region_allocator_barrier.destroy_barrier();
+        timing_measurement_barrier.destroy_barrier();
       }
     }
 
@@ -1133,6 +1203,7 @@ namespace Legion {
       derez.deserialize(field_space_allocator_barrier);
       derez.deserialize(field_allocator_barrier);
       derez.deserialize(logical_region_allocator_barrier);
+      derez.deserialize(timing_measurement_barrier);
       // Unpack our first shard here
       create_shards();
       ShardTask *first_shard = local_shards[0];
@@ -1267,6 +1338,7 @@ namespace Legion {
           rez.serialize(field_space_allocator_barrier);
           rez.serialize(field_allocator_barrier);
           rez.serialize(logical_region_allocator_barrier);
+          rez.serialize(timing_measurement_barrier);
           to_clone->pack_as_shard_task(rez, address_spaces[index]); 
         }
         // Send the message

@@ -237,7 +237,8 @@ namespace Legion {
       REDOP_LG_REDUCTION    = REDOP_FS_REDUCTION + 1,
       REDOP_FID_REDUCTION   = REDOP_LG_REDUCTION + 1,
       REDOP_SID_REDUCTION   = REDOP_FID_REDUCTION + 1,
-      REDOP_ID_AVAILABLE    = REDOP_SID_REDUCTION + 1,
+      REDOP_TIMING_REDUCTION= REDOP_SID_REDUCTION + 1,
+      REDOP_ID_AVAILABLE    = REDOP_TIMING_REDUCTION + 1,
     };
 
     // Runtime task numbering 
@@ -1418,6 +1419,7 @@ namespace Legion {
     class FieldSpaceReduction;
     class LogicalRegionReduction;
     class FieldReduction;
+    class TimingReduction;
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplFillOp;

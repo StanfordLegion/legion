@@ -1321,6 +1321,7 @@ namespace Legion {
       RtBarrier field_space_allocator_barrier;
       RtBarrier field_allocator_barrier;
       RtBarrier logical_region_allocator_barrier;
+      RtBarrier timing_measurement_barrier;
     protected:
       int shard_collective_radix;
       int shard_collective_log_radix;
