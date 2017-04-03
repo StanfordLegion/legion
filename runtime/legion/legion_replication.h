@@ -673,6 +673,10 @@ namespace Legion {
       std::vector<bool> sent_stages;
     };
 
+    /**
+     * \class BarrierExchangeCollective
+     * A class for exchanging sets of barriers between shards
+     */
     class BarrierExchangeCollective : public ShardCollective {
     public:
       BarrierExchangeCollective(ReplicateContext *ctx, size_t window_size, 
