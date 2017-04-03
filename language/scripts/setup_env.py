@@ -154,12 +154,12 @@ if __name__ == '__main__':
     if not os.path.exists(llvm_dir):
         os.mkdir(llvm_dir)
 
-        llvm_tarball = os.path.join(llvm_dir, 'llvm-3.9.1.src.tar.xz')
-        llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.9.1.src')
-        clang_tarball = os.path.join(llvm_dir, 'cfe-3.9.1.src.tar.xz')
-        clang_source_dir = os.path.join(llvm_dir, 'cfe-3.9.1.src')
-        download(llvm_tarball, 'http://llvm.org/releases/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff')
-        download(clang_tarball, 'http://llvm.org/releases/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8')
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-3.8.1.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.8.1.src')
+        clang_tarball = os.path.join(llvm_dir, 'cfe-3.8.1.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'cfe-3.8.1.src')
+        download(llvm_tarball, 'http://llvm.org/releases/3.8.1/llvm-3.8.1.src.tar.xz', 'e0c48c4c182424b99999367d688cd8ce7876827b')
+        download(clang_tarball, 'http://llvm.org/releases/3.8.1/cfe-3.8.1.src.tar.xz', 'b5ff24dc6ad8f84654f4859389990bace1cfb6d5')
         extract(llvm_dir, llvm_tarball, 'xz')
         extract(llvm_dir, clang_tarball, 'xz')
         os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
