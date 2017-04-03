@@ -888,12 +888,159 @@ create_cross_product_shallow_structured_spec(
   }
 }
 
+struct QuadLeaf;
+struct QuadNonLeaf;
+
+struct QuadNode {
+  QuadNode(const Rect<2>& _bounds) : bounds(_bounds) {}
+  virtual ~QuadNode() {}
+  virtual bool is_leaf() = 0;
+  virtual QuadLeaf* as_leaf() = 0;
+  virtual QuadNonLeaf* as_nonleaf() = 0;
+  virtual void insert(const Rect<2>& rect, unsigned idx) = 0;
+  virtual void query(const Rect<2>& rect, std::set<unsigned>& indices) = 0;
+  virtual bool overlaps(const Rect<2>& rect) {
+    return bounds.overlaps(rect);
+  }
+  virtual void print_tree(int level = 0) = 0;
+  Rect<2> bounds;
+};
+
+struct QuadLeaf : public QuadNode {
+  QuadLeaf(const Rect<2>& _bounds) : QuadNode(_bounds) {}
+  virtual ~QuadLeaf() {}
+  virtual bool is_leaf() { return true; }
+  virtual QuadLeaf* as_leaf() { return (QuadLeaf*)this; }
+  virtual QuadNonLeaf* as_nonleaf() { return 0; }
+  virtual void insert(const Rect<2>& rect, unsigned idx) {
+    children.insert(idx);
+  }
+  virtual void query(const Rect<2>& rect, std::set<unsigned>& indices) {
+    for (std::set<unsigned>::iterator it = children.begin();
+         it != children.end(); ++it)
+      indices.insert(*it);
+  }
+  virtual void print_tree(int level) {
+    std::string str = "";
+    for (int i = 0; i < level * 4; ++i)
+      str += " ";
+    printf("%s[Leaf Node] level: %d, bounds: (%lld, %lld) -- (%lld, %lld) children: ",
+        str.c_str(), level, bounds.lo[0], bounds.lo[1], bounds.hi[0], bounds.hi[1]);
+    for (std::set<unsigned>::iterator it = children.begin();
+         it != children.end(); ++it)
+      printf("%u ", *it);
+    printf("\n");
+  }
+
+  std::set<unsigned> children;
+};
+
+struct QuadNonLeaf : public QuadNode {
+  QuadNonLeaf(const Rect<2>& _bounds) : QuadNode(_bounds) {}
+  virtual ~QuadNonLeaf() {}
+  virtual bool is_leaf() { return false; }
+  virtual QuadLeaf* as_leaf() { return 0; }
+  virtual QuadNonLeaf* as_nonleaf() { return (QuadNonLeaf*)this; }
+  virtual void insert(const Rect<2>& rect, unsigned idx) {
+    for (unsigned i = 0; i < 4; ++i) {
+      if (children[i]->overlaps(rect))
+        children[i]->insert(rect, idx);
+    }
+  }
+  virtual void query(const Rect<2>& rect, std::set<unsigned>& indices) {
+    for (unsigned i = 0; i < 4; ++i)
+      if (children[i]->overlaps(rect))
+        children[i]->query(rect, indices);
+  }
+  virtual void print_tree(int level) {
+    std::string str = "";
+    for (int i = 0; i < level * 4; ++i)
+      str += " ";
+    printf("%s[NonLeaf Node] level: %d, bounds: (%lld, %lld) -- (%lld, %lld)\n",
+        str.c_str(), level, bounds.lo[0], bounds.lo[1], bounds.hi[0], bounds.hi[1]);
+    for (unsigned i = 0; i < 4; ++i)
+      children[i]->print_tree(level + 1);
+  }
+
+  QuadNode* children[4];
+};
+
+QuadNode* create_quad_tree(const Rect<2>& bounds,
+                           size_t num_nodes,
+                           size_t num_elements)
+{
+  if (num_nodes >= num_elements) {
+    QuadLeaf* leaf = new QuadLeaf(bounds);
+    return leaf;
+  }
+  else {
+    QuadNonLeaf* nonleaf = new QuadNonLeaf(bounds);
+    coord_t center_x = (bounds.lo[0] + bounds.hi[0]) / 2;
+    coord_t center_y = (bounds.lo[1] + bounds.hi[1]) / 2;
+
+    Rect<2> lower_left(bounds.lo, Arrays::make_point(center_x, center_y));
+    Rect<2> lower_right(Arrays::make_point(center_x + 1, bounds.lo[1]),
+                        Arrays::make_point(bounds.hi[0], center_y));
+    Rect<2> upper_left(Arrays::make_point(bounds.lo[0], center_y + 1),
+                       Arrays::make_point(center_x, bounds.hi[1]));
+    Rect<2> upper_right(Arrays::make_point(center_x + 1, center_y + 1),
+                        bounds.hi);
+    num_nodes *= 4;
+    num_elements /= 4;
+    nonleaf->children[0] = create_quad_tree(lower_left, num_nodes, num_elements);
+    nonleaf->children[1] = create_quad_tree(lower_right, num_nodes, num_elements);
+    nonleaf->children[2] = create_quad_tree(upper_left, num_nodes, num_elements);
+    nonleaf->children[3] = create_quad_tree(upper_right, num_nodes, num_elements);
+    return nonleaf;
+  }
+}
+
+static void
+create_cross_product_shallow_structured_tree(
+    HighLevelRuntime *runtime,
+    Context ctx,
+    IndexPartition lhs_part,
+    const std::vector<IndexSpace> &lhs,
+    const std::vector<IndexSpace> &rhs,
+    legion_terra_logical_region_list_t *rhs_,
+    legion_terra_logical_region_list_list_t *result_)
+{
+  std::vector<Rect<2> > lh_rects, rh_rects;
+  extract_ispace_domain_rects<2>(runtime, ctx, lhs, lh_rects);
+  extract_ispace_domain_rects<2>(runtime, ctx, rhs, rh_rects);
+
+  IndexSpace parent = runtime->get_parent_index_space(lhs_part);
+  Rect<2> universe = runtime->get_index_space_domain(parent).get_rect<2>();
+
+  QuadNode* tree = create_quad_tree(universe, 1, lh_rects.size());
+  for (unsigned idx = 0; idx < lh_rects.size(); ++idx)
+    tree->insert(lh_rects[idx], idx);
+  for (unsigned j = 0; j < rh_rects.size(); ++j) {
+    Rect<2> rh_rect = rh_rects[j];
+    std::set<unsigned> indices;
+    tree->query(rh_rect, indices);
+    for (std::set<unsigned>::iterator it = indices.begin(); it != indices.end(); ++it) {
+      unsigned i = *it;
+      Rect<2> lh_rect = lh_rects[i];
+      if (lh_rect.overlaps(rh_rect)) {
+        legion_terra_logical_region_list_t& sublist = result_->sublists[i];
+        size_t idx = sublist.count++;
+        sublist.subregions[idx].index_space = CObjectWrapper::wrap(rhs[j]);
+        sublist.subregions[idx].field_space = rhs_->subregions[j].field_space;
+        sublist.subregions[idx].tree_id = rhs_->subregions[j].tree_id;
+      }
+    }
+  }
+}
+
 // Takes the "shallow" cross product between lists of structured index spaces
 // `lhs` and `rhs`.  Specifically, if `lhs[i]` and `rhs[j]` intersect,
 // `result[i][j]` is populated with `rhs[j]`.
 static void
 create_cross_product_shallow_structured(HighLevelRuntime *runtime,
                                         Context ctx,
+                                        IndexPartition lhs_part,
+                                        IndexPartition rhs_part,
                                         const std::vector<IndexSpace> &lhs,
                                         const std::vector<IndexSpace> &rhs,
                                         legion_terra_logical_region_list_t *rhs_,
@@ -913,8 +1060,14 @@ create_cross_product_shallow_structured(HighLevelRuntime *runtime,
       }
     case 2:
       {
-        create_cross_product_shallow_structured_spec<2>(
-            runtime, ctx, lhs, rhs, rhs_, result_);
+        if (runtime->is_index_partition_disjoint(ctx, lhs_part)) {
+          create_cross_product_shallow_structured_tree(
+              runtime, ctx, lhs_part, lhs, rhs, rhs_, result_);
+        }
+        else {
+          create_cross_product_shallow_structured_spec<2>(
+              runtime, ctx, lhs, rhs, rhs_, result_);
+        }
         break;
       }
     case 3:
@@ -1224,7 +1377,7 @@ legion_terra_index_cross_product_create_list_shallow(
   if ((lhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, lhs_part))
       || (rhs_part != IndexPartition::NO_PART && is_structured(runtime, ctx, rhs_part))) {
       // Structured index spaces.
-    create_cross_product_shallow_structured(runtime, ctx, lhs, rhs, rhs_, result_);
+    create_cross_product_shallow_structured(runtime, ctx, lhs_part, rhs_part, lhs, rhs, rhs_, result_);
   } else { // Unstructured index spaces.
     bool lhs_disjoint = runtime->is_index_partition_disjoint(ctx, lhs_part);
     bool rhs_disjoint = runtime->is_index_partition_disjoint(ctx, rhs_part);
