@@ -4520,7 +4520,8 @@ namespace Legion {
                                    IndexPartNode *par, LegionColor c,
                                    ApEvent ready)
       : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c),
-        handle(h), parent(par), index_space_ready(ready), allocator(NULL)
+        handle(h), parent(par), index_space_ready(ready), 
+        realm_index_space_set(Runtime::create_rt_user_event()), allocator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5294,6 +5295,18 @@ namespace Legion {
       RtUserEvent ready;
       derez.deserialize(ready);
       Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_index_space_set(
+                                  RegionTreeForest *forest, Deserializer &derez) 
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      IndexSpaceNode *node = forest->get_node(handle);
+      node->unpack_index_space(derez);
     }
 
     /////////////////////////////////////////////////////////////

@@ -1919,6 +1919,7 @@ namespace Legion {
       void send_index_space_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
       void send_index_space_return(AddressSpaceID target, Serializer &rez);
+      void send_index_space_set(AddressSpaceID target, Serializer &rez);
       void send_index_space_child_request(AddressSpaceID target, 
                                           Serializer &rez);
       void send_index_space_child_response(AddressSpaceID target,
@@ -2072,6 +2073,7 @@ namespace Legion {
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_index_space_return(Deserializer &derez); 
+      void handle_index_space_set(Deserializer &derez);
       void handle_index_space_child_request(Deserializer &derez, 
                                             AddressSpaceID source); 
       void handle_index_space_child_response(Deserializer &derez);

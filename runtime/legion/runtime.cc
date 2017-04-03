@@ -5492,6 +5492,11 @@ namespace Legion {
               runtime->handle_index_space_return(derez);
               break;
             }
+          case SEND_INDEX_SPACE_SET:
+            {
+              runtime->handle_index_space_set(derez);
+              break;
+            }
           case SEND_INDEX_SPACE_CHILD_REQUEST:
             {
               runtime->handle_index_space_child_request(derez, 
@@ -12602,7 +12607,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_request(AddressSpaceID target, 
+    void Runtime::send_index_space_request(AddressSpaceID target,
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -12611,12 +12616,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_index_space_return(AddressSpaceID target,
-                                          Serializer &rez)
+    void Runtime::send_index_space_return(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_RETURN,
                                 INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_space_set(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_SET,
+              INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*return*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13678,6 +13690,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode::handle_node_return(derez); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_set(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_index_space_set(forest, derez);
     }
 
     //--------------------------------------------------------------------------
