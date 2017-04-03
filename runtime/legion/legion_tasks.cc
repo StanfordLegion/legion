@@ -3840,16 +3840,8 @@ namespace Legion {
     void SingleTask::control_replicate_task(void)
     //--------------------------------------------------------------------------
     {
-      // Only support control replication of the top-level task for now
-      if (!is_top_level_task())
-      {
-        log_run.error("ERROR: Only control replication of the top-level "
-                      "task is currently supported. Support for addition "
-                      "control replication contexts is planned.");
-        assert(false);
-      }
-      // TODO: ask the runtime to allocate a control replication context
-      const ControlReplicationID repl_context = 1;
+      const ControlReplicationID repl_context = 
+        runtime->get_unique_control_replication_id();
 #ifdef DEBUG_LEGION
       assert(!control_replication_map.empty());
 #endif

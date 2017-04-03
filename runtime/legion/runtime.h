@@ -2630,6 +2630,7 @@ namespace Legion {
       FieldID            get_unique_field_id(void);
       VariantID          get_unique_variant_id(void);
       LayoutConstraintID get_unique_constraint_id(void);
+      ControlReplicationID get_unique_control_replication_id(void);
     public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
@@ -2772,6 +2773,7 @@ namespace Legion {
       unsigned unique_field_id; 
       unsigned unique_variant_id;
       unsigned unique_constraint_id;
+      unsigned unique_control_replication_id;
       unsigned unique_task_id;
       unsigned unique_mapper_id;
     protected:

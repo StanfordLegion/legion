@@ -8678,6 +8678,7 @@ namespace Legion {
                         ((unique == 0) ? runtime_stride : unique)),
         unique_variant_id((unique == 0) ? runtime_stride : unique),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
+        unique_control_replication_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         projection_lock(Reservation::create_reservation()),
@@ -17940,6 +17941,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_constraint_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ControlReplicationID Runtime::get_unique_control_replication_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ControlReplicationID result = 
+        __sync_fetch_and_add(&unique_control_replication_id, runtime_stride);
+#ifdef DEBUG_LEGION
+      assert(result <= unique_control_replication_id);
 #endif
       return result;
     }
