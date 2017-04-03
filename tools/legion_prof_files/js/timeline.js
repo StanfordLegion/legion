@@ -92,6 +92,7 @@ function makeTimelineTransparent() {
   $("#timeline").css("overflow-x", "hidden");
   state.timelineSvg.select("g#lines").style("opacity", "0.1");
   state.timelineSvg.select("g.locator").style("opacity", "0.1");
+  state.timelineSvg.selectAll("path.line").style("opacity", "0.1");
 }
 
 function makeTimelineOpaque() {
@@ -99,6 +100,7 @@ function makeTimelineOpaque() {
   $("#timeline").css("overflow-x", "scroll");
   state.timelineSvg.select("g#lines").style("opacity", "1.0");
   state.timelineSvg.select("g.locator").style("opacity", "1.0");
+  state.timelineSvg.selectAll("path.line").style("opacity", "1.0");
 }
 
 function mouseMoveHandlerWhenDown() {
@@ -1028,22 +1030,18 @@ function drawLayout() {
 }
 
 function drawHelpBox() {
-  var paneWidth = $("#timeline").width();
-  var paneHeight = $("#timeline").height();
-  var helpBoxGroup = state.timelineSvg.append("g").attr("class", "help-box");
-  var helpBoxWidth = Math.min(450, paneWidth - 100);
+  var width = $(window).width();
+  var height = $(window).height();
+  var popUpSvg = d3.select("#pop-up").select("svg");
+
+  var helpBoxGroup = popUpSvg.append("g");
+  var helpBoxWidth = Math.min(450, width - 100);
   var helpTextOffset = 20;
   var helpBoxHeight = Math.min(helpMessage.length * helpTextOffset + 100,
-                               paneHeight - 100);
+                               height - 100);
 
-  var timelineWidth = state.timelineSvg.select("g#timeline").attr("width");
-  var timelineHeight = state.timelineSvg.select("g#timeline").attr("height");
-  var scrollLeft = $("#timeline").scrollLeft();
-  var scrollTop = $(window).scrollTop();
-
-  var thicknessRatio = state.thickness / state.baseThickness;
-  var boxStartX = scrollLeft + (paneWidth - helpBoxWidth) / 2;
-  var boxStartY = scrollTop + (paneHeight - helpBoxHeight) / 2 / (thicknessRatio);
+  var boxStartX = (width - helpBoxWidth) / 2;
+  var boxStartY = (height - helpBoxHeight) / 2;
 
   helpBoxGroup.append("rect")
     .attr({
@@ -1076,20 +1074,16 @@ function drawHelpBox() {
 }
 
 function drawSearchBox() {
-  var paneWidth = $("#timeline").width();
-  var paneHeight = $("#timeline").height();
-  var searchBoxGroup = state.timelineSvg.append("g").attr("class", "search-box");
-  var searchBoxWidth = Math.min(450, paneWidth - 100);
-  var searchBoxHeight = Math.min(250, paneHeight - 100);
-
-  var timelineWidth = state.timelineSvg.select("g#timeline").attr("width");
-  var timelineHeight = state.timelineSvg.select("g#timeline").attr("height");
-  var scrollLeft = $("#timeline").scrollLeft();
-  var scrollTop = $(window).scrollTop();
+  var width = $(window).width();
+  var height = $(window).height();
+  var popUpSvg = d3.select("#pop-up").select("svg");
+  var searchBoxGroup = popUpSvg.append("g");
+  var searchBoxWidth = Math.min(450, width - 100);
+  var searchBoxHeight = Math.min(250, height - 100);
 
   var thicknessRatio = state.thickness / state.baseThickness;
-  var boxStartX = scrollLeft + (paneWidth - searchBoxWidth) / 2;
-  var boxStartY = scrollTop + (paneHeight - searchBoxHeight) / 2 / thicknessRatio;
+  var boxStartX = (width - searchBoxWidth) / 2;
+  var boxStartY = (height - searchBoxHeight) / 2;
 
   searchBoxGroup.append("rect")
     .attr({
@@ -1122,20 +1116,16 @@ function drawSearchBox() {
 }
 
 function drawSearchHistoryBox() {
-  var paneWidth = $("#timeline").width();
-  var paneHeight = $("#timeline").height();
-  var historyBoxGroup = state.timelineSvg.append("g").attr("class", "history-box");
-  var historyBoxWidth = Math.min(450, paneWidth - 100);
-  var historyBoxHeight = Math.min(350, paneHeight - 100);
+  var width = $(window).width();
+  var height = $(window).height();
+  var popUpSvg = d3.select("#pop-up").select("svg");
 
-  var timelineWidth = state.timelineSvg.select("g#timeline").attr("width");
-  var timelineHeight = state.timelineSvg.select("g#timeline").attr("height");
-  var scrollLeft = $("#timeline").scrollLeft();
-  var scrollTop = $(window).scrollTop();
+  var historyBoxGroup = popUpSvg.append("g");
+  var historyBoxWidth = Math.min(450, width - 100);
+  var historyBoxHeight = Math.min(350, height - 100);
 
-  var thicknessRatio = state.thickness / state.baseThickness;
-  var boxStartX = scrollLeft + (paneWidth - historyBoxWidth) / 2;
-  var boxStartY = scrollTop + (paneHeight - historyBoxHeight) / 2 / thicknessRatio;
+  var boxStartX = (width - historyBoxWidth) / 2;
+  var boxStartY = (height - historyBoxHeight) / 2;
 
   historyBoxGroup.append("rect")
     .attr({
@@ -1275,6 +1265,17 @@ function makeModalKeyHandler(validKeys, callback) {
   }
 }
 
+function displayPopUp() {
+    d3.select("#pop-up").append("svg")
+                        .attr("width", $(window).width())
+                        .attr("height", $(window).height());
+}
+
+function removePopUp() {
+    var popUpSvg = d3.select("#pop-up").selectAll("svg").remove();
+}
+
+
 function defaultKeydown(e) {
   if (!e) e = event;
 
@@ -1303,9 +1304,12 @@ function defaultKeydown(e) {
   if (commandType == Command.help) {
     turnOffMouseHandlers();
     makeTimelineTransparent();
+    // make help box visible
+    displayPopUp();
     drawHelpBox();
     setKeyHandler(makeModalKeyHandler(['/', 'esc'], function(key) {
-      state.timelineSvg.select("g.help-box").remove();
+      // make help box invisible
+      removePopUp();
       makeTimelineOpaque();
       setKeyHandler(defaultKeydown);
       turnOnMouseHandlers();
@@ -1315,6 +1319,7 @@ function defaultKeydown(e) {
   else if (commandType == Command.search) {
     turnOffMouseHandlers();
     makeTimelineTransparent();
+    displayPopUp();
     drawSearchBox();
     setKeyHandler(makeModalKeyHandler(['enter', 'esc'], function(key) {
       if (key == 'enter') {
@@ -1332,7 +1337,7 @@ function defaultKeydown(e) {
           state.searchEnabled = true;
         }
       }
-      state.timelineSvg.select("g.search-box").remove();
+      removePopUp();
       if (state.searchEnabled) {
         filterAndMergeBlocks(state);
         drawTimeline();
@@ -1346,9 +1351,10 @@ function defaultKeydown(e) {
   else if (commandType == Command.search_history) {
     turnOffMouseHandlers();
     makeTimelineTransparent();
+    displayPopUp();
     drawSearchHistoryBox();
     setKeyHandler(makeModalKeyHandler(['h', 'esc'], function(key) {
-      state.timelineSvg.select("g.history-box").remove();
+      removePopUp();
       makeTimelineOpaque();
       setKeyHandler(defaultKeydown);
       turnOnMouseHandlers();
@@ -1477,6 +1483,7 @@ function initTimelineElements() {
   var windowCenterY = $(window).height() / 2;
   $(window).scroll(function() {
       $("#loader-icon").css("top", $(window).scrollTop() + windowCenterY);
+      $("#pop-up").css("top", $(window).scrollTop());
   });
 
   // set scroll callback
@@ -1756,8 +1763,8 @@ function initializeState() {
     .attr("width", "40px")
     .attr("height", "40px");
 
-
   drawLoaderIcon();
+  drawHelpBox();
   load_data();
 }
 

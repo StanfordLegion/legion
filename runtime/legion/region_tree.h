@@ -782,6 +782,8 @@ namespace Legion {
       static void handle_colors_request(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
       static void handle_colors_response(Deserializer &derez);
+      static void handle_index_space_set(RegionTreeForest *forest,
+                                         Deserializer &derez);
     public:
       inline bool has_allocator(void) const { return (allocator != NULL); }
       IndexSpaceAllocator* get_allocator(void);
@@ -826,6 +828,7 @@ namespace Legion {
       virtual bool dominates(IndexPartNode *rhs) = 0;
     public:
       virtual void pack_index_space(Serializer &rez) const = 0;
+      virtual void unpack_index_space(Deserializer &derez) = 0;
     public:
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
@@ -919,6 +922,8 @@ namespace Legion {
       IndexPartNode *const parent;
       const ApEvent index_space_ready;
     protected:
+      // On the owner node track when the index space is set
+      RtUserEvent               realm_index_space_set;
       // Must hold the node lock when accessing the
       // remaining data structures
       std::map<LegionColor,IndexPartNode*> color_map;
@@ -964,10 +969,8 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
-      inline void get_realm_index_space(Realm::ZIndexSpace<DIM,T> &result) const
-        { result = realm_index_space; }
-      inline void set_realm_index_space(const Realm::ZIndexSpace<DIM,T> &value)
-        { realm_index_space = value; }
+      void get_realm_index_space(Realm::ZIndexSpace<DIM,T> &result) const;
+      void set_realm_index_space(const Realm::ZIndexSpace<DIM,T> &value);
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
               TaskOp *op, const std::vector<IndexSpace> &handles);
@@ -1009,6 +1012,7 @@ namespace Legion {
       virtual bool dominates(IndexPartNode *rhs);
     public:
       virtual void pack_index_space(Serializer &rez) const;
+      virtual void unpack_index_space(Deserializer &derez);
     public:
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 

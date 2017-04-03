@@ -585,8 +585,7 @@ namespace Legion {
       LG_THROUGHPUT_PRIORITY = 0,
       LG_DEFERRED_THROUGHPUT_PRIORITY = 1,
       LG_LATENCY_PRIORITY = 2,
-      LG_RESPONSE_PRIORITY = 3,
-      LG_RESOURCE_PRIORITY = 4,
+      LG_RESOURCE_PRIORITY = 3,
     };
 
     enum VirtualChannelKind {
@@ -615,6 +614,7 @@ namespace Legion {
       SEND_INDEX_SPACE_NODE,
       SEND_INDEX_SPACE_REQUEST,
       SEND_INDEX_SPACE_RETURN,
+      SEND_INDEX_SPACE_SET,
       SEND_INDEX_SPACE_CHILD_REQUEST,
       SEND_INDEX_SPACE_CHILD_RESPONSE,
       SEND_INDEX_SPACE_COLORS_REQUEST,
@@ -749,6 +749,7 @@ namespace Legion {
         "Send Index Space Node",                                      \
         "Send Index Space Request",                                   \
         "Send Index Space Return",                                    \
+        "Send Index Space Set",                                       \
         "Send Index Space Child Request",                             \
         "Send Index Space Child Response",                            \
         "Send Index Space Colors Request",                            \

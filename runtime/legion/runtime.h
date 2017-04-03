@@ -833,14 +833,13 @@ namespace Legion {
       VirtualChannel& operator=(const VirtualChannel &rhs);
     public:
       void package_message(Serializer &rez, MessageKind k, bool flush,
-                           Runtime *runtime, Processor target, 
-                           bool response, bool shutdown);
+                           Runtime *runtime, Processor target, bool shutdown);
       void process_message(const void *args, size_t arglen, 
                         Runtime *runtime, AddressSpaceID remote_address_space);
       void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
     private:
       void send_message(bool complete, Runtime *runtime, 
-                        Processor target, bool response, bool shutdown);
+                        Processor target, bool shutdown);
       void handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen);
@@ -897,7 +896,7 @@ namespace Legion {
     public:
       void send_message(Serializer &rez, MessageKind kind, 
                         VirtualChannelKind channel, bool flush, 
-                        bool response = false, bool shutdown = false);
+                        bool shutdown = false);
       void receive_message(const void *args, size_t arglen);
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
@@ -1973,6 +1972,7 @@ namespace Legion {
       void send_index_space_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
       void send_index_space_return(AddressSpaceID target, Serializer &rez);
+      void send_index_space_set(AddressSpaceID target, Serializer &rez);
       void send_index_space_child_request(AddressSpaceID target, 
                                           Serializer &rez);
       void send_index_space_child_response(AddressSpaceID target,
@@ -2144,6 +2144,7 @@ namespace Legion {
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
       void handle_index_space_return(Deserializer &derez); 
+      void handle_index_space_set(Deserializer &derez);
       void handle_index_space_child_request(Deserializer &derez, 
                                             AddressSpaceID source); 
       void handle_index_space_child_response(Deserializer &derez);
