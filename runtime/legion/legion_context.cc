@@ -6529,7 +6529,7 @@ namespace Legion {
         next_ap_bar_index(0), next_int_bar_index(0), 
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
-        logical_region_allocator_shard(0)
+        logical_region_allocator_shard(0), next_available_collective_index(0)
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
@@ -6537,12 +6537,19 @@ namespace Legion {
         manager->get_index_space_allocator_barrier();
       index_partition_allocator_barrier = 
         manager->get_index_partition_allocator_barrier();
+      color_partition_allocator_barrier = 
+        manager->get_color_partition_allocator_barrier();
       field_space_allocator_barrier = 
         manager->get_field_space_allocator_barrier();
       field_allocator_barrier = 
         manager->get_field_allocator_barrier();
       logical_region_allocator_barrier = 
         manager->get_logical_region_allocator_barrier();
+      // Configure our collective settings
+      configure_collective_settings(manager->total_shards, owner->shard_id,
+          shard_collective_radix, shard_collective_log_radix,
+          shard_collective_stages, shard_collective_participating_shards,
+          shard_collective_last_radix, shard_collective_last_log_radix);
     }
 
     //--------------------------------------------------------------------------
@@ -6558,6 +6565,19 @@ namespace Legion {
     ReplicateContext::~ReplicateContext(void)
     //--------------------------------------------------------------------------
     {
+      // We delete the barriers that we created
+      for (unsigned idx = owner_shard->shard_id; 
+            idx < application_barriers.size(); idx+=shard_manager->total_shards)
+      {
+        Realm::Barrier bar = application_barriers[idx];
+        bar.destroy_barrier();
+      }
+      for (unsigned idx = owner_shard->shard_id; 
+            idx < internal_barriers.size(); idx += shard_manager->total_shards)
+      {
+        Realm::Barrier bar = internal_barriers[idx];
+        bar.destroy_barrier();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8852,10 +8872,107 @@ namespace Legion {
     void ReplicateContext::exchange_common_resources(void)
     //--------------------------------------------------------------------------
     {
-      // Exchange the barriers across all the shards
       const size_t window_size = context_configuration.max_window_size;
-      shard_manager->exchange_dependence_barriers(window_size,
-                              application_barriers, internal_barriers);
+      // Exchange the application barriers across all the shards
+      BarrierExchangeCollective application_collective(this, window_size, 
+                                                       application_barriers);
+      application_collective.exchange_barriers_async();
+      // Exchange the internal barriers across all the shards
+      BarrierExchangeCollective internal_collective(this, window_size,
+                                                    internal_barriers);
+      internal_collective.exchange_barriers_async();
+      // Wait for everything to be done
+      application_collective.wait_for_barrier_exchange();
+      internal_collective.wait_for_barrier_exchange();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::notify_collective_stage(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardCollective *collective = find_or_buffer_collective(derez);   
+      if (collective != NULL)
+        collective->handle_unpack_stage(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveID ReplicateContext::get_next_collective_index(void)
+    //--------------------------------------------------------------------------
+    {
+      // No need for a lock, should only be coming from the creation
+      // of operations directly from the application and therefore
+      // should be deterministic
+      return next_available_collective_index++;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_collective(ShardCollective *collective)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<std::pair<void*,size_t> > to_apply;
+      {
+        AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+        assert(collectives.find(collective->collective_index) == 
+               collectives.end());
+#endif
+        collectives[collective->collective_index] = collective;
+        std::map<CollectiveID,std::vector<std::pair<void*,size_t> > >::
+          iterator finder = pending_collective_updates.find(
+                                                collective->collective_index);
+        if (finder != pending_collective_updates.end())
+        {
+          to_apply = finder->second;
+          pending_collective_updates.erase(finder);
+        }
+      }
+      if (!to_apply.empty())
+      {
+        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
+              to_apply.begin(); it != to_apply.end(); it++)
+        {
+          Deserializer derez(it->first, it->second);
+          collective->handle_unpack_stage(derez);
+          free(it->first);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardCollective* ReplicateContext::find_or_buffer_collective(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveID collective_index;
+      derez.deserialize(collective_index);
+      AutoLock ctx_lock(context_lock);
+      // See if we already have the collective in which case we can just
+      // return it otherwise, we need to buffer the deserializer
+      std::map<CollectiveID,ShardCollective*>::const_iterator finder = 
+        collectives.find(collective_index);
+      if (finder != collectives.end())
+        return finder->second;
+      // If we couldn't find it then we have to buffer it for the future
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      pending_collective_updates[collective_index].push_back(
+          std::pair<void*,size_t>(buffer, remaining_bytes));
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::unregister_collective(ShardCollective *collective)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock ctx_lock(context_lock); 
+      std::map<CollectiveID,ShardCollective*>::iterator finder =
+        collectives.find(collective->collective_index);
+#ifdef DEBUG_LEGION
+      assert(finder != collectives.end());
+#endif
+      collectives.erase(finder);
     }
 
     /////////////////////////////////////////////////////////////

@@ -6137,9 +6137,9 @@ namespace Legion {
               runtime->handle_control_rep_trigger_commit(derez);
               break;
             }
-          case SEND_CONTROL_REP_BARRIER_EXCHANGE:
+          case SEND_CONTROL_REP_COLLECTIVE_STAGE:
             {
-              runtime->handle_control_rep_barrier_exchange(derez);
+              runtime->handle_control_rep_collective_stage(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -14094,12 +14094,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_rep_barrier_exchange(AddressSpaceID target,
+    void Runtime::send_control_rep_collective_stage(AddressSpaceID target,
                                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_CONTROL_REP_BARRIER_EXCHANGE, 
+          SEND_CONTROL_REP_COLLECTIVE_STAGE, 
           DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -15241,10 +15241,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_rep_barrier_exchange(Deserializer &derez)
+    void Runtime::handle_control_rep_collective_stage(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ShardManager::handle_barrier_exchange(derez, this);
+      ShardManager::handle_collective_stage(derez, this);
     }
 
     //--------------------------------------------------------------------------

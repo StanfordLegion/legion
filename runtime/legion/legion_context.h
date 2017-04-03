@@ -1079,6 +1079,19 @@ namespace Legion {
     public:
       ReplicateContext& operator=(const ReplicateContext &rhs);
     public:
+      inline int get_shard_collective_radix(void) const
+        { return shard_collective_radix; }
+      inline int get_shard_collective_log_radix(void) const
+        { return shard_collective_log_radix; }
+      inline int get_shard_collective_stages(void) const
+        { return shard_collective_stages; }
+      inline int get_shard_collective_participating_shards(void) const
+        { return shard_collective_participating_shards; }
+      inline int get_shard_collective_last_radix(void) const
+        { return shard_collective_last_radix; }
+      inline int get_shard_collective_last_log_radix(void) const
+        { return shard_collective_last_log_radix; }
+    public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const void *realm_is, 
@@ -1276,6 +1289,12 @@ namespace Legion {
                                        std::vector<Future> &contributions);
     public:
       void exchange_common_resources(void);
+      void notify_collective_stage(Deserializer &derez);
+    public:
+      CollectiveID get_next_collective_index(void);
+      void register_collective(ShardCollective *collective);
+      ShardCollective* find_or_buffer_collective(Deserializer &derez);
+      void unregister_collective(ShardCollective *collective);
     public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
@@ -1302,6 +1321,18 @@ namespace Legion {
       RtBarrier field_space_allocator_barrier;
       RtBarrier field_allocator_barrier;
       RtBarrier logical_region_allocator_barrier;
+    protected:
+      int shard_collective_radix;
+      int shard_collective_log_radix;
+      int shard_collective_stages;
+      int shard_collective_participating_shards;
+      int shard_collective_last_radix;
+      int shard_collective_last_log_radix;
+    protected:
+      CollectiveID next_available_collective_index;
+      std::map<CollectiveID,ShardCollective*> collectives;
+      std::map<CollectiveID,std::vector<
+                std::pair<void*,size_t> > > pending_collective_updates;
     };
 
     /**

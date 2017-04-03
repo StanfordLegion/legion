@@ -977,6 +977,1053 @@ namespace Legion {
       }
       else // We own it, so do the normal thing
         Operation::trigger_ready();
+    } 
+
+    /////////////////////////////////////////////////////////////
+    // Shard Manager 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardManager::ShardManager(Runtime *rt, ControlReplicationID id, 
+        size_t total, unsigned index, AddressSpaceID owner,SingleTask *original)
+      : runtime(rt), repl_id(id), total_shards(total), 
+        address_space_index(index),owner_space(owner), original_task(original),
+        manager_lock(Reservation::create_reservation()),
+        local_mapping_complete(0), remote_mapping_complete(0),
+        trigger_local_complete(0), trigger_remote_complete(0),
+        trigger_local_commit(0), trigger_remote_commit(0), 
+        remote_constituents(0), first_future(true) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(total_shards > 0);
+#endif
+      runtime->register_shard_manager(repl_id, this);
+      if (owner_space == runtime->address_space)
+      {
+        // We're the owner space so we have to make the allocation barriers
+        //index_space_allocator_barrier(Realm::Barrier::create_barrier(
+        index_space_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
+                REDOP_IS_REDUCTION, &IndexSpaceReduction::identity,
+                sizeof(IndexSpaceReduction::identity)));
+        index_partition_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
+                REDOP_IP_REDUCTION, &IndexPartitionReduction::identity,
+                sizeof(IndexPartitionReduction::identity)));
+        color_partition_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
+                REDOP_COLOR_REDUCTION, &ColorReduction::identity,
+                sizeof(ColorReduction::identity)));
+        field_space_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
+                REDOP_FS_REDUCTION, &FieldSpaceReduction::identity,
+                sizeof(FieldSpaceReduction::identity)));
+        field_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
+                REDOP_FID_REDUCTION, &FieldReduction::identity,
+                sizeof(FieldReduction::identity)));
+        logical_region_allocator_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
+                REDOP_LG_REDUCTION, &LogicalRegionReduction::identity,
+                sizeof(LogicalRegionReduction::identity)));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardManager::ShardManager(const ShardManager &rhs)
+      : runtime(NULL), repl_id(0), total_shards(0), address_space_index(0), 
+        owner_space(0), original_task(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+    
+    //--------------------------------------------------------------------------
+    ShardManager::~ShardManager(void)
+    //--------------------------------------------------------------------------
+    { 
+      // We can delete our shard tasks
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+        delete (*it);
+      local_shards.clear();
+      // Finally unregister ourselves with the runtime
+      const bool owner_manager = (owner_space == runtime->address_space);
+      runtime->unregister_shard_manager(repl_id, owner_manager);
+      manager_lock.destroy_reservation();
+      manager_lock = Reservation::NO_RESERVATION;
+      if (owner_manager)
+      {
+        // We're the owner so we have to destroy the allocation barriers
+        index_space_allocator_barrier.destroy_barrier();
+        index_partition_allocator_barrier.destroy_barrier();
+        color_partition_allocator_barrier.destroy_barrier();
+        field_space_allocator_barrier.destroy_barrier();
+        field_allocator_barrier.destroy_barrier();
+        logical_region_allocator_barrier.destroy_barrier();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardManager& ShardManager::operator=(const ShardManager &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::launch(const std::vector<AddressSpaceID> &spaces,
+                              const std::map<ShardID,Processor> &mapping)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(original_task != NULL); // should only be called on the owner
+#endif
+      address_spaces = spaces;
+      shard_mapping = mapping;
+      // Make our local shards
+      create_shards();
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+        (*it)->clone_single_from(original_task);
+      // Recursively spawn any other tasks across the machine
+      if (address_spaces.size() > 1)
+      {
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        broadcast_launch(ready_event, ready_event, original_task);
+        // Spawn a task to launch the tasks when ready
+        ShardManagerLaunchArgs args;
+        args.manager = this;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
+                                         original_task, ready_event);
+      }
+      else
+        launch_shards();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::unpack_launch(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent ready_event;
+      derez.deserialize(ready_event);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      // Unpack our local information
+      size_t num_procs;
+      derez.deserialize(num_procs);
+      for (unsigned idx = 0; idx < num_procs; idx++)
+      {
+        ShardID shard_id;
+        derez.deserialize(shard_id);
+        derez.deserialize(shard_mapping[shard_id]);
+      }
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      address_spaces.resize(num_spaces);
+      for (unsigned idx = 0; idx < num_spaces; idx++)
+        derez.deserialize(address_spaces[idx]);
+      derez.deserialize(index_space_allocator_barrier);
+      derez.deserialize(index_partition_allocator_barrier);
+      derez.deserialize(color_partition_allocator_barrier);
+      derez.deserialize(field_space_allocator_barrier);
+      derez.deserialize(field_allocator_barrier);
+      derez.deserialize(logical_region_allocator_barrier);
+      // Unpack our first shard here
+      create_shards();
+      ShardTask *first_shard = local_shards[0];
+      RtEvent shard_ready = first_shard->unpack_shard_task(derez);
+      // Check to see if this shard is ready or not
+      // If not build a continuation to avoid blocking the virtual channel
+      if (!shard_ready.has_triggered())
+      {
+        ShardManagerCloneArgs args;
+        args.manager = this;
+        args.ready_event = ready_event;
+        args.to_trigger = to_trigger;
+        args.first_shard = first_shard;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                         first_shard, shard_ready);
+      }
+      else
+        clone_and_launch(ready_event, to_trigger, first_shard);
+    }
+      
+    //--------------------------------------------------------------------------
+    void ShardManager::clone_and_launch(RtEvent ready_event,
+                                 RtUserEvent to_trigger, ShardTask *first_shard)
+    //--------------------------------------------------------------------------
+    {
+      // Broadcast the launch to the next nodes
+      broadcast_launch(ready_event, to_trigger, first_shard);
+      // Clone points for all our local shards
+      if (local_shards.size() > 1)
+      {
+        for (std::vector<ShardTask*>::const_iterator it = 
+              local_shards.begin(); it != local_shards.end(); it++)
+        {
+          if ((*it) == first_shard)
+            continue;
+          // Clone the necessary meta-data
+          (*it)->clone_single_from(first_shard);
+        }
+      }
+      // Perform our launches
+      if (!ready_event.has_triggered())
+      {
+        // Spawn a task to launch the tasks when ready
+        ShardManagerLaunchArgs args;
+        args.manager = this;
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                         first_shard, ready_event);
+      }
+      else
+        launch_shards();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::create_shards(void)
+    //--------------------------------------------------------------------------
+    {
+      // Iterate through and find the shards that we have locally 
+      for (std::map<ShardID,Processor>::const_iterator it = 
+            shard_mapping.begin(); it != shard_mapping.end(); it++)
+      {
+        AddressSpaceID space = it->second.address_space();
+        if (space != runtime->address_space)
+          continue;
+        local_shards.push_back(
+            new ShardTask(runtime, this, it->first, it->second) );
+      }
+#ifdef DEBUG_LEGION
+      assert(!local_shards.empty()); // better have made some shards
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::launch_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        // If it is a leaf and has no virtual instances then we can mark
+        // it mapped right now, otherwise wait for the call back
+        if ((*it)->is_leaf() && !(*it)->has_virtual_instances())
+          (*it)->complete_mapping();
+        // Speculation can always be resolved here
+        (*it)->resolve_speculation();
+        // Then launch the task for execution
+        (*it)->launch_task();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::broadcast_launch(RtEvent ready_event,
+                                   RtUserEvent to_trigger, SingleTask *to_clone)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(address_spaces[address_space_index] == runtime->address_space);
+#endif
+      std::set<RtEvent> preconditions;
+      const unsigned phase_offset = 
+        (address_space_index+1) * Runtime::legion_collective_radix;
+      for (int idx = 0; idx < Runtime::legion_collective_radix; idx++)
+      {
+        unsigned index = phase_offset + idx - 1;
+        if (index >= address_spaces.size())
+          break;
+        // Update the number of remote constituents
+        remote_constituents++;
+        RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          // Package up the information we need to send to the next manager
+          rez.serialize(repl_id);
+          rez.serialize(total_shards);
+          rez.serialize(index);
+          rez.serialize(ready_event);
+          rez.serialize(done);
+          rez.serialize<size_t>(shard_mapping.size());
+          for (std::map<ShardID,Processor>::const_iterator it = 
+                shard_mapping.begin(); it != shard_mapping.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+          rez.serialize<size_t>(address_spaces.size());
+          for (std::vector<AddressSpaceID>::const_iterator it = 
+                address_spaces.begin(); it != address_spaces.end(); it++)
+            rez.serialize(*it);   
+          rez.serialize(index_space_allocator_barrier);
+          rez.serialize(index_partition_allocator_barrier);
+          rez.serialize(color_partition_allocator_barrier);
+          rez.serialize(field_space_allocator_barrier);
+          rez.serialize(field_allocator_barrier);
+          rez.serialize(logical_region_allocator_barrier);
+          to_clone->pack_as_shard_task(rez, address_spaces[index]); 
+        }
+        // Send the message
+        runtime->send_control_rep_launch(address_spaces[index], rez);
+        // Add the event to the preconditions
+        preconditions.insert(done);
+      }
+      if (!preconditions.empty())
+        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardManager::broadcast_delete(RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      // Send messages to any constituents
+      std::set<RtEvent> preconditions;
+      const unsigned phase_offset = 
+        (address_space_index+1) * Runtime::legion_collective_radix;
+      for (int idx = 0; idx < Runtime::legion_collective_radix; idx++)
+      {
+        unsigned index = phase_offset + idx - 1;
+        if (index >= address_spaces.size())
+          break;
+        RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(repl_id);
+          rez.serialize(done);
+        }
+        runtime->send_control_rep_delete(address_spaces[index], rez);
+        preconditions.insert(done);
+      }
+      if (!preconditions.empty())
+      {
+        // Launch a task to perform the deletion when it is ready
+        ShardManagerDeleteArgs args;
+        args.manager = this;
+        RtEvent precondition = 
+         runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL, 
+                                          Runtime::merge_events(preconditions));
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger, precondition);
+        return false;
+      }
+      else
+      {
+        if (to_trigger.exists())
+          Runtime::trigger_event(to_trigger);
+        return true;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_post_mapped(bool local)
+    //--------------------------------------------------------------------------
+    {
+      bool notify = false;   
+      {
+        AutoLock m_lock(manager_lock);
+        if (local)
+        {
+          local_mapping_complete++;
+#ifdef DEBUG_LEGION
+          assert(local_mapping_complete <= local_shards.size());
+#endif
+        }
+        else
+        {
+          remote_mapping_complete++;
+#ifdef DEBUG_LEGION
+          assert(remote_mapping_complete <= remote_constituents);
+#endif
+        }
+        notify = (local_mapping_complete == local_shards.size()) &&
+                 (remote_mapping_complete == remote_constituents);
+      }
+      if (notify)
+      {
+        if (original_task == NULL)
+        {
+          Serializer rez;
+          rez.serialize(repl_id);
+          runtime->send_control_rep_post_mapped(owner_space, rez);
+        }
+        else
+          original_task->handle_post_mapped(RtEvent::NO_RT_EVENT);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_future(const void *res,size_t res_size,bool owned)
+    //--------------------------------------------------------------------------
+    {
+      bool notify = false;
+      {
+        AutoLock m_lock(manager_lock);
+        notify = first_future;
+        first_future = false;
+      }
+      if (notify && (original_task != NULL))
+        original_task->handle_future(res, res_size, owned);
+      else if (owned) // if we own it and don't use it we need to free it
+        free(const_cast<void*>(res));
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::trigger_task_complete(bool local)
+    //--------------------------------------------------------------------------
+    {
+      bool notify = false;
+      {
+        AutoLock m_lock(manager_lock);
+        if (local)
+        {
+          trigger_local_complete++;
+#ifdef DEBUG_LEGION
+          assert(trigger_local_complete <= local_shards.size());
+#endif
+        }
+        else
+        {
+          trigger_remote_complete++;
+#ifdef DEBUG_LEGION
+          assert(trigger_remote_complete <= remote_constituents);
+#endif
+        }
+        notify = (trigger_local_complete == local_shards.size()) &&
+                 (trigger_remote_complete == remote_constituents);
+      }
+      if (notify)
+      {
+        if (original_task == NULL)
+        {
+          Serializer rez;
+          rez.serialize(repl_id);
+          runtime->send_control_rep_trigger_complete(owner_space, rez);
+        }
+        else
+        {
+          // Return the privileges first if this isn't the top-level task
+          if (!original_task->is_top_level_task())
+            local_shards[0]->return_privilege_state(
+                              original_task->get_context());
+          original_task->trigger_task_complete();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::trigger_task_commit(bool local)
+    //--------------------------------------------------------------------------
+    {
+      bool notify = false;
+      {
+        AutoLock m_lock(manager_lock);
+        if (local)
+        {
+          trigger_local_commit++;
+#ifdef DEBUG_LEGION
+          assert(trigger_local_commit <= local_shards.size());
+#endif
+        }
+        else
+        {
+          trigger_remote_commit++;
+#ifdef DEBUG_LEGION
+          assert(trigger_remote_commit <= remote_constituents);
+#endif
+        }
+        notify = (trigger_local_commit == local_shards.size()) &&
+                 (trigger_remote_commit == remote_constituents);
+      }
+      if (notify)
+      {
+        if (original_task == NULL)
+        {
+          Serializer rez;
+          rez.serialize(repl_id);
+          runtime->send_control_rep_trigger_commit(owner_space, rez);
+        }
+        else
+          original_task->trigger_task_commit();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_shard_collective_stage(ShardID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces.size());
+#endif
+      AddressSpaceID target_space = address_spaces[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        DerezCheck z(derez);
+        // Have to unpack the preample we already know
+        ControlReplicationID local_repl;
+        derez.deserialize(local_repl);
+        notify_collective_stage(derez);
+      }
+      else
+        runtime->send_control_rep_collective_stage(target_space, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::notify_collective_stage(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->notify_collective_stage(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_clone(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ShardManagerCloneArgs *cargs = (const ShardManagerCloneArgs*)args;
+      cargs->manager->clone_and_launch(cargs->ready_event, cargs->to_trigger,
+                                       cargs->first_shard);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_launch(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ShardManagerLaunchArgs *largs = (const ShardManagerLaunchArgs*)args;
+      largs->manager->launch_shards();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_delete(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const ShardManagerDeleteArgs *dargs = (const ShardManagerDeleteArgs*)args;
+      delete dargs->manager;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_launch(Deserializer &derez, 
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      size_t total_shards;
+      derez.deserialize(total_shards);
+      int index;
+      derez.deserialize(index);
+      ShardManager *manager = 
+        new ShardManager(runtime, repl_id, total_shards, index, source);
+      manager->unpack_launch(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_delete(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      if (manager->broadcast_delete(to_trigger))
+        delete manager;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_post_mapped(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_post_mapped(false/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trigger_complete(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->trigger_task_complete(false/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_trigger_commit(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->trigger_task_commit(false/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_collective_stage(Deserializer &derez,
+                                                          Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->notify_collective_stage(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction* ShardManager::find_sharding_function(ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if it is in the cache
+      {
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
+          sharding_functions.find(sid);
+        if (finder != sharding_functions.end())
+          return finder->second;
+      }
+      // Get the functor from the runtime
+      ShardingFunctor *functor = runtime->find_sharding_functor(sid);
+      // Retake the lock
+      AutoLock m_lock(manager_lock);
+      // See if we lost the race
+      std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
+        sharding_functions.find(sid);
+      if (finder != sharding_functions.end())
+        return finder->second;
+      ShardingFunction *result = new ShardingFunction(functor, total_shards-1);
+      // Save the result for the future
+      sharding_functions[sid] = result;
+      return result;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Shard Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardCollective::ShardCollective(ReplicateContext *ctx)
+      : manager(ctx->shard_manager), context(ctx), 
+        local_shard(ctx->owner_shard->shard_id), 
+        collective_index(ctx->get_next_collective_index()), 
+        shard_collective_radix(ctx->get_shard_collective_radix()),
+        shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
+        shard_collective_stages(ctx->get_shard_collective_stages()),
+        shard_collective_participating_shards(
+            ctx->get_shard_collective_participating_shards()),
+        shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
+        shard_collective_last_log_radix(
+            ctx->get_shard_collective_last_log_radix()),
+        participating(local_shard < shard_collective_participating_shards), 
+        collective_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+      // Register this with the context
+      context->register_collective(this);
+      if (participating)
+      {
+        stage_notifications.resize(shard_collective_stages, 1);
+        sent_stages.resize(shard_collective_stages, false);
+        // Special case: if we expect a stage -1 message from a 
+        // non-participating shard, we'll count that as part of stage 0
+        if ((shard_collective_stages > 0) &&
+            (local_shard < 
+             (manager->total_shards - shard_collective_participating_shards)))
+          stage_notifications[0]--;
+      }
+      if (manager->total_shards > 1)
+        done_event = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    ShardCollective::~ShardCollective(void)
+    //--------------------------------------------------------------------------
+    {
+      // Unregister this with the context 
+      context->unregister_collective(this);
+      collective_lock.destroy_reservation();
+      collective_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardCollective::perform_collective_sync(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_async(); 
+      perform_collective_wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardCollective::perform_collective_async(void)
+    //--------------------------------------------------------------------------
+    {
+      if (manager->total_shards <= 1)
+        return;
+      // See if we are a participating shard or not
+      if (participating)
+      {
+        // We are a participating shard
+        // See if we are waiting for an initial notification
+        // if not we can just send our message now
+        if ((int(manager->total_shards) == 
+              shard_collective_participating_shards) ||
+            (local_shard >= (manager->total_shards - 
+                             shard_collective_participating_shards)))
+          send_explicit_stage(0);
+      }
+      else
+      {
+        // We are not a participating shard
+        // so we just have to send a notification to one node
+        send_explicit_stage(-1);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardCollective::perform_collective_wait(void)
+    //--------------------------------------------------------------------------
+    {
+      if (manager->total_shards <= 1)
+        return;
+      if (!done_event.has_triggered())
+        done_event.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardCollective::handle_unpack_stage(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      int stage;
+      derez.deserialize(stage);
+#ifdef DEBUG_LEGION
+      assert(participating || (stage == -1));
+#endif
+      unpack_stage(stage, derez);
+      if (stage == -1)
+      {
+        if (!participating)
+        {
+          Runtime::trigger_event(done_event);
+          return;
+        }
+        else
+          send_explicit_stage(0); // we can now send stage 0
+      }
+      const bool all_stages_done = send_ready_stages();
+      if (all_stages_done)
+      {
+        // We are done
+        Runtime::trigger_event(done_event);
+        // See if we have to send a message back to a
+        // non-participating shard 
+        if ((int(manager->total_shards) > shard_collective_participating_shards)
+            && (int(local_shard) < int(manager->total_shards - 
+                                        shard_collective_participating_shards)))
+          send_explicit_stage(-1);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardCollective::send_explicit_stage(int stage) 
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(manager->repl_id);
+        rez.serialize(local_shard);
+        rez.serialize(collective_index);
+        rez.serialize(stage);
+        AutoLock c_lock(collective_lock);
+        pack_collective_stage(rez, stage);
+        // Mark that we're sending this stage
+        if (stage >= 0)
+          sent_stages[stage] = true;
+      }
+      if (stage == -1)
+      {
+        if (participating)
+        {
+          // Send back to the nodes that are not participating
+          ShardID target = local_shard + shard_collective_participating_shards;
+#ifdef DEBUG_LEGION
+          assert(target < manager->total_shards);
+#endif
+          manager->send_shard_collective_stage(target, rez);
+        }
+        else
+        {
+          // Send to a node that is participating
+          ShardID target = local_shard % shard_collective_participating_shards;
+          manager->send_shard_collective_stage(target, rez);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(stage >= 0);
+#endif
+        if (stage == (shard_collective_stages-1))
+        {
+          for (int r = 1; r < shard_collective_last_radix; r++)
+          {
+            ShardID target = local_shard ^ 
+              (r << (stage * shard_collective_log_radix));
+#ifdef DEBUG_LEGION
+            assert(int(target) < shard_collective_participating_shards);
+#endif
+            manager->send_shard_collective_stage(target, rez);
+          }
+        }
+        else
+        {
+          for (int r = 1; r < shard_collective_radix; r++)
+          {
+            ShardID target = local_shard ^ 
+              (r << (stage * shard_collective_log_radix));
+#ifdef DEBUG_LEGION
+            assert(int(target) < shard_collective_participating_shards);
+#endif
+            manager->send_shard_collective_stage(target, rez);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardCollective::send_ready_stages(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(participating);
+#endif
+      // Iterate through the stages and send any that are ready
+      // Remember that stages have to be done in order
+      for (int stage = 0; stage < shard_collective_stages; stage++)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(manager->repl_id);
+          rez.serialize(local_shard);
+          rez.serialize(collective_index);
+          rez.serialize(stage);
+          AutoLock c_lock(collective_lock);
+          // If this stage has already been sent then we can keep going
+          if (sent_stages[stage])
+            continue;
+          // Stage 0 should always be explicitly sent
+          if (stage == 0)
+            return false;
+          // Check to see if we're sending this stage
+          // We need all the notifications from the previous stage before
+          // we can send this stage
+          if (stage_notifications[stage-1] < shard_collective_radix)
+            return false;
+          // If we get here then we can send the stage
+          sent_stages[stage] = true;
+          pack_collective_stage(rez, stage);
+        }
+        // Now we can do the send
+        if (stage == (shard_collective_stages-1))
+        {
+          for (int r = 1; r < shard_collective_last_radix; r++)
+          {
+            ShardID target = local_shard ^ 
+              (r << (stage * shard_collective_log_radix));
+#ifdef DEBUG_LEGION
+            assert(int(target) < shard_collective_participating_shards);
+#endif
+            manager->send_shard_collective_stage(target, rez);
+          }
+        }
+        else
+        {
+          for (int r = 1; r < shard_collective_radix; r++)
+          {
+            ShardID target = local_shard ^ 
+              (r << (stage * shard_collective_log_radix));
+#ifdef DEBUG_LEGION
+            assert(int(target) < shard_collective_participating_shards);
+#endif
+            manager->send_shard_collective_stage(target, rez);
+          }
+        }
+      }
+      // If we make it here, then we sent the last stage, check to see
+      // if we've seen all the notifications for it
+      AutoLock c_lock(collective_lock,1,false/*exclusive*/);
+      return (stage_notifications.back() == shard_collective_last_radix);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardCollective::unpack_stage(int stage, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(collective_lock);
+      unpack_collective_stage(derez, stage);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Barrier Exchange Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    BarrierExchangeCollective::BarrierExchangeCollective(ReplicateContext *ctx,
+                                  size_t win_size, std::vector<RtBarrier> &bars)
+      : ShardCollective(ctx), window_size(win_size), barriers(bars)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    BarrierExchangeCollective::BarrierExchangeCollective(
+                                           const BarrierExchangeCollective &rhs)
+      : ShardCollective(rhs), window_size(0), barriers(rhs.barriers)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    BarrierExchangeCollective::~BarrierExchangeCollective(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    BarrierExchangeCollective& BarrierExchangeCollective::operator=(
+                                           const BarrierExchangeCollective &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierExchangeCollective::exchange_barriers_async(void)
+    //--------------------------------------------------------------------------
+    {
+      // First make our local barriers and put them in the data structure
+      {
+        AutoLock c_lock(collective_lock);
+        for (unsigned index = local_shard; 
+              index < window_size; index += manager->total_shards)
+        {
+#ifdef DEBUG_LEGION
+          assert(local_barriers.find(index) == local_barriers.end());
+          // In debug mode we give a reduction to the application barriers
+          // so that we can check that they all used the same ShardingID
+          local_barriers[index] = 
+            RtBarrier(Realm::Barrier::create_barrier(manager->total_shards,
+                  REDOP_SID_REDUCTION, &ShardingReduction::identity,
+                  sizeof(ShardingReduction::identity)));
+#else
+          local_barriers[index] = 
+              RtBarrier(Realm::Barrier::create_barrier(manager->total_shards));
+#endif
+        }
+      }
+      // Now we can start the exchange from this shard 
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierExchangeCollective::wait_for_barrier_exchange(void)
+    //--------------------------------------------------------------------------
+    {
+      // Wait for everything to be done
+      perform_collective_wait();
+#ifdef DEBUG_LEGION
+      assert(local_barriers.size() == window_size);
+#endif
+      // Fill in the barrier vector with the barriers we've got from everyone
+      barriers.resize(window_size);
+      for (std::map<unsigned,RtBarrier>::const_iterator it = 
+            local_barriers.begin(); it != local_barriers.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->first < window_size);
+#endif
+        barriers[it->first] = it->second;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierExchangeCollective::pack_collective_stage(Serializer &rez, 
+                                                          int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(window_size);
+      rez.serialize<size_t>(local_barriers.size());
+      for (std::map<unsigned,RtBarrier>::const_iterator it = 
+            local_barriers.begin(); it != local_barriers.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierExchangeCollective::unpack_collective_stage(Deserializer &derez,
+                                                            int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t other_window_size;
+      derez.deserialize(other_window_size);
+      if (other_window_size != window_size)
+      {
+        log_run.error("ERROR: Context configurations for control replicated "
+                      "task %s were assigned different maximum window sizes "
+                      "of %ld and %ld by the mapper which is illegal.",
+                      context->owner_task->get_task_name(), window_size,
+                      other_window_size);
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      size_t num_bars;
+      derez.deserialize(num_bars);
+      for (unsigned idx = 0; idx < num_bars; idx++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        derez.deserialize(local_barriers[index]);
+      }
     }
 
   }; // namespace Internal

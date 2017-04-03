@@ -734,7 +734,7 @@ namespace Legion {
       SEND_CONTROL_REP_POST_MAPPED,
       SEND_CONTROL_REP_TRIGGER_COMPLETE,
       SEND_CONTROL_REP_TRIGGER_COMMIT,
-      SEND_CONTROL_REP_BARRIER_EXCHANGE,
+      SEND_CONTROL_REP_COLLECTIVE_STAGE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -868,7 +868,7 @@ namespace Legion {
         "Send Control Replication Post Mapped",                       \
         "Send Control Replication Trigger Complete",                  \
         "Send Control Replication Trigger Commit",                    \
-        "Send Control Replication Barrier Exchange",                  \
+        "Send Control Replication Collective Stage",                  \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1285,7 +1285,6 @@ namespace Legion {
     class SliceTask;
     class RemoteTask;
     class MinimalPoint;
-    class ShardManager;
 
     // legion_context.h
     /**
@@ -1430,6 +1429,9 @@ namespace Legion {
     class ReplDependentPartitionOp;
     class ReplMustEpochOp;
     class ReplTimingOp;
+    class ShardManager;
+    class ShardCollective;
+    class BarrierExchangeCollective;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
@@ -1638,6 +1640,7 @@ namespace Legion {
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
     typedef Realm::CopySrcDstField CopySrcDstField;
+    typedef unsigned long long CollectiveID;
     // Helper for encoding templates
     struct NT_TemplateHelper : 
       public Realm::DynamicTemplates::ListProduct2<Realm::DIMCOUNTS, 

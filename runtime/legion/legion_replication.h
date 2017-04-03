@@ -458,6 +458,196 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_ready(void);
+    }; 
+
+    /**
+     * \class ShardManager
+     * This is a class that manages the execution of one or
+     * more shards for a given control replication context on
+     * a single node. It provides support for doing broadcasts,
+     * reductions, and exchanges of information between the 
+     * variaous shard tasks.
+     */
+    class ShardManager : public Mapper::SelectShardingFunctorInput {
+    public:
+      struct ShardManagerCloneArgs :
+        public LgTaskArgs<ShardManagerCloneArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONTROL_REP_CLONE_TASK_ID;
+      public:
+        ShardManager *manager;
+        RtEvent ready_event;
+        RtUserEvent to_trigger;
+        ShardTask *first_shard;
+      };
+      struct ShardManagerLaunchArgs :
+        public LgTaskArgs<ShardManagerLaunchArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONTROL_REP_LAUNCH_TASK_ID;
+      public:
+        ShardManager *manager;
+      };
+      struct ShardManagerDeleteArgs :
+        public LgTaskArgs<ShardManagerDeleteArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONTROL_REP_DELETE_TASK_ID;
+      public:
+        ShardManager *manager;
+      };
+    public:
+      ShardManager(Runtime *rt, ControlReplicationID repl_id, size_t total,
+                   unsigned address_space_index, AddressSpaceID owner_space,
+                   SingleTask *original = NULL);
+      ShardManager(const ShardManager &rhs);
+      ~ShardManager(void);
+    public:
+      ShardManager& operator=(const ShardManager &rhs);
+    public:
+      inline RtBarrier get_index_space_allocator_barrier(void) const
+        { return index_space_allocator_barrier; }
+      inline RtBarrier get_index_partition_allocator_barrier(void) const
+        { return index_partition_allocator_barrier; }
+      inline RtBarrier get_color_partition_allocator_barrier(void) const
+        { return color_partition_allocator_barrier; }
+      inline RtBarrier get_field_space_allocator_barrier(void) const
+        { return field_space_allocator_barrier; }
+      inline RtBarrier get_field_allocator_barrier(void) const
+        { return field_allocator_barrier; }
+      inline RtBarrier get_logical_region_allocator_barrier(void) const
+        { return logical_region_allocator_barrier; }
+    public:
+      void launch(const std::vector<AddressSpaceID> &spaces,
+                  const std::map<ShardID,Processor> &shard_mapping);
+      void unpack_launch(Deserializer &derez);
+      void clone_and_launch(RtEvent ready, RtUserEvent to_trigger, 
+                            ShardTask *first_shard);
+      void create_shards(void);
+      void launch_shards(void) const;
+    public:
+      void broadcast_launch(RtEvent start, RtUserEvent to_trigger,
+                            SingleTask *to_clone);
+      bool broadcast_delete(
+              RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+    public:
+      void handle_post_mapped(bool local);
+      void handle_future(const void *res, size_t res_size, bool owned);
+      void trigger_task_complete(bool local);
+      void trigger_task_commit(bool local);
+    public:
+      void send_shard_collective_stage(ShardID target, Serializer &rez);
+      void notify_collective_stage(Deserializer &derez);
+    public:
+      static void handle_clone(const void *args);
+      static void handle_launch(const void *args);
+      static void handle_delete(const void *args);
+    public:
+      static void handle_launch(Deserializer &derez, Runtime *rt, 
+                                AddressSpaceID source);
+      static void handle_delete(Deserializer &derez, Runtime *rt);
+      static void handle_post_mapped(Deserializer &derez, Runtime *rt);
+      static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
+      static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
+      static void handle_collective_stage(Deserializer &derez, Runtime *rt);
+    public:
+      ShardingFunction* find_sharding_function(ShardingID sid);
+    public:
+      Runtime *const runtime;
+      const ControlReplicationID repl_id;
+      const size_t total_shards;
+      const unsigned address_space_index;
+      const AddressSpaceID owner_space;
+      SingleTask *const original_task;
+    protected:
+      Reservation                      manager_lock;
+      // Inheritted from Mapper::SelectShardingFunctorInput
+      // std::map<ShardID,Processor>   shard_mapping;
+      std::vector<AddressSpaceID>      address_spaces;
+      std::vector<ShardTask*>          local_shards;
+    protected:
+      // There are four kinds of signals that come back from 
+      // the execution of the shards:
+      // - mapping complete
+      // - future result
+      // - task complete
+      // - task commit
+      // The owner applies these to the original task object only
+      // after they have occurred for all the shards
+      unsigned    local_mapping_complete, remote_mapping_complete;
+      unsigned    trigger_local_complete, trigger_remote_complete;
+      unsigned    trigger_local_commit,   trigger_remote_commit;
+      unsigned    remote_constituents;
+      bool        first_future;
+    protected: // Allocation barriers to be passed to shards
+      RtBarrier index_space_allocator_barrier;
+      RtBarrier index_partition_allocator_barrier;
+      RtBarrier color_partition_allocator_barrier;
+      RtBarrier field_space_allocator_barrier;
+      RtBarrier field_allocator_barrier;
+      RtBarrier logical_region_allocator_barrier;
+    protected:
+      std::map<ShardingID,ShardingFunction*> sharding_functions;
+    };
+
+    /**
+     * \class ShardCollective
+     * The shard collective is used for performing all-to-all
+     * exchanges amongst the shards of a control replicated task
+     */
+    class ShardCollective {
+    public:
+      ShardCollective(ReplicateContext *ctx);
+      virtual ~ShardCollective(void);
+    public:
+      // We guarantee that these methods will be called atomically
+      virtual void pack_collective_stage(Serializer &rez, int stage) = 0;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage) = 0;
+    public:
+      void perform_collective_sync(void);
+      void perform_collective_async(void);
+      void perform_collective_wait(void);
+      void handle_unpack_stage(Deserializer &derez);
+    protected:
+      void send_explicit_stage(int stage);
+      bool send_ready_stages(void);
+      void unpack_stage(int stage, Deserializer &derez);
+    public:
+      ShardManager *const manager;
+      ReplicateContext *const context;
+      const ShardID local_shard;
+      const CollectiveID collective_index;
+      const int shard_collective_radix;
+      const int shard_collective_log_radix;
+      const int shard_collective_stages;
+      const int shard_collective_participating_shards;
+      const int shard_collective_last_radix;
+      const int shard_collective_last_log_radix;
+      const bool participating;
+    protected:
+      Reservation collective_lock;
+    private:
+      RtUserEvent done_event;
+      std::vector<int> stage_notifications;
+      std::vector<bool> sent_stages;
+    };
+
+    class BarrierExchangeCollective : public ShardCollective {
+    public:
+      BarrierExchangeCollective(ReplicateContext *ctx, size_t window_size, 
+                                std::vector<RtBarrier> &barriers);
+      BarrierExchangeCollective(const BarrierExchangeCollective &rhs);
+      virtual ~BarrierExchangeCollective(void);
+    public:
+      BarrierExchangeCollective& operator=(const BarrierExchangeCollective &rs);
+    public:
+      void exchange_barriers_async(void);
+      void wait_for_barrier_exchange(void);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    protected:
+      const size_t window_size;
+      std::vector<RtBarrier> &barriers;
+      std::map<unsigned,RtBarrier> local_barriers;
     };
 
   }; // namespace Internal
