@@ -2543,8 +2543,8 @@ namespace Legion {
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, bool disjoint, 
                                         ApEvent partition_ready, 
-                                        ApUserEvent pend)
-      : IndexPartNode(ctx, p, par, cs, c, disjoint, partition_ready, pend),
+                                        ApUserEvent pend, ShardMapping *map)
+      : IndexPartNode(ctx, p, par, cs, c, disjoint, partition_ready, pend, map),
         has_union_space(false)
     //--------------------------------------------------------------------------
     {
@@ -2557,9 +2557,9 @@ namespace Legion {
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, RtEvent disjoint_event,
                                         ApEvent partition_ready, 
-                                        ApUserEvent pending)
+                                        ApUserEvent pending, ShardMapping *map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, 
-                      partition_ready, pending),
+                      partition_ready, pending, map),
         has_union_space(false)
     //--------------------------------------------------------------------------
     {

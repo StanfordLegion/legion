@@ -551,6 +551,27 @@ namespace Legion {
     }; 
 
     /**
+     * \class ShardMapping
+     * A mapping from the shard IDs to their address spaces
+     */
+    class ShardMapping : public Collectable {
+    public:
+      ShardMapping(void);
+      ShardMapping(const ShardMapping &rhs);
+      ShardMapping(const std::vector<AddressSpaceID> &spaces);
+      ~ShardMapping(void);
+    public:
+      ShardMapping& operator=(const ShardMapping &rhs);
+      AddressSpaceID operator[](unsigned idx) const;
+      AddressSpaceID& operator[](unsigned idx);
+    public:
+      inline size_t size(void) const { return address_spaces.size(); }
+      inline void resize(size_t size) { address_spaces.resize(size); }
+    protected:
+      std::vector<AddressSpaceID> address_spaces;
+    };
+
+    /**
      * \class ShardManager
      * This is a class that manages the execution of one or
      * more shards for a given control replication context on
@@ -612,6 +633,9 @@ namespace Legion {
       inline ApBarrier get_pending_partition_barrier(void) const
         { return pending_partition_barrier; }
     public:
+      inline ShardMapping* get_mapping(void) const
+        { return address_spaces; }
+    public:
       void launch(const std::vector<AddressSpaceID> &spaces,
                   const std::map<ShardID,Processor> &shard_mapping);
       void unpack_launch(Deserializer &derez);
@@ -657,7 +681,7 @@ namespace Legion {
       Reservation                      manager_lock;
       // Inheritted from Mapper::SelectShardingFunctorInput
       // std::map<ShardID,Processor>   shard_mapping;
-      std::vector<AddressSpaceID>      address_spaces;
+      ShardMapping*                    address_spaces;
       std::vector<ShardTask*>          local_shards;
     protected:
       // There are four kinds of signals that come back from 

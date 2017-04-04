@@ -1436,6 +1436,7 @@ namespace Legion {
     class ReplDependentPartitionOp;
     class ReplMustEpochOp;
     class ReplTimingOp;
+    class ShardMapping;
     class ShardManager;
     class ShardCollective;
     class BarrierExchangeCollective;

@@ -1051,11 +1051,73 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    ShardMapping::ShardMapping(void)
+      : Collectable()
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardMapping::ShardMapping(const ShardMapping &rhs)
+      : Collectable()
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardMapping::ShardMapping(const std::vector<AddressSpaceID> &spaces)
+      : Collectable(), address_spaces(spaces)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardMapping::~ShardMapping(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardMapping& ShardMapping::operator=(const ShardMapping &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID ShardMapping::operator[](unsigned idx) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < address_spaces.size());
+#endif
+      return address_spaces[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    AddressSpaceID& ShardMapping::operator[](unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < address_spaces.size());
+#endif
+      return address_spaces[idx];
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Shard Manager 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
     ShardManager::ShardManager(Runtime *rt, ControlReplicationID id, 
         size_t total, unsigned index, AddressSpaceID owner,SingleTask *original)
       : runtime(rt), repl_id(id), total_shards(total), 
         address_space_index(index),owner_space(owner), original_task(original),
-        manager_lock(Reservation::create_reservation()),
+        manager_lock(Reservation::create_reservation()), address_spaces(NULL),
         local_mapping_complete(0), remote_mapping_complete(0),
         trigger_local_complete(0), trigger_remote_complete(0),
         trigger_local_commit(0), trigger_remote_commit(0), 
@@ -1122,6 +1184,8 @@ namespace Legion {
     ShardManager::~ShardManager(void)
     //--------------------------------------------------------------------------
     { 
+      if ((address_spaces != NULL) && address_spaces->remove_reference())
+        delete address_spaces;
       // We can delete our shard tasks
       for (std::vector<ShardTask*>::const_iterator it = 
             local_shards.begin(); it != local_shards.end(); it++)
@@ -1163,8 +1227,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(original_task != NULL); // should only be called on the owner
+      assert(address_spaces == NULL);
 #endif
-      address_spaces = spaces;
+      address_spaces = new ShardMapping(spaces);
+      address_spaces->add_reference();
       shard_mapping = mapping;
       // Make our local shards
       create_shards();
@@ -1172,7 +1238,7 @@ namespace Legion {
             local_shards.begin(); it != local_shards.end(); it++)
         (*it)->clone_single_from(original_task);
       // Recursively spawn any other tasks across the machine
-      if (address_spaces.size() > 1)
+      if (address_spaces->size() > 1)
       {
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         broadcast_launch(ready_event, ready_event, original_task);
@@ -1205,9 +1271,14 @@ namespace Legion {
       }
       size_t num_spaces;
       derez.deserialize(num_spaces);
-      address_spaces.resize(num_spaces);
+#ifdef DEBUG_LEGION
+      assert(address_spaces == NULL);
+#endif
+      address_spaces = new ShardMapping();
+      address_spaces->add_reference();
+      address_spaces->resize(num_spaces);
       for (unsigned idx = 0; idx < num_spaces; idx++)
-        derez.deserialize(address_spaces[idx]);
+        derez.deserialize((*address_spaces)[idx]);
       derez.deserialize(index_space_allocator_barrier);
       derez.deserialize(index_partition_allocator_barrier);
       derez.deserialize(color_partition_allocator_barrier);
@@ -1312,7 +1383,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(address_spaces[address_space_index] == runtime->address_space);
+      assert((*address_spaces)[address_space_index] == runtime->address_space);
 #endif
       std::set<RtEvent> preconditions;
       const unsigned phase_offset = 
@@ -1320,7 +1391,7 @@ namespace Legion {
       for (int idx = 0; idx < Runtime::legion_collective_radix; idx++)
       {
         unsigned index = phase_offset + idx - 1;
-        if (index >= address_spaces.size())
+        if (index >= address_spaces->size())
           break;
         // Update the number of remote constituents
         remote_constituents++;
@@ -1341,10 +1412,9 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
-          rez.serialize<size_t>(address_spaces.size());
-          for (std::vector<AddressSpaceID>::const_iterator it = 
-                address_spaces.begin(); it != address_spaces.end(); it++)
-            rez.serialize(*it);   
+          rez.serialize<size_t>(address_spaces->size());
+          for (unsigned idx = 0; idx < address_spaces->size(); idx++)
+            rez.serialize((*address_spaces)[idx]);   
           rez.serialize(index_space_allocator_barrier);
           rez.serialize(index_partition_allocator_barrier);
           rez.serialize(color_partition_allocator_barrier);
@@ -1354,10 +1424,10 @@ namespace Legion {
           rez.serialize(timing_measurement_barrier);
           rez.serialize(disjointness_barrier);
           rez.serialize(pending_partition_barrier);
-          to_clone->pack_as_shard_task(rez, address_spaces[index]); 
+          to_clone->pack_as_shard_task(rez, (*address_spaces)[index]); 
         }
         // Send the message
-        runtime->send_control_rep_launch(address_spaces[index], rez);
+        runtime->send_control_rep_launch((*address_spaces)[index], rez);
         // Add the event to the preconditions
         preconditions.insert(done);
       }
@@ -1378,7 +1448,7 @@ namespace Legion {
       for (int idx = 0; idx < Runtime::legion_collective_radix; idx++)
       {
         unsigned index = phase_offset + idx - 1;
-        if (index >= address_spaces.size())
+        if (index >= address_spaces->size())
           break;
         RtUserEvent done = Runtime::create_rt_user_event();
         Serializer rez;
@@ -1387,7 +1457,7 @@ namespace Legion {
           rez.serialize(repl_id);
           rez.serialize(done);
         }
-        runtime->send_control_rep_delete(address_spaces[index], rez);
+        runtime->send_control_rep_delete((*address_spaces)[index], rez);
         preconditions.insert(done);
       }
       if (!preconditions.empty())
@@ -1549,9 +1619,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(target < address_spaces.size());
+      assert(target < address_spaces->size());
 #endif
-      AddressSpaceID target_space = address_spaces[target];
+      AddressSpaceID target_space = (*address_spaces)[target];
       // Check to see if this is a local shard
       if (target_space == runtime->address_space)
       {

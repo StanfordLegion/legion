@@ -24,6 +24,7 @@
 #include "legion_instances.h"
 #include "legion_views.h"
 #include "legion_analysis.h"
+#include "legion_replication.h"
 #include "interval_tree.h"
 #include "rectangle_set.h"
 
@@ -207,6 +208,7 @@ namespace Legion {
                                                   PartitionKind part_kind,
                                                   RtBarrier &disjointness_bar,
                                                   ApEvent partition_ready,
+                                                  ShardMapping *mapping,
                                                   ApUserEvent partial_pending)
     //--------------------------------------------------------------------------
     {
@@ -257,14 +259,15 @@ namespace Legion {
         {
           partition_node = create_node(pid, parent_node, color_node,
                                 partition_color, disjointness_event, 
-                                partition_ready, partial_pending);
+                                partition_ready, partial_pending, mapping);
         }
         else
         {
           const bool disjoint = (part_kind == DISJOINT_KIND);
           partition_node = create_node(pid, parent_node, color_node,
                                           partition_color, disjoint, 
-                                          partition_ready, partial_pending);
+                                          partition_ready, partial_pending,
+                                          mapping);
           if (Runtime::legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                            partition_color);
@@ -295,14 +298,16 @@ namespace Legion {
         {
           partition_node = create_node(pid, parent_node, color_node,
                                        partition_color, disjointness_event, 
-                                       partition_ready, partial_pending);
+                                       partition_ready, partial_pending,
+                                       mapping);
         }
         else
         {
           const bool disjoint = (part_kind == DISJOINT_KIND);
           partition_node = create_node(pid, parent_node, color_node,
                                        partition_color, disjoint, 
-                                       partition_ready, partial_pending);
+                                       partition_ready, partial_pending,
+                                       mapping);
         }
         // We know the parent is notified or we wouldn't even have
         // been given our pid
@@ -3181,11 +3186,15 @@ namespace Legion {
                                                  LegionColor color,
                                                  bool disjoint, 
                                                  ApEvent part_ready,
-                                                 ApUserEvent pending)
+                                                 ApUserEvent pending,
+                                                 ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
-      IndexPartCreator creator(this, p, parent, color_space, 
-                               color, disjoint, part_ready, pending);
+#ifdef DEBUG_LEGION
+      assert(!pending.exists() || (shard_mapping == NULL));
+#endif
+      IndexPartCreator creator(this, p, parent, color_space, color, 
+                               disjoint, part_ready, pending, shard_mapping);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -3219,11 +3228,15 @@ namespace Legion {
                                                  LegionColor color,
                                                  RtEvent disjointness_ready,
                                                  ApEvent part_ready,
-                                                 ApUserEvent pending)
+                                                 ApUserEvent pending,
+                                                 ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!pending.exists() || (shard_mapping == NULL));
+#endif
       IndexPartCreator creator(this, p, parent, color_space, color, 
-                               disjointness_ready, part_ready, pending);
+                     disjointness_ready, part_ready, pending, shard_mapping);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -5442,29 +5455,33 @@ namespace Legion {
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, bool dis, 
-                                 ApEvent part_ready, ApUserEvent partial)
+                                 ApEvent part_ready, ApUserEvent partial,
+                                 ShardMapping *mapping)
       : IndexTreeNode(ctx, par->depth+1, c), handle(p), parent(par), 
         color_space(color_sp), total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(partial),
-        disjoint(dis), has_complete(false)
+        shard_mapping(mapping), disjoint(dis), has_complete(false)
     //--------------------------------------------------------------------------
     { 
 #ifdef DEBUG_LEGION
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
 #endif
+      if (shard_mapping != NULL)
+        shard_mapping->add_reference();
     }
 
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, RtEvent dis_ready,
-                                 ApEvent part_ready, ApUserEvent part)
+                                 ApEvent part_ready, ApUserEvent part,
+                                 ShardMapping *map)
       : IndexTreeNode(ctx, par->depth+1, c), handle(p), parent(par), 
         color_space(color_sp), total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
-        partition_ready(part_ready), partial_pending(part), 
+        partition_ready(part_ready), partial_pending(part), shard_mapping(map),
         disjoint_ready(dis_ready), disjoint(false), has_complete(false)
     //--------------------------------------------------------------------------
     {
@@ -5472,12 +5489,15 @@ namespace Legion {
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
 #endif
+      if (shard_mapping != NULL)
+        shard_mapping->add_reference();
     }
 
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(const IndexPartNode &rhs)
       : IndexTreeNode(), handle(IndexPartition::NO_PART), parent(NULL),
-        color_space(NULL), total_children(0), max_linearized_color(0)
+        color_space(NULL), total_children(0), max_linearized_color(0),
+        shard_mapping(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5488,6 +5508,8 @@ namespace Legion {
     IndexPartNode::~IndexPartNode(void)
     //--------------------------------------------------------------------------
     {
+      if ((shard_mapping != NULL) && shard_mapping->remove_reference())
+        delete shard_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -5702,8 +5724,14 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_INDEX_SPACE_COLOR);
       }
-      AddressSpaceID owner_space = get_owner_space();
-      AddressSpaceID local_space = context->runtime->address_space;
+      // Check to see if we're the owner space this child, in the
+      // common case the owner space is whichever node made the 
+      // partition, but in the control replication case, we use the
+      // shard mapping to determine which node owns the given child
+      const AddressSpaceID owner_space = 
+        (shard_mapping == NULL) ? get_owner_space() :
+        (*shard_mapping)[c % shard_mapping->size()];
+      const AddressSpaceID local_space = context->runtime->address_space;
       // If we own the index partition, create a new subspace here
       if (owner_space == local_space)
       {
@@ -6214,6 +6242,14 @@ namespace Legion {
             rez.serialize<bool>(disjoint_result);
             rez.serialize(partition_ready);
             rez.serialize(partial_pending);
+            if (shard_mapping != NULL)
+            {
+              rez.serialize(shard_mapping->size());
+              for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
+                rez.serialize((*shard_mapping)[idx]);
+            }
+            else
+              rez.serialize<size_t>(0);
             rez.serialize<size_t>(semantic_info.size());
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
@@ -6260,6 +6296,16 @@ namespace Legion {
       derez.deserialize(ready_event);
       ApUserEvent partial_pending;
       derez.deserialize(partial_pending);
+      size_t num_shard_mapping;
+      derez.deserialize(num_shard_mapping);
+      ShardMapping *mapping = NULL;
+      if (num_shard_mapping > 0)
+      {
+        mapping = new ShardMapping();
+        mapping->resize(num_shard_mapping);
+        for (unsigned idx = 0; idx < num_shard_mapping; idx++)
+          derez.deserialize((*mapping)[idx]);
+      }
       IndexSpaceNode *parent_node = context->get_node(parent);
       IndexSpaceNode *color_space_node = context->get_node(parent);
 #ifdef DEBUG_LEGION
@@ -6267,7 +6313,8 @@ namespace Legion {
       assert(color_space_node != NULL);
 #endif
       IndexPartNode *node = context->create_node(handle, parent_node, 
-        color_space_node, color, disjoint, ready_event, partial_pending);
+                                   color_space_node, color, disjoint, 
+                                   ready_event, partial_pending, mapping);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif

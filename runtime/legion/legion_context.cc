@@ -6867,7 +6867,8 @@ namespace Legion {
           forest->create_pending_partition_shard(true/*owner*/, pid, parent,
                                            color_space, partition_color, 
                                            DISJOINT_KIND, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -6917,7 +6918,8 @@ namespace Legion {
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, partition_color, 
                                          DISJOINT_KIND, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_equal_partition(this, pid, granularity);
       // Now we can add the operation to the queue
@@ -7004,7 +7006,8 @@ namespace Legion {
           forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
                                            color_space, partition_color, 
                                            kind, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -7053,7 +7056,8 @@ namespace Legion {
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, partition_color, 
                                          kind, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
@@ -7139,7 +7143,8 @@ namespace Legion {
           forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
                                            color_space, partition_color, 
                                            kind, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -7188,7 +7193,8 @@ namespace Legion {
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, partition_color, 
                                          kind, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
@@ -7271,7 +7277,8 @@ namespace Legion {
           forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
                                            color_space, partition_color, 
                                            kind, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -7320,7 +7327,8 @@ namespace Legion {
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, partition_color, 
                                          kind, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
@@ -7415,7 +7423,8 @@ namespace Legion {
           forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
                                            color_space, part_color, 
                                            part_kind, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -7463,7 +7472,8 @@ namespace Legion {
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, part_color, 
                                          part_kind, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_restricted_partition(this, pid, transform, 
                                 transform_size, extent, extent_size);
@@ -7521,7 +7531,8 @@ namespace Legion {
           forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
                                            color_space, part_color,
                                            DISJOINT_KIND, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -7569,7 +7580,8 @@ namespace Legion {
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, part_color,
                                          DISJOINT_KIND, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
       // Now figure out if we need to unmap and re-map any inline mappings
@@ -7644,7 +7656,8 @@ namespace Legion {
           forest->create_pending_partition_shard(true/*owner*/, pid, handle, 
                                            color_space, part_color,
                                            part_kind, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -7692,7 +7705,8 @@ namespace Legion {
         forest->create_pending_partition_shard(false/*owner*/, pid, handle, 
                                          color_space, part_color,
                                          part_kind, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
@@ -7767,7 +7781,8 @@ namespace Legion {
           forest->create_pending_partition_shard(true/*owner*/, pid, handle,
                                            color_space, part_color,
                                            part_kind, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -7815,7 +7830,8 @@ namespace Legion {
         forest->create_pending_partition_shard(false/*owner*/, pid, handle, 
                                          color_space, part_color,
                                          part_kind, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_by_image_range(this, pid, projection, parent, 
                                          fid, id, tag);
@@ -7899,7 +7915,8 @@ namespace Legion {
                                            handle.get_index_space(), 
                                            color_space, part_color, 
                                            part_kind, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -7948,7 +7965,8 @@ namespace Legion {
                                          handle.get_index_space(), 
                                          color_space, part_color, 
                                          part_kind, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_by_preimage(this, pid, projection, handle, 
                                       parent, fid, id, tag);
@@ -8024,7 +8042,8 @@ namespace Legion {
                                            handle.get_index_space(), 
                                            color_space, part_color, 
                                            part_kind, disjointness_barrier,
-                                           pending_partition_barrier);
+                                           pending_partition_barrier,
+                                           shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
             1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
@@ -8073,7 +8092,8 @@ namespace Legion {
                                          handle.get_index_space(), 
                                          color_space, part_color, 
                                          part_kind, disjointness_barrier,
-                                         pending_partition_barrier);
+                                         pending_partition_barrier,
+                                         shard_manager->get_mapping());
       }
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
                                             parent, fid, id, tag);

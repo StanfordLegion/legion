@@ -92,6 +92,7 @@ namespace Legion {
                                              PartitionKind part_kind,
                                              RtBarrier &disjointness_bar,
                                              ApEvent partition_ready,
+                                             ShardMapping *mapping,
             ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source);
       void destroy_index_partition(IndexPartition handle, 
@@ -486,13 +487,15 @@ namespace Legion {
                                   IndexSpaceNode *color_space, 
                                   LegionColor color, bool disjoint,
                                   ApEvent partition_ready, 
-                                  ApUserEvent partial_pending);
+                                  ApUserEvent partial_pending,
+                                  ShardMapping *shard_mapping = NULL);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space,LegionColor color,
                                   RtEvent disjointness_ready_event,
                                   ApEvent partition_ready, 
-                                  ApUserEvent partial_pending);
+                                  ApUserEvent partial_pending,
+                                  ShardMapping *shard_mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space);
       FieldSpaceNode* create_node(FieldSpace space, Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
@@ -1380,11 +1383,13 @@ namespace Legion {
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, bool disjoint,
-                    ApEvent partition_ready, ApUserEvent partial_pending);
+                    ApEvent partition_ready, ApUserEvent partial_pending,
+                    ShardMapping *mapping);
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, RtEvent disjointness_ready,
-                    ApEvent partition_ready, ApUserEvent partial_pending);
+                    ApEvent partition_ready, ApUserEvent partial_pending,
+                    ShardMapping *mapping);
       IndexPartNode(const IndexPartNode &rhs);
       virtual ~IndexPartNode(void);
     public:
@@ -1484,6 +1489,7 @@ namespace Legion {
       const LegionColor max_linearized_color;
       const ApEvent partition_ready;
       const ApUserEvent partial_pending;
+      ShardMapping *const shard_mapping;
     protected:
       RtEvent disjoint_ready;
       bool disjoint;
@@ -1527,11 +1533,13 @@ namespace Legion {
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, bool disjoint,
-                     ApEvent partition_ready, ApUserEvent pending);
+                     ApEvent partition_ready, ApUserEvent pending,
+                     ShardMapping *shard_mapping);
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, RtEvent disjointness_ready,
-                     ApEvent partition_ready, ApUserEvent pending);
+                     ApEvent partition_ready, ApUserEvent pending,
+                     ShardMapping *shard_mapping);
       IndexPartNodeT(const IndexPartNodeT &rhs);
       virtual ~IndexPartNodeT(void);
     public:
@@ -1563,15 +1571,17 @@ namespace Legion {
     public:
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
-                       LegionColor c, bool d, ApEvent r, ApUserEvent pend)
+                       LegionColor c, bool d, ApEvent r, 
+                       ApUserEvent pend, ShardMapping *m)
         : forest(f), partition(p), parent(par), color_space(cs),
-          color(c), disjoint(d), ready(r), pending(pend) { }
+          color(c), disjoint(d), ready(r), pending(pend), mapping(m) { }
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
-                       LegionColor c, RtEvent d, ApEvent r, ApUserEvent pend)
+                       LegionColor c, RtEvent d, ApEvent r, 
+                       ApUserEvent pend, ShardMapping *m)
         : forest(f), partition(p), parent(par), color_space(cs),
           color(c), disjoint(false), disjoint_ready(d), 
-          ready(r), pending(pend) { }
+          ready(r), pending(pend), mapping(m) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexPartCreator *creator)
@@ -1580,12 +1590,12 @@ namespace Legion {
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
               creator->color, creator->disjoint_ready, 
-              creator->ready, creator->pending);
+              creator->ready, creator->pending, creator->mapping);
         else
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
               creator->color, creator->disjoint, 
-              creator->ready, creator->pending);
+              creator->ready, creator->pending, creator->mapping);
       }
     public:
       RegionTreeForest *const forest;
@@ -1597,6 +1607,7 @@ namespace Legion {
       const RtEvent disjoint_ready;
       const ApEvent ready;
       const ApUserEvent pending;
+      ShardMapping *const mapping;
       IndexPartNode *result;
     };
 
