@@ -1540,6 +1540,11 @@ namespace Realm {
     // partitioning operations
 
     // index-based:
+    Event create_equal_subspace(size_t count, size_t granularity,
+                                ZIndexSpace<N,T> &subspace,
+                                const ProfilingRequestSet &reqs,
+                                Event wait_on = Event::NO_EVENT) const;
+
     Event create_equal_subspaces(size_t count, size_t granularity,
 				 std::vector<ZIndexSpace<N,T> >& subspaces,
 				 const ProfilingRequestSet &reqs,
