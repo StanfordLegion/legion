@@ -28,6 +28,8 @@ namespace Legion {
     const FieldID FieldReduction::identity = 0;
     const RegionTreeID LogicalRegionReduction::identity = 0;
     const long long TimingReduction::identity = 0;
+    const bool TrueReduction::identity = false;
+    const bool FalseReduction::identity = true;
 #ifdef DEBUG_LEGION
     const ShardingID ShardingReduction::identity = UINT_MAX;
 #endif
@@ -1096,6 +1098,13 @@ namespace Legion {
           RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
                 REDOP_TIMING_REDUCTION, &TimingReduction::identity,
                 sizeof(TimingReduction::identity)));
+        disjointness_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(1/*arrives*/,
+                REDOP_TRUE_REDUCTION, &TrueReduction::identity,
+                sizeof(TrueReduction::identity)));
+        // Application barriers
+        pending_partition_barrier = 
+          ApBarrier(Realm::Barrier::create_barrier(total_shards));
       }
     }
 
@@ -1133,6 +1142,8 @@ namespace Legion {
         field_allocator_barrier.destroy_barrier();
         logical_region_allocator_barrier.destroy_barrier();
         timing_measurement_barrier.destroy_barrier();
+        disjointness_barrier.destroy_barrier();
+        pending_partition_barrier.destroy_barrier();
       }
     }
 
@@ -1204,6 +1215,8 @@ namespace Legion {
       derez.deserialize(field_allocator_barrier);
       derez.deserialize(logical_region_allocator_barrier);
       derez.deserialize(timing_measurement_barrier);
+      derez.deserialize(disjointness_barrier);
+      derez.deserialize(pending_partition_barrier);
       // Unpack our first shard here
       create_shards();
       ShardTask *first_shard = local_shards[0];
@@ -1339,6 +1352,8 @@ namespace Legion {
           rez.serialize(field_allocator_barrier);
           rez.serialize(logical_region_allocator_barrier);
           rez.serialize(timing_measurement_barrier);
+          rez.serialize(disjointness_barrier);
+          rez.serialize(pending_partition_barrier);
           to_clone->pack_as_shard_task(rez, address_spaces[index]); 
         }
         // Send the message

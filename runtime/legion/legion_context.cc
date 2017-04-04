@@ -6547,6 +6547,10 @@ namespace Legion {
         manager->get_logical_region_allocator_barrier();
       timing_measurement_barrier = 
         manager->get_timing_measurement_barrier();
+      disjointness_barrier = 
+        manager->get_disjointness_barrier();
+      pending_partition_barrier = 
+        manager->get_pending_partition_barrier();
       // Configure our collective settings
       configure_collective_settings(manager->total_shards, owner->shard_id,
           shard_collective_radix, shard_collective_log_radix,
@@ -6859,12 +6863,14 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Have to do our registration before broadcasting
-        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
-                                         color_space, partition_color, 
-                                         DISJOINT_KIND, term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, parent,
+                                           color_space, partition_color, 
+                                           DISJOINT_KIND, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -6910,11 +6916,16 @@ namespace Legion {
         // Do our registration
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, partition_color, 
-                                         DISJOINT_KIND, term_event);
+                                         DISJOINT_KIND, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_equal_partition(this, pid, granularity);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Trigger the pending partition barrier and advance it
+      Runtime::phase_barrier_arrive(pending_partition_barrier, 
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier);
       // Update the allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == shard_manager->total_shards)
@@ -6989,12 +7000,14 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
-                                         color_space, partition_color, 
-                                         kind, term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                           color_space, partition_color, 
+                                           kind, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7039,11 +7052,16 @@ namespace Legion {
         // Tell the region tree forest about this partition
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, partition_color, 
-                                         kind, term_event);
+                                         kind, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier, 
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier);
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == shard_manager->total_shards)
@@ -7117,12 +7135,14 @@ namespace Legion {
                         parent.id, get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
-                                         color_space, partition_color, 
-                                         kind, term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                           color_space, partition_color, 
+                                           kind, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7167,11 +7187,16 @@ namespace Legion {
         // Tell the region tree forest about this partition
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, partition_color, 
-                                         kind, term_event);
+                                         kind, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier, 
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier); 
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == shard_manager->total_shards)
@@ -7242,12 +7267,14 @@ namespace Legion {
                         parent.id, get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
-                                         color_space, partition_color, 
-                                         kind, term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                           color_space, partition_color, 
+                                           kind, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7292,11 +7319,16 @@ namespace Legion {
         // Tell the region tree forest about this partition
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, partition_color, 
-                                         kind, term_event);
+                                         kind, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier,
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier);
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == shard_manager->total_shards)
@@ -7379,12 +7411,14 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
-                                         color_space, part_color, 
-                                         part_kind, term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                           color_space, part_color, 
+                                           part_kind, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7428,13 +7462,17 @@ namespace Legion {
         // Tell the region tree forest about this partition
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, part_color, 
-                                         part_kind, term_event);
+                                         part_kind, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_restricted_partition(this, pid, transform, 
                                 transform_size, extent, extent_size);
-      
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Now update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier,
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier);
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == shard_manager->total_shards)
@@ -7479,12 +7517,14 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition 
-        forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
-                                         color_space, part_color,
-                                         DISJOINT_KIND, term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                           color_space, part_color,
+                                           DISJOINT_KIND, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7528,7 +7568,8 @@ namespace Legion {
         // Tell the region tree forest about this partition 
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, part_color,
-                                         DISJOINT_KIND, term_event);
+                                         DISJOINT_KIND, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
       // Now figure out if we need to unmap and re-map any inline mappings
@@ -7546,6 +7587,10 @@ namespace Legion {
       }
       // Issue the copy operation
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier,
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -7595,12 +7640,14 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition_shard(true/*owner*/, pid, handle, 
-                                         color_space, part_color,
-                                         part_kind, term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, handle, 
+                                           color_space, part_color,
+                                           part_kind, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7644,7 +7691,8 @@ namespace Legion {
         // Tell the region tree forest about this partition
         forest->create_pending_partition_shard(false/*owner*/, pid, handle, 
                                          color_space, part_color,
-                                         part_kind, term_event);
+                                         part_kind, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
@@ -7662,6 +7710,10 @@ namespace Legion {
       }
       // Issue the copy operation
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier,
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -7711,12 +7763,14 @@ namespace Legion {
                         "(ID %lld)", get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition_shard(true/*owner*/, pid, handle,
-                                         color_space, part_color,
-                                         part_kind, term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, handle,
+                                           color_space, part_color,
+                                           part_kind, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7760,7 +7814,8 @@ namespace Legion {
         // Tell the region tree forest about this partition
         forest->create_pending_partition_shard(false/*owner*/, pid, handle, 
                                          color_space, part_color,
-                                         part_kind, term_event);
+                                         part_kind, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_by_image_range(this, pid, projection, parent, 
                                          fid, id, tag);
@@ -7779,6 +7834,10 @@ namespace Legion {
       }
       // Issue the copy operation
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier,
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -7835,13 +7894,15 @@ namespace Legion {
                         get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition_shard(true/*owner*/, pid, 
-                                         handle.get_index_space(), 
-                                         color_space, part_color, part_kind,
-                                         term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, 
+                                           handle.get_index_space(), 
+                                           color_space, part_color, 
+                                           part_kind, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7885,8 +7946,9 @@ namespace Legion {
         // Tell the region tree forest about this partition
         forest->create_pending_partition_shard(false/*owner*/, pid, 
                                          handle.get_index_space(), 
-                                         color_space, part_color, part_kind,
-                                         term_event);
+                                         color_space, part_color, 
+                                         part_kind, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_by_preimage(this, pid, projection, handle, 
                                       parent, fid, id, tag);
@@ -7905,6 +7967,10 @@ namespace Legion {
       }
       // Issue the copy operation
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier,
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
@@ -7953,13 +8019,15 @@ namespace Legion {
                         "(ID %lld)", get_task_name(), get_unique_id());
 #endif
         // Tell the region tree forest about this partition
-        forest->create_pending_partition_shard(true/*owner*/, pid, 
-                                         handle.get_index_space(), 
-                                         color_space, part_color, part_kind,
-                                         term_event);
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, 
+                                           handle.get_index_space(), 
+                                           color_space, part_color, 
+                                           part_kind, disjointness_barrier,
+                                           pending_partition_barrier);
         // Do our arrival on this generation, should be the last one
         Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, RtEvent::NO_RT_EVENT, &pid.id, sizeof(pid.id));
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -8003,8 +8071,9 @@ namespace Legion {
         // Tell the region tree forest about this partition
         forest->create_pending_partition_shard(false/*owner*/, pid, 
                                          handle.get_index_space(), 
-                                         color_space, part_color, part_kind,
-                                         term_event);
+                                         color_space, part_color, 
+                                         part_kind, disjointness_barrier,
+                                         pending_partition_barrier);
       }
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
                                             parent, fid, id, tag);
@@ -8023,6 +8092,10 @@ namespace Legion {
       }
       // Issue the copy operation
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Update the pending partition barrier
+      Runtime::phase_barrier_arrive(pending_partition_barrier,
+                                    1/*count*/, term_event);
+      Runtime::advance_barrier(pending_partition_barrier);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);

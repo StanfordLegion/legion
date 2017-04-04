@@ -267,6 +267,56 @@ namespace Legion {
       }
     };
 
+    /**
+     * \class TrueReduction
+     * A class for reduction a broadcast of a true value
+     */
+    class TrueReduction {
+    public:
+      typedef bool LHS;
+      typedef bool RHS;
+      static const bool identity;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+        if (rhs)
+          lhs = true;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+        if (rhs2)
+          rhs1 = true;
+      }
+    };
+
+    /**
+     * \class FalseReduction
+     * A class for reduction a broadcast of a false value
+     */
+    class FalseReduction {
+    public:
+      typedef bool LHS;
+      typedef bool RHS;
+      static const bool identity;
+
+      template<bool EXCLUSIVE>
+      static inline void apply(LHS &lhs, RHS rhs)
+      {
+        if (!rhs)
+          lhs = false;
+      }
+
+      template<bool EXCLUSIVE>
+      static inline void fold(RHS &rhs1, RHS rhs2)
+      {
+        if (!rhs2)
+          rhs1 = false;
+      }
+    };
+
 #ifdef DEBUG_LEGION
     /**
      * \class ShardingReduction
@@ -557,6 +607,10 @@ namespace Legion {
         { return logical_region_allocator_barrier; }
       inline RtBarrier get_timing_measurement_barrier(void) const
         { return timing_measurement_barrier; }
+      inline RtBarrier get_disjointness_barrier(void) const
+        { return disjointness_barrier; }
+      inline ApBarrier get_pending_partition_barrier(void) const
+        { return pending_partition_barrier; }
     public:
       void launch(const std::vector<AddressSpaceID> &spaces,
                   const std::map<ShardID,Processor> &shard_mapping);
@@ -627,6 +681,9 @@ namespace Legion {
       RtBarrier field_allocator_barrier;
       RtBarrier logical_region_allocator_barrier;
       RtBarrier timing_measurement_barrier;
+      RtBarrier disjointness_barrier;
+    protected:
+      ApBarrier pending_partition_barrier;
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     };

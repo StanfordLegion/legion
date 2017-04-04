@@ -18898,6 +18898,10 @@ namespace Legion {
           Realm::ReductionOpUntyped::create_reduction_op<FieldReduction>();
         red_table[REDOP_TIMING_REDUCTION] = 
           Realm::ReductionOpUntyped::create_reduction_op<TimingReduction>();
+        red_table[REDOP_TRUE_REDUCTION] = 
+          Realm::ReductionOpUntyped::create_reduction_op<TrueReduction>();
+        red_table[REDOP_FALSE_REDUCTION] = 
+          Realm::ReductionOpUntyped::create_reduction_op<FalseReduction>();
 #ifdef DEBUG_LEGION
         red_table[REDOP_SID_REDUCTION] = 
           Realm::ReductionOpUntyped::create_reduction_op<ShardingReduction>();
@@ -20319,11 +20323,8 @@ namespace Legion {
           }
         case LG_DISJOINTNESS_TASK_ID:
           {
-            RegionTreeForest::DisjointnessArgs *dargs = 
-              (RegionTreeForest::DisjointnessArgs*)args;
-            Runtime *runtime = Runtime::get_runtime(p);
-            runtime->forest->compute_partition_disjointness(dargs->handle,
-                                                            dargs->ready);
+            RegionTreeForest *forest = Runtime::get_runtime(p)->forest;
+            IndexPartNode::handle_disjointness_computation(args, forest);
             break;
           }
         case LG_PART_INDEPENDENCE_TASK_ID:

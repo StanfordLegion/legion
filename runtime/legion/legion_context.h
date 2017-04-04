@@ -1322,6 +1322,9 @@ namespace Legion {
       RtBarrier field_allocator_barrier;
       RtBarrier logical_region_allocator_barrier;
       RtBarrier timing_measurement_barrier;
+      RtBarrier disjointness_barrier;
+    protected:
+      ApBarrier pending_partition_barrier;
     protected:
       int shard_collective_radix;
       int shard_collective_log_radix;

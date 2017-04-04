@@ -61,15 +61,7 @@ namespace Legion {
      * tell the runtime to send updates to the other nodes which
      * have not observed the updates.
      */
-    class RegionTreeForest {
-    public:
-      struct DisjointnessArgs : public LgTaskArgs<DisjointnessArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DISJOINTNESS_TASK_ID;
-      public:
-        IndexPartition handle;
-        RtUserEvent ready;
-      };   
+    class RegionTreeForest {   
     public:
       RegionTreeForest(Runtime *rt);
       RegionTreeForest(const RegionTreeForest &rhs);
@@ -98,11 +90,9 @@ namespace Legion {
                                              IndexSpace color_space,
                                              LegionColor &partition_color,
                                              PartitionKind part_kind,
+                                             RtBarrier &disjointness_bar,
                                              ApEvent partition_ready,
-              ApUserEvent instantiate = ApUserEvent::NO_AP_USER_EVENT,
-              ShardID local_shard = 0, size_t total_shards = 0);
-      void compute_partition_disjointness(IndexPartition handle,
-                                          RtUserEvent ready_event);
+            ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source);
       void destroy_index_partition(IndexPartition handle, 
                                    AddressSpaceID source);
@@ -1345,6 +1335,14 @@ namespace Legion {
      */
     class IndexPartNode : public IndexTreeNode { 
     public:
+      struct DisjointnessArgs : public LgTaskArgs<DisjointnessArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DISJOINTNESS_TASK_ID;
+      public:
+        IndexPartition pid;
+        RtBarrier disjointness_barrier;
+      };
+    public:
       struct DynamicIndependenceArgs : 
         public LgTaskArgs<DynamicIndependenceArgs> {
       public:
@@ -1419,9 +1417,9 @@ namespace Legion {
       void add_child(IndexSpaceNode *child);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
+      void compute_disjointness(RtBarrier disjointness_barrier);
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
     public:
-      void compute_disjointness(RtUserEvent ready_event);
       bool is_disjoint(bool from_app = false);
       bool are_disjoint(const LegionColor c1, const LegionColor c2,
                         bool force_compute = false);
@@ -1458,6 +1456,8 @@ namespace Legion {
       virtual bool dominates(IndexPartNode *other) = 0;
       virtual void destroy_node(AddressSpaceID source) = 0;
     public:
+      static void handle_disjointness_computation(const void *args, 
+                                                  RegionTreeForest *forest);
       static void handle_disjointness_test(IndexPartNode *parent,
                                            IndexSpaceNode *left,
                                            IndexSpaceNode *right);

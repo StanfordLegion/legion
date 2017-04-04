@@ -3096,6 +3096,7 @@ namespace Legion {
       static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
       static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
       static inline void advance_barrier(PhaseBarrier &bar);
+      static inline void advance_barrier(ApBarrier &bar);
       static inline bool get_barrier_result(ApBarrier bar, void *result,
                                             size_t result_size);
     public:
@@ -3602,6 +3603,14 @@ namespace Legion {
     {
       Realm::Barrier copy = bar.phase_barrier;
       bar.phase_barrier = ApBarrier(copy.advance_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::advance_barrier(ApBarrier &bar)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = bar;
+      bar = ApBarrier(copy.advance_barrier());
     }
 
     //--------------------------------------------------------------------------
