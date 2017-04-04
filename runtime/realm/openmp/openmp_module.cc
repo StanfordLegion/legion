@@ -182,7 +182,7 @@ namespace Realm {
 	
 	bool ok = cp.parse_command_line(cmdline);
 	if(!ok) {
-	  log_omp.fatal() << "error reading NUMA command line parameters";
+	  log_omp.fatal() << "error reading OpenMP command line parameters";
 	  assert(false);
 	}
       }
