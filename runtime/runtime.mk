@@ -207,6 +207,15 @@ ifeq ($(strip $(USE_OPENMP)),1)
   endif
 endif
 
+USE_PYTHON ?= 0
+ifeq ($(strip $(USE_PYTHON)),1)
+  ifneq ($(strip $(USE_LIBDL)),1)
+    $(error USE_PYTHON requires USE_LIBDL)
+  endif
+
+  CC_FLAGS += -DREALM_USE_PYTHON
+endif
+
 # Flags for Realm
 
 # Realm uses CUDA if requested
@@ -420,6 +429,9 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/openmp/openmp_module.cc \
 		   $(LG_RT_DIR)/realm/openmp/openmp_api.cc
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/procset/procset_module.cc
+ifeq ($(strip $(USE_PYTHON)),1)
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/python/python_module.cc
+endif
 ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
 		   $(LG_RT_DIR)/realm/cuda/cudart_hijack.cc
