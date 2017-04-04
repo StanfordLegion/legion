@@ -77,7 +77,6 @@ namespace Legion {
     public:
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
-      IndexSpace create_child_space_name(IndexPartition pid) const;
       void create_index_space(IndexSpace handle, const void *realm_is);
       void create_union_space(IndexSpace handle, TaskOp *op,
                               const std::vector<IndexSpace> &sources);
@@ -91,7 +90,7 @@ namespace Legion {
                                        LegionColor partition_color,
                                        PartitionKind part_kind,
                                        ApEvent partition_ready,
-             ApUserEvent instantiate = ApUserEvent::NO_AP_USER_EVENT);
+            ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source);
@@ -486,16 +485,21 @@ namespace Legion {
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT);
+      IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
+                                  IndexPartNode *par, LegionColor color,
+                                  ApUserEvent is_ready);
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space, 
                                   LegionColor color, bool disjoint,
-                                  ApEvent partition_ready);
+                                  ApEvent partition_ready, 
+                                  ApUserEvent partial_pending);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space,LegionColor color,
                                   RtEvent disjointness_ready_event,
-                                  ApEvent partition_ready);
+                                  ApEvent partition_ready, 
+                                  ApUserEvent partial_pending);
       FieldSpaceNode* create_node(FieldSpace space);
       FieldSpaceNode* create_node(FieldSpace space, Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
@@ -703,6 +707,17 @@ namespace Legion {
         SemanticTag tag;
         AddressSpaceID source;
       };
+      class IndexSpaceSetFunctor {
+      public:
+        IndexSpaceSetFunctor(Runtime *rt, AddressSpaceID src, Serializer &r)
+          : runtime(rt), source(src), rez(r) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        Runtime *const runtime;
+        const AddressSpaceID source;
+        Serializer &rez;
+      };
       class DestructionFunctor {
       public:
         DestructionFunctor(IndexSpace h, Runtime *rt)
@@ -780,7 +795,7 @@ namespace Legion {
                             Deserializer &derez, AddressSpaceID source);
       static void handle_colors_response(Deserializer &derez);
       static void handle_index_space_set(RegionTreeForest *forest,
-                                         Deserializer &derez);
+                           Deserializer &derez, AddressSpaceID source);
     public:
       inline bool has_allocator(void) const { return (allocator != NULL); }
       IndexSpaceAllocator* get_allocator(void);
@@ -813,8 +828,6 @@ namespace Legion {
                                      void *realm_color, TypeTag type_tag) = 0;
       virtual bool contains_color(LegionColor color, 
                                   bool report_error = false) = 0;
-      virtual void instantiate_color_space(IndexPartNode *partition,
-                                           ApUserEvent instantiate) = 0;
       virtual void instantiate_colors(std::vector<LegionColor> &colors) = 0;
       virtual Domain get_color_space_domain(void) const = 0;
       virtual DomainPoint get_domain_point_color(void) const = 0;
@@ -825,7 +838,8 @@ namespace Legion {
       virtual bool dominates(IndexPartNode *rhs) = 0;
     public:
       virtual void pack_index_space(Serializer &rez) const = 0;
-      virtual void unpack_index_space(Deserializer &derez) = 0;
+      virtual void unpack_index_space(Deserializer &derez,
+                                      AddressSpaceID source) = 0;
     public:
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
@@ -967,7 +981,8 @@ namespace Legion {
       void operator delete(void *ptr);
     public:
       void get_realm_index_space(Realm::ZIndexSpace<DIM,T> &result) const;
-      void set_realm_index_space(const Realm::ZIndexSpace<DIM,T> &value);
+      void set_realm_index_space(AddressSpaceID source,
+                                 const Realm::ZIndexSpace<DIM,T> &value);
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
               TaskOp *op, const std::vector<IndexSpace> &handles);
@@ -997,8 +1012,6 @@ namespace Legion {
                                      void *realm_color, TypeTag type_tag);
       virtual bool contains_color(LegionColor color,
                                   bool report_error = false);
-      virtual void instantiate_color_space(IndexPartNode *partition,
-                                           ApUserEvent instantiate);
       virtual void instantiate_colors(std::vector<LegionColor> &colors);
       virtual Domain get_color_space_domain(void) const;
       virtual DomainPoint get_domain_point_color(void) const;
@@ -1009,7 +1022,8 @@ namespace Legion {
       virtual bool dominates(IndexPartNode *rhs);
     public:
       virtual void pack_index_space(Serializer &rez) const;
-      virtual void unpack_index_space(Deserializer &derez);
+      virtual void unpack_index_space(Deserializer &derez,
+                                      AddressSpaceID source);
     public:
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
@@ -1365,11 +1379,11 @@ namespace Legion {
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, bool disjoint,
-                    ApEvent partition_ready);
+                    ApEvent partition_ready, ApUserEvent partial_pending);
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, RtEvent disjointness_ready,
-                    ApEvent partition_ready);
+                    ApEvent partition_ready, ApUserEvent partial_pending);
       IndexPartNode(const IndexPartNode &rhs);
       virtual ~IndexPartNode(void);
     public:
@@ -1466,10 +1480,10 @@ namespace Legion {
       const LegionColor total_children;
       const LegionColor max_linearized_color;
       const ApEvent partition_ready;
+      const ApUserEvent partial_pending;
     protected:
-      bool disjoint;
       RtEvent disjoint_ready;
-      RtEvent all_children_request;
+      bool disjoint;
     protected:
       bool has_complete, complete;
     protected:
@@ -1510,11 +1524,11 @@ namespace Legion {
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, bool disjoint,
-                     ApEvent partition_ready);
+                     ApEvent partition_ready, ApUserEvent pending);
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, RtEvent disjointness_ready,
-                     ApEvent partition_ready);
+                     ApEvent partition_ready, ApUserEvent pending);
       IndexPartNodeT(const IndexPartNodeT &rhs);
       virtual ~IndexPartNodeT(void);
     public:
@@ -1546,14 +1560,15 @@ namespace Legion {
     public:
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
-                       LegionColor c, bool d, ApEvent r)
+                       LegionColor c, bool d, ApEvent r, ApUserEvent pend)
         : forest(f), partition(p), parent(par), color_space(cs),
-          color(c), disjoint(d), ready(r) { }
+          color(c), disjoint(d), ready(r), pending(pend) { }
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
-                       LegionColor c, RtEvent d, ApEvent r)
+                       LegionColor c, RtEvent d, ApEvent r, ApUserEvent pend)
         : forest(f), partition(p), parent(par), color_space(cs),
-          color(c), disjoint(false), disjoint_ready(d), ready(r) { }
+          color(c), disjoint(false), disjoint_ready(d), 
+          ready(r), pending(pend) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexPartCreator *creator)
@@ -1561,11 +1576,13 @@ namespace Legion {
         if (creator->disjoint_ready.exists()) 
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
-              creator->color, creator->disjoint_ready, creator->ready);
+              creator->color, creator->disjoint_ready, 
+              creator->ready, creator->pending);
         else
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
-              creator->color, creator->disjoint, creator->ready);
+              creator->color, creator->disjoint, 
+              creator->ready, creator->pending);
       }
     public:
       RegionTreeForest *const forest;
@@ -1576,6 +1593,7 @@ namespace Legion {
       const bool disjoint;
       const RtEvent disjoint_ready;
       const ApEvent ready;
+      const ApUserEvent pending;
       IndexPartNode *result;
     };
 

@@ -73,14 +73,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace RegionTreeForest::create_child_space_name(IndexPartition p) const
-    //--------------------------------------------------------------------------
-    {
-      return IndexSpace(runtime->get_unique_index_space_id(),
-                        p.get_tree_id(), p.get_type_tag());
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::create_index_space(IndexSpace handle,
                                               const void *realm_is)
     //--------------------------------------------------------------------------
@@ -149,9 +141,13 @@ namespace Legion {
                                                     LegionColor partition_color,
                                                        PartitionKind part_kind,
                                                        ApEvent partition_ready,
-                                                       ApUserEvent instantiate)
+                                                    ApUserEvent partial_pending)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (partial_pending.exists())
+        assert(partition_ready == partial_pending);
+#endif
       IndexSpaceNode *parent_node = get_node(parent);
       IndexSpaceNode *color_node = get_node(color_space);
       if (partition_color == INVALID_COLOR)
@@ -181,22 +177,17 @@ namespace Legion {
       {
         disjointness_event = Runtime::create_rt_user_event();
         partition_node = create_node(pid, parent_node, color_node,
-             partition_color, disjointness_event, partition_ready);
+         partition_color, disjointness_event, partition_ready, partial_pending);
       }
       else
       {
         const bool disjoint = (part_kind == DISJOINT_KIND);
         partition_node = create_node(pid, parent_node, color_node,
-                       partition_color, disjoint, partition_ready);
+                   partition_color, disjoint, partition_ready, partial_pending);
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                          partition_color);
       }
-      // We also need to explicitly instantiate all the children so
-      // that they know the domains will be ready at a later time.
-      // We instantiate them with an empty domain that will be filled in later
-      if (instantiate.exists())
-        color_node->instantiate_color_space(partition_node, instantiate);
       // If we need to compute the disjointness, only do that
       // after the partition is actually ready
       if (part_kind == COMPUTE_KIND)
@@ -3065,16 +3056,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceNode* RegionTreeForest::create_node(IndexSpace sp,
+                                                  const void *realm_is,
+                                                  IndexPartNode *parent,
+                                                  LegionColor color,
+                                                  ApUserEvent is_ready)
+    //--------------------------------------------------------------------------
+    { 
+      IndexSpaceCreator creator(this, sp, realm_is, parent, color, is_ready);
+      NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
+      IndexSpaceNode *result = creator.result;  
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      // Check to see if someone else has already made it
+      {
+        // Hold the lookup lock while modifying the lookup table
+        AutoLock l_lock(lookup_lock);
+        std::map<IndexSpace,IndexSpaceNode*>::const_iterator it =
+          index_nodes.find(sp);
+        if (it != index_nodes.end())
+        {
+          delete result;
+          // Free up the event since we didn't use it
+          Runtime::trigger_event(is_ready);
+          return it->second;
+        }
+        index_nodes[sp] = result;
+        index_space_requests.erase(sp);
+      }
+      if (parent != NULL)
+        parent->add_child(result);
+      
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartNode* RegionTreeForest::create_node(IndexPartition p, 
                                                  IndexSpaceNode *parent,
                                                  IndexSpaceNode *color_space,
                                                  LegionColor color,
                                                  bool disjoint, 
-                                                 ApEvent part_ready)
+                                                 ApEvent part_ready,
+                                                 ApUserEvent pending)
     //--------------------------------------------------------------------------
     {
       IndexPartCreator creator(this, p, parent, color_space, 
-                               color, disjoint, part_ready);
+                               color, disjoint, part_ready, pending);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -3107,11 +3135,12 @@ namespace Legion {
                                                  IndexSpaceNode *color_space,
                                                  LegionColor color,
                                                  RtEvent disjointness_ready,
-                                                 ApEvent part_ready)
+                                                 ApEvent part_ready,
+                                                 ApUserEvent pending)
     //--------------------------------------------------------------------------
     {
-      IndexPartCreator creator(this, p, parent, color_space, 
-                               color, disjointness_ready, part_ready);
+      IndexPartCreator creator(this, p, parent, color_space, color, 
+                               disjointness_ready, part_ready, pending);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -5040,6 +5069,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexSpaceNode::IndexSpaceSetFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (target == source)
+        return;
+      if (target == runtime->address_space)
+        return;
+      runtime->send_index_space_set(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -5112,7 +5152,8 @@ namespace Legion {
       derez.deserialize(ready_event);
       size_t index_space_size;
       derez.deserialize(index_space_size);
-      const void *index_space_ptr = derez.get_current_pointer();
+      const void *index_space_ptr = 
+        (index_space_size > 0) ? derez.get_current_pointer() : NULL;
 
       IndexPartNode *parent_node = NULL;
       if (parent != IndexPartition::NO_PART)
@@ -5128,8 +5169,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
-      // Advance the pointer
-      derez.advance_pointer(index_space_size);
+      // Advance the pointer if necessary
+      if (index_space_size > 0)
+        derez.advance_pointer(index_space_size);
       node->add_creation_source(source);
       size_t num_semantic;
       derez.deserialize(num_semantic);
@@ -5299,14 +5341,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_index_space_set(
-                                  RegionTreeForest *forest, Deserializer &derez) 
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
       IndexSpaceNode *node = forest->get_node(handle);
-      node->unpack_index_space(derez);
+      node->unpack_index_space(derez, source);
     }
 
     /////////////////////////////////////////////////////////////
@@ -5316,27 +5358,37 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
-                                 LegionColor c, bool dis, ApEvent part_ready)
+                                 LegionColor c, bool dis, 
+                                 ApEvent part_ready, ApUserEvent partial)
       : IndexTreeNode(ctx, par->depth+1, c), handle(p), parent(par), 
         color_space(color_sp), total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
-        partition_ready(part_ready), disjoint(dis), has_complete(false)
+        partition_ready(part_ready), partial_pending(partial),
+        disjoint(dis), has_complete(false)
     //--------------------------------------------------------------------------
     { 
+#ifdef DEBUG_LEGION
+      if (partial_pending.exists())
+        assert(partial_pending == partition_ready);
+#endif
     }
 
     //--------------------------------------------------------------------------
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, RtEvent dis_ready,
-                                 ApEvent part_ready)
+                                 ApEvent part_ready, ApUserEvent part)
       : IndexTreeNode(ctx, par->depth+1, c), handle(p), parent(par), 
         color_space(color_sp), total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
-        partition_ready(part_ready), disjoint(false), 
-        disjoint_ready(dis_ready), has_complete(false)
+        partition_ready(part_ready), partial_pending(part), 
+        disjoint_ready(dis_ready), disjoint(false), has_complete(false)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (partial_pending.exists())
+        assert(partial_pending == partition_ready);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5574,9 +5626,31 @@ namespace Legion {
       {
         IndexSpace is(context->runtime->get_unique_index_space_id(),
                       handle.get_tree_id(), handle.get_type_tag());
-        // Make a new index space node ready when the partition is ready
-        IndexSpaceNode *result = context->create_node(is, NULL/*realm is*/, 
-                                                  this, c, partition_ready); 
+        IndexSpaceNode *result = NULL;
+        if (partial_pending.exists())
+        {
+          ApUserEvent partial_event = Runtime::create_ap_user_event();
+          result = context->create_node(is, NULL/*realm is*/,
+                                        this, c, partial_event);
+          // Now check to see if we need to trigger our partition ready event
+          std::set<ApEvent> child_ready_events;
+          {
+            AutoLock n_lock(node_lock,1,false/*exclusvie*/);
+            if (color_map.size() == total_children)
+            {
+              for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
+                    color_map.begin(); it != color_map.end(); it++)
+                child_ready_events.insert(it->second->index_space_ready);
+            }
+          }
+          if (!child_ready_events.empty())
+            Runtime::trigger_event(partial_pending,
+                Runtime::merge_events(child_ready_events));
+        }
+        else
+          // Make a new index space node ready when the partition is ready
+          result = context->create_node(is, NULL/*realm is*/, 
+                                        this, c, partition_ready); 
         if (Runtime::legion_spy_enabled)
         {
           LegionSpy::log_index_subspace(handle.id, is.id, 
@@ -6026,6 +6100,7 @@ namespace Legion {
             rez.serialize(color);
             rez.serialize<bool>(disjoint_result);
             rez.serialize(partition_ready);
+            rez.serialize(partial_pending);
             rez.serialize<size_t>(semantic_info.size());
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
@@ -6070,6 +6145,8 @@ namespace Legion {
       derez.deserialize(disjoint);
       ApEvent ready_event;
       derez.deserialize(ready_event);
+      ApUserEvent partial_pending;
+      derez.deserialize(partial_pending);
       IndexSpaceNode *parent_node = context->get_node(parent);
       IndexSpaceNode *color_space_node = context->get_node(parent);
 #ifdef DEBUG_LEGION
@@ -6077,7 +6154,7 @@ namespace Legion {
       assert(color_space_node != NULL);
 #endif
       IndexPartNode *node = context->create_node(handle, parent_node, 
-                      color_space_node, color, disjoint, ready_event);
+        color_space_node, color, disjoint, ready_event, partial_pending);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
