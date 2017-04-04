@@ -430,7 +430,8 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/openmp/openmp_module.cc \
 endif
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/procset/procset_module.cc
 ifeq ($(strip $(USE_PYTHON)),1)
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/python/python_module.cc
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/python/python_module.cc \
+		   $(LG_RT_DIR)/realm/python/python_source.cc
 endif
 ifeq ($(strip $(USE_CUDA)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/cuda/cuda_module.cc \
