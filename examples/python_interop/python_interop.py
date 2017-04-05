@@ -19,30 +19,19 @@ from __future__ import print_function
 
 import cffi
 import os
+import sys
 
 root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 legion_dir = os.path.join(root_dir, "runtime", "legion")
 
 ffi = cffi.FFI()
 ffi.cdef(r"""
-void *dlopen(const char *filename, int flags);
-char *dlerror(void);
-void *dlsym(void *handle, const char *symbol);
-int dlclose(void *handle);
-""")
-c = ffi.dlopen(None)
-
-c.dlerror() # Clear any previous error
-handle = c.dlopen(ffi.NULL, ffi.RTLD_NOW)
-print("handle", handle)
-if not handle:
-    print("error", ffi.string(c.dlerror()))
-
-ffi.cdef(r"""
   typedef unsigned long long legion_lowlevel_id_t;
 
   typedef struct legion_runtime_t { void *impl; } legion_runtime_t;
   typedef struct legion_context_t { void *impl; } legion_context_t;
+  typedef struct legion_task_t { void *impl; } legion_task_t;
+  typedef struct legion_physical_region_t { void *impl; } legion_physical_region_t;
 
   typedef struct legion_processor_t {
     legion_lowlevel_id_t id;
@@ -51,19 +40,43 @@ ffi.cdef(r"""
   legion_processor_t
   legion_runtime_get_executing_processor(legion_runtime_t runtime,
                                          legion_context_t ctx);
+
+  void
+  legion_task_preamble(
+    const void *data,
+    size_t datalen,
+    legion_lowlevel_id_t proc_id,
+    legion_task_t *taskptr,
+    const legion_physical_region_t **regionptr,
+    unsigned * num_regions_ptr,
+    legion_context_t * ctxptr,
+    legion_runtime_t * runtimeptr);
+
+  void
+  legion_task_postamble(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    const void *retval,
+    size_t retsize);
 """)
-
-c.dlerror()
-legion_runtime_get_executing_processor = c.dlsym(handle, "legion_runtime_get_executing_processor")
-print("dlsym returned", legion_runtime_get_executing_processor)
-if not legion_runtime_get_executing_processor:
-    print("error", ffi.string(c.dlerror()))
-
-legion_runtime_get_executing_processor = ffi.cast(
-    "legion_processor_t (*)(legion_runtime_t, legion_context_t)",
-    legion_runtime_get_executing_processor)
+c = ffi.dlopen(None)
 
 def main_task(args, user_data, proc):
+    print(len(args))
     print("hello from task1 args=({!r}) userdata=({!r}) proc=({:x})".format(
         args, user_data, proc))
-    legion_runtime_get_executing_processor()
+    arg_ptr = ffi.new("char[]", bytes(args))
+    arg_size = len(args)
+
+    task = ffi.new("legion_task_t *")
+    regions = ffi.new("legion_physical_region_t **")
+    num_regions = ffi.new("unsigned *")
+    context = ffi.new("legion_context_t *")
+    runtime = ffi.new("legion_runtime_t *")
+    c.legion_task_preamble(arg_ptr, arg_size, proc,
+                           task, regions, num_regions, context, runtime)
+    print("%x" % c.legion_runtime_get_executing_processor(runtime[0], context[0]).id)
+
+    c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
+
+    sys.exit() # Hack: process hangs if we don't kill it here
