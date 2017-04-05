@@ -17,6 +17,31 @@
 
 from __future__ import print_function
 
-def task1(args, user_data, proc):
+import cffi
+import os
+
+root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+legion_dir = os.path.join(root_dir, "runtime", "legion")
+
+ffi = cffi.FFI()
+ffi.cdef(r"""
+  typedef unsigned long long legion_lowlevel_id_t;
+
+  typedef struct legion_runtime_t { void *impl; } legion_runtime_t;
+  typedef struct legion_context_t { void *impl; } legion_context_t;
+
+  typedef struct legion_processor_t {
+    legion_lowlevel_id_t id;
+  } legion_processor_t;
+
+  legion_processor_t
+  legion_runtime_get_executing_processor(legion_runtime_t runtime,
+                                         legion_context_t ctx);
+""")
+
+c = ffi.dlopen(None)
+
+def main_task(args, user_data, proc):
     print("hello from task1 args=({!r}) userdata=({!r}) proc=({:x})".format(
         args, user_data, proc))
+    c.legion_runtime_get_executing_processor()

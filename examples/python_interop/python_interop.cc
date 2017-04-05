@@ -18,33 +18,32 @@
 
 using namespace Legion;
 
-TaskID register_python_task_variant(
-  TaskID id /* = AUTO_GENERATE_ID */,
-  const char *task_name /* = NULL*/,
-  const ExecutionConstraintSet &execution_constraints,
-  const TaskLayoutConstraintSet &layout_constraints,
-  const TaskConfigOptions &options,
+enum TaskIDs {
+  TOP_LEVEL_TASK_ID,
+  MAIN_TASK_ID,
+};
+
+VariantID preregister_python_task_variant(
+  const TaskVariantRegistrar &registrar,
   const char *module_name,
   const char *function_name,
   const void *userdata = NULL,
   size_t userlen = 0)
 {
-  if (id == AUTO_GENERATE_ID)
-    id = Runtime::generate_static_task_id();
-
-  TaskVariantRegistrar registrar(id, task_name);
-  registrar.set_leaf(options.leaf);
-  registrar.set_inner(options.inner);
-  registrar.set_idempotent(options.idempotent);
-  registrar.layout_constraints = layout_constraints;
-  registrar.execution_constraints = execution_constraints;
-
   CodeDescriptor code_desc(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
   code_desc.add_implementation(new Realm::PythonSourceImplementation(module_name, function_name));
 
-  /*VariantID vid =*/ Runtime::preregister_task_variant(
-    registrar, code_desc, userdata, userlen, task_name);
-  return id;
+  return Runtime::preregister_task_variant(
+    registrar, code_desc, userdata, userlen,
+    registrar.task_variant_name);
+}
+
+void top_level_task(const Task *task,
+                    const std::vector<PhysicalRegion> &regions,
+                    Context ctx, HighLevelRuntime *runtime)
+{
+  TaskLauncher launcher(MAIN_TASK_ID, TaskArgument());
+  runtime->execute_task(ctx, launcher);
 }
 
 int main(int argc, char **argv)
@@ -54,12 +53,19 @@ int main(int argc, char **argv)
   setenv("PYTHONPATH", ".", true /*overwrite*/);
 #endif
 
-  ExecutionConstraintSet execution_constraints;
-  execution_constraints.add_constraint(ProcessorConstraint(Processor::PY_PROC));
-  TaskLayoutConstraintSet layout_constraints;
-  TaskConfigOptions options(false /*leaf*/, false /*inner*/, false /*idempotent*/);
-  register_python_task_variant(AUTO_GENERATE_ID, "main_task",
-                               execution_constraints, layout_constraints,
-                               options,
-                               "python_interop", "main_task");
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level_task");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level_task");
+  }
+
+  {
+    TaskVariantRegistrar registrar(MAIN_TASK_ID, "main_task");
+    registrar.add_constraint(ProcessorConstraint(Processor::PY_PROC));
+    preregister_python_task_variant(registrar, "python_interop", "main_task");
+  }
+
+  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+
+  return HighLevelRuntime::start(argc, argv);
 }
