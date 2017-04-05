@@ -41,6 +41,12 @@ NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 
+ifeq ($(shell uname), Darwin)
+	LD_FLAGS += -Wl,-force_load,liblegion.a
+else
+	LD_FLAGS += -Wl,--whole-archive -llegion -Wl,--no-whole-archive
+endif
+
 ###########################################################################
 #
 #   Don't change anything below here
