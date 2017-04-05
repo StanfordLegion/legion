@@ -148,7 +148,6 @@ namespace Realm {
   {
 // #define REALM_USE_DLMOPEN
 #ifdef REALM_USE_DLMOPEN
-    assert(0);
     handle = dlmopen(LM_ID_NEWLM, "libpython2.7.so", RTLD_DEEPBIND | RTLD_LOCAL | RTLD_LAZY);
 #else
     handle = dlopen("libpython2.7.so", RTLD_GLOBAL | RTLD_LAZY);
