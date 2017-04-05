@@ -25,6 +25,19 @@ legion_dir = os.path.join(root_dir, "runtime", "legion")
 
 ffi = cffi.FFI()
 ffi.cdef(r"""
+void *dlopen(const char *filename, int flags);
+char *dlerror(void);
+void *dlsym(void *handle, const char *symbol);
+int dlclose(void *handle);
+""")
+c = ffi.dlopen(None)
+
+handle = c.dlopen(ffi.NULL, 0)
+if not handle:
+    print(c.dlerror())
+print(handle)
+
+ffi.cdef(r"""
   typedef unsigned long long legion_lowlevel_id_t;
 
   typedef struct legion_runtime_t { void *impl; } legion_runtime_t;
@@ -39,9 +52,12 @@ ffi.cdef(r"""
                                          legion_context_t ctx);
 """)
 
-c = ffi.dlopen(None)
+legion_runtime_get_executing_processor = ffi.cast(
+    "legion_processor_t (*)(legion_runtime_t, legion_context_t)",
+    c.dlsym(handle, "legion_runtime_get_executing_processor"))
 
 def main_task(args, user_data, proc):
     print("hello from task1 args=({!r}) userdata=({!r}) proc=({:x})".format(
         args, user_data, proc))
-    c.legion_runtime_get_executing_processor()
+    print(legion_runtime_get_executing_processor)
+    legion_runtime_get_executing_processor()
