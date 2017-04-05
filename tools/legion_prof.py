@@ -426,6 +426,7 @@ class Processor(object):
 
 class TimePoint(object):
     def __init__(self, time, thing, first):
+        assert time != None
         self.time = time
         self.thing = thing
         self.first = first
@@ -2196,14 +2197,16 @@ class State(object):
         # counts = list()
         utilization = list()
         count = 0
-        last_time = 0
+        last_time = None
         increment = 1.0 / float(max_count)
         for point in timepoints:
             if point.first:
                 count += increment
             else:
                 count -= increment
-            if point.time != last_time:
+            if point.time == last_time:
+                utilization[-1] = (point.time, count) # update the count
+            else:
                 utilization.append((point.time, count))
             last_time = point.time
         return utilization
