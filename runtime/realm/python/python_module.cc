@@ -29,6 +29,7 @@
 
 #include <list>
 
+struct PyObject;
 struct PyThreadState;
 typedef ssize_t Py_ssize_t;
 
@@ -36,7 +37,94 @@ namespace Realm {
 
   Logger log_py("python");
 
-  class PyObject; // FIXME: Should probably get a definition of this from python.h
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PythonAPI
+
+  // This class contains interpreter-specific instances of Python API calls.
+  class PythonAPI {
+  public:
+    PythonAPI(void *handle);
+
+  protected:
+    template<typename T>
+    void get_symbol(T &fn, const char *symbol, bool missing_ok = false);
+
+  protected:
+    void *handle;
+
+  public:
+    // Python API calls
+    void (*Py_DecRef)(PyObject *); // non-macro version of PyDECREF
+    void (*Py_Finalize)(void);
+    void (*Py_Initialize)(void);
+
+    PyObject *(*PyByteArray_FromStringAndSize)(const char *, Py_ssize_t);
+
+    void (*PyEval_AcquireLock)(void);
+    void (*PyEval_InitThreads)(void);
+    void (*PyEval_RestoreThread)(PyThreadState *);
+    PyThreadState *(*PyEval_SaveThread)(void);
+
+    void (*PyErr_PrintEx)(int set_sys_last_vars);
+
+    PyObject *(*PyImport_ImportModule)(const char *);
+
+    PyObject *(*PyLong_FromUnsignedLong)(unsigned long);
+
+    PyObject *(*PyObject_CallFunction)(PyObject *, const char *, ...);
+    PyObject* (*PyObject_CallObject)(PyObject *callable, PyObject *args);
+    PyObject *(*PyObject_GetAttrString)(PyObject *, const char *);
+    int (*PyObject_Print)(PyObject *, FILE *, int);
+
+    void (*PyRun_SimpleString)(const char *);
+
+    PyObject *(*PyTuple_New)(Py_ssize_t len);
+    int (*PyTuple_SetItem)(PyObject *p, Py_ssize_t pos, PyObject *o);
+  };
+
+  PythonAPI::PythonAPI(void *_handle)
+    : handle(_handle)
+  {
+    get_symbol(this->Py_DecRef, "Py_DecRef");
+    get_symbol(this->Py_Finalize, "Py_Finalize");
+    get_symbol(this->Py_Initialize, "Py_Initialize");
+
+    get_symbol(this->PyByteArray_FromStringAndSize, "PyByteArray_FromStringAndSize");
+
+    get_symbol(this->PyEval_AcquireLock, "PyEval_AcquireLock");
+    get_symbol(this->PyEval_InitThreads, "PyEval_InitThreads");
+    get_symbol(this->PyEval_RestoreThread, "PyEval_RestoreThread");
+    get_symbol(this->PyEval_SaveThread, "PyEval_SaveThread");
+
+    get_symbol(this->PyErr_PrintEx, "PyErr_PrintEx");
+
+    get_symbol(this->PyImport_ImportModule, "PyImport_ImportModule");
+
+    get_symbol(this->PyLong_FromUnsignedLong, "PyLong_FromUnsignedLong");
+
+    get_symbol(this->PyObject_CallFunction, "PyObject_CallFunction");
+    get_symbol(this->PyObject_CallObject, "PyObject_CallObject");
+    get_symbol(this->PyObject_GetAttrString, "PyObject_GetAttrString");
+    get_symbol(this->PyObject_Print, "PyObject_Print");
+
+    get_symbol(this->PyRun_SimpleString, "PyRun_SimpleString");
+
+    get_symbol(this->PyTuple_New, "PyTuple_New");
+    get_symbol(this->PyTuple_SetItem, "PyTuple_SetItem");
+  }
+
+  template<typename T>
+  void PythonAPI::get_symbol(T &fn, const char *symbol,
+                             bool missing_ok /*= false*/)
+  {
+    fn = reinterpret_cast<T>(dlsym(handle, symbol));
+    if(!fn && !missing_ok) {
+      const char *error = dlerror();
+      log_py.fatal() << "failed to find symbol '" << symbol << "': " << error;
+      assert(false);
+    }
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -49,36 +137,12 @@ namespace Realm {
 
     PyObject *find_or_import_function(const PythonSourceImplementation *psi);
 
-    template<typename T>
-    void get_symbol(T &fn, const char *symbol, bool missing_ok = false);
-
-    // interpreter-specific instances of python C API entry points
-    void (*Py_Initialize)(void);
-    void (*Py_Finalize)(void);
-
-    void (*PyEval_InitThreads)(void);
-    PyThreadState *(*PyEval_SaveThread)(void);
-    void (*PyEval_RestoreThread)(PyThreadState *state);
-
-    void (*PyRun_SimpleString)(const char *);
-
-    PyObject *(*PyImport_ImportModule)(const char *);
-
   protected:
     void *handle;
-  };
 
-  template<typename T>
-  void PythonInterpreter::get_symbol(T &fn, const char *symbol,
-				     bool missing_ok /*= false*/)
-  {
-    fn = reinterpret_cast<T>(dlsym(handle, symbol));
-    if(!fn && !missing_ok) {
-      const char *error = dlerror();
-      log_py.fatal() << "failed to find symbol '" << symbol << "': " << error;
-      assert(false);
-    }
-  }
+  public:
+    PythonAPI *api;
+  };
 
   PythonInterpreter::PythonInterpreter() 
   {
@@ -89,24 +153,17 @@ namespace Realm {
       assert(false);
     }
 
-    // load the symbols we know we'll need
-    get_symbol(this->Py_Initialize, "Py_Initialize");
-    get_symbol(this->Py_Finalize, "Py_Finalize");
-    get_symbol(this->PyEval_InitThreads, "PyEval_InitThreads");
-    get_symbol(this->PyEval_SaveThread, "PyEval_SaveThread");
-    get_symbol(this->PyEval_RestoreThread, "PyEval_RestoreThread");
-    get_symbol(this->PyRun_SimpleString, "PyRun_SimpleString");
-    get_symbol(this->PyImport_ImportModule, "PyImport_ImportModule");
+    api = new PythonAPI(handle);
 
-    (this->Py_Initialize)();
-    //(this->PyEval_InitThreads)();
-    //(this->Py_Finalize)();
+    (api->Py_Initialize)();
+    //(api->PyEval_InitThreads)();
+    //(api->Py_Finalize)();
 
     //PyThreadState *state;
-    //state = PyEval_SaveThread();
-    //(this->PyEval_RestoreThread)(state);
+    //state = (api->PyEval_SaveThread)();
+    //(api->PyEval_RestoreThread)(state);
 
-    //(this->PyRun_SimpleString)("print 'hello Python world!'");
+    //(api->PyRun_SimpleString)("print 'hello Python world!'");
 
     //PythonSourceImplementation psi("taskreg_helper", "task1");
     //find_or_import_function(&psi);
@@ -114,7 +171,9 @@ namespace Realm {
 
   PythonInterpreter::~PythonInterpreter()
   {
-    (this->Py_Finalize)();
+    (api->Py_Finalize)();
+
+    delete api;
 
 #if 0
     if (dlclose(handle)) {
@@ -127,38 +186,29 @@ namespace Realm {
 
   PyObject *PythonInterpreter::find_or_import_function(const PythonSourceImplementation *psi)
   {
-    //void (*PyEval_AcquireLock)(void);
-    //get_symbol(PyEval_AcquireLock, "PyEval_AcquireLock");
     //log_py.print() << "attempting to acquire python lock";
-    //PyEval_AcquireLock();
+    //(api->PyEval_AcquireLock)();
     //log_py.print() << "lock acquired";
 
-    //int (*PyObject_Print)(PyObject *o, FILE *fp, int flags);
-    //get_symbol(PyObject_Print, "PyObject_Print");
-
     log_py.debug() << "attempting to import module: " << psi->module_name;
-    PyObject *module = (this->PyImport_ImportModule)(psi->module_name.c_str());
+    PyObject *module = (api->PyImport_ImportModule)(psi->module_name.c_str());
     if (!module) {
       // FIXME: Check exception for message
       log_py.fatal() << "unable to import Python module " << psi->module_name;
       assert(0);
     }
-    //PyObject_Print(module, stdout, 0); printf("\n");
+    //(api->PyObject_Print)(module, stdout, 0); printf("\n");
 
     log_py.debug() << "finding attribute '" << psi->function_name << "' in module '" << psi->module_name << "'";
-    PyObject *(*PyObject_GetAttrString)(PyObject *, const char *);
-    get_symbol(PyObject_GetAttrString, "PyObject_GetAttrString");
-    PyObject *function = PyObject_GetAttrString(module, psi->function_name.c_str());
+    PyObject *function = (api->PyObject_GetAttrString)(module, psi->function_name.c_str());
     if (!function) {
       // FIXME: Check exception for message
       log_py.fatal() << "unable to import Python function " << psi->function_name << " from module" << psi->module_name;
       assert(0);
     }
-    //PyObject_Print(function, stdout, 0); printf("\n");
+    //(api->PyObject_Print)(function, stdout, 0); printf("\n");
 
-    PyObject* (*PyObject_CallFunction)(PyObject *callable, const char *format, ...);
-    get_symbol(PyObject_CallFunction, "PyObject_CallFunction");
-    //PyObject_CallFunction(function, "iii", 1, 2, 3);
+    //(api->PyObject_CallFunction)(function, "iii", 1, 2, 3);
 
     return function;
   }
@@ -434,53 +484,36 @@ namespace Realm {
 
     log_py.debug() << "task " << func_id << " executing on " << me << ": " << ((void *)(tte.fnptr));
 
-    PyObject *(*PyByteArray_FromStringAndSize)(const char *string, Py_ssize_t len);
-    interpreter->get_symbol(PyByteArray_FromStringAndSize, "PyByteArray_FromStringAndSize");
-    PyObject *(*PyLong_FromUnsignedLong)(unsigned long v);
-    interpreter->get_symbol(PyLong_FromUnsignedLong, "PyLong_FromUnsignedLong");
-
-    PyObject *arg1 = PyByteArray_FromStringAndSize((const char *)task_args.base(),
+    PyObject *arg1 = (interpreter->api->PyByteArray_FromStringAndSize)(
+                                                   (const char *)task_args.base(),
 						   task_args.size());
     assert(arg1 != 0);
-    PyObject *arg2 = PyByteArray_FromStringAndSize((const char *)tte.user_data.base(),
+    PyObject *arg2 = (interpreter->api->PyByteArray_FromStringAndSize)(
+                                                   (const char *)tte.user_data.base(),
 						   tte.user_data.size());
     assert(arg2 != 0);
     // TODO: make into a Python realm.Processor object
-    PyObject *arg3 = PyLong_FromUnsignedLong(me.id);
+    PyObject *arg3 = (interpreter->api->PyLong_FromUnsignedLong)(me.id);
     assert(arg3 != 0);
 
-    PyObject *(*PyTuple_New)(Py_ssize_t len);
-    interpreter->get_symbol(PyTuple_New, "PyTuple_New");
-    int (*PyTuple_SetItem)(PyObject *p, Py_ssize_t pos, PyObject *o);
-    interpreter->get_symbol(PyTuple_SetItem, "PyTuple_SetItem");
-
-    PyObject *args = PyTuple_New(3);
+    PyObject *args = (interpreter->api->PyTuple_New)(3);
     assert(args != 0);
-    PyTuple_SetItem(args, 0, arg1);
-    PyTuple_SetItem(args, 1, arg2);
-    PyTuple_SetItem(args, 2, arg3);
+    (interpreter->api->PyTuple_SetItem)(args, 0, arg1);
+    (interpreter->api->PyTuple_SetItem)(args, 1, arg2);
+    (interpreter->api->PyTuple_SetItem)(args, 2, arg3);
 
-    //int (*PyObject_Print)(PyObject *o, FILE *fp, int flags);
-    //interpreter->get_symbol(PyObject_Print, "PyObject_Print");
-    //printf("args = "); PyObject_Print(args, stdout, 0); printf("\n");
+    //printf("args = "); (interpreter->api->PyObject_Print)(args, stdout, 0); printf("\n");
 
-    PyObject* (*PyObject_CallObject)(PyObject *callable, PyObject *args);
-    interpreter->get_symbol(PyObject_CallObject, "PyObject_CallObject");
-    PyObject *res = PyObject_CallObject(tte.fnptr, args);
+    PyObject *res = (interpreter->api->PyObject_CallObject)(tte.fnptr, args);
 
-    // non-macro version of PyDECREF
-    void (*Py_DecRef)(PyObject *);
-    interpreter->get_symbol(Py_DecRef, "Py_DecRef");
-    Py_DecRef(args);
+    (interpreter->api->Py_DecRef)(args);
 
     //printf("res = "); PyObject_Print(res, stdout, 0); printf("\n");
     if(res != 0) {
-      Py_DecRef(res);
+      (interpreter->api->Py_DecRef)(res);
     } else {
       log_py.fatal() << "python exception occurred within task:";
-      void (*PyErr_PrintEx)(int set_sys_last_vars);
-      interpreter->get_symbol(PyErr_PrintEx, "PyErr_PrintEx");
-      PyErr_PrintEx(0);
+      (interpreter->api->PyErr_PrintEx)(0);
       assert(0);
     }
 
