@@ -15,35 +15,31 @@
 
 namespace Realm {
 
-  namespace Python {
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PythonSourceImplementation
 
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class PythonSourceCodeImplementation
+  inline void PythonSourceImplementation::print(std::ostream& os) const
+  {
+    os << "pyref(" << module_name << "," << function_name << ")";
+  }
 
-    inline void PythonSourceCodeImplementation::print(std::ostream& os) const
-    {
-      os << "pyref(" << module_name << "," << function_name << ")";
+  template <typename S>
+  inline bool PythonSourceImplementation::serialize(S& serializer) const
+  {
+    return (serializer << module_name) && (serializer << function_name);
+  }
+
+  template <typename S>
+  inline /*static*/ CodeImplementation *PythonSourceImplementation::deserialize_new(S& deserializer)
+  {
+    PythonSourceImplementation *pyref = new PythonSourceImplementation;
+    if((deserializer >> pyref->module_name) && (deserializer >> pyref->function_name)) {
+      return pyref;
+    } else {
+      delete pyref;
+      return 0;
     }
-
-    template <typename S>
-    inline bool PythonSourceCodeImplementation::serialize(S& serializer) const
-    {
-      return (serializer << module_name) && (serializer << function_name);
-    }
-
-    template <typename S>
-    inline /*static*/ CodeImplementation *PythonSourceCodeImplementation::deserialize_new(S& deserializer)
-    {
-      PythonSourceCodeImplementation *pyref = new PythonSourceCodeImplementation;
-      if((deserializer >> pyref->module_name) && (deserializer >> pyref->function_name)) {
-        return pyref;
-      } else {
-        delete pyref;
-        return 0;
-      }
-    }
-
-  }; // namespace Python
+  }
 
 }; // namespace Realm

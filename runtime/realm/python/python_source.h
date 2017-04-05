@@ -20,37 +20,33 @@
 
 namespace Realm {
 
-  namespace Python {
+  class PythonSourceImplementation : public CodeImplementation {
+  public:
+    PythonSourceImplementation(const std::string& _module_name,
+                                   const std::string& _function_name);
 
-    class PythonSourceCodeImplementation : public CodeImplementation {
-    public:
-      PythonSourceCodeImplementation(const std::string& _module_name,
-                                     const std::string& _function_name);
+    virtual ~PythonSourceImplementation(void);
 
-      virtual ~PythonSourceCodeImplementation(void);
+    virtual CodeImplementation *clone(void) const;
 
-      virtual CodeImplementation *clone(void) const;
+    virtual bool is_portable(void) const;
 
-      virtual bool is_portable(void) const;
+    template <typename S>
+    bool serialize(S& serializer) const;
 
-      template <typename S>
-      bool serialize(S& serializer) const;
+    template <typename S>
+    static CodeImplementation *deserialize_new(S& deserializer);
 
-      template <typename S>
-      static CodeImplementation *deserialize_new(S& deserializer);
+  protected:
+    PythonSourceImplementation(void);
 
-    protected:
-      PythonSourceCodeImplementation(void);
+    static Serialization::PolymorphicSerdezSubclass<CodeImplementation, PythonSourceImplementation> serdez_subclass;
 
-      static Serialization::PolymorphicSerdezSubclass<CodeImplementation, PythonSourceCodeImplementation> serdez_subclass;
+    virtual void print(std::ostream& os) const;
 
-      virtual void print(std::ostream& os) const;
-
-    public:
-      std::string module_name, function_name;
-    };
-
-  }; // namespace Python
+  public:
+    std::string module_name, function_name;
+  };
 
 }; // namespace Realm
 

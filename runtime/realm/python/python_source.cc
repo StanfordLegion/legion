@@ -17,36 +17,32 @@
 
 namespace Realm {
 
-  namespace Python {
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PythonSourceImplementation
 
-    ////////////////////////////////////////////////////////////////////////
-    //
-    // class PythonSourceCodeImplementation
+  /*static*/ Serialization::PolymorphicSerdezSubclass<CodeImplementation,
+                                                    PythonSourceImplementation> PythonSourceImplementation::serdez_subclass;
 
-    /*static*/ Serialization::PolymorphicSerdezSubclass<CodeImplementation,
-                                                      PythonSourceCodeImplementation> PythonSourceCodeImplementation::serdez_subclass;
+  PythonSourceImplementation::PythonSourceImplementation(void)
+  {}
 
-    PythonSourceCodeImplementation::PythonSourceCodeImplementation(void)
-    {}
+  PythonSourceImplementation::PythonSourceImplementation(const std::string& _module_name,
+                                                                 const std::string& _function_name)
+    : module_name(_module_name), function_name(_function_name)
+  {}
 
-    PythonSourceCodeImplementation::PythonSourceCodeImplementation(const std::string& _module_name,
-                                                                   const std::string& _function_name)
-      : module_name(_module_name), function_name(_function_name)
-    {}
+  PythonSourceImplementation::~PythonSourceImplementation(void)
+  {}
 
-    PythonSourceCodeImplementation::~PythonSourceCodeImplementation(void)
-    {}
+  CodeImplementation *PythonSourceImplementation::clone(void) const
+  {
+    return new PythonSourceImplementation(module_name, function_name);
+  }
 
-    CodeImplementation *PythonSourceCodeImplementation::clone(void) const
-    {
-      return new PythonSourceCodeImplementation(module_name, function_name);
-    }
-
-    bool PythonSourceCodeImplementation::is_portable(void) const
-    {
-      return true;
-    }
-
-  }; // namespace Python
+  bool PythonSourceImplementation::is_portable(void) const
+  {
+    return true;
+  }
 
 }; // namespace Realm

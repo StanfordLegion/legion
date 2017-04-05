@@ -15,6 +15,8 @@
 
 #include "python_module.h"
 
+#include "python_source.h"
+
 #include "../numa/numasysif.h"
 #include "logging.h"
 #include "cmdline.h"
@@ -29,6 +31,8 @@ namespace Realm {
 
   Logger log_py("python");
 
+  class PyObject; // FIXME: Should probably get a definition of this from python.h
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class PythonInterpreter
@@ -37,9 +41,26 @@ namespace Realm {
   public:
     PythonInterpreter();
     ~PythonInterpreter();
+
+    PyObject *find_or_import_function(const PythonSourceImplementation *psi);
+
   protected:
     void *handle;
+
+    template<typename T>
+    void get_symbol(T &fn, const char *symbol);
   };
+
+  template<typename T>
+  void PythonInterpreter::get_symbol(T &fn, const char *symbol)
+  {
+    fn = reinterpret_cast<T>(dlsym(handle, symbol));
+    if (!fn) {
+      const char *error = dlerror();
+      log_py.fatal() << error;
+      assert(false);
+    }
+  }
 
   PythonInterpreter::PythonInterpreter() {
     handle = dlmopen(LM_ID_NEWLM, "libpython2.7.so", RTLD_DEEPBIND | RTLD_LOCAL | RTLD_LAZY);
@@ -49,37 +70,19 @@ namespace Realm {
       assert(false);
     }
 
-    void (*Py_Initialize)(void) =
-      reinterpret_cast<void (*)(void)>(dlsym(handle, "Py_Initialize"));
-    if (!Py_Initialize) {
-      const char *error = dlerror();
-      log_py.fatal() << error;
-      assert(false);
-    }
-
+    void (*Py_Initialize)(void);
+    get_symbol(Py_Initialize, "Py_Initialize");
     Py_Initialize();
 
 
-    void (*PyRun_SimpleString)(const char *) =
-      reinterpret_cast<void (*)(const char *)>(dlsym(handle, "PyRun_SimpleString"));
-    if (!PyRun_SimpleString) {
-      const char *error = dlerror();
-      log_py.fatal() << error;
-      assert(false);
-    }
-
+    void (*PyRun_SimpleString)(const char *);
+    get_symbol(PyRun_SimpleString, "PyRun_SimpleString");
     PyRun_SimpleString("print 'hello Python world!'");
   }
 
   PythonInterpreter::~PythonInterpreter() {
-    void (*Py_Finalize)(void) =
-      reinterpret_cast<void (*)(void)>(dlsym(handle, "Py_Finalize"));
-    if (!Py_Finalize) {
-      const char *error = dlerror();
-      log_py.fatal() << error;
-      assert(false);
-    }
-
+    void (*Py_Finalize)(void);
+    get_symbol(Py_Finalize, "Py_Finalize");
     Py_Finalize();
 
     if (dlclose(handle)) {
@@ -87,6 +90,29 @@ namespace Realm {
       log_py.fatal() << error;
       assert(false);
     }
+  }
+
+  PyObject *PythonInterpreter::find_or_import_function(const PythonSourceImplementation *psi)
+  {
+    PyObject *(*PyImport_ImportModule)(const char *);
+    get_symbol(PyImport_ImportModule, "PyImport_ImportModule");
+    PyObject *module = PyImport_ImportModule(psi->module_name.c_str());
+    if (!module) {
+      // FIXME: Check exception for message
+      log_py.fatal() << "unable to import Python module " << psi->module_name;
+      assert(0);
+    }
+
+    PyObject *(*PyObject_GetAttr)(PyObject *, const char *);
+    get_symbol(PyObject_GetAttr, "PyObject_GetAttr");
+    PyObject *function = PyObject_GetAttr(module, psi->function_name.c_str());
+    if (!function) {
+      // FIXME: Check exception for message
+      log_py.fatal() << "unable to import Python function " << psi->function_name << " from module" << psi->module_name;
+      assert(0);
+    }
+
+    return function;
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -104,6 +130,10 @@ namespace Realm {
 
     virtual void shutdown(void);
 
+    virtual void register_task(Processor::TaskFuncID func_id,
+                               CodeDescriptor& codedesc,
+                               const ByteArrayRef& user_data);
+
     virtual void execute_task(Processor::TaskFuncID func_id,
                               const ByteArrayRef& task_args);
 
@@ -111,6 +141,13 @@ namespace Realm {
     int numa_node;
     CoreReservation *core_rsrv;
     PythonInterpreter *interpreter;
+
+    struct TaskTableEntry {
+      PyObject *fnptr;
+      ByteArray user_data;
+    };
+
+    std::map<Processor::TaskFuncID, TaskTableEntry> task_table;
   };
 
   LocalPythonProcessor::LocalPythonProcessor(Processor _me, int _numa_node,
@@ -154,6 +191,29 @@ namespace Realm {
     log_py.info() << "shutting down";
 
     LocalTaskProcessor::shutdown();
+  }
+
+  void LocalPythonProcessor::register_task(Processor::TaskFuncID func_id,
+                                           CodeDescriptor& codedesc,
+                                           const ByteArrayRef& user_data)
+  {
+    // first, make sure we haven't seen this task id before
+    if(task_table.count(func_id) > 0) {
+      log_py.fatal() << "duplicate task registration: proc=" << me << " func=" << func_id;
+      assert(0);
+    }
+
+    // next, get see if we have a Python function to register
+    const PythonSourceImplementation *psi = codedesc.find_impl<PythonSourceImplementation>();
+    assert(psi != 0);
+
+    PyObject *fnptr = interpreter->find_or_import_function(psi);
+
+    log_py.info() << "task " << func_id << " registered on " << me << ": " << codedesc;
+
+    TaskTableEntry &tte = task_table[func_id];
+    tte.fnptr = fnptr;
+    tte.user_data = user_data;
   }
 
   void LocalPythonProcessor::execute_task(Processor::TaskFuncID func_id,
