@@ -67,20 +67,23 @@ def legion_task(body):
         arg_size = len(args)
 
         task = ffi.new("legion_task_t *")
-        regions = ffi.new("legion_physical_region_t **")
+        raw_regions = ffi.new("legion_physical_region_t **")
         num_regions = ffi.new("unsigned *")
         context = ffi.new("legion_context_t *")
         runtime = ffi.new("legion_runtime_t *")
         c.legion_task_preamble(arg_ptr, arg_size, proc,
-                               task, regions, num_regions, context, runtime)
+                               task, raw_regions, num_regions, context, runtime)
 
-        value = body(task[0], regions[0], num_regions[0],
-                     context[0], runtime[0])
+        regions = []
+        for i in xrange(num_regions[0]):
+            regions.append(raw_regions[0][i])
+
+        value = body(task[0], regions, context[0], runtime[0])
         assert(value is None) # FIXME: Support return values
 
         c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
     return wrapper
 
 @legion_task
-def main_task(task, regions, num_regions, context, runtime):
+def main_task(task, regions, context, runtime):
     print("%x" % c.legion_runtime_get_executing_processor(runtime, context).id)
