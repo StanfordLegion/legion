@@ -61,22 +61,26 @@ ffi.cdef(r"""
 """)
 c = ffi.dlopen(None)
 
-def main_task(args, user_data, proc):
-    print(len(args))
-    print("hello from task1 args=({!r}) userdata=({!r}) proc=({:x})".format(
-        args, user_data, proc))
-    arg_ptr = ffi.new("char[]", bytes(args))
-    arg_size = len(args)
+def legion_task(body):
+    def wrapper(args, user_data, proc):
+        arg_ptr = ffi.new("char[]", bytes(args))
+        arg_size = len(args)
 
-    task = ffi.new("legion_task_t *")
-    regions = ffi.new("legion_physical_region_t **")
-    num_regions = ffi.new("unsigned *")
-    context = ffi.new("legion_context_t *")
-    runtime = ffi.new("legion_runtime_t *")
-    c.legion_task_preamble(arg_ptr, arg_size, proc,
-                           task, regions, num_regions, context, runtime)
-    print("%x" % c.legion_runtime_get_executing_processor(runtime[0], context[0]).id)
+        task = ffi.new("legion_task_t *")
+        regions = ffi.new("legion_physical_region_t **")
+        num_regions = ffi.new("unsigned *")
+        context = ffi.new("legion_context_t *")
+        runtime = ffi.new("legion_runtime_t *")
+        c.legion_task_preamble(arg_ptr, arg_size, proc,
+                               task, regions, num_regions, context, runtime)
 
-    c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
+        value = body(task[0], regions[0], num_regions[0],
+                     context[0], runtime[0])
+        assert(value is None) # FIXME: Support return values
 
-    sys.exit() # Hack: process hangs if we don't kill it here
+        c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
+    return wrapper
+
+@legion_task
+def main_task(task, regions, num_regions, context, runtime):
+    print("%x" % c.legion_runtime_get_executing_processor(runtime, context).id)
