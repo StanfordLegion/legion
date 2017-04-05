@@ -193,8 +193,8 @@ namespace Realm {
     log_py.debug() << "attempting to import module: " << psi->module_name;
     PyObject *module = (api->PyImport_ImportModule)(psi->module_name.c_str());
     if (!module) {
-      // FIXME: Check exception for message
       log_py.fatal() << "unable to import Python module " << psi->module_name;
+      (api->PyErr_PrintEx)(0);
       assert(0);
     }
     //(api->PyObject_Print)(module, stdout, 0); printf("\n");
@@ -202,8 +202,8 @@ namespace Realm {
     log_py.debug() << "finding attribute '" << psi->function_name << "' in module '" << psi->module_name << "'";
     PyObject *function = (api->PyObject_GetAttrString)(module, psi->function_name.c_str());
     if (!function) {
-      // FIXME: Check exception for message
       log_py.fatal() << "unable to import Python function " << psi->function_name << " from module" << psi->module_name;
+      (api->PyErr_PrintEx)(0);
       assert(0);
     }
     //(api->PyObject_Print)(function, stdout, 0); printf("\n");
