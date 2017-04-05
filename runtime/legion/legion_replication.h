@@ -496,6 +496,11 @@ namespace Legion {
       virtual ~ReplPendingPartitionOp(void);
     public:
       ReplPendingPartitionOp& operator=(const ReplPendingPartitionOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_mapping(void);
     };
 
     /**
@@ -714,13 +719,52 @@ namespace Legion {
 
     /**
      * \class ShardCollective
-     * The shard collective is used for performing all-to-all
-     * exchanges amongst the shards of a control replicated task
+     * The shard collective is the base class for performing
+     * collective operations between shards
      */
     class ShardCollective {
     public:
       ShardCollective(ReplicateContext *ctx);
       virtual ~ShardCollective(void);
+    public:
+      virtual void handle_unpack_stage(Deserializer &derez) = 0;
+    public:
+      ShardManager *const manager;
+      ReplicateContext *const context;
+      const ShardID local_shard;
+      const CollectiveID collective_index;
+    protected:
+      Reservation collective_lock;
+    };
+
+    /**
+     * \class GatherCollective
+     * This shard collective has equivalent functionality to
+     * MPI Gather in that it will ensure that data from all
+     * the shards are reduced down to a single shard.
+     */
+    class GatherCollective : public ShardCollective {
+    public:
+      GatherCollective(ReplicateContext *ctx);
+      virtual ~GatherCollective(void);
+    public:
+      // We guarantee that these methods will be called atomically
+      virtual void pack_collective_stage(Serializer &rez) = 0;
+      virtual void unpack_collective_stage(Deserializer &derez) = 0;
+    public:
+      virtual void handle_unpack_stage(Deserializer &derez);
+    };
+
+    /**
+     * \class AllGatherCollective
+     * This shard collective has equivalent functionality to
+     * MPI All Gather in that it will ensure that all shards
+     * see the value data from all other shards.
+     */
+    class AllGatherCollective : public ShardCollective {
+    public:
+      AllGatherCollective(ReplicateContext *ctx);
+      virtual ~AllGatherCollective(void);
     public:
       // We guarantee that these methods will be called atomically
       virtual void pack_collective_stage(Serializer &rez, int stage) = 0;
@@ -729,25 +773,19 @@ namespace Legion {
       void perform_collective_sync(void);
       void perform_collective_async(void);
       void perform_collective_wait(void);
-      void handle_unpack_stage(Deserializer &derez);
+      virtual void handle_unpack_stage(Deserializer &derez);
     protected:
       void send_explicit_stage(int stage);
       bool send_ready_stages(void);
       void unpack_stage(int stage, Deserializer &derez);
-    public:
-      ShardManager *const manager;
-      ReplicateContext *const context;
-      const ShardID local_shard;
-      const CollectiveID collective_index;
+    public: 
       const int shard_collective_radix;
       const int shard_collective_log_radix;
       const int shard_collective_stages;
       const int shard_collective_participating_shards;
       const int shard_collective_last_radix;
       const int shard_collective_last_log_radix;
-      const bool participating;
-    protected:
-      Reservation collective_lock;
+      const bool participating; 
     private:
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
@@ -758,7 +796,7 @@ namespace Legion {
      * \class BarrierExchangeCollective
      * A class for exchanging sets of barriers between shards
      */
-    class BarrierExchangeCollective : public ShardCollective {
+    class BarrierExchangeCollective : public AllGatherCollective {
     public:
       BarrierExchangeCollective(ReplicateContext *ctx, size_t window_size, 
                                 std::vector<RtBarrier> &barriers);

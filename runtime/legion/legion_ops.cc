@@ -11339,6 +11339,13 @@ namespace Legion {
     void PendingPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_pending();
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::activate_pending(void)
+    //--------------------------------------------------------------------------
+    {
       activate_operation();
     }
 
@@ -11346,11 +11353,18 @@ namespace Legion {
     void PendingPartitionOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      deactivate_pending(); 
+      runtime->free_pending_partition_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::deactivate_pending(void)
+    //--------------------------------------------------------------------------
+    {
       deactivate_operation();
       if (thunk != NULL)
         delete thunk;
       thunk = NULL;
-      runtime->free_pending_partition_op(this);
     }
 
     //--------------------------------------------------------------------------

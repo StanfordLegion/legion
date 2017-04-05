@@ -838,6 +838,41 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void ReplPendingPartitionOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_pending();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplPendingPartitionOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_pending();
+      runtime->free_repl_pending_partition_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplPendingPartitionOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // We know we are in a replicate context
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Perform the partitioning operation
+      ApEvent ready_event = thunk->perform_shard(this, runtime->forest,
+        repl_ctx->owner_shard->shard_id, repl_ctx->shard_manager->total_shards);
+      complete_mapping();
+      Runtime::trigger_event(completion_event, ready_event);
+      need_completion_trigger = false;
+      complete_execution(Runtime::protect_event(ready_event));
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Dependent Partition Op 
     /////////////////////////////////////////////////////////////
@@ -1793,7 +1828,35 @@ namespace Legion {
     ShardCollective::ShardCollective(ReplicateContext *ctx)
       : manager(ctx->shard_manager), context(ctx), 
         local_shard(ctx->owner_shard->shard_id), 
-        collective_index(ctx->get_next_collective_index()), 
+        collective_index(ctx->get_next_collective_index()),
+        collective_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+      // Register this with the context
+      context->register_collective(this);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardCollective::~ShardCollective(void)
+    //--------------------------------------------------------------------------
+    {
+      // Unregister this with the context 
+      context->unregister_collective(this);
+      collective_lock.destroy_reservation();
+      collective_lock = Reservation::NO_RESERVATION;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Gather Collective 
+    /////////////////////////////////////////////////////////////
+
+    /////////////////////////////////////////////////////////////
+    // All Gather Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AllGatherCollective::AllGatherCollective(ReplicateContext *ctx)
+      : ShardCollective(ctx),       
         shard_collective_radix(ctx->get_shard_collective_radix()),
         shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
         shard_collective_stages(ctx->get_shard_collective_stages()),
@@ -1802,12 +1865,9 @@ namespace Legion {
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         shard_collective_last_log_radix(
             ctx->get_shard_collective_last_log_radix()),
-        participating(local_shard < shard_collective_participating_shards), 
-        collective_lock(Reservation::create_reservation())
+        participating(local_shard < shard_collective_participating_shards) 
     //--------------------------------------------------------------------------
-    {
-      // Register this with the context
-      context->register_collective(this);
+    { 
       if (participating)
       {
         stage_notifications.resize(shard_collective_stages, 1);
@@ -1824,17 +1884,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardCollective::~ShardCollective(void)
+    AllGatherCollective::~AllGatherCollective(void)
     //--------------------------------------------------------------------------
     {
-      // Unregister this with the context 
-      context->unregister_collective(this);
-      collective_lock.destroy_reservation();
-      collective_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
-    void ShardCollective::perform_collective_sync(void)
+    void AllGatherCollective::perform_collective_sync(void)
     //--------------------------------------------------------------------------
     {
       perform_collective_async(); 
@@ -1842,7 +1898,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardCollective::perform_collective_async(void)
+    void AllGatherCollective::perform_collective_async(void)
     //--------------------------------------------------------------------------
     {
       if (manager->total_shards <= 1)
@@ -1868,7 +1924,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardCollective::perform_collective_wait(void)
+    void AllGatherCollective::perform_collective_wait(void)
     //--------------------------------------------------------------------------
     {
       if (manager->total_shards <= 1)
@@ -1878,7 +1934,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardCollective::handle_unpack_stage(Deserializer &derez)
+    void AllGatherCollective::handle_unpack_stage(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       int stage;
@@ -1912,7 +1968,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardCollective::send_explicit_stage(int stage) 
+    void AllGatherCollective::send_explicit_stage(int stage) 
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -1979,7 +2035,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShardCollective::send_ready_stages(void)
+    bool AllGatherCollective::send_ready_stages(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2045,7 +2101,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardCollective::unpack_stage(int stage, Deserializer &derez)
+    void AllGatherCollective::unpack_stage(int stage, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(collective_lock);
@@ -2059,7 +2115,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     BarrierExchangeCollective::BarrierExchangeCollective(ReplicateContext *ctx,
                                   size_t win_size, std::vector<RtBarrier> &bars)
-      : ShardCollective(ctx), window_size(win_size), barriers(bars)
+      : AllGatherCollective(ctx), window_size(win_size), barriers(bars)
     //--------------------------------------------------------------------------
     {
     }
@@ -2067,7 +2123,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     BarrierExchangeCollective::BarrierExchangeCollective(
                                            const BarrierExchangeCollective &rhs)
-      : ShardCollective(rhs), window_size(0), barriers(rhs.barriers)
+      : AllGatherCollective(rhs), window_size(0), barriers(rhs.barriers)
     //--------------------------------------------------------------------------
     {
       // should never be called

@@ -1068,6 +1068,7 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       const size_t count = partition->color_space->get_volume(); 
+      // Common case is not control replication
       std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
@@ -1078,22 +1079,19 @@ namespace Legion {
       ApEvent result(realm_index_space.create_equal_subspaces(count, 
             granularity, subspaces, requests, index_space_ready));
       // Enumerate the colors and assign the spaces
-      unsigned subspace_index = 0;
       if (partition->total_children == partition->max_linearized_color)
       {
         for (LegionColor color = 0; color < partition->total_children; color++)
         {
           IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
-#ifdef DEBUG_LEGION
-          assert(subspace_index < subspaces.size());
-#endif
           child->set_realm_index_space(context->runtime->address_space,
-                                       subspaces[subspace_index++]);
+                                       subspaces[color]);
         }
       }
       else
       {
+        unsigned subspace_index = 0;
         for (LegionColor color = 0; 
               color < partition->max_linearized_color; color++)
         {
@@ -1109,6 +1107,76 @@ namespace Legion {
         }
       }
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_equal_children(Operation *op,
+                                   IndexPartNode *partition, size_t granularity,
+                                   ShardID shard, size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+      assert(total_shards > 0);
+#endif
+      const size_t count = partition->color_space->get_volume();
+      std::set<ApEvent> done_events;
+      if (!realm_index_space_set.has_triggered())
+        realm_index_space_set.wait();
+      // In the case of control replication we do things 
+      // one point at a time for the subspaces owned by this shard
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        for (LegionColor color = shard; 
+              color < partition->max_linearized_color; color+=total_shards)
+        {
+          Realm::ProfilingRequestSet requests;
+          if (context->runtime->profiler != NULL)
+            context->runtime->profiler->add_partition_request(requests,
+                                                    op, DEP_PART_EQUAL);
+          Realm::ZIndexSpace<DIM,T> subspace;
+          ApEvent result(realm_index_space.create_equal_subspace(count, 
+            granularity, color, subspace, requests, index_space_ready));
+          IndexSpaceNodeT<DIM,T> *child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
+          child->set_realm_index_space(context->runtime->address_space,
+                                       subspace);
+          done_events.insert(result);
+        }
+      }
+      else
+      {
+        unsigned subspace_index = 0;
+        for (LegionColor color = 0; 
+              color < partition->max_linearized_color; color++)
+        {
+          if (!partition->color_space->contains_color(color))
+            continue;
+          if ((color % total_shards) != shard)
+          {
+            subspace_index++;
+            continue;
+          }
+          Realm::ProfilingRequestSet requests;
+          if (context->runtime->profiler != NULL)
+            context->runtime->profiler->add_partition_request(requests,
+                                                    op, DEP_PART_EQUAL);
+          Realm::ZIndexSpace<DIM,T> subspace;
+          ApEvent result(realm_index_space.create_equal_subspace(count, 
+            granularity, subspace_index++, subspace, requests, 
+            index_space_ready));
+          IndexSpaceNodeT<DIM,T> *child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
+          child->set_realm_index_space(context->runtime->address_space,
+                                       subspace);
+          done_events.insert(result);
+        }
+      }
+      if (!done_events.empty())
+        return Runtime::merge_events(done_events);
+      else
+        return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1213,6 +1281,89 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_union(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *left,
+                                                    IndexPartNode *right,
+                                                    ShardID shard, 
+                                                    size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+      assert(total_shards > 1);
+#endif
+      std::vector<Realm::ZIndexSpace<DIM,T> > lhs_spaces;
+      std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces;
+      std::vector<LegionColor> colors;
+      std::set<ApEvent> preconditions;
+      // First we need to fill in all the subspaces
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        for (LegionColor color = shard; 
+              color < partition->total_children; color += total_shards)
+        {
+          IndexSpaceNodeT<DIM,T> *left_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(left->get_child(color));
+          IndexSpaceNodeT<DIM,T> *right_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
+          lhs_spaces.resize(lhs_spaces.size() + 1);
+          rhs_spaces.resize(rhs_spaces.size() + 1);
+          left_child->get_realm_index_space(lhs_spaces.back());
+          right_child->get_realm_index_space(rhs_spaces.back());
+          colors.push_back(color);
+          if (!left_child->index_space_ready.has_triggered())
+            preconditions.insert(left_child->index_space_ready);
+          if (!right_child->index_space_ready.has_triggered())
+            preconditions.insert(right_child->index_space_ready);
+        }
+      }
+      else
+      {
+        for (LegionColor color = shard;
+              color < partition->max_linearized_color; color += total_shards)
+        {
+          if (!partition->color_space->contains_color(color))
+            continue;
+          IndexSpaceNodeT<DIM,T> *left_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
+          IndexSpaceNodeT<DIM,T> *right_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
+          lhs_spaces.resize(lhs_spaces.size() + 1);
+          rhs_spaces.resize(rhs_spaces.size() + 1);
+          left_child->get_realm_index_space(lhs_spaces.back());
+          right_child->get_realm_index_space(rhs_spaces.back());
+          colors.push_back(color);
+          if (!left_child->index_space_ready.has_triggered())
+            preconditions.insert(left_child->index_space_ready);
+          if (!right_child->index_space_ready.has_triggered())
+            preconditions.insert(right_child->index_space_ready);
+        }
+      }
+      if (colors.empty())
+        return ApEvent::NO_AP_EVENT;
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(colors.size());
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                              op, DEP_PART_UNIONS);
+      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_unions(
+            lhs_spaces, rhs_spaces, subspaces, requests,
+            Runtime::merge_events(preconditions)));
+      // Now set the index spaces for the results
+      for (unsigned idx = 0; idx < colors.size(); idx++)
+      {
+        IndexSpaceNodeT<DIM,T> *child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(
+                partition->get_child(colors[idx]));
+        child->set_realm_index_space(context->runtime->address_space,
+                                     subspaces[idx]);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(Operation *op,
                                                       IndexPartNode *partition,
                                                       IndexPartNode *left,
@@ -1307,6 +1458,89 @@ namespace Legion {
           child->set_realm_index_space(context->runtime->address_space,
                                        subspaces[subspace_index++]);
         }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *left,
+                                                    IndexPartNode *right,
+                                                    ShardID shard, 
+                                                    size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+      assert(total_shards > 1);
+#endif
+      std::vector<Realm::ZIndexSpace<DIM,T> > lhs_spaces;
+      std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces;
+      std::vector<LegionColor> colors;
+      std::set<ApEvent> preconditions;
+      // First we need to fill in all the subspaces
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        for (LegionColor color = shard; 
+              color < partition->total_children; color += total_shards)
+        {
+          IndexSpaceNodeT<DIM,T> *left_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(left->get_child(color));
+          IndexSpaceNodeT<DIM,T> *right_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
+          lhs_spaces.resize(lhs_spaces.size() + 1);
+          rhs_spaces.resize(rhs_spaces.size() + 1);
+          left_child->get_realm_index_space(lhs_spaces.back());
+          right_child->get_realm_index_space(rhs_spaces.back());
+          colors.push_back(color);
+          if (!left_child->index_space_ready.has_triggered())
+            preconditions.insert(left_child->index_space_ready);
+          if (!right_child->index_space_ready.has_triggered())
+            preconditions.insert(right_child->index_space_ready);
+        }
+      }
+      else
+      {
+        for (LegionColor color = shard;
+              color < partition->max_linearized_color; color += total_shards)
+        {
+          if (!partition->color_space->contains_color(color))
+            continue;
+          IndexSpaceNodeT<DIM,T> *left_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
+          IndexSpaceNodeT<DIM,T> *right_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
+          lhs_spaces.resize(lhs_spaces.size() + 1);
+          rhs_spaces.resize(rhs_spaces.size() + 1);
+          left_child->get_realm_index_space(lhs_spaces.back());
+          right_child->get_realm_index_space(rhs_spaces.back());
+          colors.push_back(color);
+          if (!left_child->index_space_ready.has_triggered())
+            preconditions.insert(left_child->index_space_ready);
+          if (!right_child->index_space_ready.has_triggered())
+            preconditions.insert(right_child->index_space_ready);
+        }
+      }
+      if (colors.empty())
+        return ApEvent::NO_AP_EVENT;
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(colors.size());
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                              op, DEP_PART_INTERSECTIONS);
+      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_intersections(
+            lhs_spaces, rhs_spaces, subspaces, requests,
+            Runtime::merge_events(preconditions)));
+      // Now set the index spaces for the results
+      for (unsigned idx = 0; idx < colors.size(); idx++)
+      {
+        IndexSpaceNodeT<DIM,T> *child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(
+                partition->get_child(colors[idx]));
+        child->set_realm_index_space(context->runtime->address_space,
+                                     subspaces[idx]);
       }
       return result;
     }
@@ -1506,11 +1740,96 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::create_by_difference(Operation *op,
+                                                    IndexPartNode *partition,
+                                                    IndexPartNode *left,
+                                                    IndexPartNode *right,
+                                                    ShardID shard, 
+                                                    size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->parent == this);
+      assert(total_shards > 1);
+#endif
+      std::vector<Realm::ZIndexSpace<DIM,T> > lhs_spaces;
+      std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces;
+      std::vector<LegionColor> colors;
+      std::set<ApEvent> preconditions;
+      // First we need to fill in all the subspaces
+      if (partition->total_children == partition->max_linearized_color)
+      {
+        for (LegionColor color = shard; 
+              color < partition->total_children; color += total_shards)
+        {
+          IndexSpaceNodeT<DIM,T> *left_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(left->get_child(color));
+          IndexSpaceNodeT<DIM,T> *right_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
+          lhs_spaces.resize(lhs_spaces.size() + 1);
+          rhs_spaces.resize(rhs_spaces.size() + 1);
+          left_child->get_realm_index_space(lhs_spaces.back());
+          right_child->get_realm_index_space(rhs_spaces.back());
+          colors.push_back(color);
+          if (!left_child->index_space_ready.has_triggered())
+            preconditions.insert(left_child->index_space_ready);
+          if (!right_child->index_space_ready.has_triggered())
+            preconditions.insert(right_child->index_space_ready);
+        }
+      }
+      else
+      {
+        for (LegionColor color = shard;
+              color < partition->max_linearized_color; color += total_shards)
+        {
+          if (!partition->color_space->contains_color(color))
+            continue;
+          IndexSpaceNodeT<DIM,T> *left_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
+          IndexSpaceNodeT<DIM,T> *right_child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
+          lhs_spaces.resize(lhs_spaces.size() + 1);
+          rhs_spaces.resize(rhs_spaces.size() + 1);
+          left_child->get_realm_index_space(lhs_spaces.back());
+          right_child->get_realm_index_space(rhs_spaces.back());
+          colors.push_back(color);
+          if (!left_child->index_space_ready.has_triggered())
+            preconditions.insert(left_child->index_space_ready);
+          if (!right_child->index_space_ready.has_triggered())
+            preconditions.insert(right_child->index_space_ready);
+        }
+      }
+      if (colors.empty())
+        return ApEvent::NO_AP_EVENT;
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(colors.size());
+      Realm::ProfilingRequestSet requests;
+      if (context->runtime->profiler != NULL)
+        context->runtime->profiler->add_partition_request(requests,
+                                              op, DEP_PART_DIFFERENCES);
+      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_differences(
+            lhs_spaces, rhs_spaces, subspaces, requests,
+            Runtime::merge_events(preconditions)));
+      // Now set the index spaces for the results
+      for (unsigned idx = 0; idx < colors.size(); idx++)
+      {
+        IndexSpaceNodeT<DIM,T> *child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(
+                partition->get_child(colors[idx]));
+        child->set_realm_index_space(context->runtime->address_space,
+                                     subspaces[idx]);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_restriction(
                                                       IndexPartNode *partition,
                                                       const void *tran,
                                                       const void *ext,
-                                                      int partition_dim)
+                                                      int partition_dim,
+                                                      ShardID shard,
+                                                      size_t total_shards)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1525,8 +1844,8 @@ namespace Legion {
               static_cast<const Realm::ZMatrix<1,DIM>*>(tran);
             const Realm::ZRect<1,T> *extent = 
               static_cast<const Realm::ZRect<1,T>*>(ext);
-            return create_by_restriction_helper<1>(partition, 
-                                                   *transform, *extent);
+            return create_by_restriction_helper<1>(partition, *transform, 
+                                            *extent, shard, total_shards);
           }
         case 2:
           {
@@ -1534,8 +1853,8 @@ namespace Legion {
               static_cast<const Realm::ZMatrix<2,DIM>*>(tran);
             const Realm::ZRect<2,T> *extent = 
               static_cast<const Realm::ZRect<2,T>*>(ext);
-            return create_by_restriction_helper<2>(partition, 
-                                                   *transform, *extent);
+            return create_by_restriction_helper<2>(partition, *transform, 
+                                            *extent, shard, total_shards);
           }
         case 3:
           {
@@ -1543,8 +1862,8 @@ namespace Legion {
               static_cast<const Realm::ZMatrix<3,DIM>*>(tran);
             const Realm::ZRect<3,T> *extent = 
               static_cast<const Realm::ZRect<3,T>*>(ext);
-            return create_by_restriction_helper<3>(partition, 
-                                                   *transform, *extent);
+            return create_by_restriction_helper<3>(partition, *transform, 
+                                            *extent, shard, total_shards);
           }
         default:
           assert(false);
@@ -1557,7 +1876,8 @@ namespace Legion {
     ApEvent IndexSpaceNodeT<N,T>::create_by_restriction_helper(
                                           IndexPartNode *partition,
                                           const Realm::ZMatrix<M,N> &transform,
-                                          const Realm::ZRect<M,T> &extent)
+                                          const Realm::ZRect<M,T> &extent,
+                                          ShardID shard, size_t total_shards)
     //--------------------------------------------------------------------------
     {
       // Get the parent index space in case it has a sparsity map
@@ -1578,13 +1898,15 @@ namespace Legion {
         for (Realm::ZPointInRectIterator<N,T> color_itr(rect_itr.rect); 
               color_itr.valid; color_itr.step())
         {
+          // Get the legion color
+          LegionColor color = linearize_color(&color_itr.p, 
+                                              handle.get_type_tag());
+          if ((total_shards > 1) && ((color % total_shards) != shard))
+            continue;
           // Copy the index space from the parent
           Realm::ZIndexSpace<M,T> child_is = parent_is;
           // Compute the new bounds 
           child_is.bounds = extent + transform * color_itr.p;
-          // Get the legion color
-          LegionColor color = linearize_color(&color_itr.p, 
-                                              handle.get_type_tag());
           // Get the appropriate child
           IndexSpaceNodeT<M,T> *child = 
             static_cast<IndexSpaceNodeT<M,T>*>(partition->get_child(color));
@@ -2543,7 +2865,7 @@ namespace Legion {
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, bool disjoint, 
                                         ApEvent partition_ready, 
-                                        ApUserEvent pend, ShardMapping *map)
+                                        ApBarrier pend, ShardMapping *map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint, partition_ready, pend, map),
         has_union_space(false)
     //--------------------------------------------------------------------------
@@ -2557,7 +2879,7 @@ namespace Legion {
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, RtEvent disjoint_event,
                                         ApEvent partition_ready, 
-                                        ApUserEvent pending, ShardMapping *map)
+                                        ApBarrier pending, ShardMapping *map)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, 
                       partition_ready, pending, map),
         has_union_space(false)
@@ -2958,6 +3280,14 @@ namespace Legion {
       // If we've already been destroyed then we are done
       if (destroyed)
         return;
+      // Clean up our partial pending barrier if we have one
+      if (partial_pending.exists() && 
+            (source == context->runtime->address_space))
+      {
+        // Dumb constness
+        ApBarrier copy = partial_pending;
+        copy.destroy_barrier();
+      }
       std::set<PartitionNode*> to_destroy;
       {
         AutoLock n_lock(node_lock);

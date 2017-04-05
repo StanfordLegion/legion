@@ -309,7 +309,6 @@ namespace Legion {
       LG_DISJOINTNESS_TASK_ID,
       LG_PART_INDEPENDENCE_TASK_ID,
       LG_SPACE_INDEPENDENCE_TASK_ID,
-      LG_PENDING_CHILD_TASK_ID,
       LG_DECREMENT_PENDING_TASK_ID,
       LG_SEND_VERSION_STATE_UPDATE_TASK_ID,
       LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
@@ -406,7 +405,6 @@ namespace Legion {
         "Disjointness Test",                                      \
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
-        "Remove Pending Child",                                   \
         "Decrement Pending Task",                                 \
         "Send Version State Update",                              \
         "Update Version State Reduce",                            \
@@ -1439,6 +1437,8 @@ namespace Legion {
     class ShardMapping;
     class ShardManager;
     class ShardCollective;
+    class GatherCollective;
+    class AllGatherCollective;
     class BarrierExchangeCollective;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \

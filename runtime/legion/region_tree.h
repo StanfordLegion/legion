@@ -82,7 +82,7 @@ namespace Legion {
                                        LegionColor partition_color,
                                        PartitionKind part_kind,
                                        ApEvent partition_ready,
-            ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT);
+                  ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
       // For control replication contexts
       RtEvent create_pending_partition_shard(bool owner_shard,
                                              IndexPartition pid,
@@ -93,33 +93,45 @@ namespace Legion {
                                              RtBarrier &disjointness_bar,
                                              ApEvent partition_ready,
                                              ShardMapping *mapping,
-            ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT);
+                   ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source);
       void destroy_index_partition(IndexPartition handle, 
                                    AddressSpaceID source);
     public:
       ApEvent create_equal_partition(Operation *op, 
                                      IndexPartition pid, 
-                                     size_t granularity);
+                                     size_t granularity,
+                                     ShardID shard = 0,
+                                     size_t total_shards = 1);
       ApEvent create_partition_by_union(Operation *op,
                                         IndexPartition pid,
                                         IndexPartition handle1,
-                                        IndexPartition handle2);
+                                        IndexPartition handle2,
+                                        ShardID shard = 0, 
+                                        size_t total_shards = 1);
       ApEvent create_partition_by_intersection(Operation *op,
                                                IndexPartition pid,
                                                IndexPartition handle1,
-                                               IndexPartition handle2);
+                                               IndexPartition handle2,
+                                               ShardID shard = 0,
+                                               size_t total_shards = 1);
       ApEvent create_partition_by_difference(Operation *op,
                                            IndexPartition pid,
                                            IndexPartition handle1,
-                                           IndexPartition handle2);
+                                           IndexPartition handle2,
+                                           ShardID shard = 0,
+                                           size_t total_shards = 1);
       ApEvent create_partition_by_restriction(IndexPartition pid,
                                               const void *transform,
-                                              const void *extent);
+                                              const void *extent,
+                                              ShardID shard = 0,
+                                              size_t total_shards = 1);
       ApEvent create_cross_product_partitions(Operation *op,
                                               IndexPartition base,
                                               IndexPartition source,
-                                              LegionColor part_color);
+                                              LegionColor part_color,
+                                              ShardID shard = 0,
+                                              size_t total_shards = 1);
     public: 
       void create_pending_cross_product(IndexPartition handle1,
                                         IndexPartition handle2,
@@ -163,19 +175,18 @@ namespace Legion {
       bool check_association_field_size(IndexSpace is,
                                         FieldSpace fspace, FieldID fid);
     public:
-      IndexSpace find_pending_space(IndexPartition parent,
-                                    const void *realm_color,
-                                    TypeTag type_tag,
-                                    ApUserEvent &domain_ready);
       ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     const std::vector<IndexSpace> &handles,
-                                    bool is_union);
+                                    bool is_union, ShardID shard = 0,
+                                    size_t total_shards = 1);
       ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     IndexPartition handle,
-                                    bool is_union);
+                                    bool is_union, ShardID shard = 0,
+                                    size_t total_shards = 1);
       ApEvent compute_pending_space(Operation *op, IndexSpace result,
                                     IndexSpace initial,
-                                    const std::vector<IndexSpace> &handles);
+                                    const std::vector<IndexSpace> &handles,
+                                    ShardID shard = 0, size_t total_shards = 1);
     public:
       IndexPartition get_index_partition(IndexSpace parent, Color color); 
       bool has_index_subspace(IndexPartition parent,
@@ -487,14 +498,14 @@ namespace Legion {
                                   IndexSpaceNode *color_space, 
                                   LegionColor color, bool disjoint,
                                   ApEvent partition_ready, 
-                                  ApUserEvent partial_pending,
+                                  ApBarrier partial_pending,
                                   ShardMapping *shard_mapping = NULL);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space,LegionColor color,
                                   RtEvent disjointness_ready_event,
                                   ApEvent partition_ready, 
-                                  ApUserEvent partial_pending,
+                                  ApBarrier partial_pending,
                                   ShardMapping *shard_mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space);
       FieldSpaceNode* create_node(FieldSpace space, Deserializer &derez);
@@ -840,14 +851,31 @@ namespace Legion {
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
                                             size_t granularity) = 0;
+      virtual ApEvent create_equal_children(Operation *op,
+                                            IndexPartNode *partition, 
+                                            size_t granularity,
+                                            ShardID shard,
+                                            size_t total_shards) = 0;
       virtual ApEvent create_by_union(Operation *op,
                                       IndexPartNode *partition,
                                       IndexPartNode *left,
                                       IndexPartNode *right) = 0;
+      virtual ApEvent create_by_union(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *left,
+                                      IndexPartNode *right,
+                                      ShardID shard,
+                                      size_t total_shards) = 0;
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              IndexPartNode *left,
                                              IndexPartNode *right) = 0;
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
+                                             IndexPartNode *left,
+                                             IndexPartNode *right,
+                                             ShardID shard,
+                                             size_t total_shards) = 0;
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"
@@ -856,11 +884,19 @@ namespace Legion {
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
                                            IndexPartNode *right) = 0;
+      virtual ApEvent create_by_difference(Operation *op,
+                                           IndexPartNode *partition,
+                                           IndexPartNode *left,
+                                           IndexPartNode *right,
+                                           ShardID shard,
+                                           size_t total_shards) = 0;
       // Called on color space and not parent
       virtual ApEvent create_by_restriction(IndexPartNode *partition,
                                             const void *transform,
                                             const void *extent,
-                                            int partition_dim) = 0;
+                                            int partition_dim,
+                                            ShardID shard,
+                                            size_t total_shards) = 0;
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -1024,14 +1060,31 @@ namespace Legion {
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
                                             size_t granularity);
+      virtual ApEvent create_equal_children(Operation *op,
+                                            IndexPartNode *partition, 
+                                            size_t granularity,
+                                            ShardID shard,
+                                            size_t total_shards);
       virtual ApEvent create_by_union(Operation *op,
                                       IndexPartNode *partition,
                                       IndexPartNode *left,
                                       IndexPartNode *right);
+      virtual ApEvent create_by_union(Operation *op,
+                                      IndexPartNode *partition,
+                                      IndexPartNode *left,
+                                      IndexPartNode *right,
+                                      ShardID shard, 
+                                      size_t total_shards);
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              IndexPartNode *left,
                                              IndexPartNode *right);
+      virtual ApEvent create_by_intersection(Operation *op,
+                                             IndexPartNode *partition,
+                                             IndexPartNode *left,
+                                             IndexPartNode *right,
+                                             ShardID shard,
+                                             size_t total_shards);
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"
@@ -1040,15 +1093,24 @@ namespace Legion {
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
                                            IndexPartNode *right);
+      virtual ApEvent create_by_difference(Operation *op,
+                                           IndexPartNode *partition,
+                                           IndexPartNode *left,
+                                           IndexPartNode *right,
+                                           ShardID shard,
+                                           size_t total_shards);
       // Called on color space and not parent
       virtual ApEvent create_by_restriction(IndexPartNode *partition,
                                             const void *transform,
                                             const void *extent,
-                                            int partition_dim);
+                                            int partition_dim,
+                                            ShardID shard,
+                                            size_t total_shards);
       template<int N>
       ApEvent create_by_restriction_helper(IndexPartNode *partition,
                                    const Realm::ZMatrix<N,DIM> &transform,
-                                   const Realm::ZRect<N,T> &extent);
+                                   const Realm::ZRect<N,T> &extent,
+                                   ShardID shard, size_t total_shards);
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -1354,13 +1416,6 @@ namespace Legion {
         IndexPartNode *parent;
         IndexSpaceNode *left, *right;
       };
-      struct PendingChildArgs : public LgTaskArgs<PendingChildArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_PENDING_CHILD_TASK_ID;
-      public:
-        IndexPartNode *parent;
-        LegionColor pending_child;
-      };
       struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
       public:
         static const LgTaskID TASK_ID = LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID;
@@ -1383,12 +1438,12 @@ namespace Legion {
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, bool disjoint,
-                    ApEvent partition_ready, ApUserEvent partial_pending,
+                    ApEvent partition_ready, ApBarrier partial_pending,
                     ShardMapping *mapping);
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, RtEvent disjointness_ready,
-                    ApEvent partition_ready, ApUserEvent partial_pending,
+                    ApEvent partition_ready, ApBarrier partial_pending,
                     ShardMapping *mapping);
       IndexPartNode(const IndexPartNode &rhs);
       virtual ~IndexPartNode(void);
@@ -1436,21 +1491,19 @@ namespace Legion {
       bool has_instance(RegionTreeID tid);
       void add_creation_source(AddressSpaceID source);
     public:
-      void add_pending_child(const LegionColor child_color,
-                            ApUserEvent domain_ready);
-      bool get_pending_child(const LegionColor child_color,
-                             ApUserEvent &domain_ready);
-      void remove_pending_child(const LegionColor child_color);
-      static void handle_pending_child_task(const void *args);
-    public:
-      ApEvent create_equal_children(Operation *op, size_t granularity);
+      ApEvent create_equal_children(Operation *op, size_t granularity,
+                                    ShardID shard, size_t total_shards);
       ApEvent create_by_union(Operation *Op,
-                              IndexPartNode *left, IndexPartNode *right);
+                              IndexPartNode *left, IndexPartNode *right,
+                              ShardID shard, size_t total_shards);
       ApEvent create_by_intersection(Operation *op,
-                              IndexPartNode *left, IndexPartNode *right);
+                              IndexPartNode *left, IndexPartNode *right,
+                              ShardID shard, size_t total_shards);
       ApEvent create_by_difference(Operation *op,
-                              IndexPartNode *left, IndexPartNode *right);
-      ApEvent create_by_restriction(const void *transform, const void *extent);
+                              IndexPartNode *left, IndexPartNode *right,
+                              ShardID shard, size_t total_shards);
+      ApEvent create_by_restriction(const void *transform, const void *extent,
+                                    ShardID shard, size_t total_shards);
     public:
       virtual bool compute_complete(void) = 0;
       virtual bool intersects_with(IndexSpaceNode *other, 
@@ -1488,7 +1541,7 @@ namespace Legion {
       const LegionColor total_children;
       const LegionColor max_linearized_color;
       const ApEvent partition_ready;
-      const ApUserEvent partial_pending;
+      const ApBarrier partial_pending;
       ShardMapping *const shard_mapping;
     protected:
       RtEvent disjoint_ready;
@@ -1502,9 +1555,6 @@ namespace Legion {
       std::set<PartitionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subspaces;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
-    protected:
-      // Support for pending child spaces that still need to be computed
-      std::map<LegionColor,ApUserEvent> pending_children;
     }; 
 
     /**
@@ -1533,12 +1583,12 @@ namespace Legion {
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, bool disjoint,
-                     ApEvent partition_ready, ApUserEvent pending,
+                     ApEvent partition_ready, ApBarrier pending,
                      ShardMapping *shard_mapping);
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, RtEvent disjointness_ready,
-                     ApEvent partition_ready, ApUserEvent pending,
+                     ApEvent partition_ready, ApBarrier pending,
                      ShardMapping *shard_mapping);
       IndexPartNodeT(const IndexPartNodeT &rhs);
       virtual ~IndexPartNodeT(void);
@@ -1572,13 +1622,13 @@ namespace Legion {
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
                        LegionColor c, bool d, ApEvent r, 
-                       ApUserEvent pend, ShardMapping *m)
+                       ApBarrier pend, ShardMapping *m)
         : forest(f), partition(p), parent(par), color_space(cs),
           color(c), disjoint(d), ready(r), pending(pend), mapping(m) { }
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
                        LegionColor c, RtEvent d, ApEvent r, 
-                       ApUserEvent pend, ShardMapping *m)
+                       ApBarrier pend, ShardMapping *m)
         : forest(f), partition(p), parent(par), color_space(cs),
           color(c), disjoint(false), disjoint_ready(d), 
           ready(r), pending(pend), mapping(m) { }
@@ -1606,7 +1656,7 @@ namespace Legion {
       const bool disjoint;
       const RtEvent disjoint_ready;
       const ApEvent ready;
-      const ApUserEvent pending;
+      const ApBarrier pending;
       ShardMapping *const mapping;
       IndexPartNode *result;
     };

@@ -142,7 +142,7 @@ namespace Legion {
                                                     LegionColor partition_color,
                                                        PartitionKind part_kind,
                                                        ApEvent partition_ready,
-                                                    ApUserEvent partial_pending)
+                                                    ApBarrier partial_pending)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -209,7 +209,7 @@ namespace Legion {
                                                   RtBarrier &disjointness_bar,
                                                   ApEvent partition_ready,
                                                   ShardMapping *mapping,
-                                                  ApUserEvent partial_pending)
+                                                  ApBarrier partial_pending)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -336,68 +336,84 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_equal_partition(Operation *op,
                                                      IndexPartition pid,
-                                                     size_t granularity)
+                                                     size_t granularity,
+                                                     ShardID shard,
+                                                     size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_equal_children(op, granularity);
+      return new_part->create_equal_children(op, granularity, 
+                                             shard, total_shards);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_union(Operation *op,
                                                         IndexPartition pid,
                                                         IndexPartition handle1,
-                                                        IndexPartition handle2)
+                                                        IndexPartition handle2,
+                                                        ShardID shard,
+                                                        size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_union(op, node1, node2);
+      return new_part->create_by_union(op, node1, node2, shard, total_shards);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_intersection(Operation *op,
                                                          IndexPartition pid,
                                                          IndexPartition handle1,
-                                                         IndexPartition handle2)
+                                                         IndexPartition handle2,
+                                                         ShardID shard,
+                                                         size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_intersection(op, node1, node2);
+      return new_part->create_by_intersection(op, node1, node2, 
+                                              shard, total_shards);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_difference(Operation *op,
                                                        IndexPartition pid,
                                                        IndexPartition handle1,
-                                                       IndexPartition handle2)
+                                                       IndexPartition handle2,
+                                                       ShardID shard,
+                                                       size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_difference(op, node1, node2);
+      return new_part->create_by_difference(op, node1, node2, 
+                                            shard, total_shards);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_restriction(
                                                         IndexPartition pid,
                                                         const void *transform,
-                                                        const void *extent)
+                                                        const void *extent,
+                                                        ShardID shard,
+                                                        size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_by_restriction(transform, extent); 
+      return new_part->create_by_restriction(transform, extent, 
+                                             shard, total_shards); 
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_cross_product_partitions(Operation *op,
                                                          IndexPartition base,
                                                          IndexPartition source,
-                                                         LegionColor part_color)
+                                                         LegionColor part_color,
+                                                         ShardID shard,
+                                                         size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base_node = get_node(base);
@@ -405,7 +421,8 @@ namespace Legion {
       std::set<ApEvent> ready_events;
       if (base_node->total_children == base_node->max_linearized_color)
       {
-        for (LegionColor color = 0; color < base_node->total_children; color++)
+        for (LegionColor color = shard; 
+              color < base_node->total_children; color+=total_shards)
         {
           IndexSpaceNode *child_node = base_node->get_child(color);
           IndexPartNode *part_node = child_node->get_child(part_color);
@@ -416,8 +433,8 @@ namespace Legion {
       }
       else
       {
-        for (LegionColor color = 0; 
-              color < base_node->max_linearized_color; color++)
+        for (LegionColor color = shard; 
+              color < base_node->max_linearized_color; color+=total_shards)
         {
           if (!base_node->color_space->contains_color(color))
             continue;
@@ -637,26 +654,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace RegionTreeForest::find_pending_space(IndexPartition parent,
-                                                    const void *realm_color,
-                                                    TypeTag type_tag,
-                                                    ApUserEvent &domain_ready)
+    ApEvent RegionTreeForest::compute_pending_space(Operation *op, 
+       IndexSpace target, const std::vector<IndexSpace> &handles, bool is_union,
+       ShardID shard, size_t total_shards)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode *parent_node = get_node(parent);
-      LegionColor child_color = 
-        parent_node->color_space->linearize_color(realm_color, type_tag);
-      // First get the child node   
-      if (!parent_node->has_child(child_color))
-      {
-        log_run.error("Invalid color in compute pending space!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PARTITION_COLOR);
-      }
-      IndexSpaceNode *child_node = parent_node->get_child(child_color);
-      if (!parent_node->get_pending_child(child_color, domain_ready))
+      IndexSpaceNode *child_node = get_node(target);
+      // Check to see if we own this child or not
+      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
+        return ApEvent::NO_AP_EVENT;
+      // Convert the ap event for the space into an ap user event and 
+      // trigger it once the operation is complete
+      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+                         const_cast<ApEvent*>(&child_node->index_space_ready)));
+      if (space_ready.has_triggered())
       {
         log_run.error("Invalid pending child!");
 #ifdef DEBUG_LEGION
@@ -664,34 +675,60 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_PENDING_CHILD);
       }
-      return child_node->handle;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::compute_pending_space(Operation *op, 
-       IndexSpace target, const std::vector<IndexSpace> &handles, bool is_union)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *child_node = get_node(target);
+      Runtime::trigger_event(space_ready, op->get_completion_event());
       return child_node->compute_pending_space(op, handles, is_union);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::compute_pending_space(Operation *op, 
-                        IndexSpace target, IndexPartition handle, bool is_union)
+                        IndexSpace target, IndexPartition handle, bool is_union,
+                        ShardID shard, size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
+      // Check to see if we own this child or not
+      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
+        return ApEvent::NO_AP_EVENT;
+      // Convert the ap event for the space into an ap user event and 
+      // trigger it once the operation is complete
+      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+                         const_cast<ApEvent*>(&child_node->index_space_ready)));
+      if (space_ready.has_triggered())
+      {
+        log_run.error("Invalid pending child!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PENDING_CHILD);
+      }
+      Runtime::trigger_event(space_ready, op->get_completion_event());
       return child_node->compute_pending_space(op, handle, is_union);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::compute_pending_space(Operation *op,
                                          IndexSpace target, IndexSpace initial,
-                                         const std::vector<IndexSpace> &handles)
+                                         const std::vector<IndexSpace> &handles,
+                                         ShardID shard, size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
+      // Check to see if we own this child or not
+      if ((total_shards > 1) && ((child_node->color % total_shards) != shard))
+        return ApEvent::NO_AP_EVENT;
+      // Convert the ap event for the space into an ap user event and 
+      // trigger it once the operation is complete
+      ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
+                         const_cast<ApEvent*>(&child_node->index_space_ready)));
+      if (space_ready.has_triggered())
+      {
+        log_run.error("Invalid pending child!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PENDING_CHILD);
+      }
+      Runtime::trigger_event(space_ready, op->get_completion_event());
       return child_node->compute_pending_difference(op, initial, handles);
     }
 
@@ -3186,7 +3223,7 @@ namespace Legion {
                                                  LegionColor color,
                                                  bool disjoint, 
                                                  ApEvent part_ready,
-                                                 ApUserEvent pending,
+                                                 ApBarrier pending,
                                                  ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
@@ -3228,7 +3265,7 @@ namespace Legion {
                                                  LegionColor color,
                                                  RtEvent disjointness_ready,
                                                  ApEvent part_ready,
-                                                 ApUserEvent pending,
+                                                 ApBarrier pending,
                                                  ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
@@ -5455,7 +5492,7 @@ namespace Legion {
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, bool dis, 
-                                 ApEvent part_ready, ApUserEvent partial,
+                                 ApEvent part_ready, ApBarrier partial,
                                  ShardMapping *mapping)
       : IndexTreeNode(ctx, par->depth+1, c), handle(p), parent(par), 
         color_space(color_sp), total_children(color_sp->get_volume()), 
@@ -5476,7 +5513,7 @@ namespace Legion {
     IndexPartNode::IndexPartNode(RegionTreeForest *ctx, IndexPartition p, 
                                  IndexSpaceNode *par, IndexSpaceNode *color_sp,
                                  LegionColor c, RtEvent dis_ready,
-                                 ApEvent part_ready, ApUserEvent part,
+                                 ApEvent part_ready, ApBarrier part,
                                  ShardMapping *map)
       : IndexTreeNode(ctx, par->depth+1, c), handle(p), parent(par), 
         color_space(color_sp), total_children(color_sp->get_volume()),
@@ -5743,20 +5780,8 @@ namespace Legion {
           ApUserEvent partial_event = Runtime::create_ap_user_event();
           result = context->create_node(is, NULL/*realm is*/,
                                         this, c, partial_event);
-          // Now check to see if we need to trigger our partition ready event
-          std::set<ApEvent> child_ready_events;
-          {
-            AutoLock n_lock(node_lock,1,false/*exclusvie*/);
-            if (color_map.size() == total_children)
-            {
-              for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
-                    color_map.begin(); it != color_map.end(); it++)
-                child_ready_events.insert(it->second->index_space_ready);
-            }
-          }
-          if (!child_ready_events.empty())
-            Runtime::trigger_event(partial_pending,
-                Runtime::merge_events(child_ready_events));
+          Runtime::phase_barrier_arrive(partial_pending, 
+                                        1/*count*/, partial_event);
         }
         else
           // Make a new index space node ready when the partition is ready
@@ -6094,105 +6119,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::add_pending_child(const LegionColor child_color,
-                                          ApUserEvent domain_ready)
-    //--------------------------------------------------------------------------
-    {
-      bool launch_remove = false;
-      {
-        AutoLock n_lock(node_lock);
-        // Duplicate insertions can happen legally so avoid them
-        if (pending_children.find(child_color) == pending_children.end())
-        {
-          pending_children[child_color] = domain_ready;
-          launch_remove = true;
-        }
-      }
-      if (launch_remove)
-      {
-        PendingChildArgs args;
-        args.parent = this;
-        args.pending_child = child_color;
-        // Don't remove the pending child until the handle is ready
-        context->runtime->issue_runtime_meta_task(args,LG_LATENCY_PRIORITY,NULL,
-                                          Runtime::protect_event(domain_ready));
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::get_pending_child(const LegionColor child_color,
-                                          ApUserEvent &domain_ready)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock, 1, false/*exclusive*/);
-      std::map<LegionColor,ApUserEvent>::const_iterator finder = 
-        pending_children.find(child_color);
-      if (finder != pending_children.end())
-      {
-        domain_ready = finder->second;
-        return true;
-      }
-      return false;
-    }
-    
-    //--------------------------------------------------------------------------
-    void IndexPartNode::remove_pending_child(const LegionColor child_color)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-      pending_children.erase(child_color);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexPartNode::handle_pending_child_task(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const PendingChildArgs *pargs = (const PendingChildArgs*)args;  
-      pargs->parent->remove_pending_child(pargs->pending_child);
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_equal_children(Operation *op,
-                                                 size_t granularity)
+                                                 size_t granularity, 
+                                                 ShardID shard, 
+                                                 size_t total_shards)
     //--------------------------------------------------------------------------
     {
-      return parent->create_equal_children(op, this, granularity); 
+      if (total_shards > 1)
+        return parent->create_equal_children(op, this, granularity,
+                                             shard, total_shards); 
+      else
+        return parent->create_equal_children(op, this, granularity);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_union(Operation *op, 
                                            IndexPartNode *left, 
-                                           IndexPartNode *right)
+                                           IndexPartNode *right,
+                                           ShardID shard,
+                                           size_t total_shards)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_union(op, this, left, right); 
+      if (total_shards > 1)
+        return parent->create_by_union(op, this, left, right, 
+                                       shard, total_shards); 
+      else
+        return parent->create_by_union(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_intersection(Operation *op,
                                                   IndexPartNode *left,
-                                                  IndexPartNode *right)
+                                                  IndexPartNode *right,
+                                                  ShardID shard,
+                                                  size_t total_shards)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_intersection(op, this, left, right);
+      if (total_shards > 1)
+        return parent->create_by_intersection(op, this, left, right,
+                                              shard, total_shards);
+      else
+        return parent->create_by_intersection(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_difference(Operation *op,
                                                 IndexPartNode *left,
-                                                IndexPartNode *right)
+                                                IndexPartNode *right,
+                                                ShardID shard,
+                                                size_t total_shards)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_difference(op, this, left, right);
+      if (total_shards > 1)
+        return parent->create_by_difference(op, this, left, right,
+                                            shard, total_shards);
+      else
+        return parent->create_by_difference(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_restriction(const void *transform,
-                                                 const void *extent)
+                                                 const void *extent,
+                                                 ShardID shard,
+                                                 size_t total_shards)
     //--------------------------------------------------------------------------
     {
       return color_space->create_by_restriction(this, transform, extent,
-                     NT_TemplateHelper::get_dim(handle.get_type_tag()));
+                     NT_TemplateHelper::get_dim(handle.get_type_tag()),
+                     shard, total_shards);
     }
 
     //--------------------------------------------------------------------------
@@ -6259,13 +6253,6 @@ namespace Legion {
               rez.serialize(it->second.buffer, it->second.size);
               rez.serialize(it->second.is_mutable);
             }
-            rez.serialize<size_t>(pending_children.size());
-            for (std::map<LegionColor,ApUserEvent>::const_iterator it = 
-                  pending_children.begin(); it != pending_children.end(); it++)
-            {
-              rez.serialize(it->first);
-              rez.serialize(it->second);
-            }
           }
           context->runtime->send_index_partition_node(target, rez);
           creation_set.add(target);
@@ -6294,7 +6281,7 @@ namespace Legion {
       derez.deserialize(disjoint);
       ApEvent ready_event;
       derez.deserialize(ready_event);
-      ApUserEvent partial_pending;
+      ApBarrier partial_pending;
       derez.deserialize(partial_pending);
       size_t num_shard_mapping;
       derez.deserialize(num_shard_mapping);
@@ -6333,16 +6320,6 @@ namespace Legion {
         derez.deserialize(is_mutable);
         node->attach_semantic_information(tag, source,
                                           buffer, buffer_size, is_mutable);
-      }
-      size_t num_pending;
-      derez.deserialize(num_pending);
-      for (unsigned idx = 0; idx < num_pending; idx++)
-      {
-        LegionColor child_color;
-        derez.deserialize(child_color);
-        ApUserEvent child_ready;
-        derez.deserialize(child_ready);
-        node->add_pending_child(child_color, child_ready);
       }
     } 
 

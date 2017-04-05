@@ -20343,11 +20343,6 @@ namespace Legion {
                 dargs->parent, dargs->left, dargs->right);
             break;
           }
-        case LG_PENDING_CHILD_TASK_ID:
-          {
-            IndexPartNode::handle_pending_child_task(args);
-            break;
-          }
         case LG_DECREMENT_PENDING_TASK_ID:
           {
             InnerContext::DecrementArgs *dargs = 

@@ -3159,7 +3159,9 @@ namespace Legion {
       LegionColor part_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
         part_color = color;
-      ApUserEvent partition_ready = Runtime::create_ap_user_event();
+      size_t color_space_size = forest->get_domain_volume(color_space);
+      ApBarrier partition_ready(
+                     Realm::Barrier::create_barrier(color_space_size));
       forest->create_pending_partition(pid, parent, color_space, part_color,
                                        part_kind, partition_ready, 
                                        partition_ready);
@@ -3179,13 +3181,11 @@ namespace Legion {
       log_index.debug("Creating index space union in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, realm_color, 
-                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handles);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return result;
@@ -3204,13 +3204,11 @@ namespace Legion {
       log_index.debug("Creating index space union in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, realm_color, 
-                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handle);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return result;
@@ -3230,13 +3228,11 @@ namespace Legion {
       log_index.debug("Creating index space intersection in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, realm_color, 
-                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handles);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return result;
@@ -3256,13 +3252,11 @@ namespace Legion {
       log_index.debug("Creating index space intersection in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, realm_color, 
-                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handle);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return result;
@@ -3283,13 +3277,11 @@ namespace Legion {
       log_index.debug("Creating index space difference in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
 #endif
-      ApUserEvent domain_ready;
-      IndexSpace result = forest->find_pending_space(parent, realm_color, 
-                                                     type_tag, domain_ready);
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_difference(this, result, initial,handles);
-      Runtime::trigger_event(domain_ready, part_op->get_completion_event());
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       return result;
@@ -8128,6 +8120,222 @@ namespace Legion {
       if (color_generated)
         Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
+    IndexPartition ReplicateContext::create_pending_partition(
+                                                      RegionTreeForest *forest,
+                                                      IndexSpace parent,
+                                                      IndexSpace color_space,
+                                                      PartitionKind part_kind,
+                                                      Color color)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      LegionColor part_color = INVALID_COLOR;
+      bool color_generated = false;
+      if (color != AUTO_GENERATE_ID)
+        part_color = color; 
+      else
+        color_generated = true;
+      IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
+      if (owner_shard->shard_id == index_partition_allocator_shard)
+      {
+        // We're the owner, so mke it locally and then broadcast it
+        pid.id = runtime->get_unique_index_partition_id();
+#ifdef DEBUG_LEGION
+        log_index.debug("Creating pending partition in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
+#endif
+        // Tell the region tree forest about this partition
+        RtEvent parent_notified = 
+          forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
+                                           color_space, part_color, 
+                                           part_kind, disjointness_barrier,
+
+                                           shard_manager->get_mapping());
+        // Do our arrival on this generation, should be the last one
+        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
+            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
+        if (color_generated)
+        {
+#ifdef DEBUG_LEGION
+          assert(part_color != INVALID_COLOR);
+#endif
+          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
+             1/*count*/, RtEvent::NO_RT_EVENT, &part_color, sizeof(part_color));
+        }
+      }
+      else
+      {
+        // We need to get the barrier result
+        if (!index_partition_allocator_barrier.has_triggered())
+          index_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        bool result =  
+#endif
+#endif
+          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
+#ifdef DEBUG_LEGION
+        assert(result);
+        assert(pid.exists());
+#endif
+        if (color_generated)
+        {
+          if (!color_partition_allocator_barrier.has_triggered())
+            color_partition_allocator_barrier.wait();
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          result =  
+#endif
+#endif
+            color_partition_allocator_barrier.get_result(&part_color, 
+                sizeof(part_color));
+#ifdef DEBUG_LEGION
+          assert(result);
+          assert(part_color != INVALID_COLOR);
+#endif
+        }
+        // Tell the region tree forest about this partition
+        forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
+                                         color_space, part_color, 
+                                         part_kind, disjointness_barrier,
+
+                                         shard_manager->get_mapping());
+      }
+      // Update our allocation shard
+      index_partition_allocator_shard++;
+      if (index_partition_allocator_shard == shard_manager->total_shards)
+        index_space_allocator_shard = 0;
+      // Advance the barrier to the next generation
+      Runtime::advance_barrier(index_partition_allocator_barrier);
+      if (color_generated)
+        Runtime::advance_barrier(color_partition_allocator_barrier);
+      return pid;
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_index_space_union(
+                                                    RegionTreeForest *forest,
+                                                    IndexPartition parent,
+                                                    const void *realm_color,
+                                                    TypeTag type_tag,
+                                        const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space union in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag);
+      part_op->initialize_index_space_union(this, result, handles);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_index_space_union(
+                                                      RegionTreeForest *forest,
+                                                      IndexPartition parent,
+                                                      const void *realm_color,
+                                                      TypeTag type_tag,
+                                                      IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space union in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag);
+      part_op->initialize_index_space_union(this, result, handle);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_index_space_intersection(
+                                                    RegionTreeForest *forest,
+                                                    IndexPartition parent,
+                                                    const void *realm_color,
+                                                    TypeTag type_tag,
+                                        const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space intersection in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag); 
+      part_op->initialize_index_space_intersection(this, result, handles);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_index_space_intersection(
+                                                    RegionTreeForest *forest,
+                                                    IndexPartition parent,
+                                                    const void *realm_color,
+                                                    TypeTag type_tag,
+                                                    IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space intersection in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag); 
+      part_op->initialize_index_space_intersection(this, result, handle);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::create_index_space_difference(
+                                                    RegionTreeForest *forest,
+                                                    IndexPartition parent,
+                                                    const void *realm_color,
+                                                    TypeTag type_tag,
+                                                    IndexSpace initial,
+                                        const std::vector<IndexSpace> &handles)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating index space difference in task %s (ID %lld)", 
+                      get_task_name(), get_unique_id());
+#endif
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op(true);
+      IndexSpace result = 
+        forest->get_index_subspace(parent, realm_color, type_tag); 
+      part_op->initialize_index_space_difference(this, result, initial,handles);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
