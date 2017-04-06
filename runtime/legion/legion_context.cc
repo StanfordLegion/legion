@@ -2754,7 +2754,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color InnerContext::create_cross_product_partition(RegionTreeForest *forest,
+    Color InnerContext::create_cross_product_partitions(
+                                                      RegionTreeForest *forest,
                                                       IndexPartition handle1,
                                                       IndexPartition handle2,
                                    std::map<IndexSpace,IndexPartition> &handles,
@@ -9946,12 +9947,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color LeafContext::create_cross_product_partition(RegionTreeForest *forest,
-                                                      IndexPartition handle1,
-                                                      IndexPartition handle2,
+    Color LeafContext::create_cross_product_partitions(RegionTreeForest *forest,
+                                                       IndexPartition handle1,
+                                                       IndexPartition handle2,
                                    std::map<IndexSpace,IndexPartition> &handles,
-                                                      PartitionKind kind,
-                                                      Color color)
+                                                       PartitionKind kind,
+                                                       Color color)
     //--------------------------------------------------------------------------
     {
       log_task.error("Illegal create cross product partitions performed in "
@@ -11330,7 +11331,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color InlineContext::create_cross_product_partition(
+    Color InlineContext::create_cross_product_partitions(
                                                        RegionTreeForest *forest,
                                                        IndexPartition handle1,
                                                        IndexPartition handle2,
@@ -11339,7 +11340,7 @@ namespace Legion {
                                                        Color color)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_cross_product_partition(forest, handle1, handle2,
+      return enclosing->create_cross_product_partitions(forest, handle1,handle2,
                                                        handles, kind, color);
     }
 

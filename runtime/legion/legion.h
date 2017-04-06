@@ -3231,7 +3231,7 @@ namespace Legion {
                                   Color color = AUTO_GENERATE_ID);
       template<int DIM, typename COORD_T, 
                int COLOR_DIM, typename COLOR_COORD_T>
-      Color create_cross_product_partition(Context ctx,
+      Color create_cross_product_partitions(Context ctx,
                                   IndexPartitionT<DIM,COORD_T> handle1,
                                   IndexPartitionT<DIM,COORD_T> handle2,
                                   typename std::map<

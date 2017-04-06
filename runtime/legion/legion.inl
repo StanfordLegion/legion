@@ -2077,7 +2077,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
-    Color Runtime::create_cross_product_partition(Context ctx,
+    Color Runtime::create_cross_product_partitions(Context ctx,
                                       IndexPartitionT<DIM,T> handle1,
                                       IndexPartitionT<DIM,T> handle2,
                                       typename std::map<
@@ -2091,7 +2091,7 @@ namespace Legion {
                              IndexPartitionT<DIM,T> >::const_iterator it =
             handles.begin(); it != handles.end(); it++)
         untyped_handles[it->first] = IndexPartition::NO_PART;
-      Color result = create_cross_product_partition(ctx, handle1, handle2, 
+      Color result = create_cross_product_partitions(ctx, handle1, handle2, 
                                         untyped_handles, part_kind, color);
       for (typename std::map<IndexSpaceT<DIM,T>,
                              IndexPartitionT<DIM,T> >::iterator it =
